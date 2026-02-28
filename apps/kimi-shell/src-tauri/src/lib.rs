@@ -19,7 +19,10 @@ use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
-use types::{AppStatus, ContextMenuStatus, DiagnosticsInfo};
+use types::{
+    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, LoginProbeResult,
+    LoginProbeState, OnboardingStatus, OnboardingStep, CURRENT_ONBOARDING_VERSION,
+};
 
 #[tauri::command]
 fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
@@ -313,6 +316,71 @@ fn disable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
     Ok(context_menu::status(&app))
 }
 
+#[tauri::command]
+fn get_onboarding_status(app: AppHandle) -> Result<OnboardingStatus, String> {
+    build_onboarding_status(&app)
+}
+
+#[tauri::command]
+fn complete_onboarding(app: AppHandle) -> Result<(), String> {
+    mark_onboarding_completed(&app)?;
+    backend_manager::release_pending_remote_navigation(&app).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn skip_onboarding(app: AppHandle) -> Result<(), String> {
+    mark_onboarding_completed(&app)?;
+    backend_manager::release_pending_remote_navigation(&app).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn ack_api_config_step(app: AppHandle, acknowledged: Option<bool>) -> Result<(), String> {
+    let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    settings.onboarding_step_acks.api_config_ack = acknowledged.unwrap_or(true);
+    settings_store::save(&app, &settings).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
+    let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let kimi_path = resolve_kimi_path_for_login(&app, &settings)?;
+
+    let output = Command::new(&kimi_path)
+        .arg("login")
+        .arg("--json")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .output()
+        .map_err(|error| {
+            format!(
+                "failed to run `{} login --json`: {}",
+                kimi_path.display(),
+                error
+            )
+        })?;
+
+    let message = summarize_command_output(&output);
+    let state = if output.status.success() {
+        LoginProbeState::LoggedIn
+    } else {
+        LoginProbeState::LoginRequired
+    };
+
+    set_login_probe_runtime(&app, state, Some(message.clone()))?;
+
+    settings.onboarding_step_acks.login_verified = state == LoginProbeState::LoggedIn;
+    settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
+
+    Ok(LoginProbeResult {
+        state,
+        message,
+        kimi_path: Some(kimi_path.to_string_lossy().to_string()),
+        exit_code: output.status.code(),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let shortcut = shortcut_manager::default_shortcut();
@@ -376,7 +444,12 @@ pub fn run() {
             open_logs_folder,
             get_context_menu_status,
             enable_context_menu,
-            disable_context_menu
+            disable_context_menu,
+            get_onboarding_status,
+            complete_onboarding,
+            skip_onboarding,
+            ack_api_config_step,
+            probe_kimi_login
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -396,6 +469,210 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> {
+    let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    let context_status = context_menu::status(app);
+
+    let (
+        runtime_state,
+        startup_open_request_applied,
+        launch_blocked_by_onboarding,
+        runtime_detected_kimi_path,
+        runtime_login_state,
+        runtime_login_message,
+    ) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+        (
+            runtime.state,
+            runtime.startup_open_request_applied,
+            runtime.pending_remote_port.is_some(),
+            runtime
+                .detected_kimi_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            runtime.login_probe_state,
+            runtime.login_probe_message.clone(),
+        )
+    };
+
+    let located_kimi_path = kimi_locator::locate(&settings)
+        .ok()
+        .map(|path| path.to_string_lossy().to_string());
+    let kimi_installed = located_kimi_path.is_some();
+    let detected_kimi_path = runtime_detected_kimi_path.or(located_kimi_path);
+
+    let login_state = runtime_login_state.unwrap_or_else(|| {
+        if settings.onboarding_step_acks.login_verified {
+            LoginProbeState::LoggedIn
+        } else {
+            LoginProbeState::Unknown
+        }
+    });
+
+    let work_dir = settings
+        .work_dir
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let work_dir_configured = work_dir.is_some();
+    let api_config_ack = settings.onboarding_step_acks.api_config_ack;
+
+    let should_show_onboarding =
+        should_show_onboarding(&settings, startup_open_request_applied, runtime_state);
+    let recommended_step = recommend_onboarding_step(
+        runtime_state,
+        kimi_installed,
+        context_status.supported,
+        context_status.enabled,
+        login_state,
+        work_dir_configured,
+        api_config_ack,
+    );
+
+    Ok(OnboardingStatus {
+        current_version: CURRENT_ONBOARDING_VERSION,
+        completed_version: settings.onboarding_completed_version,
+        should_show_onboarding,
+        launch_blocked_by_onboarding,
+        startup_open_request_applied,
+        recommended_step,
+        kimi_installed,
+        detected_kimi_path,
+        context_menu_supported: context_status.supported,
+        context_menu_enabled: context_status.enabled,
+        context_menu_message: context_status.message,
+        login_state,
+        login_message: runtime_login_message,
+        work_dir_configured,
+        work_dir,
+        api_config_ack,
+    })
+}
+
+fn should_show_onboarding(
+    settings: &AppSettings,
+    startup_open_request_applied: bool,
+    runtime_state: BackendState,
+) -> bool {
+    if matches!(
+        runtime_state,
+        BackendState::MissingKimi | BackendState::Crashed
+    ) {
+        return true;
+    }
+
+    settings.onboarding_completed_version < CURRENT_ONBOARDING_VERSION
+        && !startup_open_request_applied
+}
+
+fn recommend_onboarding_step(
+    runtime_state: BackendState,
+    kimi_installed: bool,
+    context_menu_supported: bool,
+    context_menu_enabled: bool,
+    login_state: LoginProbeState,
+    work_dir_configured: bool,
+    api_config_ack: bool,
+) -> OnboardingStep {
+    if matches!(runtime_state, BackendState::MissingKimi) || !kimi_installed {
+        return OnboardingStep::InstallKimi;
+    }
+    if context_menu_supported && !context_menu_enabled {
+        return OnboardingStep::ContextMenu;
+    }
+    if login_state != LoginProbeState::LoggedIn {
+        return OnboardingStep::LoginKimi;
+    }
+    if !work_dir_configured {
+        return OnboardingStep::WorkDir;
+    }
+    if !api_config_ack {
+        return OnboardingStep::ApiConfig;
+    }
+    OnboardingStep::Done
+}
+
+fn mark_onboarding_completed(app: &AppHandle) -> Result<(), String> {
+    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+    settings_store::save(app, &settings).map_err(|error| error.to_string())
+}
+
+fn resolve_kimi_path_for_login(app: &AppHandle, settings: &AppSettings) -> Result<PathBuf, String> {
+    if let Some(configured) = settings
+        .kimi_path
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(configured);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "configured kimi path does not exist: {}",
+            path.display()
+        ));
+    }
+
+    {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+        if let Some(path) = runtime.detected_kimi_path.clone() {
+            return Ok(path);
+        }
+    }
+
+    kimi_locator::locate(settings).map_err(|error| error.to_string())
+}
+
+fn set_login_probe_runtime(
+    app: &AppHandle,
+    state: LoginProbeState,
+    message: Option<String>,
+) -> Result<(), String> {
+    let shared = app.state::<AppState>();
+    let mut runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+    runtime.login_probe_state = Some(state);
+    runtime.login_probe_message = message;
+    Ok(())
+}
+
+fn summarize_command_output(output: &std::process::Output) -> String {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    let merged = if !stdout.is_empty() && !stderr.is_empty() {
+        format!("{stdout}\n{stderr}")
+    } else if !stdout.is_empty() {
+        stdout
+    } else if !stderr.is_empty() {
+        stderr
+    } else if output.status.success() {
+        "Login command completed.".to_string()
+    } else {
+        "Login command failed. Please run `kimi login` manually and try again.".to_string()
+    };
+
+    let max_chars = 600usize;
+    if merged.chars().count() <= max_chars {
+        return merged;
+    }
+
+    let truncated: String = merged.chars().take(max_chars).collect();
+    format!("{truncated}…")
 }
 
 fn query_kimi_version(kimi_path: &str) -> Result<String, String> {
@@ -444,4 +721,45 @@ fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {
     let start = start_ms?;
     let end = end_ms?;
     end.checked_sub(start)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_is_shown_for_missing_kimi_even_if_completed() {
+        let mut settings = AppSettings::default();
+        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        assert!(should_show_onboarding(
+            &settings,
+            false,
+            BackendState::MissingKimi
+        ));
+    }
+
+    #[test]
+    fn onboarding_is_hidden_after_completion_for_normal_startup() {
+        let mut settings = AppSettings::default();
+        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        assert!(!should_show_onboarding(
+            &settings,
+            false,
+            BackendState::Running
+        ));
+    }
+
+    #[test]
+    fn recommendation_prefers_install_when_kimi_missing() {
+        let step = recommend_onboarding_step(
+            BackendState::Starting,
+            false,
+            true,
+            false,
+            LoginProbeState::Unknown,
+            false,
+            false,
+        );
+        assert!(matches!(step, OnboardingStep::InstallKimi));
+    }
 }

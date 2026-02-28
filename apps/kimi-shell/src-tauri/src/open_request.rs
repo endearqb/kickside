@@ -10,9 +10,9 @@ use std::{
 use chrono::Local;
 use rand::Rng;
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
-use crate::{backend_manager, log_manager, settings_store, window_manager};
+use crate::{app_state::AppState, backend_manager, log_manager, settings_store, window_manager};
 
 const OPEN_FILES_DEBOUNCE_MS: u64 = 350;
 const WORKSPACE_STEM_MAX_LEN: usize = 40;
@@ -41,6 +41,7 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
     let current_dir = std::env::current_dir().ok();
     match parse_open_request(&args, current_dir.as_deref()) {
         Ok(Some(request)) => {
+            mark_startup_open_request(app);
             if let Err(error) = apply_open_request(app, request) {
                 log_manager::append_line(
                     app,
@@ -53,6 +54,13 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
             log_manager::append_line(app, format!("invalid startup arguments: {error}"));
         }
     }
+}
+
+fn mark_startup_open_request(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if let Ok(mut runtime) = state.runtime.lock() {
+        runtime.startup_open_request_applied = true;
+    };
 }
 
 pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Option<String>) {

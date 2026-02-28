@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendState {
@@ -35,7 +38,7 @@ pub struct AppStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: u32,
     pub kimi_path: Option<String>,
@@ -43,19 +46,30 @@ pub struct AppSettings {
     pub hotkey: String,
     pub start_minimized_to_tray: bool,
     pub auto_restart_on_crash: bool,
+    pub onboarding_completed_version: u32,
+    pub onboarding_step_acks: OnboardingStepAcks,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: CURRENT_SETTINGS_SCHEMA_VERSION,
             kimi_path: None,
             work_dir: None,
             hotkey: "CmdOrCtrl+Shift+K".to_string(),
             start_minimized_to_tray: false,
             auto_restart_on_crash: false,
+            onboarding_completed_version: 0,
+            onboarding_step_acks: OnboardingStepAcks::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OnboardingStepAcks {
+    pub login_verified: bool,
+    pub api_config_ack: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,4 +111,53 @@ pub struct ContextMenuStatus {
     pub supported: bool,
     pub enabled: bool,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnboardingStep {
+    InstallKimi,
+    ContextMenu,
+    LoginKimi,
+    WorkDir,
+    ApiConfig,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LoginProbeState {
+    LoggedIn,
+    LoginRequired,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingStatus {
+    pub current_version: u32,
+    pub completed_version: u32,
+    pub should_show_onboarding: bool,
+    pub launch_blocked_by_onboarding: bool,
+    pub startup_open_request_applied: bool,
+    pub recommended_step: OnboardingStep,
+    pub kimi_installed: bool,
+    pub detected_kimi_path: Option<String>,
+    pub context_menu_supported: bool,
+    pub context_menu_enabled: bool,
+    pub context_menu_message: Option<String>,
+    pub login_state: LoginProbeState,
+    pub login_message: Option<String>,
+    pub work_dir_configured: bool,
+    pub work_dir: Option<String>,
+    pub api_config_ack: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginProbeResult {
+    pub state: LoginProbeState,
+    pub message: String,
+    pub kimi_path: Option<String>,
+    pub exit_code: Option<i32>,
 }

@@ -10,7 +10,7 @@ use anyhow::Context;
 use fs2::FileExt;
 use tauri::{AppHandle, Manager};
 
-use crate::types::BackendState;
+use crate::types::{BackendState, LoginProbeState};
 
 #[derive(Debug)]
 pub struct RuntimeState {
@@ -32,6 +32,10 @@ pub struct RuntimeState {
     pub cli_contract_error: Option<String>,
     pub last_exit_reason: Option<String>,
     pub session_work_dir: Option<PathBuf>,
+    pub pending_remote_port: Option<u16>,
+    pub startup_open_request_applied: bool,
+    pub login_probe_state: Option<LoginProbeState>,
+    pub login_probe_message: Option<String>,
 }
 
 impl Default for RuntimeState {
@@ -55,6 +59,10 @@ impl Default for RuntimeState {
             cli_contract_error: None,
             last_exit_reason: None,
             session_work_dir: None,
+            pending_remote_port: None,
+            startup_open_request_applied: false,
+            login_probe_state: None,
+            login_probe_message: None,
         }
     }
 }

@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::{
     app_state::{unix_time_millis, AppState},
     cli_contract, kimi_locator, log_manager, port_manager, settings_store,
-    types::{AppSettings, BackendState},
+    types::{AppSettings, BackendState, CURRENT_ONBOARDING_VERSION},
     window_manager,
 };
 
@@ -41,6 +41,7 @@ pub fn start_backend(app: AppHandle) {
         runtime.last_error = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
+        runtime.pending_remote_port = None;
         runtime.generation = runtime.generation.saturating_add(1);
         runtime.start_cycle_id = runtime.generation;
         runtime.start_requested_at_ms = Some(unix_time_millis());
@@ -125,6 +126,7 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
         runtime.last_error = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
+        runtime.pending_remote_port = None;
         runtime.backend_ready_at_ms = None;
         runtime.child.take()
     };
@@ -146,6 +148,7 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
     runtime.last_error = None;
     runtime.effective_work_dir = None;
     runtime.launch_command = None;
+    runtime.pending_remote_port = None;
     runtime.start_requested_at_ms = None;
     runtime.loading_reported_at_ms = None;
     runtime.loading_reported_cycle_id = None;
@@ -281,7 +284,35 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     }
 
     log_manager::append_line(app, format!("backend ready on port {active_port}"));
-    window_manager::navigate_remote(app, active_port);
+    if should_defer_remote_navigation(app, &settings) {
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+            if runtime.generation == generation {
+                runtime.pending_remote_port = Some(active_port);
+            }
+        }
+        log_manager::append_line(
+            app,
+            "holding remote navigation until onboarding is completed",
+        );
+        window_manager::navigate_onboarding(app);
+    } else {
+        {
+            let state = app.state::<AppState>();
+            let mut runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+            if runtime.generation == generation {
+                runtime.pending_remote_port = None;
+            }
+        }
+        window_manager::navigate_remote(app, active_port);
+    }
     spawn_monitor(app.clone(), generation);
 
     Ok(())
@@ -467,6 +498,7 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
         runtime.backend_ready_at_ms = None;
+        runtime.pending_remote_port = None;
         runtime.last_exit_reason = Some("missing_kimi".to_string());
     }
 
@@ -492,6 +524,7 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
         runtime.state = BackendState::Crashed;
         runtime.last_error = Some(message.clone());
         runtime.backend_ready_at_ms = None;
+        runtime.pending_remote_port = None;
         runtime.last_exit_reason = Some("startup_failed".to_string());
     }
 
@@ -524,6 +557,38 @@ fn stop_child_for_generation(app: &AppHandle, generation: u64) {
             }
         }
     }
+}
+
+pub fn release_pending_remote_navigation(app: &AppHandle) -> anyhow::Result<()> {
+    let target_port = {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        runtime.pending_remote_port.take().or(runtime.active_port)
+    };
+
+    if let Some(port) = target_port {
+        window_manager::navigate_remote(app, port);
+    }
+
+    Ok(())
+}
+
+fn should_defer_remote_navigation(app: &AppHandle, settings: &AppSettings) -> bool {
+    if settings.onboarding_completed_version >= CURRENT_ONBOARDING_VERSION {
+        return false;
+    }
+
+    let state = app.state::<AppState>();
+    if let Ok(runtime) = state.runtime.lock() {
+        if runtime.startup_open_request_applied {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn terminate_child(child: &mut Child) -> &'static str {

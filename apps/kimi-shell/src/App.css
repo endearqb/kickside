@@ -130,6 +130,22 @@ body {
   gap: 10px;
 }
 
+.doc-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 11px;
+  padding: 9px 14px;
+  border: 1px solid var(--ghost-border);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--button-bg);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.doc-link:hover {
+  background: #ffffff;
+}
+
 button {
   appearance: none;
   border: 1px solid transparent;
@@ -250,6 +266,66 @@ input:focus {
   background: #fbfcff;
   font-size: 0.82rem;
   line-height: 1.4;
+}
+
+.probe-output {
+  margin: 0 0 12px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 43, 69, 0.22);
+  padding: 12px;
+  background: #fbfcff;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.onboarding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.onboarding-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(37, 53, 83, 0.15);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.onboarding-item p {
+  margin: 4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.onboarding-item.active {
+  border-color: rgba(24, 54, 97, 0.35);
+  background: rgba(228, 238, 255, 0.62);
+}
+
+.onboarding-item.done {
+  border-color: rgba(12, 122, 96, 0.45);
+  background: rgba(214, 242, 234, 0.74);
+}
+
+.onboarding-index {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #f9fbff;
+  background: var(--button-bg);
 }
 
 @keyframes spin {

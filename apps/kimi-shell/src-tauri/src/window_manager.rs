@@ -45,6 +45,10 @@ pub fn navigate_diagnostics(app: &AppHandle) {
     navigate_local(app, "diagnostics");
 }
 
+pub fn navigate_onboarding(app: &AppHandle) {
+    navigate_local(app, "onboarding");
+}
+
 pub fn navigate_remote(app: &AppHandle, port: u16) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
         return;

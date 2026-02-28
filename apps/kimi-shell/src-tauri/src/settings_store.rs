@@ -1,7 +1,10 @@
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
 
-use crate::{app_state::AppState, types::AppSettings};
+use crate::{
+    app_state::AppState,
+    types::{AppSettings, CURRENT_SETTINGS_SCHEMA_VERSION},
+};
 
 pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
     let state = app.state::<AppState>();
@@ -17,9 +20,20 @@ pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
         .with_context(|| format!("failed to read settings file: {}", path.display()))?;
     let mut settings: AppSettings = serde_json::from_str(&raw)
         .with_context(|| format!("failed to parse settings file: {}", path.display()))?;
+    let mut changed = false;
 
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = AppSettings::default().hotkey;
+        changed = true;
+    }
+
+    if settings.schema_version < CURRENT_SETTINGS_SCHEMA_VERSION {
+        settings.schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
+        changed = true;
+    }
+
+    if changed {
+        save(app, &settings)?;
     }
 
     Ok(settings)

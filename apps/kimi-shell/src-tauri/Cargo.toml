@@ -1,0 +1,39 @@
+[package]
+name = "appskimi-shell"
+version = "0.1.0"
+description = "Kimi Desktop Shell"
+authors = ["kimi-shell"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "appskimi_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+fs2 = "0.4"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+url = "2"
+which = "6"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }

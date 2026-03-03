@@ -1,9 +1,17 @@
+import type { MouseEvent } from "react";
 import { Copy, FolderOpen, Menu, Minus, Monitor, RefreshCcw, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KimiCliBrand } from "@/components/kimi-cli-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import type { BackendState, Screen, Theme } from "@/app/types";
+
+const DRAG_BLOCK_SELECTOR =
+  ".titlebar-actions, .titlebar-window-controls, button, a, input, textarea, select, [role='button'], [data-no-drag='true']";
+
+function isTitlebarDragTarget(target: EventTarget | null): boolean {
+  return !(target instanceof Element && target.closest(DRAG_BLOCK_SELECTOR));
+}
 
 type ShellTitlebarProps = {
   screen: Screen;
@@ -21,6 +29,7 @@ type ShellTitlebarProps = {
   onBackToStatus: () => void;
   onOpenFolder: (path: string) => void;
   onToggleTheme: () => void;
+  onStartWindowDrag: () => void;
   onMinimizeWindow: () => void;
   onToggleMaximizeWindow: () => void;
   onCloseWindow: () => void;
@@ -43,6 +52,7 @@ export function ShellTitlebar({
   onBackToStatus,
   onOpenFolder,
   onToggleTheme,
+  onStartWindowDrag,
   onMinimizeWindow,
   onToggleMaximizeWindow,
   onCloseWindow,
@@ -51,8 +61,26 @@ export function ShellTitlebar({
   const effectivePath = effectiveWorkDir?.trim() || "-";
   const canOpenEffectivePath = Boolean(effectiveWorkDir?.trim());
 
+  const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
+    if (!tauriRuntime) return;
+    if (event.button !== 0) return;
+    if (!isTitlebarDragTarget(event.target)) return;
+    onStartWindowDrag();
+  };
+
+  const handleTitlebarDoubleClick = (event: MouseEvent<HTMLElement>) => {
+    if (!tauriRuntime) return;
+    if (event.button !== 0) return;
+    if (!isTitlebarDragTarget(event.target)) return;
+    onTitlebarDoubleClick();
+  };
+
   return (
-    <header className="titlebar">
+    <header
+      className="titlebar"
+      onMouseDown={handleTitlebarMouseDown}
+      onDoubleClick={handleTitlebarDoubleClick}
+    >
       <div className="titlebar-actions">
         {screen === "workspace" ? (
           <IconButton
@@ -93,11 +121,7 @@ export function ShellTitlebar({
       <div className="titlebar-identity">
         {screen === "workspace" ? (
           <div className="titlebar-workspace-line">
-            <div
-              className="titlebar-drag titlebar-workspace-main"
-              data-tauri-drag-region
-              onDoubleClick={tauriRuntime ? onTitlebarDoubleClick : undefined}
-            >
+            <div className="titlebar-drag titlebar-workspace-main">
               <span>Workspace</span>
               <span className="titlebar-workspace-divider" aria-hidden>
                 |
@@ -115,11 +139,7 @@ export function ShellTitlebar({
             />
           </div>
         ) : (
-          <div
-            className="titlebar-drag titlebar-status-wrap"
-            data-tauri-drag-region
-            onDoubleClick={tauriRuntime ? onTitlebarDoubleClick : undefined}
-          >
+          <div className="titlebar-drag titlebar-status-wrap">
             <KimiCliBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
               {shellScreenLabel} | State: {statusText}

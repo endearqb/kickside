@@ -1,6 +1,7 @@
 mod app_state;
 mod backend_manager;
 mod cli_contract;
+mod command_utils;
 mod context_menu;
 mod kimi_locator;
 mod log_manager;
@@ -395,7 +396,9 @@ fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
     let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
     let kimi_path = resolve_kimi_path_for_login(&app, &settings)?;
 
-    let output = Command::new(&kimi_path)
+    let mut process = Command::new(&kimi_path);
+    command_utils::configure_kimi_query_command(&mut process);
+    let output = process
         .arg("login")
         .arg("--json")
         .env("PYTHONIOENCODING", "utf-8")
@@ -748,7 +751,9 @@ fn summarize_command_output(output: &std::process::Output) -> String {
 }
 
 fn query_kimi_version(kimi_path: &str) -> Result<String, String> {
-    let output = Command::new(kimi_path)
+    let mut process = Command::new(kimi_path);
+    command_utils::configure_kimi_query_command(&mut process);
+    let output = process
         .arg("--version")
         .output()
         .map_err(|error| format!("failed to run `{} --version`: {}", kimi_path, error))?;

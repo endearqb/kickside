@@ -237,7 +237,9 @@ export function useShellController() {
     if (
       hashRoute === "diagnostics" ||
       hashRoute === "logs_paths" ||
-      hashRoute === "onboarding"
+      hashRoute === "onboarding" ||
+      hashRoute === "error" ||
+      hashRoute === "missing-kimi"
     ) {
       return "control_center";
     }
@@ -644,6 +646,15 @@ export function useShellController() {
     }
   }
 
+  async function handleStartWindowDrag() {
+    if (!tauriRuntime) return;
+    try {
+      await getCurrentWindow().startDragging();
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
   async function handleToggleMaximizeWindow() {
     if (!tauriRuntime) return;
     try {
@@ -813,6 +824,7 @@ export function useShellController() {
     handleSkipOnboarding,
     openControlCenter,
     backToStatus,
+    handleStartWindowDrag,
     handleMinimizeWindow,
     handleToggleMaximizeWindow,
     handleCloseWindow,

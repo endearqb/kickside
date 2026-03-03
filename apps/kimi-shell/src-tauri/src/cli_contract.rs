@@ -1,9 +1,13 @@
 use std::{path::Path, process::Command};
 
+use crate::command_utils;
+
 const REQUIRED_WEB_FLAGS: [&str; 3] = ["--no-open", "--host", "--port"];
 
 pub fn verify_kimi_web_contract(kimi_path: &Path) -> Result<(), String> {
-    let output = Command::new(kimi_path)
+    let mut process = Command::new(kimi_path);
+    command_utils::configure_kimi_query_command(&mut process);
+    let output = process
         .arg("web")
         .arg("--help")
         .output()

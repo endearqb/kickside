@@ -37,16 +37,16 @@ pub fn navigate_missing_kimi(app: &AppHandle) {
     navigate_local(app, "missing-kimi");
 }
 
-pub fn navigate_error(app: &AppHandle) {
-    navigate_local(app, "error");
-}
-
 pub fn navigate_diagnostics(app: &AppHandle) {
     navigate_local(app, "diagnostics");
 }
 
 pub fn navigate_onboarding(app: &AppHandle) {
     navigate_local(app, "onboarding");
+}
+
+pub fn navigate_control_center(app: &AppHandle) {
+    navigate_local(app, "control-center");
 }
 
 fn navigate_local(app: &AppHandle, route: &str) {

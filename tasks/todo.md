@@ -820,3 +820,143 @@
   - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（13/13）。
 - 风险与后续：
   - `docs/index.css` 中 Tailwind 专用指令（`@import "tailwindcss"`、`@layer`、`@theme inline`）未直接引入当前工程，而是做了等价语义映射；若后续需要与 KimiWeb 完全同构的原子类体系，可再单独引入 Tailwind/shadcn 构建链。
+
+---
+
+## 本轮计划（中英文 MSI/EXE 安装包，版本 0.0.1）
+
+### 计划清单
+
+- [x] 将前后端版本统一为 `0.0.1`（`package.json`、`tauri.conf.json`、`Cargo.toml`）
+- [x] 增加中英文打包配置（WiX + NSIS）并确保可复用
+- [x] 构建中文安装包（MSI + EXE）
+- [x] 构建英文安装包（MSI + EXE）
+- [ ] 安装前先卸载本机已安装版本并验证安装流程
+- [x] 汇总产物路径与校验结果
+
+### 验收标准
+
+- [x] 生成 `0.0.1` 中文 `msi/exe` 安装包
+- [x] 生成 `0.0.1` 英文 `msi/exe` 安装包
+- [ ] 本机安装前已完成旧版本卸载
+- [ ] 新安装包可完成安装，且可正常卸载
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 将 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 版本统一到 `0.0.1`。
+  - 新增按语种拆分的打包覆盖配置：`tauri.conf.bundle.zh-CN.json`、`tauri.conf.bundle.en-US.json`。
+  - 完成中英文 `msi/exe` 构建，并归档到 `apps/kimi-shell/release-artifacts/0.0.1`。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis --config src-tauri/tauri.conf.bundle.zh-CN.json` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis --config src-tauri/tauri.conf.bundle.en-US.json` 通过。
+  - 本机卸载项扫描结果为 `MATCH_COUNT=0`（无已安装版本）。
+- 风险与后续：
+  - 该方案是“分语种安装包”；后续需求已改为“同包多语言自动选择”，因此继续在下一个计划中处理多语言同包构建。
+
+---
+
+## 需求变更（多语言自动选择安装包）
+
+### 计划清单
+
+- [x] 新增多语言安装配置：中/英文同包（优先按系统语言自动选择）
+- [x] 重新构建 MSI + EXE
+- [x] 校验产物命名、语言配置与输出路径
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 新增多语言覆盖配置 `apps/kimi-shell/src-tauri/tauri.conf.bundle.multilang.json`：
+    - WiX: `language = ["zh-CN", "en-US"]`
+    - NSIS: `languages = ["SimpChinese", "English"]`，`displayLanguageSelector = false`
+  - 重新构建产物并归档到 `apps/kimi-shell/release-artifacts/0.0.1-multilang`。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis --config src-tauri/tauri.conf.bundle.multilang.json` 通过。
+  - 构建输出包含：
+    - `Kimi Desktop Shell_0.0.1_x64_zh-CN.msi`
+    - `Kimi Desktop Shell_0.0.1_x64_en-US.msi`
+    - `Kimi Desktop Shell_0.0.1_x64-setup.exe`
+  - 生成的 NSIS 脚本包含 `MUI_LANGUAGE "SimpChinese"` 和 `MUI_LANGUAGE "English"`（自动按系统语言匹配）。
+- 风险与后续：
+  - WiX 仍会输出两个 MSI（zh-CN / en-US）；NSIS EXE 为单包多语言并按系统语言自动选择。
+
+---
+
+## 本轮计划（启动卡住与标题栏交互修复）
+
+### 计划清单
+
+- [x] Windows 下 `kimi` 相关命令统一为无控制台窗口启动
+- [x] 后端异常退出时切到 Control Center，不停留 error/loading
+- [x] 标题栏改为整条（除按钮区）支持拖拽，双击切换最大化
+- [x] 运行构建与测试验证（Rust + 前端 + capability 检查）
+
+### 验收标准
+
+- [x] 启动应用不再弹出多个终端窗口
+- [x] `kimi web` 异常退出后，主界面切到 Control Center 并展示可重试入口
+- [x] 标题栏可拖动窗口，双击可最大化/还原
+- [x] 构建与测试通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 新增 `src-tauri/src/command_utils.rs`，并将 `kimi` 相关命令统一接入 Windows 无控制台启动策略：
+    - 后端启动 `kimi web ...` 使用 `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`，并显式 `stdin = null`。
+    - `kimi web --help`、`kimi login --json`、`kimi --version`、`kimi -v` 探测使用 `CREATE_NO_WINDOW`。
+  - 崩溃跳转改为 `Control Center`：
+    - `backend_manager` 的监控退出与 `set_crashed` 路径统一调用 `navigate_control_center`。
+    - `window_manager` 新增 `navigate_control_center` 并移除未使用的 `navigate_error`。
+    - 前端 hash 路由将 `#/error` 与 `#/missing-kimi` 统一映射到 `control_center`。
+  - 标题栏交互重做：
+    - `ShellTitlebar` 改为在标题栏根容器处理 `onMouseDown/onDoubleClick`。
+    - 过滤按钮区与交互元素后，触发 `startDragging` 或 `toggleMaximize`。
+    - `useShellController` 新增 `handleStartWindowDrag`，`App.tsx` 透传。
+    - `App.css` 增加标题栏拖拽光标与按钮区光标规则。
+  - 近似原生细化：
+    - `ShellTitlebar` 将拖拽与双击判定收敛为单一函数 `isTitlebarDragTarget`，统一规则避免行为漂移。
+    - 双击事件新增左键限制，避免非主键交互误触发最大化。
+    - `App.css` 为标题栏根容器增加 `user-select: none`，降低拖拽时误选中文本。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（13/13）。
+  - `pnpm -C apps/kimi-shell build` 通过（首轮 `spawn EPERM`，提权后通过）。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+- 风险与后续：
+  - 已完成编译与自动化校验；“启动不弹终端/拖拽双击体验”属于 GUI 行为，仍建议在目标 Windows 机器做一次手工验收（尤其是多显示器与缩放场景）。
+
+---
+
+## 本轮计划（引导卡片窄屏折叠 + 流程操作去卡片 + 安装区按探测收敛）
+
+### 计划清单
+
+- [x] 引导配置 4 个步骤在 `<=480px` 默认折叠为标题栏，点击标题展开/收起，且同一时间仅展开一个
+- [x] 窄屏标题栏强制单行，右侧仅保留主按钮，次级按钮下沉到展开内容区
+- [x] “引导流程操作”移除卡片容器和标题，保留 4 个按钮（全屏尺寸生效）
+- [x] “安装 Kimi CLI”在依赖和 Kimi 全部就绪时隐藏安装按钮与官方/镜像切换
+- [x] 完成构建验证并回填结果
+
+### 验收标准
+
+- [x] `<=480px` 时每张引导卡片仅显示标题栏，点击标题可展开/收起
+- [x] 标题与右侧主按钮始终同一行，按钮不换到下一行
+- [x] 流程操作区域无卡片外框和标题，仅有 4 个操作按钮
+- [x] 安装步骤在全就绪时不显示安装源切换与安装按钮
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `ControlCenterView.tsx` 新增 `installProbe` 入参，接入安装就绪判断 `hideInstallControls`（`git/uv/python313/kimi` 全部 ready 时隐藏安装源切换与安装按钮）。
+  - 新增窄屏折叠状态（`matchMedia("(max-width: 480px)")`）与 `expandedOnboardingStep`，实现默认全部折叠、标题点击展开/收起、同一时间仅展开一个。
+  - `StepHeader` 重构为 `primaryAction + secondaryActions` 模式：窄屏标题栏只展示主按钮，次级按钮下沉到展开内容区。
+  - 引导第 1~4 步内容改为按步骤展开状态条件渲染；保留桌面端原有信息密度与交互。
+  - “引导流程操作”去除卡片容器与标题，改为仅渲染 4 个操作按钮区域。
+  - `App.tsx` 将 `shell.installProbe` 透传给 `ControlCenterView`。
+  - `App.css` 新增窄屏标题栏单行样式与折叠指示样式，移除 `<=900px` 下把引导头部改为纵向堆叠的旧规则。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（首轮 `spawn EPERM`，提权后通过）。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+- 风险与后续：
+  - 折叠交互与按钮显隐已在代码层落地；建议在目标 Windows 设备做一次 `<=480px` 实机验收，重点确认标题省略与主按钮文案可读性。

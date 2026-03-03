@@ -37,6 +37,7 @@ function App() {
           void shell.handleOpenFolder(path);
         }}
         onToggleTheme={shell.handleToggleThemeMode}
+        onStartWindowDrag={shell.handleStartWindowDrag}
         onMinimizeWindow={shell.handleMinimizeWindow}
         onToggleMaximizeWindow={shell.handleToggleMaximizeWindow}
         onCloseWindow={shell.handleCloseWindow}
@@ -94,6 +95,7 @@ function App() {
           apiConfigForm={shell.apiConfigForm}
           apiConfigPath={shell.apiConfigPath}
           apiConfigHasKey={shell.apiConfigHasKey}
+          installProbe={shell.installProbe}
           installSource={shell.installSource}
           installBusy={shell.installBusy}
           installMessage={shell.installMessage}

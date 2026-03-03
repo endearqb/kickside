@@ -17,7 +17,7 @@ use url::Url;
 
 use crate::{
     app_state::{unix_time_millis, AppState},
-    cli_contract, kimi_locator, log_manager, port_manager, settings_store,
+    cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
     types::{
         AppSettings, BackendState, InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView,
         CURRENT_ONBOARDING_VERSION,
@@ -476,7 +476,7 @@ pub fn get_install_probe_status() -> InstallProbeStatus {
         git_ready: command_success("git", &["--version"]),
         uv_ready: command_success("uv", &["--version"]),
         python313_ready: python313_ready(),
-        kimi_ready: command_success("kimi", &["-v"]),
+        kimi_ready: command_success_kimi("kimi", &["-v"]),
     }
 }
 
@@ -540,6 +540,16 @@ fn truncate_install_output(value: &str) -> String {
 
 fn command_success(command: &str, args: &[&str]) -> bool {
     Command::new(command)
+        .args(args)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn command_success_kimi(command: &str, args: &[&str]) -> bool {
+    let mut process = Command::new(command);
+    command_utils::configure_kimi_query_command(&mut process);
+    process
         .args(args)
         .output()
         .map(|output| output.status.success())
@@ -801,7 +811,7 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
 
         if let Some(message) = crash_message {
             log_manager::append_line(&app, &message);
-            window_manager::navigate_error(&app);
+            window_manager::navigate_control_center(&app);
             return;
         }
     });
@@ -823,11 +833,13 @@ fn spawn_backend_process(
         .context("failed to clone log file handle for stderr")?;
 
     let mut command = Command::new(kimi_path);
+    command_utils::configure_kimi_background_command(&mut command);
     command
         .args(args)
         // Force UTF-8 stdio so Python banner output does not crash on GBK consoles.
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUTF8", "1")
+        .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
 
@@ -1789,7 +1801,7 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
     }
 
     log_manager::append_line(app, &message);
-    window_manager::navigate_error(app);
+    window_manager::navigate_control_center(app);
 }
 
 fn stop_child_for_generation(app: &AppHandle, generation: u64) {

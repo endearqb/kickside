@@ -16,6 +16,7 @@ use crate::types::{BackendState, LoginProbeState};
 pub struct RuntimeState {
     pub state: BackendState,
     pub active_port: Option<u16>,
+    pub workspace_port: Option<u16>,
     pub base_port: Option<u16>,
     pub generation: u64,
     pub start_cycle_id: u64,
@@ -43,6 +44,7 @@ impl Default for RuntimeState {
         Self {
             state: BackendState::Stopped,
             active_port: None,
+            workspace_port: None,
             base_port: None,
             generation: 0,
             start_cycle_id: 0,

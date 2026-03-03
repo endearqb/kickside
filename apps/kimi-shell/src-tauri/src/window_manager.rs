@@ -49,17 +49,6 @@ pub fn navigate_onboarding(app: &AppHandle) {
     navigate_local(app, "onboarding");
 }
 
-pub fn navigate_remote(app: &AppHandle, port: u16) {
-    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
-        return;
-    };
-    let Ok(url) = Url::parse(&format!("http://127.0.0.1:{port}")) else {
-        return;
-    };
-
-    let _ = window.navigate(url);
-}
-
 fn navigate_local(app: &AppHandle, route: &str) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
         return;

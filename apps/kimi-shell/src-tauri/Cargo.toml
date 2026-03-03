@@ -29,6 +29,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
+tiny_http = "0.12"
+toml_edit = "0.22"
 url = "2"
 which = "6"
 

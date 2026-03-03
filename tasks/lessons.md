@@ -1,3 +1,12 @@
 # Lessons Learned
 
-- 暂无历史纠正记录。本文件用于在被用户纠正后沉淀规则，防止同类问题复发。
+- 视觉类改动涉及“窗口层 + Web 层”时，必须一次性核对 `tauri.conf.json`、`src-tauri` 运行时设置与 `html/body/#root` 背景，避免只改一层导致效果不完整。
+- 当用户追加约束（例如“保留透明同时打开阴影”）时，应立即把新增约束并入当前实现与验收，不做半完成交付。
+- `iframe` 嵌入跨域页面时，`localStorage`/DOM 主题状态天然隔离；若要实现“被嵌入页切主题后壳层跟随”，必须预留显式桥接通道（如本地代理注入 + `postMessage`），不能假设同名存储键会自动同步。
+- 自建 HTTP 代理转发前端静态资源时，要么透传 `Content-Encoding`，要么强制上游 `Accept-Encoding: identity`；否则压缩 JS 被当明文返回会触发 `Invalid or unexpected token`。
+- 对 iframe 的 `postMessage(targetOrigin)` 需在子页面完成导航后再发（至少等 `onLoad`/ready 状态），否则常见 origin mismatch 报错。
+- 主题同步方案要优先满足“可预测可切换”；若用户明确不需要系统跟随，应保持 `light/dark` 双态，避免第三态引入反向覆盖与状态竞争。
+- 代理 Kimi Web 时不能只做 HTTP 转发，`/api/sessions/:id/stream` 必须完整处理 WebSocket Upgrade（识别 Upgrade 请求、强制 `Connection/Upgrade` 头、101 回包头透传）；否则会表现为“新建 session 一直 connecting + 后端 `/stream 404`”。
+- 当需求文字存在歧义或冲突时（例如“不要跳转浏览器”与“修复为可打开浏览器”），必须先锁定最终行为再实现，避免按错误方向提交变更。
+- 侧栏选中项不要复用 `default` 按钮变体：其全局 hover 往往覆盖为深色背景，易出现“黑底黑字”；导航项应统一 `ghost` 变体并单独定义 active/hover 规则以保证可读性。
+- 引导页文档入口要做“最小化保留”：仅保留用户明确要求的单一入口，其余文档按钮应移除，避免信息噪音和错误跳转反馈。

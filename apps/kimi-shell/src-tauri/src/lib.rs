@@ -20,8 +20,10 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, LoginProbeResult,
-    LoginProbeState, OnboardingStatus, OnboardingStep, CURRENT_ONBOARDING_VERSION,
+    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo,
+    InstallProbeStatus,
+    KimiCliApiConfigInput, KimiCliApiConfigView, LoginProbeResult, LoginProbeState,
+    OnboardingStatus, OnboardingStep, CURRENT_ONBOARDING_VERSION,
 };
 
 #[tauri::command]
@@ -39,6 +41,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         state,
         start_cycle_id,
         active_port,
+        workspace_port,
         base_port,
         loading_startup_ms,
         backend_ready_ms,
@@ -61,6 +64,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
             runtime.state,
             runtime.start_cycle_id,
             runtime.active_port,
+            runtime.workspace_port,
             runtime.base_port,
             loading_startup_ms,
             backend_ready_ms,
@@ -85,6 +89,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         start_cycle_id,
         state,
         active_port,
+        workspace_port,
         base_port,
         loading_startup_ms,
         backend_ready_ms,
@@ -181,6 +186,46 @@ fn open_logs_folder(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    backend_manager::open_external_url(&url)
+}
+
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    backend_manager::open_folder(&path)
+}
+
+#[tauri::command]
+fn open_kimi_config_dir() -> Result<(), String> {
+    backend_manager::open_kimi_config_dir()
+}
+
+#[tauri::command]
+fn load_kimi_cli_api_config() -> Result<KimiCliApiConfigView, String> {
+    backend_manager::load_kimi_cli_api_config()
+}
+
+#[tauri::command]
+fn save_kimi_cli_api_config(input: KimiCliApiConfigInput) -> Result<(), String> {
+    backend_manager::save_kimi_cli_api_config(input)
+}
+
+#[tauri::command]
+fn install_kimi_dependencies(source: String) -> Result<String, String> {
+    backend_manager::install_kimi_dependencies(&source)
+}
+
+#[tauri::command]
+fn install_kimi_cli(source: String) -> Result<String, String> {
+    backend_manager::install_kimi_cli(&source)
+}
+
+#[tauri::command]
+fn get_install_probe_status() -> InstallProbeStatus {
+    backend_manager::get_install_probe_status()
+}
+
+#[tauri::command]
 fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     let settings = settings_store::load_or_default(&app).unwrap_or_default();
     let logs_dir = log_manager::ensure_logs_dir(&app).map_err(|error| error.to_string())?;
@@ -197,6 +242,7 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         state,
         start_cycle_id,
         active_port,
+        workspace_port,
         base_port,
         loading_startup_ms,
         backend_ready_ms,
@@ -223,6 +269,7 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
             runtime.state,
             runtime.start_cycle_id,
             runtime.active_port,
+            runtime.workspace_port,
             runtime.base_port,
             loading_startup_ms,
             backend_ready_ms,
@@ -275,6 +322,7 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         start_cycle_id,
         state,
         active_port,
+        workspace_port,
         base_port,
         loading_startup_ms,
         backend_ready_ms,
@@ -406,6 +454,22 @@ pub fn run() {
 
             let settings = settings_store::load_or_default(app.handle()).unwrap_or_default();
 
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(error) = window.set_decorations(false) {
+                    log_manager::append_line(
+                        app.handle(),
+                        format!("failed to disable window decorations: {error}"),
+                    );
+                }
+                if let Err(error) = window.set_shadow(true) {
+                    log_manager::append_line(
+                        app.handle(),
+                        format!("failed to enable window shadow: {error}"),
+                    );
+                }
+            }
+
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
                 shortcut_manager::register_default_hotkey(app.handle())?;
@@ -442,6 +506,14 @@ pub fn run() {
             save_work_dir,
             get_diagnostics,
             open_logs_folder,
+            open_external_url,
+            open_folder,
+            open_kimi_config_dir,
+            load_kimi_cli_api_config,
+            save_kimi_cli_api_config,
+            install_kimi_dependencies,
+            install_kimi_cli,
+            get_install_probe_status,
             get_context_menu_status,
             enable_context_menu,
             disable_context_menu,

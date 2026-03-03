@@ -24,6 +24,7 @@ pub struct AppStatus {
     pub start_cycle_id: u64,
     pub state: BackendState,
     pub active_port: Option<u16>,
+    pub workspace_port: Option<u16>,
     pub base_port: Option<u16>,
     pub loading_startup_ms: Option<u64>,
     pub backend_ready_ms: Option<u64>,
@@ -82,6 +83,7 @@ pub struct DiagnosticsInfo {
     pub start_cycle_id: u64,
     pub state: BackendState,
     pub active_port: Option<u16>,
+    pub workspace_port: Option<u16>,
     pub base_port: Option<u16>,
     pub loading_startup_ms: Option<u64>,
     pub backend_ready_ms: Option<u64>,
@@ -160,4 +162,32 @@ pub struct LoginProbeResult {
     pub message: String,
     pub kimi_path: Option<String>,
     pub exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCliApiConfigView {
+    pub config_path: String,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub has_api_key: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCliApiConfigInput {
+    pub provider_id: String,
+    pub model: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallProbeStatus {
+    pub git_ready: bool,
+    pub uv_ready: bool,
+    pub python313_ready: bool,
+    pub kimi_ready: bool,
 }

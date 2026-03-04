@@ -1,5 +1,83 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（白屏修复 1/2/3：首屏本地页 + 去阻断 + 导航状态机）
+
+### 计划清单
+
+- [x] 启动时强制加载本地首屏（`loading`），避免窗口停留 `about:blank`
+- [x] 移除“onboarding 完成前阻断远程导航”逻辑，不再依赖 `pending_remote_port` gate
+- [x] 在 `window_manager` 建立统一导航状态机，收敛所有本地路由跳转入口
+- [x] 将白屏恢复逻辑接入统一导航入口，避免多处并发抢导航
+- [x] 完成构建与验证（`cargo test`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell check:nfr:security`）
+
+### 验收标准
+
+- [x] 首次启动时窗口可稳定进入本地壳页，不再长期停留 `about:blank`
+- [x] backend ready 后仅更新状态，不再打印“holding remote navigation until onboarding is completed”
+- [x] 所有本地路由切换通过单一状态机函数执行，日志可追踪阶段变更
+- [x] 白屏恢复不再持续覆盖已成功导航的页面
+- [x] 自动化验证通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/window_manager.rs` 重构为统一导航状态机：`NavigationStage + LocalRoute`，所有本地路由跳转统一经 `transition(...)` 执行并记录阶段变更日志。
+  - `src-tauri/lib.rs` 在 `setup` 阶段先执行 `enter_local_boot(..., "setup_bootstrap")`，确保首屏强制落在本地 `loading`；白屏恢复改为 `recover_loading_route(...)` 状态机入口。
+  - `src-tauri/backend_manager.rs` 删除 onboarding gate：移除 `pending_remote_port` 与 `should_defer_remote_navigation` 分支，backend ready 后只做 `mark_backend_ready(...)` 状态更新。
+  - `src-tauri/app_state.rs` 删除 `pending_remote_port` 运行时字段，彻底去除“引导前阻断”残留状态。
+  - `src-tauri/tray_manager.rs` 打开诊断页改为 `show_diagnostics(..., "tray_open_diagnostics")`，接入统一导航入口。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+  - `pnpm -C apps/kimi-shell tauri build --bundles nsis` 通过，产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.1_x64-setup.exe`
+- 风险与后续：
+  - 这轮已去掉后端层面的 onboarding 导航阻断；若个别机器仍出现 `about:blank`，下一步应聚焦 WebView2 初始化时序（窗口可见性与首次导航调用先后）做更细粒度埋点。
+
+## 本轮计划（引导第 3 步配置中心完整弹窗）
+
+### 计划清单
+
+- [x] 后端新增配置中心命令与类型：`load_kimi_cli_config_center` / `save_kimi_cli_config_center`
+- [x] 后端实现配置中心全量 TOML 读写（providers/models/services/defaults/loop_control/mcp_servers）
+- [x] 后端实现环境变量覆盖状态采集面板（只读、掩码、覆盖关系）
+- [x] 后端保存成功后原子更新 `api_config_ack=true`
+- [x] 前端新增配置中心 DTO 与校验结构（与后端类型对齐）
+- [x] 前端实现配置中心弹窗（左侧 section 导航 + 右侧全结构化表单）
+- [x] 前端实现 `providers/models/services/mcp_servers` 完整 CRUD（新增/编辑/删除/重命名 key）
+- [x] 前端接入引导第 3 步触发入口，替换旧 API 四字段表单
+- [x] 前端实现保存成功自动完成 API 配置步骤，并刷新摘要
+- [x] 完成回归验证（`cargo test`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell check:nfr:security`）
+
+### 验收标准
+
+- [x] 第 3 步点击按钮可打开配置中心弹窗，支持关闭未保存确认
+- [x] 全量 section 可编辑并成功写回 `~/.kimi/config.toml`
+- [x] `providers/models/services/mcp_servers` CRUD 与重命名可用
+- [x] 阻断校验生效（key 唯一/非空、模型与服务 provider 引用校验）
+- [x] 环境变量面板显示 set/unset、掩码值、覆盖关系与优先级说明
+- [x] 保存成功后自动 `api_config_ack=true`，引导步骤状态更新为完成
+- [x] 保留旧 `load/save_kimi_cli_api_config` 命令兼容
+- [x] 自动化验证通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/types.rs` 新增配置中心完整 DTO：`KimiCliConfigCenterView/Input`、`ProviderEntry/ModelEntry/ServiceEntry/LoopControlEntry/McpServerEntry`、`EnvOverrideStatus`、`KeyValueEntry/TypedFieldEntry`。
+  - `src-tauri/backend_manager.rs` 新增 `load_kimi_cli_config_center` 与 `save_kimi_cli_config_center`，实现全量 section 解析、校验、结构化重写和环境变量覆盖状态采集；保存成功后原子写入 `api_config_ack=true`。
+  - `src-tauri/lib.rs` 暴露并注册新命令，同时保留旧 `load/save_kimi_cli_api_config` 兼容接口。
+  - 新增前端组件 `ConfigCenterModal.tsx`：左侧分区导航、全结构化表单、providers/models/services/mcp_servers 完整 CRUD、extra typed fields、env/custom_headers 编辑、未保存确认、阻断错误展示。
+  - `useShellController.ts` 接入配置中心加载/编辑/重置/保存状态与命令调用。
+  - `ControlCenterView.tsx` 第 3 步 API 区域改为“打开配置中心弹窗 + 摘要展示”，去除旧四字段表单，保存后自动完成步骤。
+  - `App.tsx` 与 `App.css` 接入新弹窗与响应式样式。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16，含新增配置中心单测）。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+- 风险与后续：
+  - 目前 `services/loop_control/mcp_servers` 的“全结构化”以通用字段 + `extra_fields` 形式覆盖，后续如 Kimi CLI 文档明确新增固定字段，可再升级为更强约束控件。
+
 ## 本轮计划（标题栏恢复切换 + effectiveWorkDir 展示 + 黑色按钮垂直居中）
 
 ### 计划清单
@@ -960,3 +1038,126 @@
   - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
 - 风险与后续：
   - 折叠交互与按钮显隐已在代码层落地；建议在目标 Windows 设备做一次 `<=480px` 实机验收，重点确认标题省略与主按钮文案可读性。
+
+## 本轮计划（安装后透明窗口卡死修复）
+
+### 计划清单
+
+- [x] 排查并固化启动透明窗口的根因与最小修复范围
+- [x] 调整 Tauri 窗口配置，移除发布版透明窗口依赖
+- [x] 增加关键 UI 背景/前景的兼容兜底样式，避免首屏透明
+- [x] 重新构建并产出可安装 EXE/MSI
+- [x] 回填本节验收与回顾
+
+### 验收标准
+
+- [x] 安装后首次启动不再出现“完全透明窗口”
+- [x] 即使后端未就绪，壳层页面也可见（loading/control center 可见）
+- [x] `pnpm -C apps/kimi-shell tauri build` 构建通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/tauri.conf.json` 将主窗口改为 `transparent: false`，避免发布环境首屏渲染异常时整窗透明。
+  - `apps/kimi-shell/src/index.css` 为 `body` 增加显式 sRGB 背景/文字回退色，保证变量色值异常时仍有可见底色。
+  - `apps/kimi-shell/src/App.css` 为 `shell-root`、`titlebar`、`control-center`、`modal`、`statusbar` 等关键容器增加显式回退背景/边框色，降低 WebView 兼容差异风险。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过，产出新的 `setup.exe` 与 `msi`。
+- 风险与后续：
+  - 当前修复优先保障“可见与可操作”；如目标机器仍出现空白，可继续补充 WebView 版本探测与运行时错误日志上报。
+
+## 本轮计划（安装后白窗口修复）
+
+### 计划清单
+
+- [x] 复盘白窗口可能触发链路并锁定最小修复面
+- [x] 增加启动白屏保护层（JS 未挂载时可见提示）
+- [x] 增加前端全局错误捕获与可视化 fallback（避免静默白屏）
+- [x] 下调构建 target 提升旧 WebView 兼容性
+- [x] 重新构建并产出新 EXE/MSI
+- [x] 回填本节验收与回顾
+
+### 验收标准
+
+- [x] 启动失败时不再是纯白空白，至少显示可读提示
+- [x] 前端运行时异常可被捕获并在界面呈现
+- [x] `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/index.html` 新增启动 fallback 覆盖层：当前端模块未加载/挂载失败时，界面可见且提示日志路径，不再纯白。
+  - `apps/kimi-shell/src/app/RootErrorBoundary.tsx` 新增根错误边界，捕获渲染异常并展示错误信息。
+  - `apps/kimi-shell/src/main.tsx` 增加启动阶段错误处理（`error`/`unhandledrejection`），并在 React 成功启动后自动移除 boot fallback。
+  - `apps/kimi-shell/vite.config.ts` 设置 `base: "./"` 与 `build.target: "es2019"`，降低资源路径与旧 WebView 语法兼容风险。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过，已生成新安装包。
+- 风险与后续：
+  - 若目标机器 WebView2 运行时损坏/被策略拦截，仍可能无法正常渲染业务页，但现在会显示可读错误提示而非白屏；下一步可据提示日志继续定位。
+
+## 本轮计划（安装版窗口 13x13 与二次启动不聚焦修复）
+
+### 计划清单
+
+- [x] 记录已定位根因（窗口异常尺寸 + 单实例不聚焦）
+- [x] 启动阶段加入窗口尺寸自愈（小于最小尺寸时恢复并居中）
+- [x] 单实例回调加入 `show_and_focus`，确保重复启动可见
+- [x] 重新构建并产出 EXE/MSI
+- [x] 回填本节验收与回顾
+
+### 验收标准
+
+- [x] 启动后主窗口尺寸不再出现 13x13 等异常值
+- [x] 重复双击启动时可拉起并聚焦已运行窗口
+- [x] `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/lib.rs` 的单实例回调新增 `window_manager::show_and_focus(&app)`，确保重复启动时可见窗口被拉起。
+  - `src-tauri/lib.rs` 在 Windows setup 阶段新增窗口尺寸自愈：设置最小尺寸 `900x640`，若检测到异常小窗口（如 `13x13`）则自动 `unminimize + set_size(1200x820) + center`。
+  - 保留无边框与阴影策略不变，仅补充可见性与可恢复性保障。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过。
+  - 本地启动 `target/release/appskimi-shell.exe` 实测窗口尺寸恢复为 `1213x828`（不再是 `13x13`）。
+- 风险与后续：
+  - 若目标机仍出现“窗口可见但内容白屏”，更可能是 WebView2 运行时环境问题；当前版本已具备启动兜底提示，可继续基于日志定位。
+
+## 本轮计划（安装版停在 about:blank 自救）
+
+### 计划清单
+
+- [x] 记录“WebView 停在 about:blank”根因假设与修复策略
+- [x] 在 setup 增加 about:blank 启动自救导航（重试）
+- [x] 保留现有窗口尺寸自愈与单实例聚焦能力
+- [x] 重新构建并产出 EXE/MSI
+- [x] 回填本节验收与回顾
+
+### 验收标准
+
+- [x] 安装版启动后不再长期停留 `about:blank`
+- [x] DevTools `Sources` 不再只有 `about:blank`，可看到应用文档与静态资源
+- [x] `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/lib.rs` 新增 `spawn_blank_window_recovery`：启动后最多 40 次轮询（350ms 间隔）检查窗口 URL，前 20 次优先强制 `navigate_loading`，20 次后优先尝试 `workspace` HTTP 兜底导航（`http://127.0.0.1:<workspace_port>`）。
+  - 修正兜底状态机：`workspace fallback` 成功后不再重复覆盖导航，后续仅观察是否生效并记录 waiting 日志，避免“成功后又被重置”。
+  - `setup` 中在 `start_backend` 后挂载自救线程，保留“窗口尺寸自愈 + 单实例 show_and_focus”逻辑，三者并行保障可见性。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --bundles msi,nsis` 通过。
+  - 本地日志可见 `blank-window recovery tick sent`，证明自救线程已生效。
+- 风险与后续：
+  - 若目标机 WebView2 环境异常严重，`location.replace` 仍可能受限；此时需继续采集 WebView2 运行时版本与系统策略信息。

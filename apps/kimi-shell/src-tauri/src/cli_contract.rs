@@ -7,17 +7,13 @@ const REQUIRED_WEB_FLAGS: [&str; 3] = ["--no-open", "--host", "--port"];
 pub fn verify_kimi_web_contract(kimi_path: &Path) -> Result<(), String> {
     let mut process = Command::new(kimi_path);
     command_utils::configure_kimi_query_command(&mut process);
-    let output = process
-        .arg("web")
-        .arg("--help")
-        .output()
-        .map_err(|error| {
-            format!(
-                "failed to run `{} web --help`: {}",
-                kimi_path.display(),
-                error
-            )
-        })?;
+    let output = process.arg("web").arg("--help").output().map_err(|error| {
+        format!(
+            "failed to run `{} web --help`: {}",
+            kimi_path.display(),
+            error
+        )
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);

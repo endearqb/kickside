@@ -22,7 +22,8 @@ import type {
   ControlSectionId,
   DiagnosticsInfo,
   InstallProbeStatus,
-  KimiCliApiConfigInput,
+  KimiCliConfigCenterInput,
+  KimiCliConfigCenterView,
   OnboardingStatus,
   RuntimePanelId,
 } from "@/app/types";
@@ -33,6 +34,7 @@ import {
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir";
@@ -52,9 +54,11 @@ type ControlCenterViewProps = {
   installBusy: boolean;
   kimiPathInput: string;
   workDirInput: string;
-  apiConfigForm: KimiCliApiConfigInput;
-  apiConfigPath: string;
-  apiConfigHasKey: boolean;
+  configCenterView: KimiCliConfigCenterView | null;
+  configCenterDraft: KimiCliConfigCenterInput;
+  configCenterOpen: boolean;
+  configCenterBusy: boolean;
+  configCenterDirty: boolean;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
   setActiveControlSection: (section: ControlSectionId) => void;
@@ -76,12 +80,14 @@ type ControlCenterViewProps = {
   onPickWorkDir: () => Promise<void>;
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
-  onApiConfigFieldChange: (field: keyof KimiCliApiConfigInput, value: string) => void;
-  onSaveKimiCliApiConfig: () => Promise<void>;
+  onOpenConfigCenterModal: () => Promise<void>;
+  onCloseConfigCenterModal: () => void;
+  onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
+  onResetConfigCenterDraft: () => void;
+  onSaveKimiCliConfigCenter: () => Promise<void>;
   onInstallSourceChange: (source: "official" | "mirror") => void;
   onInstallDependencies: () => Promise<void>;
   onInstallKimi: () => Promise<void>;
-  onAckApiConfig: () => Promise<void>;
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;
@@ -212,9 +218,11 @@ export function ControlCenterView({
   installBusy,
   kimiPathInput,
   workDirInput,
-  apiConfigForm,
-  apiConfigPath,
-  apiConfigHasKey,
+  configCenterView,
+  configCenterDraft,
+  configCenterOpen,
+  configCenterBusy,
+  configCenterDirty,
   installProbe,
   installSource,
   setActiveControlSection,
@@ -236,12 +244,14 @@ export function ControlCenterView({
   onPickWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
-  onApiConfigFieldChange,
-  onSaveKimiCliApiConfig,
+  onOpenConfigCenterModal,
+  onCloseConfigCenterModal,
+  onConfigCenterDraftChange,
+  onResetConfigCenterDraft,
+  onSaveKimiCliConfigCenter,
   onInstallSourceChange,
   onInstallDependencies,
   onInstallKimi,
-  onAckApiConfig,
   onCompleteOnboarding,
   onSkipOnboarding,
   onOpenExternalUrl,
@@ -381,10 +391,10 @@ export function ControlCenterView({
         type="button"
         icon={<Check size={14} />}
         className="cc-action-btn"
-        onClick={() => void onSaveKimiCliApiConfig()}
-        disabled={actionBusy}
+        onClick={() => void onOpenConfigCenterModal()}
+        disabled={actionBusy || configCenterBusy}
       >
-        写入配置文件
+        打开配置中心弹窗
       </Button>
     );
 
@@ -393,12 +403,12 @@ export function ControlCenterView({
       <Button
         type="button"
         variant="ghost"
-        icon={<Check size={14} />}
+        icon={<FolderOpen size={14} />}
         className="cc-action-btn"
-        onClick={() => void onAckApiConfig()}
+        onClick={() => void onOpenKimiConfigDir()}
         disabled={actionBusy}
       >
-        标记 API 配置完成
+        打开配置目录
       </Button>
     );
 
@@ -770,64 +780,22 @@ export function ControlCenterView({
                         </div>
                       ) : (
                         <div className="cc-auth-panel">
-                          <div className="cc-api-form-grid">
-                            <div className="cc-api-field">
-                              <label htmlFor="api-provider-id">Provider</label>
-                              <Input
-                                id="api-provider-id"
-                                value={apiConfigForm.providerId ?? ""}
-                                onChange={(event) =>
-                                  onApiConfigFieldChange(
-                                    "providerId",
-                                    event.currentTarget.value,
-                                  )
-                                }
-                                placeholder="moonshot"
-                              />
-                            </div>
-                            <div className="cc-api-field">
-                              <label htmlFor="api-model">Model</label>
-                              <Input
-                                id="api-model"
-                                value={apiConfigForm.model ?? ""}
-                                onChange={(event) =>
-                                  onApiConfigFieldChange("model", event.currentTarget.value)
-                                }
-                                placeholder="kimi-k2-turbo-preview"
-                              />
-                            </div>
-                            <div className="cc-api-field">
-                              <label htmlFor="api-base-url">Base URL</label>
-                              <Input
-                                id="api-base-url"
-                                value={apiConfigForm.baseUrl ?? ""}
-                                onChange={(event) =>
-                                  onApiConfigFieldChange("baseUrl", event.currentTarget.value)
-                                }
-                                placeholder="https://api.moonshot.cn/v1"
-                              />
-                            </div>
-                            <div className="cc-api-field">
-                              <label htmlFor="api-key">
-                                API Key
-                                {apiConfigHasKey ? (
-                                  <span className="cc-api-key-state">（已存在）</span>
-                                ) : null}
-                              </label>
-                              <Input
-                                id="api-key"
-                                type="password"
-                                value={apiConfigForm.apiKey ?? ""}
-                                onChange={(event) =>
-                                  onApiConfigFieldChange("apiKey", event.currentTarget.value)
-                                }
-                                placeholder={
-                                  apiConfigHasKey ? "留空则保持现有 key" : "请输入 API key"
-                                }
-                              />
-                            </div>
-                          </div>
+                          <p className="hint cc-step-summary">
+                            已配置 providers：<strong>{configCenterView?.providers.length ?? 0}</strong>；
+                            models：<strong>{configCenterView?.models.length ?? 0}</strong>；
+                            services：<strong>{configCenterView?.services.length ?? 0}</strong>
+                          </p>
                           <div className="cc-api-inline-actions">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              icon={<Check size={14} />}
+                              className="cc-action-btn"
+                              onClick={() => void onOpenConfigCenterModal()}
+                              disabled={configCenterBusy}
+                            >
+                              打开配置中心弹窗
+                            </Button>
                             <Button
                               type="button"
                               variant="outline"
@@ -839,7 +807,21 @@ export function ControlCenterView({
                             </Button>
                           </div>
                           <p className="hint cc-step-meta">
-                            配置文件：<strong>{apiConfigPath || "~/.kimi/config.toml"}</strong>
+                            配置文件：
+                            <strong>
+                              {configCenterView?.configPath || "~/.kimi/config.toml"}
+                            </strong>
+                          </p>
+                          {configCenterDirty ? (
+                            <p className="hint cc-step-meta">配置中心弹窗内存在未保存修改。</p>
+                          ) : null}
+                          {configCenterView?.warnings?.length ? (
+                            <p className="hint cc-step-meta">
+                              当前警告：{configCenterView.warnings[0]}
+                            </p>
+                          ) : null}
+                          <p className="hint cc-step-meta">
+                            保存成功后将自动标记本步骤完成。
                           </p>
                         </div>
                       )}
@@ -1011,6 +993,18 @@ export function ControlCenterView({
           )}
         </div>
       </div>
+      <ConfigCenterModal
+        open={configCenterOpen}
+        busy={configCenterBusy || actionBusy}
+        dirty={configCenterDirty}
+        view={configCenterView}
+        draft={configCenterDraft}
+        onDraftChange={onConfigCenterDraftChange}
+        onClose={onCloseConfigCenterModal}
+        onSave={onSaveKimiCliConfigCenter}
+        onReset={onResetConfigCenterDraft}
+        onOpenConfigDir={onOpenKimiConfigDir}
+      />
     </section>
   );
 }

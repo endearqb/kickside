@@ -117,6 +117,8 @@ body {
     Roboto,
     sans-serif;
   font-size: 14px;
+  background-color: #ffffff;
+  color: #111827;
   background-color: var(--background);
   color: var(--foreground);
   text-rendering: geometricPrecision;

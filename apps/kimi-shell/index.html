@@ -4,10 +4,61 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>Kimi Desktop Shell</title>
+    <style>
+      #boot-fallback {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+        background: #ffffff;
+        color: #111827;
+        font-family:
+          "Segoe UI",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Inter",
+          sans-serif;
+      }
+
+      #boot-fallback[data-state="mounting"] {
+        opacity: 0.98;
+      }
+
+      #boot-fallback-card {
+        width: min(560px, 100%);
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        background: #f9fafb;
+        padding: 14px 16px;
+      }
+
+      #boot-fallback h1 {
+        margin: 0 0 8px;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+
+      #boot-fallback p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+    </style>
   </head>
 
   <body>
+    <div id="boot-fallback" data-state="booting">
+      <div id="boot-fallback-card">
+        <h1>Kimi Desktop Shell 正在启动</h1>
+        <p>
+          如果这个提示长时间不消失，说明前端资源可能没有正确加载。请关闭后重试，或将
+          `%LOCALAPPDATA%\\com.kimi.shell\\logs\\app.log` 提供给开发者排查。
+        </p>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

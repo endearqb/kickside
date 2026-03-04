@@ -1,5 +1,11 @@
 # Lessons Learned
 
+- 救火式重试逻辑必须显式“锁存成功状态”（latch）：一旦 fallback 导航成功，后续循环只能观察，不可继续发送会覆盖目标页面的导航指令。
+- 当 `tauri://localhost` 重试导航仍持续 `about:blank` 时，要尽快切换“协议绕行兜底”（直接导航 `http://127.0.0.1:<workspace_port>`），先恢复可用性再追协议根因。
+- 当截图显示 DevTools 目标仅有 `about:blank` 且无资源树时，优先按“协议加载时序故障”处理：在 Rust setup 加入 about:blank 自救重试导航，而不是只在前端层继续加 fallback。
+- 安装版出现“打不开/白块”时要先检查真实窗口几何（`MainWindowHandle + GetWindowRect`）；13x13 这类异常尺寸会被误判为渲染故障，应在 setup 增加窗口尺寸自愈。
+- 桌面端发布包必须内置“启动可视化兜底”（index 启动 fallback + 根错误边界）；否则前端模块加载失败会表现为白窗，用户无法提供有效诊断信息。
+- Windows 发布包若出现“透明窗口/空窗”反馈，优先把 `tauri.conf.json` 的窗口透明依赖降级（`transparent=false`）并为 `body/shell-root` 提供显式 sRGB 回退底色，再做深层排查。
 - 视觉类改动涉及“窗口层 + Web 层”时，必须一次性核对 `tauri.conf.json`、`src-tauri` 运行时设置与 `html/body/#root` 背景，避免只改一层导致效果不完整。
 - 当用户追加约束（例如“保留透明同时打开阴影”）时，应立即把新增约束并入当前实现与验收，不做半完成交付。
 - `iframe` 嵌入跨域页面时，`localStorage`/DOM 主题状态天然隔离；若要实现“被嵌入页切主题后壳层跟随”，必须预留显式桥接通道（如本地代理注入 + `postMessage`），不能假设同名存储键会自动同步。

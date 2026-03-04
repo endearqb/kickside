@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
+  base: "./",
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
@@ -36,5 +37,9 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+  },
+  build: {
+    // Keep release bundle compatible with older WebView2 runtimes.
+    target: "es2019",
   },
 }));

@@ -52,7 +52,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             MENU_RESTART_BACKEND => backend_manager::restart_backend(app.clone()),
             MENU_OPEN_DIAGNOSTICS => {
                 window_manager::show_and_focus(app);
-                window_manager::navigate_diagnostics(app);
+                window_manager::show_diagnostics(app, "tray_open_diagnostics");
             }
             MENU_OPEN_LOGS => {
                 if let Err(error) = backend_manager::open_logs_folder(app) {

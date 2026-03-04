@@ -13,12 +13,13 @@
     "windows": [
       {
         "title": "Kimi Desktop Shell",
+        "url": "index.html#/loading",
         "width": 1200,
         "height": 820,
         "minWidth": 900,
         "minHeight": 640,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": true
       }
     ],

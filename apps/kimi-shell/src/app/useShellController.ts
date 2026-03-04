@@ -4,32 +4,79 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getInitialThemeMode, LEGACY_THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY } from "@/app/theme";
 import type {
+  ActionableOnboardingStep,
   AppStatus,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
   InstallProbeStatus,
-  KimiCliApiConfigView,
+  KimiCliConfigCenterInput,
+  KimiCliConfigCenterView,
   LoginProbeResult,
   OnboardingStatus,
   RuntimePanelId,
   Screen,
   Theme,
   WorkspaceEmbedState,
-  ActionableOnboardingStep,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 
 const POLL_MS = 1000;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
-type ApiConfigFormState = {
-  providerId: string;
-  model: string;
-  baseUrl: string;
-  apiKey: string;
-};
 type InstallSource = "official" | "mirror";
+
+function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
+  return {
+    providers: [],
+    models: [],
+    services: [],
+    defaultProvider: undefined,
+    model: undefined,
+    defaultModel: undefined,
+    defaultService: undefined,
+    defaultEditor: undefined,
+    defaultYolo: undefined,
+    defaultYoloMode: undefined,
+    defaultThinking: undefined,
+    defaultThinkingMode: undefined,
+    localModelDisableAutoPull: undefined,
+    loopControl: {
+      enabled: undefined,
+      maxSteps: undefined,
+      maxRetries: undefined,
+      timeoutMs: undefined,
+      extraFields: [],
+    },
+    mcpServers: [],
+  };
+}
+
+function toConfigCenterInput(view: KimiCliConfigCenterView): KimiCliConfigCenterInput {
+  return {
+    providers: view.providers,
+    models: view.models,
+    services: view.services,
+    defaultProvider: view.defaultProvider,
+    model: view.model,
+    defaultModel: view.defaultModel,
+    defaultService: view.defaultService,
+    defaultEditor: view.defaultEditor,
+    defaultYolo: view.defaultYolo,
+    defaultYoloMode: view.defaultYoloMode,
+    defaultThinking: view.defaultThinking,
+    defaultThinkingMode: view.defaultThinkingMode,
+    localModelDisableAutoPull: view.localModelDisableAutoPull,
+    loopControl: view.loopControl,
+    mcpServers: view.mcpServers,
+  };
+}
+
+function cloneConfigCenterInput(
+  input: KimiCliConfigCenterInput,
+): KimiCliConfigCenterInput {
+  return JSON.parse(JSON.stringify(input)) as KimiCliConfigCenterInput;
+}
 
 function parseHashRoute(hash: string): string {
   return hash.replace(/^#\/?/, "");
@@ -51,14 +98,15 @@ export function useShellController() {
     useState<LoginProbeResult | null>(null);
   const [kimiPathInput, setKimiPathInput] = useState("");
   const [workDirInput, setWorkDirInput] = useState("");
-  const [apiConfigForm, setApiConfigForm] = useState<ApiConfigFormState>({
-    providerId: "moonshot",
-    model: "",
-    baseUrl: "",
-    apiKey: "",
-  });
-  const [apiConfigPath, setApiConfigPath] = useState("");
-  const [apiConfigHasKey, setApiConfigHasKey] = useState(false);
+  const [configCenterView, setConfigCenterView] =
+    useState<KimiCliConfigCenterView | null>(null);
+  const [configCenterDraft, setConfigCenterDraft] = useState<KimiCliConfigCenterInput>(
+    () => createEmptyConfigCenterInput(),
+  );
+  const [configCenterSnapshot, setConfigCenterSnapshot] =
+    useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
+  const [configCenterOpen, setConfigCenterOpen] = useState(false);
+  const [configCenterBusy, setConfigCenterBusy] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installBusy, setInstallBusy] = useState(false);
   const [installMessage, setInstallMessage] = useState("");
@@ -146,20 +194,18 @@ export function useShellController() {
     await Promise.all([refreshStatus(), refreshOnboarding()]);
   }
 
-  async function loadKimiCliApiConfig() {
+  async function loadKimiCliConfigCenter() {
     try {
-      const data = await invoke<KimiCliApiConfigView>("load_kimi_cli_api_config");
-      setApiConfigPath(data.configPath);
-      setApiConfigHasKey(data.hasApiKey);
-      setApiConfigForm((current) => ({
-        providerId: data.providerId ?? current.providerId,
-        model: data.model ?? current.model,
-        baseUrl: data.baseUrl ?? current.baseUrl,
-        apiKey: "",
-      }));
+      const data = await invoke<KimiCliConfigCenterView>("load_kimi_cli_config_center");
+      setConfigCenterView(data);
+      const nextInput = toConfigCenterInput(data);
+      setConfigCenterDraft(nextInput);
+      setConfigCenterSnapshot(cloneConfigCenterInput(nextInput));
       setActionError(null);
+      return data;
     } catch (error) {
       setActionError(String(error));
+      throw error;
     }
   }
 
@@ -264,7 +310,9 @@ export function useShellController() {
     void refreshOnboarding();
     void refreshDiagnostics();
     void refreshContextMenuStatus();
-    void loadKimiCliApiConfig();
+    void loadKimiCliConfigCenter().catch(() => {
+      // Best-effort loading.
+    });
     void refreshInstallProbe().catch(() => {
       // Best-effort probe.
     });
@@ -370,14 +418,47 @@ export function useShellController() {
     }
   }
 
-  function handleApiConfigFieldChange(
-    field: keyof ApiConfigFormState,
-    value: string,
-  ) {
-    setApiConfigForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
+  async function handleOpenConfigCenterModal() {
+    setConfigCenterBusy(true);
+    try {
+      await loadKimiCliConfigCenter();
+      setConfigCenterOpen(true);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setConfigCenterBusy(false);
+    }
+  }
+
+  function handleCloseConfigCenterModal() {
+    setConfigCenterOpen(false);
+  }
+
+  function handleConfigCenterDraftChange(next: KimiCliConfigCenterInput) {
+    setConfigCenterDraft(next);
+  }
+
+  function handleResetConfigCenterDraft() {
+    setConfigCenterDraft(cloneConfigCenterInput(configCenterSnapshot));
+  }
+
+  async function handleSaveKimiCliConfigCenter() {
+    setActionBusy(true);
+    setConfigCenterBusy(true);
+    setActionError(null);
+    try {
+      await invoke("save_kimi_cli_config_center", {
+        input: configCenterDraft,
+      });
+      await loadKimiCliConfigCenter();
+      await refreshOnboarding();
+      setConfigCenterOpen(false);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+      setConfigCenterBusy(false);
+    }
   }
 
   async function handlePickKimiPath() {
@@ -498,41 +579,6 @@ export function useShellController() {
       setActionError(String(error));
     } finally {
       setLoginProbeBusy(false);
-    }
-  }
-
-  async function handleAckApiConfig() {
-    setActionBusy(true);
-    setActionError(null);
-    try {
-      await invoke("ack_api_config_step", { acknowledged: true });
-      await refreshOnboarding();
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
-    }
-  }
-
-  async function handleSaveKimiCliApiConfig() {
-    setActionBusy(true);
-    setActionError(null);
-    try {
-      await invoke("save_kimi_cli_api_config", {
-        input: {
-          providerId: apiConfigForm.providerId.trim(),
-          model: apiConfigForm.model.trim(),
-          baseUrl: apiConfigForm.baseUrl.trim(),
-          apiKey: apiConfigForm.apiKey.trim() || undefined,
-        },
-      });
-      setApiConfigForm((current) => ({ ...current, apiKey: "" }));
-      await loadKimiCliApiConfig();
-      await refreshOnboarding();
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
     }
   }
 
@@ -733,6 +779,12 @@ export function useShellController() {
     [onboarding],
   );
 
+  const configCenterDirty = useMemo(
+    () =>
+      JSON.stringify(configCenterDraft) !== JSON.stringify(configCenterSnapshot),
+    [configCenterDraft, configCenterSnapshot],
+  );
+
   const canOpenWorkspace =
     status?.state === "running" &&
     typeof status.activePort === "number" &&
@@ -790,9 +842,11 @@ export function useShellController() {
     remoteUrl,
     workspaceIframeRef,
     stepCompletion,
-    apiConfigForm,
-    apiConfigPath,
-    apiConfigHasKey,
+    configCenterView,
+    configCenterDraft,
+    configCenterOpen,
+    configCenterBusy,
+    configCenterDirty,
     installProbe,
     installSource,
     installBusy,
@@ -806,20 +860,22 @@ export function useShellController() {
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenKimiConfigDir,
+    handleOpenConfigCenterModal,
+    handleCloseConfigCenterModal,
+    handleConfigCenterDraftChange,
+    handleResetConfigCenterDraft,
+    handleSaveKimiCliConfigCenter,
     handlePickKimiPath,
     handleSavePathAndRetry,
     handlePickWorkDir,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
-    handleApiConfigFieldChange,
-    handleSaveKimiCliApiConfig,
     handleInstallSourceChange,
     handleInstallDependencies,
     handleInstallKimi,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,
-    handleAckApiConfig,
     handleCompleteOnboarding,
     handleSkipOnboarding,
     openControlCenter,

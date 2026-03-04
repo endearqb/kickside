@@ -15,16 +15,18 @@ mod window_manager;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, LogicalSize, Manager, RunEvent, Size};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo,
-    InstallProbeStatus,
-    KimiCliApiConfigInput, KimiCliApiConfigView, LoginProbeResult, LoginProbeState,
-    OnboardingStatus, OnboardingStep, CURRENT_ONBOARDING_VERSION,
+    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, InstallProbeStatus,
+    KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+    LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
+    CURRENT_ONBOARDING_VERSION,
 };
 
 #[tauri::command]
@@ -212,6 +214,19 @@ fn save_kimi_cli_api_config(input: KimiCliApiConfigInput) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn load_kimi_cli_config_center() -> Result<KimiCliConfigCenterView, String> {
+    backend_manager::load_kimi_cli_config_center()
+}
+
+#[tauri::command]
+fn save_kimi_cli_config_center(
+    app: AppHandle,
+    input: KimiCliConfigCenterInput,
+) -> Result<(), String> {
+    backend_manager::save_kimi_cli_config_center(&app, input)
+}
+
+#[tauri::command]
 fn install_kimi_dependencies(source: String) -> Result<String, String> {
     backend_manager::install_kimi_dependencies(&source)
 }
@@ -373,14 +388,12 @@ fn get_onboarding_status(app: AppHandle) -> Result<OnboardingStatus, String> {
 #[tauri::command]
 fn complete_onboarding(app: AppHandle) -> Result<(), String> {
     mark_onboarding_completed(&app)?;
-    backend_manager::release_pending_remote_navigation(&app).map_err(|error| error.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn skip_onboarding(app: AppHandle) -> Result<(), String> {
     mark_onboarding_completed(&app)?;
-    backend_manager::release_pending_remote_navigation(&app).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -437,6 +450,7 @@ pub fn run() {
     let shortcut = shortcut_manager::default_shortcut();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            window_manager::show_and_focus(&app);
             open_request::handle_external_cli_request(app.clone(), args, Some(cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -471,6 +485,37 @@ pub fn run() {
                         format!("failed to enable window shadow: {error}"),
                     );
                 }
+
+                if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
+                    900.0, 640.0,
+                )))) {
+                    log_manager::append_line(
+                        app.handle(),
+                        format!("failed to set window min size: {error}"),
+                    );
+                }
+
+                match window.outer_size() {
+                    Ok(size) if size.width < 900 || size.height < 640 => {
+                        log_manager::append_line(
+                            app.handle(),
+                            format!(
+                                "detected abnormal window size {}x{}, restoring default bounds",
+                                size.width, size.height
+                            ),
+                        );
+                        let _ = window.unminimize();
+                        let _ = window.set_size(Size::Logical(LogicalSize::new(1200.0, 820.0)));
+                        let _ = window.center();
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        log_manager::append_line(
+                            app.handle(),
+                            format!("failed to query window size: {error}"),
+                        );
+                    }
+                }
             }
 
             tray_manager::setup_tray(app.handle())?;
@@ -491,7 +536,9 @@ pub fn run() {
             }
 
             open_request::apply_startup_cli_request(app.handle());
+            window_manager::enter_local_boot(app.handle(), "setup_bootstrap");
             backend_manager::start_backend(app.handle().clone());
+            spawn_blank_window_recovery(app.handle());
 
             if settings.start_minimized_to_tray {
                 if let Some(window) = app.get_webview_window("main") {
@@ -514,6 +561,8 @@ pub fn run() {
             open_kimi_config_dir,
             load_kimi_cli_api_config,
             save_kimi_cli_api_config,
+            load_kimi_cli_config_center,
+            save_kimi_cli_config_center,
             install_kimi_dependencies,
             install_kimi_cli,
             get_install_probe_status,
@@ -530,6 +579,10 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
+        RunEvent::Ready => {
+            // Re-assert local boot route after the event loop is fully ready.
+            window_manager::enter_local_boot(app_handle, "run_ready");
+        }
         RunEvent::WindowEvent { label, event, .. } => {
             if label == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -553,7 +606,6 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     let (
         runtime_state,
         startup_open_request_applied,
-        launch_blocked_by_onboarding,
         runtime_detected_kimi_path,
         runtime_login_state,
         runtime_login_message,
@@ -566,7 +618,6 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         (
             runtime.state,
             runtime.startup_open_request_applied,
-            runtime.pending_remote_port.is_some(),
             runtime
                 .detected_kimi_path
                 .as_ref()
@@ -614,7 +665,7 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         current_version: CURRENT_ONBOARDING_VERSION,
         completed_version: settings.onboarding_completed_version,
         should_show_onboarding,
-        launch_blocked_by_onboarding,
+        launch_blocked_by_onboarding: false,
         startup_open_request_applied,
         recommended_step,
         kimi_installed,
@@ -798,6 +849,141 @@ fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {
     let start = start_ms?;
     let end = end_ms?;
     end.checked_sub(start)
+}
+
+fn spawn_blank_window_recovery(app: &AppHandle) {
+    let app_handle = app.clone();
+    thread::spawn(move || {
+        let mut workspace_fallback_attempted = false;
+
+        for attempt in 1u32..=40u32 {
+            thread::sleep(Duration::from_millis(350));
+
+            let Some(window) = app_handle.get_webview_window("main") else {
+                return;
+            };
+
+            let current_url = match window.url() {
+                Ok(url) => url,
+                Err(error) => {
+                    window_manager::recover_loading_route(
+                        &app_handle,
+                        "blank_recovery:url_unreadable",
+                    );
+                    if attempt == 1 || attempt % 5 == 0 {
+                        log_manager::append_line(
+                            &app_handle,
+                            format!(
+                                "blank-window recovery cannot read url (attempt={attempt}), forced navigate_loading: {error}"
+                            ),
+                        );
+                    }
+                    continue;
+                }
+            };
+
+            if current_url.as_str() != "about:blank" {
+                if attempt > 1 {
+                    log_manager::append_line(
+                        &app_handle,
+                        format!(
+                            "blank-window recovery completed at attempt={attempt}, current url: {}",
+                            current_url
+                        ),
+                    );
+                }
+                return;
+            }
+
+            // Emergency fallback for environments where `tauri://localhost` cannot
+            // be resolved reliably: after attempt 20, prefer backend workspace URL.
+            if attempt >= 20 && !workspace_fallback_attempted {
+                workspace_fallback_attempted =
+                    try_navigate_workspace_fallback(&app_handle, attempt);
+                if workspace_fallback_attempted {
+                    continue;
+                }
+            }
+
+            if !workspace_fallback_attempted {
+                window_manager::recover_loading_route(&app_handle, "blank_recovery:about_blank");
+                if attempt == 1 || attempt % 5 == 0 {
+                    log_manager::append_line(
+                        &app_handle,
+                        format!(
+                            "blank-window recovery forced navigate_loading (attempt={attempt})"
+                        ),
+                    );
+                }
+            } else if attempt % 5 == 0 {
+                log_manager::append_line(
+                    &app_handle,
+                    format!(
+                        "blank-window recovery waiting workspace fallback to take effect (attempt={attempt})"
+                    ),
+                );
+            }
+        }
+
+        log_manager::append_line(
+            &app_handle,
+            "blank-window recovery exhausted retries; window may still be stuck on about:blank",
+        );
+    });
+}
+
+fn try_navigate_workspace_fallback(app: &AppHandle, attempt: u32) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+
+    let fallback_port = {
+        let state = app.state::<AppState>();
+        let runtime = match state.runtime.lock() {
+            Ok(runtime) => runtime,
+            Err(_) => return false,
+        };
+        runtime.workspace_port.or(runtime.active_port)
+    };
+
+    let Some(port) = fallback_port else {
+        return false;
+    };
+
+    let fallback_url = format!("http://127.0.0.1:{port}");
+    let parsed = match url::Url::parse(&fallback_url) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "blank-window workspace fallback parse failed (attempt={attempt}): {error}"
+                ),
+            );
+            return false;
+        }
+    };
+
+    match window.navigate(parsed) {
+        Ok(_) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "blank-window workspace fallback navigate succeeded (attempt={attempt}, url={fallback_url})"
+                ),
+            );
+            true
+        }
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "blank-window workspace fallback navigate failed (attempt={attempt}, url={fallback_url}): {error}"
+                ),
+            );
+            false
+        }
+    }
 }
 
 #[cfg(test)]

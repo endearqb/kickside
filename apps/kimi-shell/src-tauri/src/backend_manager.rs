@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, OpenOptions},
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -12,15 +13,17 @@ use std::{
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
 use tiny_http::{Header, Response, Server, StatusCode};
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table, Value};
 use url::Url;
 
 use crate::{
     app_state::{unix_time_millis, AppState},
     cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
     types::{
-        AppSettings, BackendState, InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView,
-        CURRENT_ONBOARDING_VERSION,
+        AppSettings, BackendState, EnvOverrideStatus, InstallProbeStatus, KeyValueEntry,
+        KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
+        KimiCliConfigCenterView, LoopControlEntry, McpServerEntry, ModelEntry, ProviderEntry,
+        ServiceEntry, TypedFieldEntry, TypedFieldType,
     },
     window_manager,
 };
@@ -31,6 +34,91 @@ const THEME_BRIDGE_SOURCE: &str = "kimi-shell-theme-bridge";
 const SHELL_THEME_SYNC_SOURCE: &str = "kimi-shell-theme-sync";
 const MAX_UPSTREAM_HEADER_BYTES: usize = 64 * 1024;
 const MAX_INSTALL_OUTPUT_CHARS: usize = 1500;
+const ENV_VALUE_VISIBLE_EDGE: usize = 2;
+
+struct EnvOverrideDefinition {
+    key: &'static str,
+    overrides: &'static [&'static str],
+    priority: &'static str,
+}
+
+const ENV_OVERRIDE_DEFINITIONS: &[EnvOverrideDefinition] = &[
+    EnvOverrideDefinition {
+        key: "KIMI_PROVIDER",
+        overrides: &["provider"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_MODEL",
+        overrides: &["model", "default_model"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_DEFAULT_SERVICE",
+        overrides: &["default_service"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_DEFAULT_EDITOR",
+        overrides: &["default_editor"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_DEFAULT_YOLO_MODE",
+        overrides: &["default_yolo_mode", "default_yolo"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_DEFAULT_THINKING_MODE",
+        overrides: &["default_thinking_mode", "default_thinking"],
+        priority: "Environment overrides config.toml values.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_API_KEY",
+        overrides: &["providers.<active>.api_key"],
+        priority: "Environment overrides provider credentials from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "MOONSHOT_API_KEY",
+        overrides: &["providers.moonshot.api_key"],
+        priority: "Environment overrides provider credentials from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "OPENAI_API_KEY",
+        overrides: &["providers.openai.api_key"],
+        priority: "Environment overrides provider credentials from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "OPENAI_BASE_URL",
+        overrides: &["providers.openai.base_url"],
+        priority: "Environment overrides provider endpoint from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "ANTHROPIC_API_KEY",
+        overrides: &["providers.anthropic.api_key"],
+        priority: "Environment overrides provider credentials from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "AZURE_OPENAI_API_KEY",
+        overrides: &["providers.azure.api_key"],
+        priority: "Environment overrides provider credentials from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "AZURE_OPENAI_ENDPOINT",
+        overrides: &["providers.azure.base_url", "providers.azure.deployment"],
+        priority: "Environment overrides provider endpoint from config.toml.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_SHARE_DIR",
+        overrides: &["CLI data location"],
+        priority: "Environment overrides default data directory location.",
+    },
+    EnvOverrideDefinition {
+        key: "KIMI_CLI_DATA_DIR",
+        overrides: &["CLI data location"],
+        priority: "Environment overrides default data directory location.",
+    },
+];
 
 const POWERSHELL_INSTALL_DEPS_OFFICIAL: &str = r#"
 $ErrorActionPreference='Stop'
@@ -177,7 +265,6 @@ pub fn start_backend(app: AppHandle) {
         runtime.last_error = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
-        runtime.pending_remote_port = None;
         runtime.generation = runtime.generation.saturating_add(1);
         runtime.start_cycle_id = runtime.generation;
         runtime.start_requested_at_ms = Some(unix_time_millis());
@@ -198,7 +285,7 @@ pub fn start_backend(app: AppHandle) {
         );
     }
 
-    window_manager::navigate_loading(&app);
+    window_manager::enter_local_boot(&app, "backend_start");
     log_manager::append_line(
         &app,
         format!("starting kimi web backend (cycle={generation})"),
@@ -263,7 +350,6 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
         runtime.last_error = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
-        runtime.pending_remote_port = None;
         runtime.backend_ready_at_ms = None;
         runtime.child.take()
     };
@@ -286,7 +372,6 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
     runtime.last_error = None;
     runtime.effective_work_dir = None;
     runtime.launch_command = None;
-    runtime.pending_remote_port = None;
     runtime.start_requested_at_ms = None;
     runtime.loading_reported_at_ms = None;
     runtime.loading_reported_cycle_id = None;
@@ -453,6 +538,82 @@ pub fn save_kimi_cli_api_config(input: KimiCliApiConfigInput) -> Result<(), Stri
     Ok(())
 }
 
+pub fn load_kimi_cli_config_center() -> Result<KimiCliConfigCenterView, String> {
+    let config_dir = resolve_kimi_config_dir()?;
+    let config_path = resolve_kimi_config_path()?;
+    let (data_dir, data_dir_env_source) = resolve_kimi_data_dir()?;
+
+    let mut view = KimiCliConfigCenterView {
+        config_path: config_path.to_string_lossy().to_string(),
+        config_dir: config_dir.to_string_lossy().to_string(),
+        data_dir,
+        data_dir_env_source,
+        ..Default::default()
+    };
+
+    if config_path.exists() {
+        let raw = fs::read_to_string(&config_path).map_err(|error| {
+            format!(
+                "failed to read config file {}: {error}",
+                config_path.display()
+            )
+        })?;
+        let doc = parse_kimi_config_document(&raw, &config_path)?;
+        let root = doc.as_table();
+
+        view.default_provider = table_string(root, "provider");
+        view.model = table_string(root, "model");
+        view.default_model = table_string(root, "default_model");
+        view.default_service = table_string(root, "default_service");
+        view.default_editor = table_string(root, "default_editor");
+        view.default_yolo = table_bool(root, "default_yolo");
+        view.default_yolo_mode = table_string(root, "default_yolo_mode");
+        view.default_thinking = table_bool(root, "default_thinking");
+        view.default_thinking_mode = table_string(root, "default_thinking_mode");
+        view.local_model_disable_auto_pull = table_bool(root, "local_model_disable_auto_pull");
+        view.providers = parse_provider_entries(root);
+        view.models = parse_model_entries(root);
+        view.services = parse_service_entries(root);
+        view.loop_control = parse_loop_control_entry(root);
+        view.mcp_servers = parse_mcp_server_entries(root);
+    }
+
+    view.env_overrides = collect_env_override_statuses();
+    view.warnings = collect_config_center_warnings(&view);
+    Ok(view)
+}
+
+pub fn save_kimi_cli_config_center(
+    app: &AppHandle,
+    input: KimiCliConfigCenterInput,
+) -> Result<(), String> {
+    validate_config_center_input(&input)?;
+
+    let config_dir = resolve_kimi_config_dir()?;
+    fs::create_dir_all(&config_dir).map_err(|error| {
+        format!(
+            "failed to create kimi config directory {}: {error}",
+            config_dir.display()
+        )
+    })?;
+
+    let config_path = config_dir.join("config.toml");
+    let mut doc = read_or_init_kimi_config(&config_path)?;
+    apply_config_center_input(&mut doc, &input)?;
+
+    fs::write(&config_path, doc.to_string()).map_err(|error| {
+        format!(
+            "failed to write config file {}: {error}",
+            config_path.display()
+        )
+    })?;
+
+    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    settings.onboarding_step_acks.api_config_ack = true;
+    settings_store::save(app, &settings).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 pub fn install_kimi_dependencies(source: &str) -> Result<String, String> {
     let source = parse_install_source(source)?;
     let script = match source {
@@ -505,7 +666,13 @@ fn run_windows_powershell_install(script: &str) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
             .output()
             .map_err(|error| format!("failed to run powershell install command: {error}"))?;
 
@@ -581,6 +748,908 @@ fn python313_ready() -> bool {
         }
         false
     }
+}
+
+fn collect_config_center_warnings(view: &KimiCliConfigCenterView) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    if let Some(default_model) = normalize_optional_string(&view.default_model) {
+        let model_exists = view
+            .models
+            .iter()
+            .any(|entry| entry.key.trim() == default_model);
+        if !model_exists {
+            warnings.push(format!(
+                "default_model `{default_model}` not found in models table (allowed but may be overridden)."
+            ));
+        }
+    }
+
+    let active_provider = normalize_optional_string(&view.default_provider).or_else(|| {
+        view.providers
+            .first()
+            .map(|entry| entry.key.trim().to_string())
+            .filter(|value| !value.is_empty())
+    });
+
+    if let Some(provider_key) = active_provider {
+        let provider_entry = view
+            .providers
+            .iter()
+            .find(|entry| entry.key.trim() == provider_key);
+        if let Some(provider) = provider_entry {
+            let has_key_in_config = normalize_optional_string(&provider.api_key).is_some();
+            let has_key_in_env = [
+                "KIMI_API_KEY",
+                "MOONSHOT_API_KEY",
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "AZURE_OPENAI_API_KEY",
+            ]
+            .iter()
+            .any(|key| env_var_trimmed(key).is_some());
+
+            if !has_key_in_config && !has_key_in_env {
+                warnings.push(format!(
+                    "provider `{provider_key}` has no API key in config or env overrides."
+                ));
+            }
+        }
+    }
+
+    warnings
+}
+
+fn collect_env_override_statuses() -> Vec<EnvOverrideStatus> {
+    ENV_OVERRIDE_DEFINITIONS
+        .iter()
+        .map(|definition| {
+            let value = env_var_trimmed(definition.key);
+            EnvOverrideStatus {
+                key: definition.key.to_string(),
+                is_set: value.is_some(),
+                masked_value: value.as_deref().map(mask_env_value),
+                overrides: definition
+                    .overrides
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect(),
+                priority: definition.priority.to_string(),
+            }
+        })
+        .collect()
+}
+
+fn mask_env_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "***".to_string();
+    }
+
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= ENV_VALUE_VISIBLE_EDGE * 2 {
+        return "*".repeat(chars.len());
+    }
+
+    let prefix: String = chars[..ENV_VALUE_VISIBLE_EDGE].iter().collect();
+    let suffix: String = chars[chars.len() - ENV_VALUE_VISIBLE_EDGE..]
+        .iter()
+        .collect();
+    format!("{prefix}***{suffix}")
+}
+
+fn resolve_kimi_data_dir() -> Result<(String, Option<String>), String> {
+    if let Some(path) = env_var_trimmed("KIMI_SHARE_DIR") {
+        return Ok((path, Some("KIMI_SHARE_DIR".to_string())));
+    }
+    if let Some(path) = env_var_trimmed("KIMI_CLI_DATA_DIR") {
+        return Ok((path, Some("KIMI_CLI_DATA_DIR".to_string())));
+    }
+
+    let fallback = resolve_kimi_config_dir()?;
+    Ok((fallback.to_string_lossy().to_string(), None))
+}
+
+fn env_var_trimmed(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_provider_entries(root: &Table) -> Vec<ProviderEntry> {
+    let mut entries = Vec::new();
+    let Some(providers) = root.get("providers").and_then(Item::as_table) else {
+        return entries;
+    };
+
+    for (key, item) in providers.iter() {
+        let Some(table) = item.as_table() else {
+            continue;
+        };
+
+        let mut entry = ProviderEntry {
+            key: key.to_string(),
+            provider_type: table_string(table, "type"),
+            api_key: table_string(table, "api_key"),
+            base_url: table_string(table, "base_url"),
+            auth_token: table_string(table, "auth_token"),
+            app_id: table_string(table, "app_id"),
+            access_key_id: table_string(table, "access_key_id"),
+            secret_access_key: table_string(table, "secret_access_key"),
+            region: table_string(table, "region"),
+            api_version: table_string(table, "api_version"),
+            deployment: table_string(table, "deployment"),
+            model_name: table_string(table, "model_name"),
+            env: table_to_key_value_entries(table, "env"),
+            custom_headers: table_to_key_value_entries(table, "custom_headers"),
+            extra_fields: collect_extra_fields(
+                table,
+                &[
+                    "name",
+                    "type",
+                    "api_key",
+                    "base_url",
+                    "auth_token",
+                    "app_id",
+                    "access_key_id",
+                    "secret_access_key",
+                    "region",
+                    "api_version",
+                    "deployment",
+                    "model_name",
+                    "env",
+                    "custom_headers",
+                ],
+            ),
+        };
+
+        if entry.provider_type.is_none() {
+            entry.provider_type = table_string(table, "name");
+        }
+
+        entries.push(entry);
+    }
+
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+}
+
+fn parse_model_entries(root: &Table) -> Vec<ModelEntry> {
+    let mut entries = Vec::new();
+    let Some(models) = root.get("models").and_then(Item::as_table) else {
+        return entries;
+    };
+
+    for (key, item) in models.iter() {
+        let Some(table) = item.as_table() else {
+            continue;
+        };
+
+        entries.push(ModelEntry {
+            key: key.to_string(),
+            provider: table_string(table, "provider"),
+            model: table_string(table, "model"),
+            max_context_size: table_i64(table, "max_context_size"),
+            capabilities: table_string_array(table, "capabilities"),
+            extra_fields: collect_extra_fields(
+                table,
+                &["provider", "model", "max_context_size", "capabilities"],
+            ),
+        });
+    }
+
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+}
+
+fn parse_service_entries(root: &Table) -> Vec<ServiceEntry> {
+    let mut entries = Vec::new();
+    let Some(services) = root.get("services").and_then(Item::as_table) else {
+        return entries;
+    };
+
+    for (key, item) in services.iter() {
+        let Some(table) = item.as_table() else {
+            continue;
+        };
+
+        entries.push(ServiceEntry {
+            key: key.to_string(),
+            provider: table_string(table, "provider"),
+            model: table_string(table, "model"),
+            endpoint: table_string(table, "endpoint"),
+            api_key: table_string(table, "api_key"),
+            timeout_ms: table_i64(table, "timeout_ms"),
+            max_retries: table_i64(table, "max_retries"),
+            extra_fields: collect_extra_fields(
+                table,
+                &[
+                    "provider",
+                    "model",
+                    "endpoint",
+                    "api_key",
+                    "timeout_ms",
+                    "max_retries",
+                ],
+            ),
+        });
+    }
+
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+}
+
+fn parse_loop_control_entry(root: &Table) -> LoopControlEntry {
+    let Some(loop_control) = root.get("loop_control").and_then(Item::as_table) else {
+        return LoopControlEntry::default();
+    };
+
+    LoopControlEntry {
+        enabled: table_bool(loop_control, "enabled"),
+        max_steps: table_i64(loop_control, "max_steps"),
+        max_retries: table_i64(loop_control, "max_retries"),
+        timeout_ms: table_i64(loop_control, "timeout_ms"),
+        extra_fields: collect_extra_fields(
+            loop_control,
+            &["enabled", "max_steps", "max_retries", "timeout_ms"],
+        ),
+    }
+}
+
+fn parse_mcp_server_entries(root: &Table) -> Vec<McpServerEntry> {
+    let mut entries = Vec::new();
+    let Some(mcp_servers) = root.get("mcp_servers").and_then(Item::as_table) else {
+        return entries;
+    };
+
+    for (key, item) in mcp_servers.iter() {
+        let Some(table) = item.as_table() else {
+            continue;
+        };
+
+        entries.push(McpServerEntry {
+            key: key.to_string(),
+            command: table_string(table, "command"),
+            args: table_string_array(table, "args"),
+            env: table_to_key_value_entries(table, "env"),
+            enabled: table_bool(table, "enabled"),
+            working_directory: table_string(table, "working_directory"),
+            timeout_ms: table_i64(table, "timeout_ms"),
+            extra_fields: collect_extra_fields(
+                table,
+                &[
+                    "command",
+                    "args",
+                    "env",
+                    "enabled",
+                    "working_directory",
+                    "timeout_ms",
+                ],
+            ),
+        });
+    }
+
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+}
+
+fn table_to_key_value_entries(table: &Table, key: &str) -> Vec<KeyValueEntry> {
+    let mut entries = Vec::new();
+    let Some(child) = table.get(key).and_then(Item::as_table) else {
+        return entries;
+    };
+
+    for (child_key, child_item) in child.iter() {
+        let Some(value_item) = child_item.as_value() else {
+            continue;
+        };
+        entries.push(KeyValueEntry {
+            key: child_key.to_string(),
+            value: toml_value_to_string(value_item),
+        });
+    }
+
+    entries.sort_by(|left, right| left.key.cmp(&right.key));
+    entries
+}
+
+fn collect_extra_fields(table: &Table, known_keys: &[&str]) -> Vec<TypedFieldEntry> {
+    let known: HashSet<&str> = known_keys.iter().copied().collect();
+    let mut fields = Vec::new();
+
+    for (key, item) in table.iter() {
+        if known.contains(key) {
+            continue;
+        }
+        if let Some(field) = typed_field_from_item(key, item) {
+            fields.push(field);
+        }
+    }
+
+    fields.sort_by(|left, right| left.key.cmp(&right.key));
+    fields
+}
+
+fn typed_field_from_item(key: &str, item: &Item) -> Option<TypedFieldEntry> {
+    let value_item = item.as_value()?;
+
+    if let Some(value) = value_item.as_str() {
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::String,
+            value: value.to_string(),
+        });
+    }
+    if let Some(value) = value_item.as_integer() {
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::Integer,
+            value: value.to_string(),
+        });
+    }
+    if let Some(value) = value_item.as_float() {
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::Float,
+            value: value.to_string(),
+        });
+    }
+    if let Some(value) = value_item.as_bool() {
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::Boolean,
+            value: value.to_string(),
+        });
+    }
+    if let Some(value) = value_item.as_array() {
+        if value.iter().all(|entry| entry.as_str().is_some()) {
+            let joined = value
+                .iter()
+                .filter_map(|entry| entry.as_str())
+                .map(|entry| entry.to_string())
+                .collect::<Vec<String>>()
+                .join("\n");
+            return Some(TypedFieldEntry {
+                key: key.to_string(),
+                value_type: TypedFieldType::StringArray,
+                value: joined,
+            });
+        }
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::String,
+            value: value.to_string(),
+        });
+    }
+    if let Some(value) = value_item.as_datetime() {
+        return Some(TypedFieldEntry {
+            key: key.to_string(),
+            value_type: TypedFieldType::String,
+            value: value.to_string(),
+        });
+    }
+    None
+}
+
+fn validate_config_center_input(input: &KimiCliConfigCenterInput) -> Result<(), String> {
+    let provider_keys = validate_named_keys(&input.providers, "providers", |entry| &entry.key)?;
+    let _ = validate_named_keys(&input.models, "models", |entry| &entry.key)?;
+    let _ = validate_named_keys(&input.services, "services", |entry| &entry.key)?;
+    let _ = validate_named_keys(&input.mcp_servers, "mcp_servers", |entry| &entry.key)?;
+
+    for provider in &input.providers {
+        validate_key_value_entries(
+            &provider.env,
+            &format!("providers.{}.env", provider.key.trim()),
+        )?;
+        validate_key_value_entries(
+            &provider.custom_headers,
+            &format!("providers.{}.custom_headers", provider.key.trim()),
+        )?;
+        validate_typed_fields(
+            &provider.extra_fields,
+            &format!("providers.{}.extra_fields", provider.key.trim()),
+        )?;
+    }
+
+    for model in &input.models {
+        if let Some(provider) = normalize_optional_string(&model.provider) {
+            if !provider_keys.contains(&provider) {
+                return Err(format!(
+                    "models.{} references unknown provider `{provider}`",
+                    model.key.trim()
+                ));
+            }
+        }
+        validate_typed_fields(
+            &model.extra_fields,
+            &format!("models.{}.extra_fields", model.key.trim()),
+        )?;
+    }
+
+    for service in &input.services {
+        if let Some(provider) = normalize_optional_string(&service.provider) {
+            if !provider_keys.contains(&provider) {
+                return Err(format!(
+                    "services.{} references unknown provider `{provider}`",
+                    service.key.trim()
+                ));
+            }
+        }
+        validate_typed_fields(
+            &service.extra_fields,
+            &format!("services.{}.extra_fields", service.key.trim()),
+        )?;
+    }
+
+    validate_typed_fields(
+        &input.loop_control.extra_fields,
+        "loop_control.extra_fields",
+    )?;
+
+    for server in &input.mcp_servers {
+        validate_key_value_entries(
+            &server.env,
+            &format!("mcp_servers.{}.env", server.key.trim()),
+        )?;
+        validate_typed_fields(
+            &server.extra_fields,
+            &format!("mcp_servers.{}.extra_fields", server.key.trim()),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_named_keys<T>(
+    entries: &[T],
+    label: &str,
+    key_selector: impl Fn(&T) -> &str,
+) -> Result<HashSet<String>, String> {
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let key = key_selector(entry).trim();
+        if key.is_empty() {
+            return Err(format!("{label} contains an empty key"));
+        }
+        if !seen.insert(key.to_string()) {
+            return Err(format!("{label} contains duplicate key `{key}`"));
+        }
+    }
+    Ok(seen)
+}
+
+fn validate_key_value_entries(entries: &[KeyValueEntry], label: &str) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err(format!("{label} contains an empty key"));
+        }
+        if !seen.insert(key.to_string()) {
+            return Err(format!("{label} contains duplicate key `{key}`"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_typed_fields(entries: &[TypedFieldEntry], label: &str) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err(format!("{label} contains an empty key"));
+        }
+        if !seen.insert(key.to_string()) {
+            return Err(format!("{label} contains duplicate key `{key}`"));
+        }
+
+        match entry.value_type {
+            TypedFieldType::String => {}
+            TypedFieldType::Integer => {
+                let value = entry.value.trim();
+                if value.parse::<i64>().is_err() {
+                    return Err(format!("{label}.{key} must be a valid integer"));
+                }
+            }
+            TypedFieldType::Float => {
+                let value = entry.value.trim();
+                if value.parse::<f64>().is_err() {
+                    return Err(format!("{label}.{key} must be a valid float"));
+                }
+            }
+            TypedFieldType::Boolean => {
+                let value = entry.value.trim();
+                if parse_bool_text(value).is_none() {
+                    return Err(format!("{label}.{key} must be true/false"));
+                }
+            }
+            TypedFieldType::StringArray => {}
+        }
+    }
+    Ok(())
+}
+
+fn apply_config_center_input(
+    doc: &mut DocumentMut,
+    input: &KimiCliConfigCenterInput,
+) -> Result<(), String> {
+    set_or_remove_string_key(
+        doc,
+        "provider",
+        normalize_optional_string(&input.default_provider),
+    );
+    set_or_remove_string_key(doc, "model", normalize_optional_string(&input.model));
+    set_or_remove_string_key(
+        doc,
+        "default_model",
+        normalize_optional_string(&input.default_model),
+    );
+    set_or_remove_string_key(
+        doc,
+        "default_service",
+        normalize_optional_string(&input.default_service),
+    );
+    set_or_remove_string_key(
+        doc,
+        "default_editor",
+        normalize_optional_string(&input.default_editor),
+    );
+    set_or_remove_bool_key(doc, "default_yolo", input.default_yolo);
+    set_or_remove_string_key(
+        doc,
+        "default_yolo_mode",
+        normalize_optional_string(&input.default_yolo_mode),
+    );
+    set_or_remove_bool_key(doc, "default_thinking", input.default_thinking);
+    set_or_remove_string_key(
+        doc,
+        "default_thinking_mode",
+        normalize_optional_string(&input.default_thinking_mode),
+    );
+    set_or_remove_bool_key(
+        doc,
+        "local_model_disable_auto_pull",
+        input.local_model_disable_auto_pull,
+    );
+
+    set_or_remove_table_key(doc, "providers", build_providers_table(&input.providers)?);
+    set_or_remove_table_key(doc, "models", build_models_table(&input.models)?);
+    set_or_remove_table_key(doc, "services", build_services_table(&input.services)?);
+    set_or_remove_table_key(
+        doc,
+        "loop_control",
+        build_loop_control_table(&input.loop_control)?,
+    );
+    set_or_remove_table_key(
+        doc,
+        "mcp_servers",
+        build_mcp_servers_table(&input.mcp_servers)?,
+    );
+    Ok(())
+}
+
+fn set_or_remove_string_key(doc: &mut DocumentMut, key: &str, next_value: Option<String>) {
+    if let Some(next_value) = next_value {
+        doc[key] = value(next_value);
+        return;
+    }
+    let _ = doc.as_table_mut().remove(key);
+}
+
+fn set_or_remove_bool_key(doc: &mut DocumentMut, key: &str, next_value: Option<bool>) {
+    if let Some(next_value) = next_value {
+        doc[key] = value(next_value);
+        return;
+    }
+    let _ = doc.as_table_mut().remove(key);
+}
+
+fn set_or_remove_table_key(doc: &mut DocumentMut, key: &str, table: Option<Table>) {
+    if let Some(table) = table {
+        doc[key] = Item::Table(table);
+        return;
+    }
+    let _ = doc.as_table_mut().remove(key);
+}
+
+fn build_providers_table(entries: &[ProviderEntry]) -> Result<Option<Table>, String> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let mut providers = Table::new();
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|left, right| left.key.trim().cmp(right.key.trim()));
+
+    for entry in sorted {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err("providers contains an empty key".to_string());
+        }
+
+        let mut provider = Table::new();
+        provider["name"] = value(key);
+        set_if_string(&mut provider, "type", &entry.provider_type);
+        set_if_string(&mut provider, "api_key", &entry.api_key);
+        set_if_string(&mut provider, "base_url", &entry.base_url);
+        set_if_string(&mut provider, "auth_token", &entry.auth_token);
+        set_if_string(&mut provider, "app_id", &entry.app_id);
+        set_if_string(&mut provider, "access_key_id", &entry.access_key_id);
+        set_if_string(&mut provider, "secret_access_key", &entry.secret_access_key);
+        set_if_string(&mut provider, "region", &entry.region);
+        set_if_string(&mut provider, "api_version", &entry.api_version);
+        set_if_string(&mut provider, "deployment", &entry.deployment);
+        set_if_string(&mut provider, "model_name", &entry.model_name);
+
+        if let Some(env) = build_key_value_table(&entry.env)? {
+            provider["env"] = Item::Table(env);
+        }
+        if let Some(headers) = build_key_value_table(&entry.custom_headers)? {
+            provider["custom_headers"] = Item::Table(headers);
+        }
+        apply_typed_fields(&mut provider, &entry.extra_fields)?;
+
+        providers.insert(key, Item::Table(provider));
+    }
+
+    Ok(Some(providers))
+}
+
+fn build_models_table(entries: &[ModelEntry]) -> Result<Option<Table>, String> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let mut models = Table::new();
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|left, right| left.key.trim().cmp(right.key.trim()));
+
+    for entry in sorted {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err("models contains an empty key".to_string());
+        }
+
+        let mut model = Table::new();
+        set_if_string(&mut model, "provider", &entry.provider);
+        set_if_string(&mut model, "model", &entry.model);
+        if let Some(max_context_size) = entry.max_context_size {
+            model["max_context_size"] = value(max_context_size);
+        }
+        set_if_string_array(&mut model, "capabilities", &entry.capabilities);
+        apply_typed_fields(&mut model, &entry.extra_fields)?;
+        models.insert(key, Item::Table(model));
+    }
+
+    Ok(Some(models))
+}
+
+fn build_services_table(entries: &[ServiceEntry]) -> Result<Option<Table>, String> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let mut services = Table::new();
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|left, right| left.key.trim().cmp(right.key.trim()));
+
+    for entry in sorted {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err("services contains an empty key".to_string());
+        }
+
+        let mut service = Table::new();
+        set_if_string(&mut service, "provider", &entry.provider);
+        set_if_string(&mut service, "model", &entry.model);
+        set_if_string(&mut service, "endpoint", &entry.endpoint);
+        set_if_string(&mut service, "api_key", &entry.api_key);
+        if let Some(timeout_ms) = entry.timeout_ms {
+            service["timeout_ms"] = value(timeout_ms);
+        }
+        if let Some(max_retries) = entry.max_retries {
+            service["max_retries"] = value(max_retries);
+        }
+        apply_typed_fields(&mut service, &entry.extra_fields)?;
+        services.insert(key, Item::Table(service));
+    }
+
+    Ok(Some(services))
+}
+
+fn build_loop_control_table(entry: &LoopControlEntry) -> Result<Option<Table>, String> {
+    let mut loop_control = Table::new();
+    if let Some(enabled) = entry.enabled {
+        loop_control["enabled"] = value(enabled);
+    }
+    if let Some(max_steps) = entry.max_steps {
+        loop_control["max_steps"] = value(max_steps);
+    }
+    if let Some(max_retries) = entry.max_retries {
+        loop_control["max_retries"] = value(max_retries);
+    }
+    if let Some(timeout_ms) = entry.timeout_ms {
+        loop_control["timeout_ms"] = value(timeout_ms);
+    }
+    apply_typed_fields(&mut loop_control, &entry.extra_fields)?;
+
+    if loop_control.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(loop_control))
+}
+
+fn build_mcp_servers_table(entries: &[McpServerEntry]) -> Result<Option<Table>, String> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let mut servers = Table::new();
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|left, right| left.key.trim().cmp(right.key.trim()));
+
+    for entry in sorted {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err("mcp_servers contains an empty key".to_string());
+        }
+
+        let mut server = Table::new();
+        set_if_string(&mut server, "command", &entry.command);
+        set_if_string_array(&mut server, "args", &entry.args);
+        if let Some(env) = build_key_value_table(&entry.env)? {
+            server["env"] = Item::Table(env);
+        }
+        if let Some(enabled) = entry.enabled {
+            server["enabled"] = value(enabled);
+        }
+        set_if_string(&mut server, "working_directory", &entry.working_directory);
+        if let Some(timeout_ms) = entry.timeout_ms {
+            server["timeout_ms"] = value(timeout_ms);
+        }
+        apply_typed_fields(&mut server, &entry.extra_fields)?;
+        servers.insert(key, Item::Table(server));
+    }
+
+    Ok(Some(servers))
+}
+
+fn build_key_value_table(entries: &[KeyValueEntry]) -> Result<Option<Table>, String> {
+    if entries.is_empty() {
+        return Ok(None);
+    }
+
+    let mut table = Table::new();
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let key = entry.key.trim();
+        if key.is_empty() {
+            return Err("key/value table contains empty key".to_string());
+        }
+        if !seen.insert(key.to_string()) {
+            return Err(format!("key/value table contains duplicate key `{key}`"));
+        }
+        table.insert(key, value(entry.value.trim().to_string()));
+    }
+
+    if table.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(table))
+}
+
+fn set_if_string(table: &mut Table, key: &str, raw_value: &Option<String>) {
+    if let Some(next_value) = normalize_optional_string(raw_value) {
+        table[key] = value(next_value);
+    }
+}
+
+fn set_if_string_array(table: &mut Table, key: &str, values: &[String]) {
+    let filtered = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect::<Vec<String>>();
+
+    if filtered.is_empty() {
+        return;
+    }
+
+    let mut array = Array::new();
+    for value in filtered {
+        array.push(value);
+    }
+    table[key] = Item::Value(Value::Array(array));
+}
+
+fn apply_typed_fields(table: &mut Table, fields: &[TypedFieldEntry]) -> Result<(), String> {
+    for field in fields {
+        let key = field.key.trim();
+        if key.is_empty() {
+            return Err("extra field key cannot be empty".to_string());
+        }
+
+        match field.value_type {
+            TypedFieldType::String => {
+                table.insert(key, value(field.value.clone()));
+            }
+            TypedFieldType::Integer => {
+                let parsed = field
+                    .value
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|_| format!("extra field `{key}` must be a valid integer"))?;
+                table.insert(key, value(parsed));
+            }
+            TypedFieldType::Float => {
+                let parsed = field
+                    .value
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| format!("extra field `{key}` must be a valid float"))?;
+                table.insert(key, value(parsed));
+            }
+            TypedFieldType::Boolean => {
+                let parsed = parse_bool_text(field.value.trim())
+                    .ok_or_else(|| format!("extra field `{key}` must be true/false"))?;
+                table.insert(key, value(parsed));
+            }
+            TypedFieldType::StringArray => {
+                let mut array = Array::new();
+                for line in field
+                    .value
+                    .lines()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty())
+                {
+                    array.push(line);
+                }
+                table[key] = Item::Value(Value::Array(array));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_bool_text(value: &str) -> Option<bool> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "true" | "1" | "yes" => Some(true),
+        "false" | "0" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+fn normalize_optional_string(value: &Option<String>) -> Option<String> {
+    value
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn toml_value_to_string(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    if let Some(number) = value.as_integer() {
+        return number.to_string();
+    }
+    if let Some(number) = value.as_float() {
+        return number.to_string();
+    }
+    if let Some(flag) = value.as_bool() {
+        return flag.to_string();
+    }
+    if let Some(datetime) = value.as_datetime() {
+        return datetime.to_string();
+    }
+    if let Some(array) = value.as_array() {
+        return array.to_string();
+    }
+    value.to_string()
 }
 
 fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
@@ -717,34 +1786,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         app,
         format!("backend ready on port {active_port}; workspace proxy on {workspace_port}"),
     );
-    if should_defer_remote_navigation(app, &settings) {
-        {
-            let state = app.state::<AppState>();
-            let mut runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-            if runtime.generation == generation {
-                runtime.pending_remote_port = Some(active_port);
-            }
-        }
-        log_manager::append_line(
-            app,
-            "holding remote navigation until onboarding is completed",
-        );
-        window_manager::navigate_onboarding(app);
-    } else {
-        {
-            let state = app.state::<AppState>();
-            let mut runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-            if runtime.generation == generation {
-                runtime.pending_remote_port = None;
-            }
-        }
-    }
+    window_manager::mark_backend_ready(app, "backend_ready");
     spawn_monitor(app.clone(), generation);
 
     Ok(())
@@ -811,7 +1853,7 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
 
         if let Some(message) = crash_message {
             log_manager::append_line(&app, &message);
-            window_manager::navigate_control_center(&app);
+            window_manager::show_control_center(&app, "monitor_crash");
             return;
         }
     });
@@ -1740,6 +2782,40 @@ fn table_string(table: &Table, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn table_bool(table: &Table, key: &str) -> Option<bool> {
+    table.get(key).and_then(Item::as_value).and_then(|value| {
+        value
+            .as_bool()
+            .or_else(|| value.as_str().and_then(parse_bool_text))
+    })
+}
+
+fn table_i64(table: &Table, key: &str) -> Option<i64> {
+    table.get(key).and_then(Item::as_value).and_then(|value| {
+        value.as_integer().or_else(|| {
+            value
+                .as_str()
+                .and_then(|raw| raw.trim().parse::<i64>().ok())
+        })
+    })
+}
+
+fn table_string_array(table: &Table, key: &str) -> Vec<String> {
+    table
+        .get(key)
+        .and_then(Item::as_value)
+        .and_then(Value::as_array)
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.trim().to_string())
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default()
+}
+
 fn provider_table<'a>(root: &'a Table, provider: &str) -> Option<&'a Table> {
     root.get("providers")
         .and_then(Item::as_table)
@@ -1769,12 +2845,11 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
         runtime.backend_ready_at_ms = None;
-        runtime.pending_remote_port = None;
         runtime.last_exit_reason = Some("missing_kimi".to_string());
     }
 
     log_manager::append_line(app, &message);
-    window_manager::navigate_missing_kimi(app);
+    window_manager::show_missing_kimi(app, "missing_kimi");
 }
 
 fn set_crashed(app: &AppHandle, generation: u64, message: String) {
@@ -1796,12 +2871,11 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
         runtime.state = BackendState::Crashed;
         runtime.last_error = Some(message.clone());
         runtime.backend_ready_at_ms = None;
-        runtime.pending_remote_port = None;
         runtime.last_exit_reason = Some("startup_failed".to_string());
     }
 
     log_manager::append_line(app, &message);
-    window_manager::navigate_control_center(app);
+    window_manager::show_control_center(app, "backend_crashed");
 }
 
 fn stop_child_for_generation(app: &AppHandle, generation: u64) {
@@ -1829,32 +2903,6 @@ fn stop_child_for_generation(app: &AppHandle, generation: u64) {
             }
         }
     }
-}
-
-pub fn release_pending_remote_navigation(app: &AppHandle) -> anyhow::Result<()> {
-    let state = app.state::<AppState>();
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-    runtime.pending_remote_port = None;
-
-    Ok(())
-}
-
-fn should_defer_remote_navigation(app: &AppHandle, settings: &AppSettings) -> bool {
-    if settings.onboarding_completed_version >= CURRENT_ONBOARDING_VERSION {
-        return false;
-    }
-
-    let state = app.state::<AppState>();
-    if let Ok(runtime) = state.runtime.lock() {
-        if runtime.startup_open_request_applied {
-            return false;
-        }
-    }
-
-    true
 }
 
 fn terminate_child(child: &mut Child) -> &'static str {
@@ -1976,6 +3024,12 @@ fn open_with_system_browser(url: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn launch_args_enforce_local_only_mode() {
@@ -1987,5 +3041,164 @@ mod tests {
         assert!(args_joined.contains("--port 57999"));
         assert!(!args_joined.contains("--network"));
         assert!(!args_joined.contains("--public"));
+    }
+
+    #[test]
+    fn config_center_validation_rejects_unknown_provider_reference() {
+        let input = KimiCliConfigCenterInput {
+            providers: vec![ProviderEntry {
+                key: "moonshot".to_string(),
+                ..Default::default()
+            }],
+            models: vec![ModelEntry {
+                key: "kimi-k2".to_string(),
+                provider: Some("unknown".to_string()),
+                ..Default::default()
+            }],
+            services: vec![],
+            default_provider: None,
+            model: None,
+            default_model: None,
+            default_service: None,
+            default_editor: None,
+            default_yolo: None,
+            default_yolo_mode: None,
+            default_thinking: None,
+            default_thinking_mode: None,
+            local_model_disable_auto_pull: None,
+            loop_control: LoopControlEntry::default(),
+            mcp_servers: vec![],
+        };
+
+        let result = validate_config_center_input(&input);
+        assert!(result.is_err());
+        let error = result.err().unwrap_or_default();
+        assert!(error.contains("unknown provider"));
+    }
+
+    #[test]
+    fn config_center_apply_rewrites_managed_sections() {
+        let mut doc = r#"
+provider = "legacy"
+[providers.legacy]
+api_key = "legacy-key"
+"#
+        .parse::<DocumentMut>()
+        .expect("valid toml document");
+
+        let input = KimiCliConfigCenterInput {
+            providers: vec![ProviderEntry {
+                key: "moonshot".to_string(),
+                provider_type: Some("moonshot".to_string()),
+                api_key: Some("new-key".to_string()),
+                base_url: Some("https://api.moonshot.cn/v1".to_string()),
+                auth_token: None,
+                app_id: None,
+                access_key_id: None,
+                secret_access_key: None,
+                region: None,
+                api_version: None,
+                deployment: None,
+                model_name: None,
+                env: vec![KeyValueEntry {
+                    key: "MOONSHOT_API_KEY".to_string(),
+                    value: "${MOONSHOT_API_KEY}".to_string(),
+                }],
+                custom_headers: vec![],
+                extra_fields: vec![],
+            }],
+            models: vec![ModelEntry {
+                key: "kimi-k2".to_string(),
+                provider: Some("moonshot".to_string()),
+                model: Some("kimi-k2-turbo-preview".to_string()),
+                max_context_size: Some(128000),
+                capabilities: vec!["chat".to_string(), "vision".to_string()],
+                extra_fields: vec![],
+            }],
+            services: vec![ServiceEntry {
+                key: "default".to_string(),
+                provider: Some("moonshot".to_string()),
+                model: Some("kimi-k2".to_string()),
+                endpoint: Some("https://api.moonshot.cn/v1".to_string()),
+                api_key: None,
+                timeout_ms: Some(60000),
+                max_retries: Some(3),
+                extra_fields: vec![],
+            }],
+            default_provider: Some("moonshot".to_string()),
+            model: Some("kimi-k2".to_string()),
+            default_model: Some("kimi-k2".to_string()),
+            default_service: Some("default".to_string()),
+            default_editor: Some("vim".to_string()),
+            default_yolo: Some(false),
+            default_yolo_mode: Some("safe".to_string()),
+            default_thinking: Some(true),
+            default_thinking_mode: Some("balanced".to_string()),
+            local_model_disable_auto_pull: Some(true),
+            loop_control: LoopControlEntry {
+                enabled: Some(true),
+                max_steps: Some(4),
+                max_retries: Some(2),
+                timeout_ms: Some(120000),
+                extra_fields: vec![],
+            },
+            mcp_servers: vec![McpServerEntry {
+                key: "filesystem".to_string(),
+                command: Some("npx".to_string()),
+                args: vec![
+                    "-y".to_string(),
+                    "@modelcontextprotocol/server-filesystem".to_string(),
+                ],
+                env: vec![],
+                enabled: Some(true),
+                working_directory: Some("D:/Projects".to_string()),
+                timeout_ms: Some(45000),
+                extra_fields: vec![],
+            }],
+        };
+
+        apply_config_center_input(&mut doc, &input).expect("apply config center input");
+        let root = doc.as_table();
+
+        assert_eq!(table_string(root, "provider").as_deref(), Some("moonshot"));
+        assert_eq!(
+            table_string(root, "default_model").as_deref(),
+            Some("kimi-k2")
+        );
+        assert!(provider_table(root, "legacy").is_none());
+        assert!(provider_table(root, "moonshot").is_some());
+        assert!(root
+            .get("models")
+            .and_then(Item::as_table)
+            .and_then(|table| table.get("kimi-k2"))
+            .is_some());
+        assert!(root
+            .get("services")
+            .and_then(Item::as_table)
+            .and_then(|table| table.get("default"))
+            .is_some());
+        assert!(root
+            .get("mcp_servers")
+            .and_then(Item::as_table)
+            .and_then(|table| table.get("filesystem"))
+            .is_some());
+    }
+
+    #[test]
+    fn env_override_status_masks_sensitive_values() {
+        let _guard = env_lock().lock().expect("env lock should not be poisoned");
+
+        std::env::set_var("KIMI_API_KEY", "sk-test-secret");
+        let statuses = collect_env_override_statuses();
+        std::env::remove_var("KIMI_API_KEY");
+
+        let record = statuses
+            .iter()
+            .find(|status| status.key == "KIMI_API_KEY")
+            .expect("KIMI_API_KEY status should exist");
+        assert!(record.is_set);
+        let masked = record.masked_value.clone().unwrap_or_default();
+        assert!(masked.contains("***"));
+        assert_ne!(masked, "sk-test-secret");
     }
 }

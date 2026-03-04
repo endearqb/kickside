@@ -119,6 +119,142 @@ export interface KimiCliApiConfigInput {
   apiKey?: string;
 }
 
+export type TypedFieldType =
+  | "string"
+  | "integer"
+  | "float"
+  | "boolean"
+  | "string_array";
+
+export interface KeyValueEntry {
+  key: string;
+  value: string;
+}
+
+export interface TypedFieldEntry {
+  key: string;
+  valueType: TypedFieldType;
+  value: string;
+}
+
+export interface ProviderEntry {
+  key: string;
+  providerType?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  authToken?: string;
+  appId?: string;
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  region?: string;
+  apiVersion?: string;
+  deployment?: string;
+  modelName?: string;
+  env: KeyValueEntry[];
+  customHeaders: KeyValueEntry[];
+  extraFields: TypedFieldEntry[];
+}
+
+export interface ModelEntry {
+  key: string;
+  provider?: string;
+  model?: string;
+  maxContextSize?: number;
+  capabilities: string[];
+  extraFields: TypedFieldEntry[];
+}
+
+export interface ServiceEntry {
+  key: string;
+  provider?: string;
+  model?: string;
+  endpoint?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  maxRetries?: number;
+  extraFields: TypedFieldEntry[];
+}
+
+export interface LoopControlEntry {
+  enabled?: boolean;
+  maxSteps?: number;
+  maxRetries?: number;
+  timeoutMs?: number;
+  extraFields: TypedFieldEntry[];
+}
+
+export interface McpServerEntry {
+  key: string;
+  command?: string;
+  args: string[];
+  env: KeyValueEntry[];
+  enabled?: boolean;
+  workingDirectory?: string;
+  timeoutMs?: number;
+  extraFields: TypedFieldEntry[];
+}
+
+export interface EnvOverrideStatus {
+  key: string;
+  isSet: boolean;
+  maskedValue?: string;
+  overrides: string[];
+  priority: string;
+}
+
+export interface KimiCliConfigCenterInput {
+  providers: ProviderEntry[];
+  models: ModelEntry[];
+  services: ServiceEntry[];
+  defaultProvider?: string;
+  model?: string;
+  defaultModel?: string;
+  defaultService?: string;
+  defaultEditor?: string;
+  defaultYolo?: boolean;
+  defaultYoloMode?: string;
+  defaultThinking?: boolean;
+  defaultThinkingMode?: string;
+  localModelDisableAutoPull?: boolean;
+  loopControl: LoopControlEntry;
+  mcpServers: McpServerEntry[];
+}
+
+export interface KimiCliConfigCenterView extends KimiCliConfigCenterInput {
+  configPath: string;
+  configDir: string;
+  dataDir: string;
+  dataDirEnvSource?: string;
+  envOverrides: EnvOverrideStatus[];
+  warnings: string[];
+}
+
+export type ConfigCenterSectionId =
+  | "overview"
+  | "providers"
+  | "models"
+  | "services"
+  | "defaults"
+  | "loop_control"
+  | "mcp_servers"
+  | "env_overrides";
+
+export const PROVIDER_TYPE_OPTIONS = [
+  "moonshot",
+  "openai",
+  "anthropic",
+  "azure",
+  "openrouter",
+  "doubao",
+  "siliconflow",
+  "deepseek",
+  "gemini",
+  "vertex_ai",
+  "ollama",
+  "openai-compatible",
+  "custom",
+] as const;
+
 export interface InstallProbeStatus {
   gitReady: boolean;
   uvReady: boolean;

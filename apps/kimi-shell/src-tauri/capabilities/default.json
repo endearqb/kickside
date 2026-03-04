@@ -5,7 +5,7 @@
       "identifier": "default",
       "description": "Capability for the main window",
       "local": true,
-      "windows": ["main"],
+      "windows": ["main", "prefill"],
       "permissions": [
         "core:default",
         "dialog:allow-open"

@@ -38,6 +38,41 @@ pub struct AppStatus {
     pub hotkey: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendReadyAck {
+    pub accepted: bool,
+    pub backend_state: BackendState,
+    pub workspace_url: Option<String>,
+    pub start_cycle_id: u64,
+    pub pending_prefill: Option<PrefillChatPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefillChatPayload {
+    pub request_id: String,
+    pub text: String,
+    pub auto_send: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShellRoutePayload {
+    pub route: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitPrefillAck {
+    pub accepted: bool,
+    pub request_id: Option<String>,
+    pub queued: bool,
+    pub dispatched: bool,
+    pub text_length: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {

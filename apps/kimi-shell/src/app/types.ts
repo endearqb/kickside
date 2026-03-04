@@ -40,6 +40,40 @@ export interface AppStatus {
   hotkey: string;
 }
 
+export interface FrontendReadyAck {
+  accepted: boolean;
+  backendState: BackendState;
+  workspaceUrl?: string;
+  startCycleId: number;
+  pendingPrefill?: PrefillChatPayload;
+}
+
+export interface PrefillChatPayload {
+  requestId: string;
+  text: string;
+  autoSend: boolean;
+}
+
+export interface ShellRoutePayload {
+  route: string;
+  source: string;
+}
+
+export interface SubmitPrefillAck {
+  accepted: boolean;
+  requestId?: string;
+  queued: boolean;
+  dispatched: boolean;
+  textLength: number;
+}
+
+export interface PrefillBridgeAck {
+  source?: string;
+  requestId?: string;
+  applied?: boolean;
+  reason?: string;
+}
+
 export interface DiagnosticsInfo {
   instanceId: string;
   pid: number;

@@ -41,5 +41,11 @@ export default defineConfig(async () => ({
   build: {
     // Keep release bundle compatible with older WebView2 runtimes.
     target: "es2019",
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        prefill: path.resolve(__dirname, "prefill.html"),
+      },
+    },
   },
 }));

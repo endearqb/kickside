@@ -4,6 +4,8 @@ export const THEME_STORAGE_KEY = "kimi-theme";
 export const LEGACY_THEME_MODE_STORAGE_KEY = "kimi_shell_theme_mode";
 export const THEME_BRIDGE_SOURCE = "kimi-shell-theme-bridge";
 export const THEME_SYNC_SOURCE = "kimi-shell-theme-sync";
+export const PREFILL_SYNC_SOURCE = "kimi-shell-prefill-sync";
+export const PREFILL_BRIDGE_SOURCE = "kimi-shell-prefill-bridge";
 
 export function getInitialThemeMode(): Theme {
   try {

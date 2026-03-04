@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kimi Desktop Shell",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "identifier": "com.kimi.shell",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -12,8 +12,10 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Kimi Desktop Shell",
         "url": "index.html#/loading",
+        "visible": false,
         "width": 1200,
         "height": 820,
         "minWidth": 900,
@@ -21,6 +23,19 @@
         "decorations": false,
         "transparent": false,
         "shadow": true
+      },
+      {
+        "label": "prefill",
+        "title": "Kimi Desktop Shell",
+        "url": "prefill.html",
+        "visible": true,
+        "center": true,
+        "width": 760,
+        "height": 520,
+        "minWidth": 560,
+        "minHeight": 360,
+        "decorations": true,
+        "transparent": false
       }
     ],
     "security": {

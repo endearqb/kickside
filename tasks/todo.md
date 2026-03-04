@@ -1,5 +1,119 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（Splashscreen 预填窗口替换：主窗口单次加载 + 自动预填发送）
+
+### 计划清单
+
+- [x] 将 `tauri.conf.json` 改为双窗口：`main` 隐藏启动 + `prefill` 可见启动
+- [x] 更新 capability，使 `prefill` 具备 `core:default` 调用能力
+- [x] Rust 新增 `submit_prefill` 命令与 `SubmitPrefillAck`，并接入关闭 prefill/显示 main/派发事件流程
+- [x] Rust 扩展 `notify_frontend_ready` 返回 `pending_prefill`，防止启动监听时序丢包
+- [x] `window_manager` 移除 `window.navigate(...)` 文档导航，改为 `emit_to("main","shell-route",...)`
+- [x] `RunEvent` 处理 `prefill` 关闭（X）：拦截并按“空预填完成”路径切到 main
+- [x] 新增 prefill 前端入口（`prefill.html + src/prefill/*`）并复用现有对话框视觉体系
+- [x] Vite 增加多入口构建（`index.html` + `prefill.html`）
+- [x] 主窗口前端接入 `prefill-chat` / `shell-route` 事件，先监听后握手
+- [x] workspace 注入桥扩展 prefill 自动填入 + 自动发送 + ack 回传，前端加入低频重试队列
+- [x] 更新调查文档与经验沉淀（`white-screen-investigation.md` / `lessons.md`）
+- [x] 完成构建与验证（`cargo test`、`pnpm build`、`check:nfr:security`、`tauri build --no-bundle`）
+
+### 验收标准
+
+- [x] 冷启动先出现 `prefill`，`main` 初始不可见；提交后关闭 `prefill` 并显示 `main`
+- [x] 关闭 `prefill`（X）不退出应用，直接进入 `main`（空输入）
+- [x] 启动日志不再出现 Rust 侧本地 `window.navigate(...)` 导航链
+- [x] 预填文本可在 workspace ready 后自动填入并自动发送；慢启动场景可排队重试且不风暴
+- [x] `missing_kimi` / `crashed` / 托盘诊断入口保持可用
+- [x] 自动化命令全部通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/tauri.conf.json` 改为双窗口：`main(visible=false)` + `prefill(visible=true, url=prefill.html)`；`capabilities/default.json` 允许 `prefill` 使用 `core:default`。
+  - `src-tauri/window_manager.rs` 重构为事件驱动路由分发：移除 `window.navigate(...)`，改为 `emit_to("main","shell-route", payload)`；新增 prefill 状态与排队、`submit_prefill`、`complete_prefill_without_text`、`consume_prefill_close_allowance`。
+  - `src-tauri/lib.rs` 新增命令 `submit_prefill` 并注册；`notify_frontend_ready` 扩展 `pending_prefill` 回传；移除 `on_page_load` 与单次 `about:blank` 超时恢复线程；`RunEvent` 新增 `prefill` 关闭拦截分支。
+  - 新增 prefill 前端入口：`prefill.html`、`src/prefill/main.tsx`、`src/prefill/PrefillApp.tsx`、`src/prefill/prefill.css`；支持 textarea + 提交按钮 + Ctrl/Cmd+Enter。
+  - `vite.config.ts` 增加多入口构建（`index.html` + `prefill.html`），产物验证包含 `dist/prefill.html`。
+  - `useShellController.ts` 接入 `shell-route` / `prefill-chat` 监听（先监听后握手），新增 prefill 下发、iframe ack 监听、低频重试队列（超时/失败重试 + 次数上限）。
+  - `backend_manager.rs` 的注入脚本扩展 prefill 桥：接收 `prefill-sync`、尝试定位输入框写入、自动发送并回传 `prefill-bridge` ack。
+  - `types.rs` / `types.ts` 新增并对齐：`SubmitPrefillAck`、`PrefillChatPayload`、`ShellRoutePayload`、`PrefillBridgeAck`；`FrontendReadyAck` 扩展 `pendingPrefill`。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell build` 通过（包含 `prefill.html` 多入口产物）。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+  - `pnpm -C apps/kimi-shell tauri build --no-bundle` 通过，生成 `src-tauri/target/release/appskimi-shell.exe`。
+- 风险与后续：
+  - 预填自动发送依赖对上游 chat DOM 的启发式定位（textarea/contenteditable/button 选择器）；若 Kimi Web 后续大改 DOM，可能触发 ack 失败并进入重试上限，需要补充针对性选择器。
+  - 本轮已把主窗口启动期从文档导航切为事件路由，但“冷启动 10 次”与“慢机实机”属于手工体验验收，仍建议你在目标机器补跑一轮。
+
+## 本轮计划（版本号单点维护 + 版本升级构建）
+
+### 计划清单
+
+- [x] 将版本号收敛到单一来源（`apps/kimi-shell/package.json`）
+- [x] 新增自动同步脚本，将版本写入 `src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json`
+- [x] 调整 npm scripts，确保 `dev/build/tauri` 前自动同步版本
+- [x] 版本号 `+0.0.1`（`0.0.1 -> 0.0.2`）
+- [x] 执行项目构建验证
+
+### 验收标准
+
+- [x] 只需改 `package.json` 的 `version` 即可驱动 Tauri/Cargo 版本一致
+- [x] `Cargo.toml` 与 `tauri.conf.json` 版本同步到 `0.0.2`
+- [x] 构建命令通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 将 `apps/kimi-shell/package.json` 作为版本单一来源，版本升级为 `0.0.2`。
+  - 新增 `apps/kimi-shell/scripts/sync_version.mjs`，在构建前自动同步 `src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 的版本字段。
+  - 调整 npm scripts：`dev/build/tauri` 统一前置 `pnpm sync:version`，避免三处版本漂移。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell sync:version` 通过，日志显示 `version=0.0.2` 已同步到 Cargo 与 Tauri 配置。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --no-bundle` 通过，生成 `src-tauri/target/release/appskimi-shell.exe`。
+- 风险与后续：
+  - 若后续新增发布配置文件（如语言/渠道覆盖 config），需确认其版本字段也走同一同步路径，避免发布产物版本不一致。
+
+## 本轮计划（白屏修复：事件驱动串行导航 + 前端握手）
+
+### 计划清单
+
+- [x] 接入 `on_page_load`，记录 `main` 窗口 Started/Finished + URL，并在 Finished 释放导航锁
+- [x] 将 `window_manager` 重构为串行导航协调器（`frontend_ready/in_flight_nav/queued_route/boot_timeout_recovered`）
+- [x] 统一本地路由跳转为“单飞行 + 队列覆盖”，禁止并发/重入导航
+- [x] 删除 `spawn_blank_window_recovery` 与 workspace 顶层 HTTP fallback
+- [x] 删除 `RunEvent::Ready` 二次 `enter_local_boot`
+- [x] 新增 `notify_frontend_ready` 命令与 `FrontendReadyAck` 类型，并接入前端启动握手
+- [x] 增加 8 秒单次超时兜底（仅在 `about:blank` 且未恢复时触发一次 `recover_loading_route`）
+- [x] 更新白屏调查文档与本节回顾
+- [x] 完成构建与验证（`cargo test`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell check:nfr:security`）
+
+### 验收标准
+
+- [x] 启动日志可见 `page-load Started/Finished`，且 `Finished` 能稳定出现
+- [x] 不再出现高频 `blank-window recovery forced navigate...` 循环日志
+- [x] 不再出现“`navigate` 成功但长期停在 `about:blank`”
+- [x] `missing_kimi`/`crashed` 路由仍可稳定进入控制中心，不发生重入抖动
+- [x] 自动化验证通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `src-tauri/window_manager.rs` 重构为事件驱动串行导航协调器：新增 `frontend_ready/in_flight_nav/queued_route/boot_timeout_recovered`，所有本地导航统一走“单飞行 + 队列覆盖”。
+  - 新增 `handle_page_load_finished`，仅在 `PageLoadEvent::Finished` 后释放 in-flight 并推进队列导航；并补充导航失败回收逻辑，避免死锁。
+  - `src-tauri/lib.rs` 接入 `Builder::on_page_load`，记录 `main` 窗口 Started/Finished + URL，并在 Finished 回调协调器。
+  - `src-tauri/lib.rs` 删除 `spawn_blank_window_recovery`/`try_navigate_workspace_fallback` 与 `RunEvent::Ready` 二次导航，替换为 8 秒单次超时兜底。
+  - 新增 `notify_frontend_ready` 命令与 `FrontendReadyAck` 类型（Rust/TS 双端），前端启动后主动 `invoke` 进行一次性握手（`invoke only`）。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（16/16）。
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `pnpm -C apps/kimi-shell check:nfr:security` 通过（Capability check passed）。
+- 风险与后续：
+  - 已按最小改动完成“事件驱动 + 串行导航”；若仍有极端机型卡白屏，下一阶段可切换为 splashscreen 方案，把主窗口导航次数进一步收敛到 1 次。
+
 ## 本轮计划（白屏修复 1/2/3：首屏本地页 + 去阻断 + 导航状态机）
 
 ### 计划清单

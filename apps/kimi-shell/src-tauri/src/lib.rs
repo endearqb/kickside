@@ -15,18 +15,16 @@ mod window_manager;
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
 
 use tauri::{AppHandle, LogicalSize, Manager, RunEvent, Size};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, InstallProbeStatus,
-    KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
-    LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
-    CURRENT_ONBOARDING_VERSION,
+    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
+    InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
+    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
+    SubmitPrefillAck, CURRENT_ONBOARDING_VERSION,
 };
 
 #[tauri::command]
@@ -130,6 +128,43 @@ fn report_loading_rendered(app: AppHandle, start_cycle_id: Option<u64>) -> Resul
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn notify_frontend_ready(app: AppHandle) -> Result<FrontendReadyAck, String> {
+    let transition = window_manager::mark_frontend_ready(&app, "frontend_ready_invoke");
+
+    let (backend_state, start_cycle_id, workspace_url) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+
+        let workspace_url = runtime
+            .workspace_port
+            .or(runtime.active_port)
+            .map(|port| format!("http://127.0.0.1:{port}"));
+
+        (runtime.state, runtime.start_cycle_id, workspace_url)
+    };
+
+    Ok(FrontendReadyAck {
+        accepted: transition.accepted,
+        backend_state,
+        workspace_url,
+        start_cycle_id,
+        pending_prefill: transition.pending_prefill,
+    })
+}
+
+#[tauri::command]
+fn submit_prefill(app: AppHandle, text: String) -> Result<SubmitPrefillAck, String> {
+    Ok(window_manager::submit_prefill(
+        &app,
+        text,
+        "submit_prefill_invoke",
+    ))
 }
 
 #[tauri::command]
@@ -469,8 +504,6 @@ pub fn run() {
             let pid = shared.pid;
             app.manage(shared);
 
-            let settings = settings_store::load_or_default(app.handle()).unwrap_or_default();
-
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(error) = window.set_decorations(false) {
@@ -538,13 +571,6 @@ pub fn run() {
             open_request::apply_startup_cli_request(app.handle());
             window_manager::enter_local_boot(app.handle(), "setup_bootstrap");
             backend_manager::start_backend(app.handle().clone());
-            spawn_blank_window_recovery(app.handle());
-
-            if settings.start_minimized_to_tray {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
-                }
-            }
 
             Ok(())
         })
@@ -552,6 +578,8 @@ pub fn run() {
             get_app_status,
             retry_start_backend,
             report_loading_rendered,
+            notify_frontend_ready,
+            submit_prefill,
             save_kimi_path,
             save_work_dir,
             get_diagnostics,
@@ -579,11 +607,20 @@ pub fn run() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
-        RunEvent::Ready => {
-            // Re-assert local boot route after the event loop is fully ready.
-            window_manager::enter_local_boot(app_handle, "run_ready");
-        }
         RunEvent::WindowEvent { label, event, .. } => {
+            if label == "prefill" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if !window_manager::consume_prefill_close_allowance(app_handle) {
+                        api.prevent_close();
+                        window_manager::complete_prefill_without_text(
+                            app_handle,
+                            "prefill_close_requested",
+                        );
+                    }
+                }
+                return;
+            }
+
             if label == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -849,141 +886,6 @@ fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {
     let start = start_ms?;
     let end = end_ms?;
     end.checked_sub(start)
-}
-
-fn spawn_blank_window_recovery(app: &AppHandle) {
-    let app_handle = app.clone();
-    thread::spawn(move || {
-        let mut workspace_fallback_attempted = false;
-
-        for attempt in 1u32..=40u32 {
-            thread::sleep(Duration::from_millis(350));
-
-            let Some(window) = app_handle.get_webview_window("main") else {
-                return;
-            };
-
-            let current_url = match window.url() {
-                Ok(url) => url,
-                Err(error) => {
-                    window_manager::recover_loading_route(
-                        &app_handle,
-                        "blank_recovery:url_unreadable",
-                    );
-                    if attempt == 1 || attempt % 5 == 0 {
-                        log_manager::append_line(
-                            &app_handle,
-                            format!(
-                                "blank-window recovery cannot read url (attempt={attempt}), forced navigate_loading: {error}"
-                            ),
-                        );
-                    }
-                    continue;
-                }
-            };
-
-            if current_url.as_str() != "about:blank" {
-                if attempt > 1 {
-                    log_manager::append_line(
-                        &app_handle,
-                        format!(
-                            "blank-window recovery completed at attempt={attempt}, current url: {}",
-                            current_url
-                        ),
-                    );
-                }
-                return;
-            }
-
-            // Emergency fallback for environments where `tauri://localhost` cannot
-            // be resolved reliably: after attempt 20, prefer backend workspace URL.
-            if attempt >= 20 && !workspace_fallback_attempted {
-                workspace_fallback_attempted =
-                    try_navigate_workspace_fallback(&app_handle, attempt);
-                if workspace_fallback_attempted {
-                    continue;
-                }
-            }
-
-            if !workspace_fallback_attempted {
-                window_manager::recover_loading_route(&app_handle, "blank_recovery:about_blank");
-                if attempt == 1 || attempt % 5 == 0 {
-                    log_manager::append_line(
-                        &app_handle,
-                        format!(
-                            "blank-window recovery forced navigate_loading (attempt={attempt})"
-                        ),
-                    );
-                }
-            } else if attempt % 5 == 0 {
-                log_manager::append_line(
-                    &app_handle,
-                    format!(
-                        "blank-window recovery waiting workspace fallback to take effect (attempt={attempt})"
-                    ),
-                );
-            }
-        }
-
-        log_manager::append_line(
-            &app_handle,
-            "blank-window recovery exhausted retries; window may still be stuck on about:blank",
-        );
-    });
-}
-
-fn try_navigate_workspace_fallback(app: &AppHandle, attempt: u32) -> bool {
-    let Some(window) = app.get_webview_window("main") else {
-        return false;
-    };
-
-    let fallback_port = {
-        let state = app.state::<AppState>();
-        let runtime = match state.runtime.lock() {
-            Ok(runtime) => runtime,
-            Err(_) => return false,
-        };
-        runtime.workspace_port.or(runtime.active_port)
-    };
-
-    let Some(port) = fallback_port else {
-        return false;
-    };
-
-    let fallback_url = format!("http://127.0.0.1:{port}");
-    let parsed = match url::Url::parse(&fallback_url) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-            log_manager::append_line(
-                app,
-                format!(
-                    "blank-window workspace fallback parse failed (attempt={attempt}): {error}"
-                ),
-            );
-            return false;
-        }
-    };
-
-    match window.navigate(parsed) {
-        Ok(_) => {
-            log_manager::append_line(
-                app,
-                format!(
-                    "blank-window workspace fallback navigate succeeded (attempt={attempt}, url={fallback_url})"
-                ),
-            );
-            true
-        }
-        Err(error) => {
-            log_manager::append_line(
-                app,
-                format!(
-                    "blank-window workspace fallback navigate failed (attempt={attempt}, url={fallback_url}): {error}"
-                ),
-            );
-            false
-        }
-    }
 }
 
 #[cfg(test)]

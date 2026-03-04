@@ -32,6 +32,8 @@ const SHUTDOWN_TIMEOUT_SECS: u64 = 4;
 const KIMI_HOST: &str = "127.0.0.1";
 const THEME_BRIDGE_SOURCE: &str = "kimi-shell-theme-bridge";
 const SHELL_THEME_SYNC_SOURCE: &str = "kimi-shell-theme-sync";
+const PREFILL_BRIDGE_SOURCE: &str = "kimi-shell-prefill-bridge";
+const SHELL_PREFILL_SYNC_SOURCE: &str = "kimi-shell-prefill-sync";
 const MAX_UPSTREAM_HEADER_BYTES: usize = 64 * 1024;
 const MAX_INSTALL_OUTPUT_CHARS: usize = 1500;
 const ENV_VALUE_VISIBLE_EDGE: usize = 2;
@@ -2542,6 +2544,8 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
   const THEME_KEY = "kimi-theme";
   const BRIDGE_SOURCE = "{theme_bridge_source}";
   const SHELL_SOURCE = "{shell_theme_source}";
+  const PREFILL_SOURCE = "{shell_prefill_source}";
+  const PREFILL_ACK_SOURCE = "{prefill_bridge_source}";
   const QUERY = "(prefers-color-scheme: dark)";
   const UPSTREAM_WS_ORIGIN = "{upstream_ws_origin}";
   const UPSTREAM_WS_HOST = (function () {{
@@ -2599,6 +2603,206 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
     }}
     applyDomTheme(normalized);
     notifyParent();
+  }}
+
+  function postPrefillAck(payload) {{
+    try {{
+      if (window.parent && window.parent !== window) {{
+        window.parent.postMessage(
+          {{
+            source: PREFILL_ACK_SOURCE,
+            requestId: payload.requestId,
+            applied: !!payload.applied,
+            reason: payload.reason || ""
+          }},
+          "*"
+        );
+      }}
+    }} catch (_) {{
+      // ignore
+    }}
+  }}
+
+  function isVisible(element) {{
+    if (!element || !element.isConnected) {{
+      return false;
+    }}
+    const style = window.getComputedStyle(element);
+    if (!style || style.display === "none" || style.visibility === "hidden") {{
+      return false;
+    }}
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }}
+
+  function findComposerElement() {{
+    const selectors = [
+      "textarea[placeholder*='发送']",
+      "textarea[placeholder*='Send']",
+      "textarea[aria-label*='发送']",
+      "textarea[aria-label*='Send']",
+      "textarea",
+      "[contenteditable='true'][role='textbox']",
+      "[contenteditable='true'][data-lexical-editor='true']",
+      "[contenteditable='true']"
+    ];
+
+    for (const selector of selectors) {{
+      const nodes = Array.from(document.querySelectorAll(selector));
+      const target = nodes.find((node) => {{
+        if (!(node instanceof HTMLElement)) {{
+          return false;
+        }}
+        if (!isVisible(node)) {{
+          return false;
+        }}
+        if ("disabled" in node && node.disabled) {{
+          return false;
+        }}
+        if (node.getAttribute("aria-disabled") === "true") {{
+          return false;
+        }}
+        return true;
+      }});
+      if (target) {{
+        return target;
+      }}
+    }}
+
+    return null;
+  }}
+
+  function writeComposerValue(target, text) {{
+    if (!target) {{
+      return false;
+    }}
+
+    try {{
+      target.focus();
+      if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {{
+        target.value = text;
+        target.dispatchEvent(new Event("input", {{ bubbles: true }}));
+        target.dispatchEvent(new Event("change", {{ bubbles: true }}));
+        return true;
+      }}
+
+      if (target instanceof HTMLElement && target.isContentEditable) {{
+        target.textContent = text;
+        try {{
+          target.dispatchEvent(
+            new InputEvent("input", {{
+              bubbles: true,
+              data: text,
+              inputType: "insertText"
+            }})
+          );
+        }} catch (_) {{
+          target.dispatchEvent(new Event("input", {{ bubbles: true }}));
+        }}
+        return true;
+      }}
+    }} catch (_) {{
+      return false;
+    }}
+
+    return false;
+  }}
+
+  function findSendButton() {{
+    const selectors = [
+      "button[type='submit']",
+      "button[aria-label*='发送']",
+      "button[aria-label*='Send']",
+      "button[data-testid*='send']",
+      "button[data-icon*='send']"
+    ];
+
+    for (const selector of selectors) {{
+      const nodes = Array.from(document.querySelectorAll(selector));
+      const button = nodes.find((node) => {{
+        if (!(node instanceof HTMLButtonElement)) {{
+          return false;
+        }}
+        if (!isVisible(node)) {{
+          return false;
+        }}
+        if (node.disabled || node.getAttribute("aria-disabled") === "true") {{
+          return false;
+        }}
+        return true;
+      }});
+      if (button) {{
+        return button;
+      }}
+    }}
+    return null;
+  }}
+
+  function triggerSend(target) {{
+    const sendButton = findSendButton();
+    if (sendButton) {{
+      sendButton.click();
+      return true;
+    }}
+
+    const keyboardEventInit = {{
+      key: "Enter",
+      code: "Enter",
+      which: 13,
+      keyCode: 13,
+      bubbles: true,
+      cancelable: true
+    }};
+
+    try {{
+      target.dispatchEvent(new KeyboardEvent("keydown", keyboardEventInit));
+      target.dispatchEvent(new KeyboardEvent("keypress", keyboardEventInit));
+      target.dispatchEvent(new KeyboardEvent("keyup", keyboardEventInit));
+      return true;
+    }} catch (_) {{
+      return false;
+    }}
+  }}
+
+  function applyPrefillFromShell(data) {{
+    const requestId = typeof data.requestId === "string" ? data.requestId : "";
+    const text = typeof data.text === "string" ? data.text : "";
+    const autoSend = data.autoSend !== false;
+
+    if (!requestId) {{
+      postPrefillAck({{ requestId: "", applied: false, reason: "missing_request_id" }});
+      return;
+    }}
+
+    if (!text.trim()) {{
+      postPrefillAck({{ requestId, applied: false, reason: "empty_text" }});
+      return;
+    }}
+
+    const target = findComposerElement();
+    if (!target) {{
+      postPrefillAck({{ requestId, applied: false, reason: "composer_not_found" }});
+      return;
+    }}
+
+    if (!writeComposerValue(target, text)) {{
+      postPrefillAck({{ requestId, applied: false, reason: "composer_write_failed" }});
+      return;
+    }}
+
+    if (!autoSend) {{
+      postPrefillAck({{ requestId, applied: true, reason: "filled_only" }});
+      return;
+    }}
+
+    setTimeout(function () {{
+      const sent = triggerSend(target);
+      postPrefillAck({{
+        requestId,
+        applied: sent,
+        reason: sent ? "sent" : "send_failed"
+      }});
+    }}, 50);
   }}
 
   function maybeRewriteWebSocketUrl(rawUrl) {{
@@ -2666,10 +2870,16 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
 
   window.addEventListener("message", function (event) {{
     const data = event && event.data;
-    if (!data || data.source !== SHELL_SOURCE) {{
+    if (!data || !data.source) {{
       return;
     }}
-    applyThemeFromShell(data.theme);
+    if (data.source === SHELL_SOURCE) {{
+      applyThemeFromShell(data.theme);
+      return;
+    }}
+    if (data.source === PREFILL_SOURCE) {{
+      applyPrefillFromShell(data);
+    }}
   }});
 
   if (document.readyState === "loading") {{
@@ -2687,6 +2897,8 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
 </script>"#,
         theme_bridge_source = THEME_BRIDGE_SOURCE,
         shell_theme_source = SHELL_THEME_SYNC_SOURCE,
+        prefill_bridge_source = PREFILL_BRIDGE_SOURCE,
+        shell_prefill_source = SHELL_PREFILL_SYNC_SOURCE,
         upstream_ws_origin = upstream_ws_origin
     )
 }

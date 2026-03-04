@@ -1,27 +1,44 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getInitialThemeMode, LEGACY_THEME_MODE_STORAGE_KEY, THEME_STORAGE_KEY } from "@/app/theme";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  getInitialThemeMode,
+  LEGACY_THEME_MODE_STORAGE_KEY,
+  PREFILL_BRIDGE_SOURCE,
+  PREFILL_SYNC_SOURCE,
+  THEME_STORAGE_KEY,
+} from "@/app/theme";
 import type {
   ActionableOnboardingStep,
   AppStatus,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  FrontendReadyAck,
   InstallProbeStatus,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   LoginProbeResult,
   OnboardingStatus,
+  PrefillBridgeAck,
+  PrefillChatPayload,
   RuntimePanelId,
   Screen,
+  ShellRoutePayload,
   Theme,
   WorkspaceEmbedState,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 
 const POLL_MS = 1000;
+const SHELL_ROUTE_EVENT = "shell-route";
+const PREFILL_CHAT_EVENT = "prefill-chat";
+const PREFILL_ACK_TIMEOUT_MS = 2600;
+const PREFILL_RETRY_DELAY_MS = 1600;
+const PREFILL_MAX_ATTEMPTS = 8;
+let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type InstallSource = "official" | "mirror";
@@ -120,10 +137,60 @@ export function useShellController() {
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
+  const [listenersReady, setListenersReady] = useState(false);
+  const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
+    null,
+  );
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
   const workspaceIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const pendingPrefillRef = useRef<PrefillChatPayload | null>(null);
+  const prefillRetryTimerRef = useRef<number | null>(null);
+  const prefillAckTimerRef = useRef<number | null>(null);
+  const prefillDispatchRef = useRef<((source: string) => void) | null>(null);
+  const prefillAttemptsRef = useRef<Record<string, number>>({});
+  const handledPrefillIdsRef = useRef<Set<string>>(new Set());
+  const inFlightPrefillRequestRef = useRef<string | null>(null);
+
+  const screen: Screen = useMemo(() => {
+    const hashRoute = parseHashRoute(routeHash);
+    if (hashRoute === "control-center") return "control_center";
+    if (
+      hashRoute === "diagnostics" ||
+      hashRoute === "logs_paths" ||
+      hashRoute === "onboarding" ||
+      hashRoute === "error" ||
+      hashRoute === "missing-kimi"
+    ) {
+      return "control_center";
+    }
+
+    if (status?.state === "missing_kimi" || status?.state === "crashed") {
+      return "control_center";
+    }
+
+    if (onboarding?.shouldShowOnboarding) {
+      return "control_center";
+    }
+
+    if (status?.state === "running" && typeof status.activePort === "number") {
+      return "workspace";
+    }
+
+    return "loading";
+  }, [onboarding, routeHash, status]);
+
+  const workspacePort = status?.workspacePort ?? status?.activePort;
+  const remoteUrl = workspacePort ? `http://127.0.0.1:${workspacePort}` : null;
+  const workspaceOrigin = useMemo(() => {
+    if (!remoteUrl) return null;
+    try {
+      return new URL(remoteUrl).origin;
+    } catch {
+      return null;
+    }
+  }, [remoteUrl]);
 
   useEffect(() => {
     const handleHashChange = () => setRouteHash(window.location.hash);
@@ -145,6 +212,137 @@ export function useShellController() {
     root.classList.toggle("dark", themeMode === "dark");
     root.style.colorScheme = themeMode;
   }, [themeMode]);
+
+  useEffect(() => {
+    pendingPrefillRef.current = pendingPrefill;
+  }, [pendingPrefill]);
+
+  function clearPrefillTimers() {
+    if (prefillRetryTimerRef.current !== null) {
+      window.clearTimeout(prefillRetryTimerRef.current);
+      prefillRetryTimerRef.current = null;
+    }
+    if (prefillAckTimerRef.current !== null) {
+      window.clearTimeout(prefillAckTimerRef.current);
+      prefillAckTimerRef.current = null;
+    }
+  }
+
+  function applyRouteHash(route: string) {
+    const normalized = route.replace(/^\/+/, "").trim();
+    if (!normalized) {
+      return;
+    }
+
+    const targetHash = `#/${normalized}`;
+    if (window.location.hash !== targetHash) {
+      window.location.hash = `/${normalized}`;
+    }
+    setRouteHash(window.location.hash);
+  }
+
+  const enqueuePrefillPayload = useCallback(
+    (payload: PrefillChatPayload, source: string) => {
+      const requestId = payload.requestId?.trim();
+      const text = payload.text ?? "";
+      if (!requestId || !text.trim()) {
+        return;
+      }
+      if (handledPrefillIdsRef.current.has(requestId)) {
+        return;
+      }
+
+      clearPrefillTimers();
+      inFlightPrefillRequestRef.current = null;
+      prefillAttemptsRef.current[requestId] = prefillAttemptsRef.current[requestId] ?? 0;
+      setPendingPrefill({
+        requestId,
+        text,
+        autoSend: payload.autoSend !== false,
+      });
+      setActionError(null);
+      void source;
+    },
+    [],
+  );
+
+  const dispatchPendingPrefillToWorkspace = useCallback(
+    (source: string) => {
+      const payload = pendingPrefillRef.current;
+      if (!payload) {
+        return;
+      }
+      if (handledPrefillIdsRef.current.has(payload.requestId)) {
+        setPendingPrefill(null);
+        return;
+      }
+      if (screen !== "workspace" || workspaceEmbedState !== "ready") {
+        return;
+      }
+      if (!workspaceOrigin) {
+        return;
+      }
+
+      const frameWindow = workspaceIframeRef.current?.contentWindow;
+      if (!frameWindow) {
+        return;
+      }
+
+      const attempts = (prefillAttemptsRef.current[payload.requestId] ?? 0) + 1;
+      prefillAttemptsRef.current[payload.requestId] = attempts;
+      if (attempts > PREFILL_MAX_ATTEMPTS) {
+        clearPrefillTimers();
+        inFlightPrefillRequestRef.current = null;
+        setPendingPrefill(null);
+        setActionError(
+          `Prefill dispatch exceeded retry limit (${payload.requestId}).`,
+        );
+        return;
+      }
+
+      try {
+        frameWindow.postMessage(
+          {
+            source: PREFILL_SYNC_SOURCE,
+            requestId: payload.requestId,
+            text: payload.text,
+            autoSend: payload.autoSend !== false,
+          },
+          workspaceOrigin,
+        );
+        inFlightPrefillRequestRef.current = payload.requestId;
+      } catch (error) {
+        if (prefillRetryTimerRef.current === null) {
+          prefillRetryTimerRef.current = window.setTimeout(() => {
+            prefillRetryTimerRef.current = null;
+            prefillDispatchRef.current?.("retry_after_postmessage_error");
+          }, PREFILL_RETRY_DELAY_MS);
+        }
+        setActionError(String(error));
+        return;
+      }
+
+      if (prefillAckTimerRef.current !== null) {
+        window.clearTimeout(prefillAckTimerRef.current);
+      }
+      prefillAckTimerRef.current = window.setTimeout(() => {
+        prefillAckTimerRef.current = null;
+        if (pendingPrefillRef.current?.requestId === payload.requestId) {
+          if (prefillRetryTimerRef.current === null) {
+            prefillRetryTimerRef.current = window.setTimeout(() => {
+              prefillRetryTimerRef.current = null;
+              prefillDispatchRef.current?.("retry_after_ack_timeout");
+            }, PREFILL_RETRY_DELAY_MS);
+          }
+        }
+      }, PREFILL_ACK_TIMEOUT_MS);
+
+      void source;
+    },
+    [screen, workspaceEmbedState, workspaceOrigin],
+  );
+
+  prefillDispatchRef.current = dispatchPendingPrefillToWorkspace;
 
   async function refreshStatus() {
     try {
@@ -193,6 +391,147 @@ export function useShellController() {
   async function refreshCoreState() {
     await Promise.all([refreshStatus(), refreshOnboarding()]);
   }
+
+  useEffect(() => {
+    if (!tauriRuntime) {
+      setListenersReady(false);
+      return;
+    }
+
+    let disposed = false;
+    let unlistenRoute: (() => void) | undefined;
+    let unlistenPrefill: (() => void) | undefined;
+
+    const bindListeners = async () => {
+      try {
+        const currentWebviewWindow = getCurrentWebviewWindow();
+        const [routeOff, prefillOff] = await Promise.all([
+          currentWebviewWindow.listen<ShellRoutePayload>(
+            SHELL_ROUTE_EVENT,
+            (event) => {
+              const route = event.payload?.route ?? "";
+              applyRouteHash(route);
+            },
+          ),
+          currentWebviewWindow.listen<PrefillChatPayload>(
+            PREFILL_CHAT_EVENT,
+            (event) => {
+              enqueuePrefillPayload(event.payload, "event_listener");
+            },
+          ),
+        ]);
+
+        if (disposed) {
+          routeOff();
+          prefillOff();
+          return;
+        }
+
+        unlistenRoute = routeOff;
+        unlistenPrefill = prefillOff;
+        setListenersReady(true);
+      } catch (error) {
+        setActionError(String(error));
+      }
+    };
+
+    void bindListeners();
+
+    return () => {
+      disposed = true;
+      setListenersReady(false);
+      if (unlistenRoute) {
+        unlistenRoute();
+      }
+      if (unlistenPrefill) {
+        unlistenPrefill();
+      }
+    };
+  }, [enqueuePrefillPayload, tauriRuntime]);
+
+  useEffect(() => {
+    if (!tauriRuntime || !listenersReady || frontendReadyHandshakeSent) {
+      return;
+    }
+
+    frontendReadyHandshakeSent = true;
+    void invoke<FrontendReadyAck>("notify_frontend_ready")
+      .then((ack) => {
+        if (ack.pendingPrefill) {
+          enqueuePrefillPayload(ack.pendingPrefill, "ready_ack");
+        }
+        void refreshCoreState();
+      })
+      .catch(() => {
+        // Best-effort startup handshake.
+      });
+  }, [enqueuePrefillPayload, listenersReady, tauriRuntime]);
+
+  useEffect(() => {
+    const handleWorkspacePrefillAck = (event: MessageEvent) => {
+      if (!workspaceOrigin || event.origin !== workspaceOrigin) {
+        return;
+      }
+
+      const payload = event.data as PrefillBridgeAck | null;
+      if (!payload || payload.source !== PREFILL_BRIDGE_SOURCE) {
+        return;
+      }
+
+      const requestId = payload.requestId?.trim();
+      if (!requestId) {
+        return;
+      }
+      if (
+        pendingPrefillRef.current?.requestId !== requestId &&
+        inFlightPrefillRequestRef.current !== requestId
+      ) {
+        return;
+      }
+
+      if (prefillAckTimerRef.current !== null) {
+        window.clearTimeout(prefillAckTimerRef.current);
+        prefillAckTimerRef.current = null;
+      }
+
+      if (payload.applied) {
+        handledPrefillIdsRef.current.add(requestId);
+        delete prefillAttemptsRef.current[requestId];
+        inFlightPrefillRequestRef.current = null;
+        setPendingPrefill((current) =>
+          current?.requestId === requestId ? null : current,
+        );
+        return;
+      }
+
+      if (prefillRetryTimerRef.current === null) {
+        prefillRetryTimerRef.current = window.setTimeout(() => {
+          prefillRetryTimerRef.current = null;
+          prefillDispatchRef.current?.("retry_after_ack_failed");
+        }, PREFILL_RETRY_DELAY_MS);
+      }
+    };
+
+    window.addEventListener("message", handleWorkspacePrefillAck);
+    return () => window.removeEventListener("message", handleWorkspacePrefillAck);
+  }, [workspaceOrigin]);
+
+  useEffect(() => {
+    if (!pendingPrefill) {
+      clearPrefillTimers();
+      inFlightPrefillRequestRef.current = null;
+      return;
+    }
+
+    prefillDispatchRef.current?.("pending_prefill_state_change");
+  }, [pendingPrefill, screen, workspaceEmbedState, workspaceOrigin]);
+
+  useEffect(
+    () => () => {
+      clearPrefillTimers();
+    },
+    [],
+  );
 
   async function loadKimiCliConfigCenter() {
     try {
@@ -276,34 +615,6 @@ export function useShellController() {
       }
     };
   }, [tauriRuntime]);
-
-  const screen: Screen = useMemo(() => {
-    const hashRoute = parseHashRoute(routeHash);
-    if (hashRoute === "control-center") return "control_center";
-    if (
-      hashRoute === "diagnostics" ||
-      hashRoute === "logs_paths" ||
-      hashRoute === "onboarding" ||
-      hashRoute === "error" ||
-      hashRoute === "missing-kimi"
-    ) {
-      return "control_center";
-    }
-
-    if (status?.state === "missing_kimi" || status?.state === "crashed") {
-      return "control_center";
-    }
-
-    if (onboarding?.shouldShowOnboarding) {
-      return "control_center";
-    }
-
-    if (status?.state === "running" && typeof status.activePort === "number") {
-      return "workspace";
-    }
-
-    return "loading";
-  }, [onboarding, routeHash, status]);
 
   useEffect(() => {
     if (screen !== "control_center") return;
@@ -730,17 +1041,6 @@ export function useShellController() {
     setThemeMode((current) => (current === "light" ? "dark" : "light"));
   }
 
-  const workspacePort = status?.workspacePort ?? status?.activePort;
-  const remoteUrl = workspacePort ? `http://127.0.0.1:${workspacePort}` : null;
-  const workspaceOrigin = useMemo(() => {
-    if (!remoteUrl) return null;
-    try {
-      return new URL(remoteUrl).origin;
-    } catch {
-      return null;
-    }
-  }, [remoteUrl]);
-
   const { pushThemeToWorkspace } = useWorkspaceThemeBridge({
     screen,
     workspaceEmbedState,
@@ -804,6 +1104,7 @@ export function useShellController() {
   function handleWorkspaceFrameLoad() {
     setWorkspaceEmbedState("ready");
     pushThemeToWorkspace();
+    prefillDispatchRef.current?.("workspace_frame_load");
   }
 
   function handleWorkspaceFrameError() {

@@ -23,6 +23,7 @@ type ShellTitlebarProps = {
   tauriRuntime: boolean;
   isWindowMaximized: boolean;
   canOpenWorkspace: boolean;
+  activeSessionWorkDir?: string;
   effectiveWorkDir?: string;
   onRetry: () => void;
   onOpenControlCenter: () => void;
@@ -46,6 +47,7 @@ export function ShellTitlebar({
   tauriRuntime,
   isWindowMaximized,
   canOpenWorkspace,
+  activeSessionWorkDir,
   effectiveWorkDir,
   onRetry,
   onOpenControlCenter,
@@ -58,8 +60,10 @@ export function ShellTitlebar({
   onCloseWindow,
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
-  const effectivePath = effectiveWorkDir?.trim() || "-";
-  const canOpenEffectivePath = Boolean(effectiveWorkDir?.trim());
+  const sessionPath = activeSessionWorkDir?.trim();
+  const fallbackPath = effectiveWorkDir?.trim();
+  const effectivePath = sessionPath || fallbackPath || "-";
+  const canOpenEffectivePath = Boolean(sessionPath || fallbackPath);
 
   const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;

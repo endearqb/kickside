@@ -1,5 +1,220 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（版本 0.0.5 发布：升级版本 + 安装包 + 更新说明）
+
+### 计划清单
+
+- [x] 升级 `apps/kimi-shell/package.json` 版本到 `0.0.5`
+- [x] 执行 `pnpm -C apps/kimi-shell sync:version` 同步 `Cargo.toml` 与 `tauri.conf.json`
+- [x] 构建 NSIS 安装包并确认产物路径
+- [x] 新增 `apps/kimi-shell/docs/release-notes-0.0.5.md` 版本更新说明
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 应用版本号为 `0.0.5`
+- [x] 安装包构建成功并可定位产物
+- [x] 版本更新说明文档已创建并记录本轮核心变更
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 版本号升级：`apps/kimi-shell/package.json` 从 `0.0.4` 升级到 `0.0.5`。
+  - 版本同步：执行 `pnpm -C apps/kimi-shell sync:version`，同步更新 `apps/kimi-shell/src-tauri/Cargo.toml` 与 `apps/kimi-shell/src-tauri/tauri.conf.json`。
+  - 构建安装包：执行 `pnpm -C apps/kimi-shell tauri build --bundles nsis`，生成 `0.0.5` 安装包。
+  - 新增版本说明：`apps/kimi-shell/docs/release-notes-0.0.5.md`。
+- 验证结果：
+  - `apps/kimi-shell/package.json` / `Cargo.toml` / `tauri.conf.json` 版本字段均为 `0.0.5`。
+  - 安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.5_x64-setup.exe`
+    - 大小：`3524789` bytes
+    - 构建时间：`2026-03-05 16:50:37`
+- 风险与后续：
+  - 建议在目标机器安装后做一次手工回归：目录/文件右键链路、外链外开、关闭进度提示。
+
+## 本轮计划（task0305-1 两期实施：右键稳定性 + Session 自动化）
+
+### 计划清单
+
+- [x] Phase 0：在 `tasks/todo.md` 记录两期计划与验收门槛，补文档分流与专项调查记录
+- [x] Phase 1：实现右键注册表自动自愈（启动时发现漂移/缺失自动重写）
+- [x] Phase 1：统一并强制写入目录/文件右键命令模板（含 `AllFilesystemObjects`）
+- [x] Phase 1：增强 `context_menu` 状态提示，明确缺失键与命令漂移点
+- [x] Phase 1：补强 `open_request` 的“非空参数但 parse 为 none”诊断日志
+- [x] Phase 1：修复关闭应用终端闪现（`taskkill` 无窗）并增加关闭进度事件/前端可视化
+- [x] Phase 1：注入桥接并外开 iframe 内外链（拦截 `<a>` 与 `window.open`）
+- [x] Phase 1：补日志埋点（右键自愈结果、外链桥接、关闭流程耗时）
+- [x] Phase 2：新增 `workspace_session` 服务（轮询 `/api/sessions` 并维护 active session）
+- [x] Phase 2：扩展 `AppStatus` 与 TS 类型（`activeSessionId`/`activeSessionWorkDir`/`sessionSource`）
+- [x] Phase 2：实现工作区 bootstrap（open-dir/open-files 后自动建/切 session）
+- [x] Phase 2：实现 session 导航桥（捕获 stream 模板 + `navigate_session` 指令）
+- [x] Phase 2：让 prefill 在 session 导航完成后发送，优先作为新 session 首条 prompt
+- [x] Phase 2：标题栏优先显示 session 工作区，回退 runtime `effectiveWorkDir`
+- [x] 补充 Rust 单测（`context_menu`、`open_request`、`workspace_session`）并执行回归
+- [x] 执行前端构建验证并回填本节回顾
+
+### 验收标准
+
+- [ ] 安装后不手动点“启用”，目录右键与文件右键都可触发链路
+- [ ] 文件右键不再出现“前置页几秒后关闭且打开失败”
+- [ ] 应用内 Kimi Web 外链可稳定跳系统浏览器
+- [ ] 关闭应用不再弹终端窗口，并显示关闭进度提示
+- [ ] 标题栏可在 2 秒内跟随 active session 工作区（回退逻辑正常）
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - Rust：
+    - `lib.rs` 接入 `workspace_session`、`AppStatus` 回填 active session 字段、启动时 context menu 自动自愈、主窗口关闭改为 `shutdown-progress` 事件 + 后台线程停服退出。
+    - `backend_manager.rs` 接入 session bootstrap 触发与状态清理；`taskkill` 改无窗执行；注入脚本新增外链桥、session 桥、`window.open` 与锚点拦截。
+    - `open_request.rs` 在 `open-dir/open-files` 成功后排队 workspace bootstrap；补“args 非空但无可执行请求”日志。
+    - `context_menu.rs` 状态 message 增强为“缺失键/漂移键”可读根因。
+    - 新增模块 `workspace_session.rs`（轮询 sessions、活动会话判定、按工作区建 session、桥接事件发射）。
+  - 前端：
+    - `types.ts/theme.ts/useShellController.ts` 新增 shutdown/session/external-link 桥接类型与监听、session 导航调度、prefill 在 session 导航期间挂起后再发送。
+    - `ShellTitlebar.tsx` 优先展示 `activeSessionWorkDir`，回退 `effectiveWorkDir`。
+    - `App.tsx/App.css` 新增关闭进度覆盖层展示。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（27/27）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 风险与后续：
+  - Explorer 真实右键链路、外链跳转与 session 自动切换仍需你在目标安装包环境做手工验收（本轮未自动化驱动 Explorer/UI）。
+  - `navigate_session` 目前是“模板观测 + 最佳努力跳转”策略，若 Kimi Web 路由后续变更，可能需要补充更精确的路由模板识别规则。
+
+## 本轮计划（回归修复：安装后文件右键不触发链路）
+
+### 计划清单
+
+- [x] 记录用户回归问题（目录右键可触发，文件右键不触发）
+- [x] 调整文件右键命令模板，提升 Explorer 兼容性
+- [x] 补充文件对象注册兜底键（`AllFilesystemObjects`）
+- [x] 保持 `open_request` 对 `--open-files --` 新语法兼容，同时增强无分隔符场景容错
+- [x] 增补/更新单测并执行回归验证
+- [x] 回填本轮回顾与后续验证建议
+
+### 验收标准
+
+- [ ] 安装后目录右键链路保持可用
+- [ ] 安装后文件右键可稳定触发 `open-files` 链路
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/context_menu.rs`：
+    - 文件右键命令模板从 `--open-files -- "%1"` 调整为 `--open-files "%1"`，提升 Explorer 触发兼容性。
+    - 新增文件对象兜底注册：`HKCU\\Software\\Classes\\AllFilesystemObjects\\shell\\KimiWebShell` 及 `command`。
+    - `status` 校验范围同步扩展到 `AllFilesystemObjects` 命令键，发现缺失/漂移时仍给出“启用重写”提示。
+  - `apps/kimi-shell/src-tauri/src/open_request.rs`：
+    - `collect_candidate_paths` 增强容错：在非 literal 模式下，若参数以 `--` 开头但解析后路径真实存在，仍按文件路径处理。
+    - 新增单测：`parse_open_files_without_literal_still_accepts_existing_dash_prefixed_file`。
+  - 版本与发布：
+    - 版本提升到 `0.0.4`（`package.json` + `sync:version` 同步到 `Cargo.toml` 与 `tauri.conf.json`）。
+    - 新增版本说明：`apps/kimi-shell/docs/release-notes-0.0.4.md`。
+    - 重新构建 NSIS 安装包：`Kimi Desktop Shell_0.0.4_x64-setup.exe`。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml context_menu -- --nocapture` 通过（3/3）。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml open_request -- --nocapture` 通过（9/9）。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（24/24）。
+  - `pnpm -C apps/kimi-shell tauri build --bundles nsis` 成功，产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.4_x64-setup.exe`
+- 风险与后续：
+  - 真实 Explorer 右键链路属于系统交互验收，需你在安装 `0.0.4` 后手工确认“目录/文件右键均可触发”。
+  - 若机器上保留旧版注册表值，请在应用内点击一次“启用右键菜单”完成重写后再测试。
+
+## 本轮计划（版本 +0.0.1 + 更新说明 + 安装包）
+
+### 计划清单
+
+- [x] 记录并确认本轮发布目标（版本升级、更新说明、安装包产出）
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.2` 升级到 `0.0.3`
+- [x] 执行 `sync:version` 同步 `Cargo.toml` 与 `tauri.conf.json`
+- [x] 新增版本更新说明文档（Markdown）
+- [x] 执行安装包构建命令并确认产物路径
+- [x] 回填本轮回顾与验证结论
+
+### 验收标准
+
+- [x] 应用版本号成功升级到 `0.0.3`
+- [x] 版本更新说明文档已创建并包含核心变更与验证信息
+- [x] 安装包构建成功并可定位到产物文件
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 版本升级：`apps/kimi-shell/package.json` 从 `0.0.2` 升级到 `0.0.3`。
+  - 版本同步：执行 `pnpm -C apps/kimi-shell sync:version`，同步更新 `apps/kimi-shell/src-tauri/Cargo.toml` 与 `apps/kimi-shell/src-tauri/tauri.conf.json` 的版本字段。
+  - 新增版本说明文档：`apps/kimi-shell/docs/release-notes-0.0.3.md`。
+  - 安装包构建：执行 `pnpm -C apps/kimi-shell tauri build --bundles nsis`，成功生成 NSIS 安装包。
+- 验证结果：
+  - `sync:version` 日志确认：`version=0.0.3`。
+  - 打包命令成功结束（exit code 0）。
+  - 安装包产物存在：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.3_x64-setup.exe`
+    - 文件大小：`3495009` bytes。
+- 风险与后续：
+  - 当前仅产出 NSIS 安装包；如需 MSI 或多语言安装包，需要追加对应 bundler 参数与构建流程。
+
+## 本轮计划（右键文档 404 修复 + 调查分流）
+
+### 计划清单
+
+- [x] 梳理并落地本轮方案到 `tasks/todo.md`（执行前清单）
+- [x] 强化 `context_menu.rs` 状态判定：键存在 + 命令值匹配预期
+- [x] 统一右键命令模板（目录背景/目录/文件），文件命令改为 `--open-files -- "%1"`
+- [x] `enable_context_menu` 每次全量重写命令；`status` 发现漂移返回修复提示
+- [x] 重构 `open_request.rs` 参数解析为“规范化 + 分类”流程
+- [x] 支持 `file:///` 路径、保留 `--` 后字面量参数、过滤常见 Shell 噪声参数
+- [x] 为 `--open-files` 增加“无有效文件”安全回退（单目录降级 `OpenDir`，其余结构化报错）
+- [x] 增加关键埋点日志（startup/forwarded args + cwd + parse result）
+- [x] 补充单测：`open_request` 覆盖 file URI / literal `--` / shell 噪声 / 目录降级
+- [x] 补充单测：`context_menu` 纯函数层命令构造与匹配（含空格与引号路径）
+- [x] 调查文档分流：`white-screen-investigation.md` 增加分流说明；新增 `right-click-404-investigation.md`
+- [x] 完成验证并回填回顾（必要时更新 `tasks/lessons.md`）
+
+### 验收标准
+
+- [ ] Explorer 目录右键仍可正常打开（`--open-dir` 行为不回归）
+- [ ] 文件/文档右键触发后不再出现应用内 404（`--open-files` 行为稳定）
+- [x] 支持 `--open-files -- <path...>` 新语法，同时兼容旧语法
+- [x] 日志可见清晰的 open-request 解析记录与结构化错误信息
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/context_menu.rs`：
+    - 新增命令模板构造与匹配纯函数；文件右键命令升级为 `--open-files -- "%1"`。
+    - `status` 从“仅键存在”升级为“键存在 + 命令值匹配预期”；命令漂移时返回修复提示消息。
+    - `enable` 每次覆盖写入目录背景/目录/文件三类命令值，保证旧值可修复。
+    - 新增 3 个单测：空格路径、引号路径、命令匹配行为。
+  - `apps/kimi-shell/src-tauri/src/open_request.rs`：
+    - `parse_open_request` 重构为“规范化 + 分类”流程，支持 `file:///`、`--open-files -- <path...>` 字面量模式。
+    - 过滤常见 Shell 噪声参数（`/embedding`、`/prefetch:*`）。
+    - `--open-files` 在“无有效文件”时新增安全回退：单目录自动降级 `OpenDir`，其他场景返回结构化错误（含 `first_invalid_token`）。
+    - 增加 startup/forwarded 解析埋点日志（args/cwd/result）。
+    - 新增 5 个解析单测：file URI、literal `--`、噪声过滤、单目录降级、结构化错误字段。
+  - 文档分流：
+    - `tasks/white-screen-investigation.md` 新增“问题分流说明”。
+    - 新增 `tasks/right-click-404-investigation.md` 记录右键 404 专项排查与修复。
+  - 经验沉淀：
+    - `tasks/lessons.md` 新增“右键状态必须校验命令值一致性”经验。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml open_request -- --nocapture` 通过（8/8）。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml context_menu -- --nocapture` 通过（3/3）。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（23/23）。
+  - 手工命令验证（本机）：
+    - `appskimi-shell.exe --open-dir <docs>`：日志显示 `result=open_dir` 且 `cwd` 切换成功。
+    - `appskimi-shell.exe --open-files <file>`：日志显示 `result=open_files:1` 且创建工作区成功。
+    - `appskimi-shell.exe --open-files -- <file>`：新语法可用，日志可见 parse 结果。
+    - `--open-files` 缺失文件：日志包含结构化错误与 `first_invalid_token`。
+- 风险与后续：
+  - 本轮未直接自动化驱动真实 Explorer 右键点击链路；“Explorer 实际交互 + 应用内无 404”仍需在目标机器做一次手工验收。
+  - 若用户机器已启用旧版右键命令，需在应用内点击一次“启用右键菜单”以重写注册表命令值，漂移提示会给出修复引导。
+
 ## 本轮计划（Splashscreen 预填窗口替换：主窗口单次加载 + 自动预填发送）
 
 ### 计划清单

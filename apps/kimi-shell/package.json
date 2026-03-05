@@ -1,7 +1,7 @@
 {
   "name": "appskimi-shell",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.5",
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync_version.mjs",

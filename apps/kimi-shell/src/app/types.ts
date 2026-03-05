@@ -36,6 +36,9 @@ export interface AppStatus {
   configuredKimiPath?: string;
   configuredWorkDir?: string;
   effectiveWorkDir?: string;
+  activeSessionId?: string;
+  activeSessionWorkDir?: string;
+  sessionSource?: string;
   logsDir: string;
   hotkey: string;
 }
@@ -70,6 +73,23 @@ export interface SubmitPrefillAck {
 export interface PrefillBridgeAck {
   source?: string;
   requestId?: string;
+  applied?: boolean;
+  reason?: string;
+}
+
+export interface ShutdownProgressPayload {
+  stage: string;
+  detail?: string;
+  elapsedMs?: number;
+}
+
+export interface WorkspaceSessionBridgePayload {
+  action: string;
+  source: string;
+  requestId?: string;
+  sessionId?: string;
+  workDir?: string;
+  routeTemplate?: string;
   applied?: boolean;
   reason?: string;
 }

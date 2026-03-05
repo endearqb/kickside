@@ -11,12 +11,17 @@ use chrono::Local;
 use rand::Rng;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
+use url::Url;
 
-use crate::{app_state::AppState, backend_manager, log_manager, settings_store, window_manager};
+use crate::{
+    app_state::AppState, backend_manager, log_manager, settings_store, window_manager,
+    workspace_session,
+};
 
 const OPEN_FILES_DEBOUNCE_MS: u64 = 350;
 const WORKSPACE_STEM_MAX_LEN: usize = 40;
 const WORKSPACE_ATTEMPTS: usize = 24;
+const CLI_LOG_ARG_MAX_CHARS: usize = 480;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenRequest {
@@ -39,7 +44,10 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
     }
 
     let current_dir = std::env::current_dir().ok();
-    match parse_open_request(&args, current_dir.as_deref()) {
+    let parsed = parse_open_request(&args, current_dir.as_deref());
+    log_open_request_parse(app, "startup", &args, current_dir.as_deref(), &parsed);
+
+    match parsed {
         Ok(Some(request)) => {
             mark_startup_open_request(app);
             if let Err(error) = apply_open_request(app, request) {
@@ -49,7 +57,9 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
                 );
             }
         }
-        Ok(None) => {}
+        Ok(None) => {
+            log_non_matching_args(app, "startup", &args);
+        }
         Err(error) => {
             log_manager::append_line(app, format!("invalid startup arguments: {error}"));
         }
@@ -66,6 +76,7 @@ fn mark_startup_open_request(app: &AppHandle) {
 pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Option<String>) {
     let cwd_path = cwd.as_deref().map(PathBuf::from);
     let parsed = parse_open_request(&args, cwd_path.as_deref());
+    log_open_request_parse(&app, "forwarded", &args, cwd_path.as_deref(), &parsed);
     match parsed {
         Ok(Some(OpenRequest::OpenDir(path))) => {
             thread::spawn(move || {
@@ -81,6 +92,7 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
             enqueue_open_files_request(app, files);
         }
         Ok(None) => {
+            log_non_matching_args(&app, "forwarded", &args);
             window_manager::show_and_focus(&app);
         }
         Err(error) => {
@@ -175,6 +187,7 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
 
     backend_manager::set_session_work_dir(app, Some(directory.clone()))
         .map_err(|error| error.to_string())?;
+    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request");
     log_manager::append_line(
         app,
         format!(
@@ -207,6 +220,7 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
 
     backend_manager::set_session_work_dir(app, Some(workspace_dir.clone()))
         .map_err(|error| error.to_string())?;
+    workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request");
 
     log_manager::append_line(
         app,
@@ -222,70 +236,218 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct CandidatePath {
+    raw: String,
+    resolved: PathBuf,
+}
+
+#[derive(Debug, Default)]
+struct CandidateClassification {
+    files: Vec<PathBuf>,
+    directories: Vec<PathBuf>,
+    missing: Vec<CandidatePath>,
+    other_fs_entries: Vec<CandidatePath>,
+}
+
 fn parse_open_request(args: &[String], cwd: Option<&Path>) -> Result<Option<OpenRequest>, String> {
     if args.is_empty() {
         return Ok(None);
     }
 
-    let args = strip_executable_arg(args);
+    let args = normalize_cli_args(args);
     if args.is_empty() {
         return Ok(None);
     }
 
     if let Some(index) = args.iter().position(|value| value == "--open-dir") {
-        let Some(raw_path) = args.get(index + 1) else {
-            return Err("`--open-dir` requires a path argument".to_string());
-        };
-        let path = resolve_path(raw_path, cwd);
-        return Ok(Some(OpenRequest::OpenDir(path)));
+        return parse_open_dir_flag(&args, index, cwd);
     }
 
     if let Some(index) = args.iter().position(|value| value == "--open-files") {
-        let files: Vec<PathBuf> = args
-            .iter()
-            .skip(index + 1)
-            .filter(|value| !value.starts_with("--"))
-            .map(|value| resolve_path(value, cwd))
-            .collect();
-        if files.is_empty() {
-            return Err("`--open-files` requires at least one file path".to_string());
-        }
-        return Ok(Some(OpenRequest::OpenFiles(dedupe_paths(files))));
+        return parse_open_files_flag(&args, index, cwd);
     }
 
-    let candidates: Vec<PathBuf> = args
+    parse_implicit_candidates(&args, cwd)
+}
+
+fn normalize_cli_args(args: &[String]) -> Vec<String> {
+    strip_executable_arg(args)
         .iter()
-        .filter(|value| !value.starts_with("--"))
-        .map(|value| resolve_path(value, cwd))
-        .collect();
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .filter(|value| !is_shell_noise_arg(value))
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn parse_open_dir_flag(
+    args: &[String],
+    index: usize,
+    cwd: Option<&Path>,
+) -> Result<Option<OpenRequest>, String> {
+    let remainder = args.get(index + 1..).unwrap_or_default();
+    if remainder.is_empty() {
+        return Err("`--open-dir` requires a path argument".to_string());
+    }
+
+    let raw_path = if remainder[0] == "--" {
+        let Some(path) = remainder.get(1) else {
+            return Err("`--open-dir --` requires a path argument".to_string());
+        };
+        path
+    } else {
+        if is_option_token(&remainder[0]) {
+            return Err(format!(
+                "`--open-dir` received option `{}` as path argument",
+                remainder[0]
+            ));
+        }
+        &remainder[0]
+    };
+
+    Ok(Some(OpenRequest::OpenDir(resolve_path(raw_path, cwd))))
+}
+
+fn parse_open_files_flag(
+    args: &[String],
+    index: usize,
+    cwd: Option<&Path>,
+) -> Result<Option<OpenRequest>, String> {
+    let remainder = args.get(index + 1..).unwrap_or_default();
+    if remainder.is_empty() {
+        return Err("`--open-files` requires at least one file path".to_string());
+    }
+
+    let literal_mode = remainder.first().is_some_and(|value| value == "--");
+    let file_tokens = if literal_mode {
+        &remainder[1..]
+    } else {
+        remainder
+    };
+    if file_tokens.is_empty() {
+        return Err("`--open-files --` requires at least one file path".to_string());
+    }
+
+    let candidates = collect_candidate_paths(file_tokens, cwd, literal_mode);
+    if candidates.is_empty() {
+        return Err(
+            "`--open-files` did not contain any usable paths after filtering options".to_string(),
+        );
+    }
+
+    let classification = classify_candidate_paths(candidates);
+    if !classification.files.is_empty() {
+        return Ok(Some(OpenRequest::OpenFiles(dedupe_paths(
+            classification.files,
+        ))));
+    }
+    if classification.directories.len() == 1
+        && classification.missing.is_empty()
+        && classification.other_fs_entries.is_empty()
+    {
+        return Ok(Some(OpenRequest::OpenDir(
+            classification.directories[0].clone(),
+        )));
+    }
+
+    Err(build_open_files_parse_error(&classification, literal_mode))
+}
+
+fn parse_implicit_candidates(
+    args: &[String],
+    cwd: Option<&Path>,
+) -> Result<Option<OpenRequest>, String> {
+    let candidates = collect_candidate_paths(args, cwd, false);
     if candidates.is_empty() {
         return Ok(None);
     }
 
-    let mut files = Vec::new();
-    let mut directories = Vec::new();
-    let mut missing = Vec::new();
-
-    for path in candidates {
-        match fs::metadata(&path) {
-            Ok(metadata) if metadata.is_file() => files.push(path),
-            Ok(metadata) if metadata.is_dir() => directories.push(path),
-            Ok(_) => {}
-            Err(_) => missing.push(path),
-        }
+    let classification = classify_candidate_paths(candidates);
+    if !classification.files.is_empty() {
+        return Ok(Some(OpenRequest::OpenFiles(dedupe_paths(
+            classification.files,
+        ))));
     }
-
-    if !files.is_empty() {
-        return Ok(Some(OpenRequest::OpenFiles(dedupe_paths(files))));
-    }
-    if let Some(directory) = directories.into_iter().next() {
+    if let Some(directory) = classification.directories.into_iter().next() {
         return Ok(Some(OpenRequest::OpenDir(directory)));
     }
-    if let Some(path) = missing.into_iter().next() {
-        return Err(format!("path does not exist: {}", path.display()));
+    if let Some(path) = classification.missing.into_iter().next() {
+        return Err(format!("path does not exist: {}", path.resolved.display()));
+    }
+    if let Some(path) = classification.other_fs_entries.into_iter().next() {
+        return Err(format!(
+            "path is neither file nor directory: {}",
+            path.resolved.display()
+        ));
     }
 
     Ok(None)
+}
+
+fn collect_candidate_paths(
+    tokens: &[String],
+    cwd: Option<&Path>,
+    literal_mode: bool,
+) -> Vec<CandidatePath> {
+    let mut candidates = Vec::new();
+    for token in tokens {
+        let value = token.trim();
+        if value.is_empty() || is_shell_noise_arg(value) {
+            continue;
+        }
+
+        let resolved = resolve_path(value, cwd);
+        if !literal_mode && is_option_token(value) && !resolved.exists() {
+            continue;
+        }
+
+        candidates.push(CandidatePath {
+            raw: value.to_string(),
+            resolved,
+        });
+    }
+    candidates
+}
+
+fn classify_candidate_paths(candidates: Vec<CandidatePath>) -> CandidateClassification {
+    let mut classification = CandidateClassification::default();
+    for candidate in candidates {
+        match fs::metadata(&candidate.resolved) {
+            Ok(metadata) if metadata.is_file() => classification.files.push(candidate.resolved),
+            Ok(metadata) if metadata.is_dir() => {
+                classification.directories.push(candidate.resolved)
+            }
+            Ok(_) => classification.other_fs_entries.push(candidate),
+            Err(_) => classification.missing.push(candidate),
+        }
+    }
+
+    classification
+}
+
+fn build_open_files_parse_error(
+    classification: &CandidateClassification,
+    literal_mode: bool,
+) -> String {
+    let first_invalid = classification
+        .missing
+        .first()
+        .or_else(|| classification.other_fs_entries.first());
+    let invalid_token = first_invalid
+        .map(|entry| entry.raw.as_str())
+        .unwrap_or("<none>");
+    let invalid_resolved = first_invalid
+        .map(|entry| entry.resolved.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+
+    format!(
+        "open-files parse failed: reason=no_valid_files; literal_mode={literal_mode}; first_invalid_token={invalid_token}; first_invalid_resolved={invalid_resolved}; files_detected={}; directories_detected={}; missing_detected={}; other_detected={}",
+        classification.files.len(),
+        classification.directories.len(),
+        classification.missing.len(),
+        classification.other_fs_entries.len()
+    )
 }
 
 fn strip_executable_arg(args: &[String]) -> &[String] {
@@ -303,7 +465,11 @@ fn strip_executable_arg(args: &[String]) -> &[String] {
 }
 
 fn resolve_path(raw: &str, cwd: Option<&Path>) -> PathBuf {
-    let path = PathBuf::from(raw);
+    if let Some(path) = parse_file_uri(raw) {
+        return path;
+    }
+
+    let path = PathBuf::from(raw.trim());
     if path.is_absolute() {
         return path;
     }
@@ -311,6 +477,90 @@ fn resolve_path(raw: &str, cwd: Option<&Path>) -> PathBuf {
         return cwd.join(path);
     }
     path
+}
+
+fn parse_file_uri(raw: &str) -> Option<PathBuf> {
+    if !raw.trim().to_ascii_lowercase().starts_with("file://") {
+        return None;
+    }
+    let url = Url::parse(raw.trim()).ok()?;
+    if url.scheme() != "file" {
+        return None;
+    }
+    url.to_file_path().ok()
+}
+
+fn is_shell_noise_arg(value: &str) -> bool {
+    let lower = value.trim().to_ascii_lowercase();
+    lower == "/embedding" || lower.starts_with("/prefetch:")
+}
+
+fn is_option_token(value: &str) -> bool {
+    value.starts_with("--")
+}
+
+fn log_open_request_parse(
+    app: &AppHandle,
+    scope: &str,
+    args: &[String],
+    cwd: Option<&Path>,
+    parsed: &Result<Option<OpenRequest>, String>,
+) {
+    let cwd_display = cwd
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    let args_display = format_args_for_log(args);
+    let parsed_display = match parsed {
+        Ok(Some(OpenRequest::OpenDir(path))) => format!("open_dir:{}", path.display()),
+        Ok(Some(OpenRequest::OpenFiles(files))) => {
+            let first = files
+                .first()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            format!("open_files:{} (first={first})", files.len())
+        }
+        Ok(None) => "none".to_string(),
+        Err(error) => format!("error:{error}"),
+    };
+
+    log_manager::append_line(
+        app,
+        format!(
+            "open-request parse (scope={scope}, cwd={cwd_display}, args={args_display}, result={parsed_display})"
+        ),
+    );
+}
+
+fn format_args_for_log(args: &[String]) -> String {
+    let mut joined = args
+        .iter()
+        .map(|value| format!("\"{}\"", value.replace('"', "\\\"")))
+        .collect::<Vec<String>>()
+        .join(" ");
+    if joined.len() > CLI_LOG_ARG_MAX_CHARS {
+        joined.truncate(CLI_LOG_ARG_MAX_CHARS);
+        joined.push_str("...");
+    }
+    joined
+}
+
+fn log_non_matching_args(app: &AppHandle, scope: &str, args: &[String]) {
+    if args.is_empty() {
+        return;
+    }
+
+    let first = args
+        .first()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("<empty>");
+    log_manager::append_line(
+        app,
+        format!(
+            "open-request parse produced no actionable request (scope={scope}, first_token={first}, args={})",
+            format_args_for_log(args)
+        ),
+    );
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -533,6 +783,33 @@ fn write_sources_manifest(files: &[PathBuf], workspace_dir: &Path) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "kimi-shell-open-request-{prefix}-{}",
+                random_code()
+            ));
+            fs::create_dir_all(&path).expect("failed to create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn parse_explicit_open_dir_flag() {
@@ -545,20 +822,79 @@ mod tests {
     }
 
     #[test]
-    fn parse_explicit_open_files_flag() {
+    fn parse_open_files_supports_file_uri() {
+        let temp = TempDirGuard::new("file-uri");
+        let file_path = temp.path().join("a.txt");
+        fs::write(&file_path, b"ok").expect("failed to write file");
+
+        let file_uri = Url::from_file_path(&file_path)
+            .expect("failed to build file uri")
+            .to_string();
+        let args = vec!["--open-files".to_string(), file_uri];
+        let request = parse_open_request(&args, None).expect("parse should succeed");
+        assert_eq!(request, Some(OpenRequest::OpenFiles(vec![file_path])));
+    }
+
+    #[test]
+    fn parse_open_files_literal_separator_keeps_dash_prefixed_file() {
+        let temp = TempDirGuard::new("literal");
+        let file_path = temp.path().join("--draft.md");
+        fs::write(&file_path, b"hello").expect("failed to write file");
+
         let args = vec![
             "--open-files".to_string(),
-            "D:\\a.txt".to_string(),
-            "D:\\b.md".to_string(),
+            "--".to_string(),
+            "--draft.md".to_string(),
         ];
-        let request = parse_open_request(&args, None).expect("parse should succeed");
-        assert_eq!(
-            request,
-            Some(OpenRequest::OpenFiles(vec![
-                PathBuf::from("D:\\a.txt"),
-                PathBuf::from("D:\\b.md"),
-            ]))
-        );
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+        assert_eq!(request, Some(OpenRequest::OpenFiles(vec![file_path])));
+    }
+
+    #[test]
+    fn parse_open_files_without_literal_still_accepts_existing_dash_prefixed_file() {
+        let temp = TempDirGuard::new("literal-optional");
+        let file_path = temp.path().join("--draft.md");
+        fs::write(&file_path, b"hello").expect("failed to write file");
+
+        let args = vec!["--open-files".to_string(), "--draft.md".to_string()];
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+        assert_eq!(request, Some(OpenRequest::OpenFiles(vec![file_path])));
+    }
+
+    #[test]
+    fn parse_open_files_filters_shell_noise_args() {
+        let temp = TempDirGuard::new("shell-noise");
+        let file_path = temp.path().join("note.md");
+        fs::write(&file_path, b"hello").expect("failed to write file");
+
+        let args = vec![
+            "/prefetch:7".to_string(),
+            "/embedding".to_string(),
+            "--open-files".to_string(),
+            "note.md".to_string(),
+        ];
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+        assert_eq!(request, Some(OpenRequest::OpenFiles(vec![file_path])));
+    }
+
+    #[test]
+    fn parse_open_files_falls_back_to_single_directory() {
+        let temp = TempDirGuard::new("fallback-dir");
+        let dir_path = temp.path().join("workspace");
+        fs::create_dir_all(&dir_path).expect("failed to create directory");
+
+        let args = vec!["--open-files".to_string(), "workspace".to_string()];
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+        assert_eq!(request, Some(OpenRequest::OpenDir(dir_path)));
+    }
+
+    #[test]
+    fn parse_open_files_error_contains_first_invalid_token() {
+        let temp = TempDirGuard::new("invalid-token");
+        let args = vec!["--open-files".to_string(), "missing.md".to_string()];
+        let error = parse_open_request(&args, Some(temp.path())).expect_err("should fail");
+        assert!(error.contains("first_invalid_token=missing.md"));
+        assert!(error.contains("reason=no_valid_files"));
     }
 
     #[test]

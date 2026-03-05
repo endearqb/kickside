@@ -34,6 +34,9 @@ pub struct AppStatus {
     pub configured_kimi_path: Option<String>,
     pub configured_work_dir: Option<String>,
     pub effective_work_dir: Option<String>,
+    pub active_session_id: Option<String>,
+    pub active_session_work_dir: Option<String>,
+    pub session_source: Option<String>,
     pub logs_dir: String,
     pub hotkey: String,
 }
@@ -71,6 +74,27 @@ pub struct SubmitPrefillAck {
     pub queued: bool,
     pub dispatched: bool,
     pub text_length: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShutdownProgressPayload {
+    pub stage: String,
+    pub detail: Option<String>,
+    pub elapsed_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSessionBridgePayload {
+    pub action: String,
+    pub source: String,
+    pub request_id: Option<String>,
+    pub session_id: Option<String>,
+    pub work_dir: Option<String>,
+    pub route_template: Option<String>,
+    pub applied: Option<bool>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

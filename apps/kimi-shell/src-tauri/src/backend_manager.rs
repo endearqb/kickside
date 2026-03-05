@@ -25,7 +25,7 @@ use crate::{
         KimiCliConfigCenterView, LoopControlEntry, McpServerEntry, ModelEntry, ProviderEntry,
         ServiceEntry, TypedFieldEntry, TypedFieldType,
     },
-    window_manager,
+    window_manager, workspace_session,
 };
 
 const SHUTDOWN_TIMEOUT_SECS: u64 = 4;
@@ -34,6 +34,9 @@ const THEME_BRIDGE_SOURCE: &str = "kimi-shell-theme-bridge";
 const SHELL_THEME_SYNC_SOURCE: &str = "kimi-shell-theme-sync";
 const PREFILL_BRIDGE_SOURCE: &str = "kimi-shell-prefill-bridge";
 const SHELL_PREFILL_SYNC_SOURCE: &str = "kimi-shell-prefill-sync";
+const EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-external-link-bridge";
+const SHELL_SESSION_SYNC_SOURCE: &str = "kimi-shell-session-sync";
+const SESSION_BRIDGE_SOURCE: &str = "kimi-shell-session-bridge";
 const MAX_UPSTREAM_HEADER_BYTES: usize = 64 * 1024;
 const MAX_INSTALL_OUTPUT_CHARS: usize = 1500;
 const ENV_VALUE_VISIBLE_EDGE: usize = 2;
@@ -279,6 +282,8 @@ pub fn start_backend(app: AppHandle) {
         (runtime.generation, stale_child)
     };
 
+    workspace_session::clear_active_session_runtime(&app, "start_backend");
+
     if let Some(mut stale_child) = stale_child {
         let reason = terminate_child(&mut stale_child);
         log_manager::append_line(
@@ -337,6 +342,9 @@ pub fn set_session_work_dir(app: &AppHandle, work_dir: Option<PathBuf>) -> anyho
 }
 
 pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
+    let stop_started = Instant::now();
+    log_manager::append_line(app, "shutdown stage=stop_backend_begin");
+
     let child = {
         let state = app.state::<AppState>();
         let mut runtime = state
@@ -379,12 +387,25 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
     runtime.loading_reported_cycle_id = None;
     runtime.backend_ready_at_ms = None;
     runtime.last_exit_reason = termination_reason.clone();
+    runtime.active_session_id = None;
+    runtime.active_session_work_dir = None;
+    runtime.session_source = Some("cleared:stop_backend".to_string());
+    drop(runtime);
+
+    workspace_session::clear_active_session_runtime(app, "stop_backend");
 
     if let Some(reason) = termination_reason {
         log_manager::append_line(app, format!("backend stopped ({reason})"));
     } else {
         log_manager::append_line(app, "backend stopped");
     }
+    log_manager::append_line(
+        app,
+        format!(
+            "shutdown stage=stop_backend_done elapsed_ms={}",
+            stop_started.elapsed().as_millis()
+        ),
+    );
     Ok(())
 }
 
@@ -393,7 +414,7 @@ pub fn open_logs_folder(app: &AppHandle) -> Result<(), String> {
     open_with_system_file_manager(&logs_dir).map_err(|error| error.to_string())
 }
 
-pub fn open_external_url(url: &str) -> Result<(), String> {
+pub fn open_external_url(app: &AppHandle, url: &str) -> Result<(), String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return Err("url cannot be empty".to_string());
@@ -405,6 +426,10 @@ pub fn open_external_url(url: &str) -> Result<(), String> {
         return Err(format!("unsupported url scheme: {scheme}"));
     }
 
+    log_manager::append_line(
+        app,
+        format!("external-link bridge open url={}", parsed.as_str()),
+    );
     open_with_system_browser(parsed.as_str()).map_err(|error| error.to_string())
 }
 
@@ -1789,6 +1814,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         format!("backend ready on port {active_port}; workspace proxy on {workspace_port}"),
     );
     window_manager::mark_backend_ready(app, "backend_ready");
+    workspace_session::handle_backend_ready(app, generation, workspace_port);
     spawn_monitor(app.clone(), generation);
 
     Ok(())
@@ -1854,6 +1880,7 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
         };
 
         if let Some(message) = crash_message {
+            workspace_session::clear_active_session_runtime(&app, "monitor_crash");
             log_manager::append_line(&app, &message);
             window_manager::show_control_center(&app, "monitor_crash");
             return;
@@ -2546,6 +2573,9 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
   const SHELL_SOURCE = "{shell_theme_source}";
   const PREFILL_SOURCE = "{shell_prefill_source}";
   const PREFILL_ACK_SOURCE = "{prefill_bridge_source}";
+  const EXTERNAL_LINK_SOURCE = "{external_link_bridge_source}";
+  const SESSION_SYNC_SOURCE = "{shell_session_sync_source}";
+  const SESSION_BRIDGE_SOURCE = "{session_bridge_source}";
   const QUERY = "(prefers-color-scheme: dark)";
   const UPSTREAM_WS_ORIGIN = "{upstream_ws_origin}";
   const UPSTREAM_WS_HOST = (function () {{
@@ -2555,6 +2585,8 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
       return "";
     }}
   }})();
+  let observedSessionId = "";
+  let observedLocationTemplate = "";
 
   function normalizeTheme(value) {{
     return value === "light" || value === "dark" ? value : "system";
@@ -2620,6 +2652,157 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
       }}
     }} catch (_) {{
       // ignore
+    }}
+  }}
+
+  function postExternalLink(url, reason) {{
+    try {{
+      if (!window.parent || window.parent === window) {{
+        return;
+      }}
+      window.parent.postMessage(
+        {{
+          source: EXTERNAL_LINK_SOURCE,
+          url: url,
+          reason: reason || "unknown"
+        }},
+        "*"
+      );
+    }} catch (_) {{
+      // ignore
+    }}
+  }}
+
+  function postSessionBridge(payload) {{
+    try {{
+      if (!window.parent || window.parent === window) {{
+        return;
+      }}
+      window.parent.postMessage(
+        {{
+          source: SESSION_BRIDGE_SOURCE,
+          action: payload.action || "",
+          requestId: payload.requestId || "",
+          sessionId: payload.sessionId || "",
+          routeTemplate: payload.routeTemplate || "",
+          applied: !!payload.applied,
+          reason: payload.reason || ""
+        }},
+        "*"
+      );
+    }} catch (_) {{
+      // ignore
+    }}
+  }}
+
+  function extractSessionIdFromPath(pathname) {{
+    if (typeof pathname !== "string") {{
+      return "";
+    }}
+    const match = pathname.match(/^\/api\/sessions\/([^/]+)\/stream$/);
+    return match && match[1] ? decodeURIComponent(match[1]) : "";
+  }}
+
+  function observeSessionRouteTemplate(resolvedUrl) {{
+    const sessionId = extractSessionIdFromPath(resolvedUrl.pathname);
+    if (!sessionId) {{
+      return;
+    }}
+
+    observedSessionId = sessionId;
+    if (!observedLocationTemplate && window.location.href.indexOf(sessionId) >= 0) {{
+      observedLocationTemplate = window.location.href.split(sessionId).join("{{session_id}}");
+    }}
+
+    postSessionBridge({{
+      action: "route_template_observed",
+      sessionId: sessionId,
+      routeTemplate: observedLocationTemplate || "",
+      applied: true,
+      reason: observedLocationTemplate ? "location_template" : "session_seen_without_location_template"
+    }});
+  }}
+
+  function tryBuildNavigateTarget(sessionId, routeTemplate) {{
+    if (!sessionId) {{
+      return "";
+    }}
+
+    const template = typeof routeTemplate === "string" && routeTemplate.indexOf("{{session_id}}") >= 0
+      ? routeTemplate
+      : observedLocationTemplate;
+    if (template) {{
+      return template.split("{{session_id}}").join(encodeURIComponent(sessionId));
+    }}
+
+    const href = String(window.location.href || "");
+    if (observedSessionId && href.indexOf(observedSessionId) >= 0) {{
+      return href.split(observedSessionId).join(encodeURIComponent(sessionId));
+    }}
+    return "";
+  }}
+
+  function navigateToSession(data) {{
+    const requestId = typeof data.requestId === "string" ? data.requestId : "";
+    const sessionId = typeof data.sessionId === "string" ? data.sessionId.trim() : "";
+    const routeTemplate = typeof data.routeTemplate === "string" ? data.routeTemplate : "";
+
+    if (!sessionId) {{
+      postSessionBridge({{
+        action: "navigate_session_ack",
+        requestId,
+        sessionId,
+        applied: false,
+        reason: "missing_session_id"
+      }});
+      return;
+    }}
+
+    const target = tryBuildNavigateTarget(sessionId, routeTemplate);
+    if (!target) {{
+      postSessionBridge({{
+        action: "navigate_session_ack",
+        requestId,
+        sessionId,
+        applied: false,
+        reason: "missing_or_unusable_route_template"
+      }});
+      return;
+    }}
+
+    try {{
+      window.location.assign(target);
+      postSessionBridge({{
+        action: "navigate_session_ack",
+        requestId,
+        sessionId,
+        routeTemplate: routeTemplate || observedLocationTemplate,
+        applied: true,
+        reason: "navigated"
+      }});
+    }} catch (_) {{
+      postSessionBridge({{
+        action: "navigate_session_ack",
+        requestId,
+        sessionId,
+        applied: false,
+        reason: "navigate_exception"
+      }});
+    }}
+  }}
+
+  function shouldOpenExternally(url) {{
+    if (!url) {{
+      return false;
+    }}
+    try {{
+      const parsed = new URL(url, window.location.href);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
+        return false;
+      }}
+      return parsed.origin !== window.location.origin;
+    }} catch (_) {{
+      return false;
     }}
   }}
 
@@ -2813,6 +2996,9 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
       const resolved = new URL(String(rawUrl), window.location.href);
       const isSameProxyHost = resolved.host === window.location.host;
       const isSessionStream = /^\/api\/sessions\/[^/]+\/stream$/.test(resolved.pathname);
+      if (isSessionStream) {{
+        observeSessionRouteTemplate(resolved);
+      }}
       if (!isSameProxyHost || !isSessionStream) {{
         return rawUrl;
       }}
@@ -2841,6 +3027,48 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
       PatchedWebSocket.CLOSING = NativeWebSocket.CLOSING;
       PatchedWebSocket.CLOSED = NativeWebSocket.CLOSED;
       window.WebSocket = PatchedWebSocket;
+    }}
+  }} catch (_) {{
+    // ignore
+  }}
+
+  try {{
+    document.addEventListener(
+      "click",
+      function(event) {{
+        const target = event && event.target;
+        if (!(target instanceof Element)) {{
+          return;
+        }}
+        const anchor = target.closest("a[href]");
+        if (!(anchor instanceof HTMLAnchorElement)) {{
+          return;
+        }}
+        const href = anchor.getAttribute("href") || "";
+        if (!shouldOpenExternally(href)) {{
+          return;
+        }}
+        event.preventDefault();
+        event.stopPropagation();
+        postExternalLink(new URL(href, window.location.href).toString(), "anchor_click");
+      }},
+      true
+    );
+  }} catch (_) {{
+    // ignore
+  }}
+
+  try {{
+    const nativeWindowOpen = window.open;
+    if (typeof nativeWindowOpen === "function") {{
+      window.open = function(url, target, features) {{
+        const resolvedUrl = typeof url === "string" ? url : String(url || "");
+        if (shouldOpenExternally(resolvedUrl)) {{
+          postExternalLink(new URL(resolvedUrl, window.location.href).toString(), "window_open");
+          return null;
+        }}
+        return nativeWindowOpen.call(window, url, target, features);
+      }};
     }}
   }} catch (_) {{
     // ignore
@@ -2879,6 +3107,13 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
     }}
     if (data.source === PREFILL_SOURCE) {{
       applyPrefillFromShell(data);
+      return;
+    }}
+    if (data.source === SESSION_SYNC_SOURCE) {{
+      const action = typeof data.action === "string" ? data.action : "";
+      if (action === "navigate_session") {{
+        navigateToSession(data);
+      }}
     }}
   }});
 
@@ -2899,6 +3134,9 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
         shell_theme_source = SHELL_THEME_SYNC_SOURCE,
         prefill_bridge_source = PREFILL_BRIDGE_SOURCE,
         shell_prefill_source = SHELL_PREFILL_SYNC_SOURCE,
+        external_link_bridge_source = EXTERNAL_LINK_BRIDGE_SOURCE,
+        shell_session_sync_source = SHELL_SESSION_SYNC_SOURCE,
+        session_bridge_source = SESSION_BRIDGE_SOURCE,
         upstream_ws_origin = upstream_ws_origin
     )
 }
@@ -3058,8 +3296,12 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
         runtime.launch_command = None;
         runtime.backend_ready_at_ms = None;
         runtime.last_exit_reason = Some("missing_kimi".to_string());
+        runtime.active_session_id = None;
+        runtime.active_session_work_dir = None;
+        runtime.session_source = Some("cleared:missing_kimi".to_string());
     }
 
+    workspace_session::clear_active_session_runtime(app, "missing_kimi");
     log_manager::append_line(app, &message);
     window_manager::show_missing_kimi(app, "missing_kimi");
 }
@@ -3084,8 +3326,12 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
         runtime.last_error = Some(message.clone());
         runtime.backend_ready_at_ms = None;
         runtime.last_exit_reason = Some("startup_failed".to_string());
+        runtime.active_session_id = None;
+        runtime.active_session_work_dir = None;
+        runtime.session_source = Some("cleared:crashed".to_string());
     }
 
+    workspace_session::clear_active_session_runtime(app, "crashed");
     log_manager::append_line(app, &message);
     window_manager::show_control_center(app, "backend_crashed");
 }
@@ -3149,14 +3395,16 @@ fn force_terminate(pid: u32) {
 
 #[cfg(windows)]
 fn soft_terminate(pid: u32) {
-    let _ = Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/T"])
-        .status();
+    let mut command = Command::new("taskkill");
+    command_utils::configure_system_command(&mut command);
+    let _ = command.args(["/PID", &pid.to_string(), "/T"]).status();
 }
 
 #[cfg(windows)]
 fn force_terminate(pid: u32) {
-    let _ = Command::new("taskkill")
+    let mut command = Command::new("taskkill");
+    command_utils::configure_system_command(&mut command);
+    let _ = command
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status();
 }

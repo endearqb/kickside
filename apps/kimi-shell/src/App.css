@@ -1424,6 +1424,45 @@ input:focus {
   padding: 12px;
 }
 
+.shutdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--shell-bg) 72%, #000 28%);
+}
+
+.shutdown-card {
+  width: min(360px, 100%);
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  padding: 14px;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.shutdown-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.shutdown-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.shutdown-card small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .statusbar {
   height: 26px;
   min-height: 26px;

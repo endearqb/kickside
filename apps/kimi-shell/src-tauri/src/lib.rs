@@ -12,11 +12,14 @@ mod shortcut_manager;
 mod tray_manager;
 mod types;
 mod window_manager;
+mod workspace_session;
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::thread;
+use std::time::Instant;
 
-use tauri::{AppHandle, LogicalSize, Manager, RunEvent, Size};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, Size};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
@@ -24,8 +27,11 @@ use types::{
     AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
     InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
     KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
-    SubmitPrefillAck, CURRENT_ONBOARDING_VERSION,
+    ShutdownProgressPayload, SubmitPrefillAck, CURRENT_ONBOARDING_VERSION,
 };
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
 
 #[tauri::command]
 fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
@@ -50,6 +56,9 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         message,
         detected_kimi_path,
         effective_work_dir,
+        active_session_id,
+        active_session_work_dir,
+        session_source,
     ) = {
         let runtime = shared
             .runtime
@@ -79,6 +88,12 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
                 .effective_work_dir
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
+            runtime.active_session_id.clone(),
+            runtime
+                .active_session_work_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            runtime.session_source.clone(),
         )
     };
 
@@ -100,6 +115,9 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         configured_kimi_path: settings.kimi_path,
         configured_work_dir: settings.work_dir,
         effective_work_dir,
+        active_session_id,
+        active_session_work_dir,
+        session_source,
         logs_dir: logs_dir.to_string_lossy().to_string(),
         hotkey: settings.hotkey,
     })
@@ -224,8 +242,8 @@ fn open_logs_folder(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-    backend_manager::open_external_url(&url)
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    backend_manager::open_external_url(&app, &url)
 }
 
 #[tauri::command]
@@ -568,6 +586,8 @@ pub fn run() {
                 );
             }
 
+            auto_repair_context_menu(app.handle());
+
             open_request::apply_startup_cli_request(app.handle());
             window_manager::enter_local_boot(app.handle(), "setup_bootstrap");
             backend_manager::start_backend(app.handle().clone());
@@ -624,13 +644,42 @@ pub fn run() {
             if label == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    let _ = backend_manager::stop_backend(app_handle);
-                    app_handle.exit(0);
+                    let app = app_handle.clone();
+                    emit_shutdown_progress(
+                        &app,
+                        "close_requested",
+                        Some("正在关闭后端服务…"),
+                        Some(0),
+                    );
+                    thread::spawn(move || {
+                        let started = Instant::now();
+                        emit_shutdown_progress(
+                            &app,
+                            "stopping_backend",
+                            Some("正在关闭后端服务…"),
+                            Some(0),
+                        );
+                        if let Err(error) = backend_manager::stop_backend(&app) {
+                            log_manager::append_line(
+                                &app,
+                                format!("shutdown stop_backend failed: {error:#}"),
+                            );
+                        }
+                        emit_shutdown_progress(
+                            &app,
+                            "finalizing_exit",
+                            Some("正在退出应用…"),
+                            Some(duration_to_u64_ms(started.elapsed().as_millis())),
+                        );
+                        app.exit(0);
+                    });
                 }
             }
         }
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
-            let _ = backend_manager::stop_backend(app_handle);
+            if should_attempt_stop_backend(app_handle) {
+                let _ = backend_manager::stop_backend(app_handle);
+            }
         }
         _ => {}
     });
@@ -886,6 +935,78 @@ fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {
     let start = start_ms?;
     let end = end_ms?;
     end.checked_sub(start)
+}
+
+fn duration_to_u64_ms(value: u128) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn emit_shutdown_progress(
+    app: &AppHandle,
+    stage: &str,
+    detail: Option<&str>,
+    elapsed_ms: Option<u64>,
+) {
+    let payload = ShutdownProgressPayload {
+        stage: stage.to_string(),
+        detail: detail.map(|value| value.to_string()),
+        elapsed_ms,
+    };
+    if let Err(error) = app.emit_to(MAIN_WINDOW_LABEL, SHUTDOWN_PROGRESS_EVENT, payload) {
+        log_manager::append_line(
+            app,
+            format!("failed to emit shutdown progress event: {error}"),
+        );
+    }
+}
+
+fn should_attempt_stop_backend(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let lock = state.runtime.lock();
+    let Ok(runtime) = lock else {
+        return true;
+    };
+
+    !matches!(runtime.state, BackendState::Stopped)
+}
+
+fn auto_repair_context_menu(app: &AppHandle) {
+    let status = context_menu::status(app);
+    if !status.supported {
+        return;
+    }
+    if status.enabled {
+        log_manager::append_line(app, "context-menu self-heal skipped (already healthy)");
+        return;
+    }
+
+    let reason = status
+        .message
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+    log_manager::append_line(
+        app,
+        format!("context-menu self-heal start (reason={reason})"),
+    );
+    match context_menu::enable(app) {
+        Ok(_) => {
+            let after = context_menu::status(app);
+            if after.enabled {
+                log_manager::append_line(app, "context-menu self-heal success");
+            } else {
+                let message = after
+                    .message
+                    .unwrap_or_else(|| "status still disabled".to_string());
+                log_manager::append_line(
+                    app,
+                    format!("context-menu self-heal incomplete: {message}"),
+                );
+            }
+        }
+        Err(error) => {
+            log_manager::append_line(app, format!("context-menu self-heal failed: {error}"));
+        }
+    }
 }
 
 #[cfg(test)]

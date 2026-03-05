@@ -6,6 +6,9 @@ export const THEME_BRIDGE_SOURCE = "kimi-shell-theme-bridge";
 export const THEME_SYNC_SOURCE = "kimi-shell-theme-sync";
 export const PREFILL_SYNC_SOURCE = "kimi-shell-prefill-sync";
 export const PREFILL_BRIDGE_SOURCE = "kimi-shell-prefill-bridge";
+export const EXTERNAL_LINK_BRIDGE_SOURCE = "kimi-shell-external-link-bridge";
+export const SESSION_SYNC_SOURCE = "kimi-shell-session-sync";
+export const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
 
 export function getInitialThemeMode(): Theme {
   try {

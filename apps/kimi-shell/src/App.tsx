@@ -29,6 +29,7 @@ function App() {
         tauriRuntime={shell.tauriRuntime}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
+        activeSessionWorkDir={shell.status?.activeSessionWorkDir}
         effectiveWorkDir={shell.status?.effectiveWorkDir}
         onRetry={shell.handleRetry}
         onOpenControlCenter={shell.openControlCenter}
@@ -129,6 +130,19 @@ function App() {
           onSkipOnboarding={shell.handleSkipOnboarding}
           onOpenExternalUrl={shell.handleOpenExternalUrl}
         />
+      )}
+
+      {shell.shutdownProgress && (
+        <div className="shutdown-overlay" role="status" aria-live="assertive">
+          <div className="shutdown-card">
+            <div className="spinner" aria-hidden />
+            <h3>正在关闭应用</h3>
+            <p>{shell.shutdownProgress.detail ?? shell.shutdownProgress.stage}</p>
+            {typeof shell.shutdownProgress.elapsedMs === "number" && (
+              <small>耗时 {shell.shutdownProgress.elapsedMs} ms</small>
+            )}
+          </div>
+        </div>
       )}
 
       <footer className="statusbar" aria-live="polite">

@@ -21,3 +21,10 @@ pub fn configure_kimi_query_command(command: &mut Command) {
         command.creation_flags(CREATE_NO_WINDOW_FLAG);
     }
 }
+
+pub fn configure_system_command(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        command.creation_flags(CREATE_NO_WINDOW_FLAG);
+    }
+}

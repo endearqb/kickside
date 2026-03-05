@@ -4,10 +4,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  EXTERNAL_LINK_BRIDGE_SOURCE,
   getInitialThemeMode,
   LEGACY_THEME_MODE_STORAGE_KEY,
   PREFILL_BRIDGE_SOURCE,
   PREFILL_SYNC_SOURCE,
+  SESSION_BRIDGE_SOURCE,
+  SESSION_SYNC_SOURCE,
   THEME_STORAGE_KEY,
 } from "@/app/theme";
 import type {
@@ -24,10 +27,12 @@ import type {
   OnboardingStatus,
   PrefillBridgeAck,
   PrefillChatPayload,
+  ShutdownProgressPayload,
   RuntimePanelId,
   Screen,
   ShellRoutePayload,
   Theme,
+  WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
@@ -35,9 +40,13 @@ import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 const POLL_MS = 1000;
 const SHELL_ROUTE_EVENT = "shell-route";
 const PREFILL_CHAT_EVENT = "prefill-chat";
+const SHUTDOWN_PROGRESS_EVENT = "shutdown-progress";
+const WORKSPACE_SESSION_BOOTSTRAP_EVENT = "workspace-session-bootstrap";
+const WORKSPACE_SESSION_BRIDGE_EVENT = "workspace-session-bridge";
 const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
 const PREFILL_MAX_ATTEMPTS = 8;
+const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
@@ -141,6 +150,8 @@ export function useShellController() {
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
     null,
   );
+  const [shutdownProgress, setShutdownProgress] =
+    useState<ShutdownProgressPayload | null>(null);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
@@ -152,6 +163,10 @@ export function useShellController() {
   const prefillAttemptsRef = useRef<Record<string, number>>({});
   const handledPrefillIdsRef = useRef<Set<string>>(new Set());
   const inFlightPrefillRequestRef = useRef<string | null>(null);
+  const pendingSessionBridgeRef =
+    useRef<WorkspaceSessionBridgePayload | null>(null);
+  const sessionRouteTemplateRef = useRef<string | null>(null);
+  const sessionNavigateTimerRef = useRef<number | null>(null);
 
   const screen: Screen = useMemo(() => {
     const hashRoute = parseHashRoute(routeHash);
@@ -228,6 +243,13 @@ export function useShellController() {
     }
   }
 
+  function clearSessionNavigateTimer() {
+    if (sessionNavigateTimerRef.current !== null) {
+      window.clearTimeout(sessionNavigateTimerRef.current);
+      sessionNavigateTimerRef.current = null;
+    }
+  }
+
   function applyRouteHash(route: string) {
     const normalized = route.replace(/^\/+/, "").trim();
     if (!normalized) {
@@ -266,6 +288,63 @@ export function useShellController() {
     [],
   );
 
+  const dispatchPendingSessionBridge = useCallback(
+    (source: string) => {
+      const payload = pendingSessionBridgeRef.current;
+      if (!payload) {
+        return;
+      }
+      if (payload.action !== "navigate_session") {
+        pendingSessionBridgeRef.current = null;
+        return;
+      }
+      if (screen !== "workspace" || workspaceEmbedState !== "ready") {
+        return;
+      }
+      if (!workspaceOrigin) {
+        return;
+      }
+
+      const frameWindow = workspaceIframeRef.current?.contentWindow;
+      if (!frameWindow) {
+        return;
+      }
+
+      const routeTemplate =
+        payload.routeTemplate?.trim() || sessionRouteTemplateRef.current || undefined;
+      try {
+        frameWindow.postMessage(
+          {
+            source: SESSION_SYNC_SOURCE,
+            action: "navigate_session",
+            requestId: payload.requestId,
+            sessionId: payload.sessionId,
+            routeTemplate,
+          },
+          workspaceOrigin,
+        );
+      } catch (error) {
+        setActionError(String(error));
+        return;
+      }
+
+      clearSessionNavigateTimer();
+      sessionNavigateTimerRef.current = window.setTimeout(() => {
+        sessionNavigateTimerRef.current = null;
+        if (pendingSessionBridgeRef.current?.requestId === payload.requestId) {
+          pendingSessionBridgeRef.current = null;
+          setActionError(
+            `Session navigation timed out (${payload.sessionId ?? "unknown"}).`,
+          );
+          prefillDispatchRef.current?.("session_navigation_timeout");
+        }
+      }, SESSION_NAVIGATE_TIMEOUT_MS);
+
+      void source;
+    },
+    [screen, workspaceEmbedState, workspaceOrigin],
+  );
+
   const dispatchPendingPrefillToWorkspace = useCallback(
     (source: string) => {
       const payload = pendingPrefillRef.current;
@@ -274,6 +353,9 @@ export function useShellController() {
       }
       if (handledPrefillIdsRef.current.has(payload.requestId)) {
         setPendingPrefill(null);
+        return;
+      }
+      if (pendingSessionBridgeRef.current) {
         return;
       }
       if (screen !== "workspace" || workspaceEmbedState !== "ready") {
@@ -348,6 +430,9 @@ export function useShellController() {
     try {
       const data = await invoke<AppStatus>("get_app_status");
       setStatus(data);
+      if (data.state !== "stopping") {
+        setShutdownProgress(null);
+      }
       setActionError(null);
     } catch (error) {
       setActionError(String(error));
@@ -401,11 +486,15 @@ export function useShellController() {
     let disposed = false;
     let unlistenRoute: (() => void) | undefined;
     let unlistenPrefill: (() => void) | undefined;
+    let unlistenShutdownProgress: (() => void) | undefined;
+    let unlistenSessionBootstrap: (() => void) | undefined;
+    let unlistenSessionBridge: (() => void) | undefined;
 
     const bindListeners = async () => {
       try {
         const currentWebviewWindow = getCurrentWebviewWindow();
-        const [routeOff, prefillOff] = await Promise.all([
+        const [routeOff, prefillOff, shutdownOff, bootstrapOff, sessionBridgeOff] =
+          await Promise.all([
           currentWebviewWindow.listen<ShellRoutePayload>(
             SHELL_ROUTE_EVENT,
             (event) => {
@@ -419,16 +508,54 @@ export function useShellController() {
               enqueuePrefillPayload(event.payload, "event_listener");
             },
           ),
+          currentWebviewWindow.listen<ShutdownProgressPayload>(
+            SHUTDOWN_PROGRESS_EVENT,
+            (event) => {
+              setShutdownProgress(event.payload);
+            },
+          ),
+          currentWebviewWindow.listen<WorkspaceSessionBridgePayload>(
+            WORKSPACE_SESSION_BOOTSTRAP_EVENT,
+            (event) => {
+              const payload = event.payload;
+              if (payload.routeTemplate?.trim()) {
+                sessionRouteTemplateRef.current = payload.routeTemplate.trim();
+              }
+              if (payload.action === "navigate_session") {
+                pendingSessionBridgeRef.current = payload;
+                dispatchPendingSessionBridge("bootstrap_event");
+              }
+            },
+          ),
+          currentWebviewWindow.listen<WorkspaceSessionBridgePayload>(
+            WORKSPACE_SESSION_BRIDGE_EVENT,
+            (event) => {
+              const payload = event.payload;
+              if (payload.routeTemplate?.trim()) {
+                sessionRouteTemplateRef.current = payload.routeTemplate.trim();
+              }
+              if (payload.action === "navigate_session") {
+                pendingSessionBridgeRef.current = payload;
+                dispatchPendingSessionBridge("bridge_event");
+              }
+            },
+          ),
         ]);
 
         if (disposed) {
           routeOff();
           prefillOff();
+          shutdownOff();
+          bootstrapOff();
+          sessionBridgeOff();
           return;
         }
 
         unlistenRoute = routeOff;
         unlistenPrefill = prefillOff;
+        unlistenShutdownProgress = shutdownOff;
+        unlistenSessionBootstrap = bootstrapOff;
+        unlistenSessionBridge = sessionBridgeOff;
         setListenersReady(true);
       } catch (error) {
         setActionError(String(error));
@@ -446,8 +573,17 @@ export function useShellController() {
       if (unlistenPrefill) {
         unlistenPrefill();
       }
+      if (unlistenShutdownProgress) {
+        unlistenShutdownProgress();
+      }
+      if (unlistenSessionBootstrap) {
+        unlistenSessionBootstrap();
+      }
+      if (unlistenSessionBridge) {
+        unlistenSessionBridge();
+      }
     };
-  }, [enqueuePrefillPayload, tauriRuntime]);
+  }, [dispatchPendingSessionBridge, enqueuePrefillPayload, tauriRuntime]);
 
   useEffect(() => {
     if (!tauriRuntime || !listenersReady || frontendReadyHandshakeSent) {
@@ -468,13 +604,71 @@ export function useShellController() {
   }, [enqueuePrefillPayload, listenersReady, tauriRuntime]);
 
   useEffect(() => {
-    const handleWorkspacePrefillAck = (event: MessageEvent) => {
+    const handleWorkspaceBridgeMessage = (event: MessageEvent) => {
       if (!workspaceOrigin || event.origin !== workspaceOrigin) {
         return;
       }
 
-      const payload = event.data as PrefillBridgeAck | null;
-      if (!payload || payload.source !== PREFILL_BRIDGE_SOURCE) {
+      const payload = event.data as
+        | (PrefillBridgeAck & {
+            source?: string;
+            action?: string;
+            url?: string;
+            routeTemplate?: string;
+            sessionId?: string;
+          })
+        | null;
+      if (!payload || typeof payload.source !== "string") {
+        return;
+      }
+
+      if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
+        const externalUrl = payload.url?.trim();
+        if (!externalUrl) {
+          return;
+        }
+        if (tauriRuntime) {
+          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
+            setActionError(String(error));
+          });
+        } else {
+          try {
+            window.open(externalUrl, "_blank", "noopener,noreferrer");
+          } catch (error) {
+            setActionError(String(error));
+          }
+        }
+        return;
+      }
+
+      if (payload.source === SESSION_BRIDGE_SOURCE) {
+        if (payload.routeTemplate?.trim()) {
+          sessionRouteTemplateRef.current = payload.routeTemplate.trim();
+        }
+        if (payload.action === "navigate_session_ack") {
+          clearSessionNavigateTimer();
+          const currentRequestId = pendingSessionBridgeRef.current?.requestId?.trim();
+          if (
+            currentRequestId &&
+            payload.requestId?.trim() &&
+            payload.requestId?.trim() !== currentRequestId
+          ) {
+            return;
+          }
+
+          pendingSessionBridgeRef.current = null;
+          if (!payload.applied) {
+            const reason = payload.reason?.trim() || "unknown";
+            setActionError(
+              `Session navigation failed (${payload.sessionId ?? "unknown"}): ${reason}`,
+            );
+          }
+          prefillDispatchRef.current?.("session_navigation_ack");
+        }
+        return;
+      }
+
+      if (payload.source !== PREFILL_BRIDGE_SOURCE) {
         return;
       }
 
@@ -512,9 +706,9 @@ export function useShellController() {
       }
     };
 
-    window.addEventListener("message", handleWorkspacePrefillAck);
-    return () => window.removeEventListener("message", handleWorkspacePrefillAck);
-  }, [workspaceOrigin]);
+    window.addEventListener("message", handleWorkspaceBridgeMessage);
+    return () => window.removeEventListener("message", handleWorkspaceBridgeMessage);
+  }, [tauriRuntime, workspaceOrigin]);
 
   useEffect(() => {
     if (!pendingPrefill) {
@@ -526,9 +720,27 @@ export function useShellController() {
     prefillDispatchRef.current?.("pending_prefill_state_change");
   }, [pendingPrefill, screen, workspaceEmbedState, workspaceOrigin]);
 
+  useEffect(() => {
+    if (!pendingSessionBridgeRef.current) {
+      clearSessionNavigateTimer();
+      return;
+    }
+
+    dispatchPendingSessionBridge("workspace_state_change");
+  }, [dispatchPendingSessionBridge, screen, workspaceEmbedState, workspaceOrigin]);
+
+  useEffect(() => {
+    if (status?.state === "running") {
+      return;
+    }
+    pendingSessionBridgeRef.current = null;
+    clearSessionNavigateTimer();
+  }, [status?.state]);
+
   useEffect(
     () => () => {
       clearPrefillTimers();
+      clearSessionNavigateTimer();
     },
     [],
   );
@@ -1104,6 +1316,7 @@ export function useShellController() {
   function handleWorkspaceFrameLoad() {
     setWorkspaceEmbedState("ready");
     pushThemeToWorkspace();
+    dispatchPendingSessionBridge("workspace_frame_load");
     prefillDispatchRef.current?.("workspace_frame_load");
   }
 
@@ -1121,6 +1334,7 @@ export function useShellController() {
     contextMenuBusy,
     loginProbeBusy,
     actionError,
+    shutdownProgress,
     contextMenuStatus,
     loginProbeResult,
     kimiPathInput,

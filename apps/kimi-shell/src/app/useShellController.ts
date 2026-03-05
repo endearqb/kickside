@@ -25,6 +25,7 @@ import type {
   KimiCliConfigCenterView,
   LoginProbeResult,
   OnboardingStatus,
+  OpenRequestErrorPayload,
   PrefillBridgeAck,
   PrefillChatPayload,
   ShutdownProgressPayload,
@@ -41,11 +42,12 @@ const POLL_MS = 1000;
 const SHELL_ROUTE_EVENT = "shell-route";
 const PREFILL_CHAT_EVENT = "prefill-chat";
 const SHUTDOWN_PROGRESS_EVENT = "shutdown-progress";
+const OPEN_REQUEST_ERROR_EVENT = "open-request-error";
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT = "workspace-session-bridge";
 const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
-const PREFILL_MAX_ATTEMPTS = 8;
+const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 let frontendReadyHandshakeSent = false;
 
@@ -152,6 +154,7 @@ export function useShellController() {
   );
   const [shutdownProgress, setShutdownProgress] =
     useState<ShutdownProgressPayload | null>(null);
+  const [shutdownElapsedMs, setShutdownElapsedMs] = useState<number | null>(null);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
@@ -163,10 +166,15 @@ export function useShellController() {
   const prefillAttemptsRef = useRef<Record<string, number>>({});
   const handledPrefillIdsRef = useRef<Set<string>>(new Set());
   const inFlightPrefillRequestRef = useRef<string | null>(null);
+  const prefillLastFailureReasonRef = useRef<string | null>(null);
   const pendingSessionBridgeRef =
     useRef<WorkspaceSessionBridgePayload | null>(null);
   const sessionRouteTemplateRef = useRef<string | null>(null);
   const sessionNavigateTimerRef = useRef<number | null>(null);
+  const shutdownElapsedBaseRef = useRef<number>(0);
+  const shutdownElapsedStartedAtRef = useRef<number>(0);
+  const shutdownElapsedTimerRef = useRef<number | null>(null);
+  const workspaceRemoteUrlRef = useRef<string | null>(null);
 
   const screen: Screen = useMemo(() => {
     const hashRoute = parseHashRoute(routeHash);
@@ -250,6 +258,30 @@ export function useShellController() {
     }
   }
 
+  function clearShutdownElapsedTimer(resetValue: boolean) {
+    if (shutdownElapsedTimerRef.current !== null) {
+      window.clearInterval(shutdownElapsedTimerRef.current);
+      shutdownElapsedTimerRef.current = null;
+    }
+    shutdownElapsedBaseRef.current = 0;
+    shutdownElapsedStartedAtRef.current = 0;
+    if (resetValue) {
+      setShutdownElapsedMs(null);
+    }
+  }
+
+  function startShutdownElapsedTimer(baseElapsedMs?: number) {
+    const safeBase = Math.max(0, baseElapsedMs ?? 0);
+    clearShutdownElapsedTimer(false);
+    shutdownElapsedBaseRef.current = safeBase;
+    shutdownElapsedStartedAtRef.current = Date.now();
+    setShutdownElapsedMs(safeBase);
+    shutdownElapsedTimerRef.current = window.setInterval(() => {
+      const delta = Math.max(0, Date.now() - shutdownElapsedStartedAtRef.current);
+      setShutdownElapsedMs(shutdownElapsedBaseRef.current + delta);
+    }, 100);
+  }
+
   function applyRouteHash(route: string) {
     const normalized = route.replace(/^\/+/, "").trim();
     if (!normalized) {
@@ -276,6 +308,7 @@ export function useShellController() {
 
       clearPrefillTimers();
       inFlightPrefillRequestRef.current = null;
+      prefillLastFailureReasonRef.current = null;
       prefillAttemptsRef.current[requestId] = prefillAttemptsRef.current[requestId] ?? 0;
       setPendingPrefill({
         requestId,
@@ -298,7 +331,7 @@ export function useShellController() {
         pendingSessionBridgeRef.current = null;
         return;
       }
-      if (screen !== "workspace" || workspaceEmbedState !== "ready") {
+      if (status?.state !== "running" || workspaceEmbedState !== "ready") {
         return;
       }
       if (!workspaceOrigin) {
@@ -342,7 +375,7 @@ export function useShellController() {
 
       void source;
     },
-    [screen, workspaceEmbedState, workspaceOrigin],
+    [status?.state, workspaceEmbedState, workspaceOrigin],
   );
 
   const dispatchPendingPrefillToWorkspace = useCallback(
@@ -358,7 +391,7 @@ export function useShellController() {
       if (pendingSessionBridgeRef.current) {
         return;
       }
-      if (screen !== "workspace" || workspaceEmbedState !== "ready") {
+      if (status?.state !== "running" || workspaceEmbedState !== "ready") {
         return;
       }
       if (!workspaceOrigin) {
@@ -376,8 +409,11 @@ export function useShellController() {
         clearPrefillTimers();
         inFlightPrefillRequestRef.current = null;
         setPendingPrefill(null);
+        const reason = prefillLastFailureReasonRef.current;
         setActionError(
-          `Prefill dispatch exceeded retry limit (${payload.requestId}).`,
+          reason
+            ? `Prefill dispatch exceeded retry limit (${payload.requestId}): ${reason}.`
+            : `Prefill dispatch exceeded retry limit (${payload.requestId}).`,
         );
         return;
       }
@@ -421,7 +457,7 @@ export function useShellController() {
 
       void source;
     },
-    [screen, workspaceEmbedState, workspaceOrigin],
+    [status?.state, workspaceEmbedState, workspaceOrigin],
   );
 
   prefillDispatchRef.current = dispatchPendingPrefillToWorkspace;
@@ -432,6 +468,7 @@ export function useShellController() {
       setStatus(data);
       if (data.state !== "stopping") {
         setShutdownProgress(null);
+        clearShutdownElapsedTimer(true);
       }
       setActionError(null);
     } catch (error) {
@@ -487,13 +524,21 @@ export function useShellController() {
     let unlistenRoute: (() => void) | undefined;
     let unlistenPrefill: (() => void) | undefined;
     let unlistenShutdownProgress: (() => void) | undefined;
+    let unlistenOpenRequestError: (() => void) | undefined;
     let unlistenSessionBootstrap: (() => void) | undefined;
     let unlistenSessionBridge: (() => void) | undefined;
 
     const bindListeners = async () => {
       try {
         const currentWebviewWindow = getCurrentWebviewWindow();
-        const [routeOff, prefillOff, shutdownOff, bootstrapOff, sessionBridgeOff] =
+        const [
+          routeOff,
+          prefillOff,
+          shutdownOff,
+          openRequestErrorOff,
+          bootstrapOff,
+          sessionBridgeOff,
+        ] =
           await Promise.all([
           currentWebviewWindow.listen<ShellRoutePayload>(
             SHELL_ROUTE_EVENT,
@@ -512,6 +557,22 @@ export function useShellController() {
             SHUTDOWN_PROGRESS_EVENT,
             (event) => {
               setShutdownProgress(event.payload);
+              startShutdownElapsedTimer(event.payload?.elapsedMs);
+            },
+          ),
+          currentWebviewWindow.listen<OpenRequestErrorPayload>(
+            OPEN_REQUEST_ERROR_EVENT,
+            (event) => {
+              const payload = event.payload;
+              const source = payload.source?.trim() || "unknown";
+              const stage = payload.stage?.trim() || "unknown";
+              const message = payload.message?.trim() || "Unknown open-request error";
+              const argsPart = payload.argsSummary?.trim()
+                ? `; args=${payload.argsSummary.trim()}`
+                : "";
+              setActionError(
+                `Open request failed [${source}/${stage}]: ${message}${argsPart}`,
+              );
             },
           ),
           currentWebviewWindow.listen<WorkspaceSessionBridgePayload>(
@@ -520,6 +581,21 @@ export function useShellController() {
               const payload = event.payload;
               if (payload.routeTemplate?.trim()) {
                 sessionRouteTemplateRef.current = payload.routeTemplate.trim();
+              }
+              if (payload.action === "active_session_updated") {
+                setStatus((current) => {
+                  if (!current) {
+                    return current;
+                  }
+                  const nextSessionId = payload.sessionId?.trim() || undefined;
+                  const nextWorkDir = payload.workDir?.trim() || undefined;
+                  return {
+                    ...current,
+                    activeSessionId: nextSessionId,
+                    activeSessionWorkDir: nextWorkDir,
+                    sessionSource: payload.source?.trim() || current.sessionSource,
+                  };
+                });
               }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
@@ -534,6 +610,21 @@ export function useShellController() {
               if (payload.routeTemplate?.trim()) {
                 sessionRouteTemplateRef.current = payload.routeTemplate.trim();
               }
+              if (payload.action === "active_session_updated") {
+                setStatus((current) => {
+                  if (!current) {
+                    return current;
+                  }
+                  const nextSessionId = payload.sessionId?.trim() || undefined;
+                  const nextWorkDir = payload.workDir?.trim() || undefined;
+                  return {
+                    ...current,
+                    activeSessionId: nextSessionId,
+                    activeSessionWorkDir: nextWorkDir,
+                    sessionSource: payload.source?.trim() || current.sessionSource,
+                  };
+                });
+              }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
                 dispatchPendingSessionBridge("bridge_event");
@@ -546,6 +637,7 @@ export function useShellController() {
           routeOff();
           prefillOff();
           shutdownOff();
+          openRequestErrorOff();
           bootstrapOff();
           sessionBridgeOff();
           return;
@@ -554,6 +646,7 @@ export function useShellController() {
         unlistenRoute = routeOff;
         unlistenPrefill = prefillOff;
         unlistenShutdownProgress = shutdownOff;
+        unlistenOpenRequestError = openRequestErrorOff;
         unlistenSessionBootstrap = bootstrapOff;
         unlistenSessionBridge = sessionBridgeOff;
         setListenersReady(true);
@@ -575,6 +668,9 @@ export function useShellController() {
       }
       if (unlistenShutdownProgress) {
         unlistenShutdownProgress();
+      }
+      if (unlistenOpenRequestError) {
+        unlistenOpenRequestError();
       }
       if (unlistenSessionBootstrap) {
         unlistenSessionBootstrap();
@@ -692,11 +788,14 @@ export function useShellController() {
         handledPrefillIdsRef.current.add(requestId);
         delete prefillAttemptsRef.current[requestId];
         inFlightPrefillRequestRef.current = null;
+        prefillLastFailureReasonRef.current = null;
         setPendingPrefill((current) =>
           current?.requestId === requestId ? null : current,
         );
         return;
       }
+
+      prefillLastFailureReasonRef.current = payload.reason?.trim() || "workspace_ack_failed";
 
       if (prefillRetryTimerRef.current === null) {
         prefillRetryTimerRef.current = window.setTimeout(() => {
@@ -714,11 +813,12 @@ export function useShellController() {
     if (!pendingPrefill) {
       clearPrefillTimers();
       inFlightPrefillRequestRef.current = null;
+      prefillLastFailureReasonRef.current = null;
       return;
     }
 
     prefillDispatchRef.current?.("pending_prefill_state_change");
-  }, [pendingPrefill, screen, workspaceEmbedState, workspaceOrigin]);
+  }, [pendingPrefill, status?.state, workspaceEmbedState, workspaceOrigin]);
 
   useEffect(() => {
     if (!pendingSessionBridgeRef.current) {
@@ -727,7 +827,7 @@ export function useShellController() {
     }
 
     dispatchPendingSessionBridge("workspace_state_change");
-  }, [dispatchPendingSessionBridge, screen, workspaceEmbedState, workspaceOrigin]);
+  }, [dispatchPendingSessionBridge, status?.state, workspaceEmbedState, workspaceOrigin]);
 
   useEffect(() => {
     if (status?.state === "running") {
@@ -741,6 +841,8 @@ export function useShellController() {
     () => () => {
       clearPrefillTimers();
       clearSessionNavigateTimer();
+      clearShutdownElapsedTimer(true);
+      prefillLastFailureReasonRef.current = null;
     },
     [],
   );
@@ -767,9 +869,10 @@ export function useShellController() {
   }
 
   useEffect(() => {
-    void refreshCoreState();
+    void refreshStatus();
+    void refreshOnboarding();
     const timer = window.setInterval(() => {
-      void refreshCoreState();
+      void refreshStatus();
     }, POLL_MS);
     return () => window.clearInterval(timer);
   }, []);
@@ -831,15 +934,26 @@ export function useShellController() {
   useEffect(() => {
     if (screen !== "control_center") return;
     void refreshOnboarding();
-    void refreshDiagnostics();
     void refreshContextMenuStatus();
-    void loadKimiCliConfigCenter().catch(() => {
-      // Best-effort loading.
-    });
     void refreshInstallProbe().catch(() => {
       // Best-effort probe.
     });
   }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "control_center") return;
+    if (activeControlSection !== "runtime_center") return;
+    void refreshDiagnostics();
+  }, [activeControlSection, screen]);
+
+  useEffect(() => {
+    if (screen !== "control_center") return;
+    if (activeControlSection !== "onboarding") return;
+    if (configCenterView) return;
+    void loadKimiCliConfigCenter().catch(() => {
+      // Best-effort lazy loading.
+    });
+  }, [activeControlSection, configCenterView, screen]);
 
   useEffect(() => {
     if (screen !== "control_center") return;
@@ -1263,10 +1377,16 @@ export function useShellController() {
   });
 
   useEffect(() => {
-    if (screen !== "workspace" || !remoteUrl) {
+    if (!remoteUrl) {
+      workspaceRemoteUrlRef.current = null;
       setWorkspaceEmbedState("idle");
       return;
     }
+
+    if (workspaceRemoteUrlRef.current === remoteUrl) {
+      return;
+    }
+    workspaceRemoteUrlRef.current = remoteUrl;
 
     setWorkspaceEmbedState("loading");
     const timer = window.setTimeout(() => {
@@ -1276,7 +1396,7 @@ export function useShellController() {
     }, 8_000);
 
     return () => window.clearTimeout(timer);
-  }, [screen, remoteUrl]);
+  }, [remoteUrl]);
 
   const stepCompletion = useMemo<StepCompletion>(
     () => ({
@@ -1335,6 +1455,7 @@ export function useShellController() {
     loginProbeBusy,
     actionError,
     shutdownProgress,
+    shutdownElapsedMs,
     contextMenuStatus,
     loginProbeResult,
     kimiPathInput,

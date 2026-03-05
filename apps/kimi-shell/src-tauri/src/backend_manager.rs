@@ -2034,6 +2034,13 @@ fn handle_workspace_proxy_request(
     }
 
     if is_websocket_upgrade {
+        if let Some(session_id) = extract_session_id_from_stream_path(request.url()) {
+            workspace_session::note_session_stream_activity(
+                app,
+                &session_id,
+                "workspace_proxy_ws_upgrade",
+            );
+        }
         handle_workspace_websocket_upgrade(app, upstream_port, request);
         return;
     }
@@ -2309,6 +2316,22 @@ fn is_websocket_upgrade_request(request: &tiny_http::Request) -> bool {
         || (has_upgrade_websocket && has_websocket_key)
         || (has_connection_upgrade && has_websocket_key)
         || has_websocket_key
+}
+
+fn extract_session_id_from_stream_path(raw_url: &str) -> Option<String> {
+    const PREFIX: &str = "/api/sessions/";
+    const SUFFIX: &str = "/stream";
+
+    let path = raw_url.split('?').next().unwrap_or(raw_url).trim();
+    if !path.starts_with(PREFIX) || !path.ends_with(SUFFIX) {
+        return None;
+    }
+
+    let body = &path[PREFIX.len()..path.len() - SUFFIX.len()];
+    if body.is_empty() || body.contains('/') {
+        return None;
+    }
+    Some(body.to_string())
 }
 
 fn build_upstream_websocket_request(request: &tiny_http::Request, upstream_addr: &str) -> String {
@@ -2723,6 +2746,18 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
     }});
   }}
 
+  function buildQuerySessionFallback(sessionId) {{
+    try {{
+      const parsed = new URL(window.location.href);
+      parsed.pathname = "/";
+      parsed.search = "?session=" + encodeURIComponent(sessionId);
+      parsed.hash = "";
+      return parsed.toString();
+    }} catch (_) {{
+      return "/?session=" + encodeURIComponent(sessionId);
+    }}
+  }}
+
   function tryBuildNavigateTarget(sessionId, routeTemplate) {{
     if (!sessionId) {{
       return "";
@@ -2739,13 +2774,17 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
     if (observedSessionId && href.indexOf(observedSessionId) >= 0) {{
       return href.split(observedSessionId).join(encodeURIComponent(sessionId));
     }}
-    return "";
+    return buildQuerySessionFallback(sessionId);
   }}
 
   function navigateToSession(data) {{
     const requestId = typeof data.requestId === "string" ? data.requestId : "";
     const sessionId = typeof data.sessionId === "string" ? data.sessionId.trim() : "";
     const routeTemplate = typeof data.routeTemplate === "string" ? data.routeTemplate : "";
+    const hasTemplate =
+      typeof routeTemplate === "string" &&
+      routeTemplate.indexOf("{{session_id}}") >= 0;
+    const usedObservedTemplate = !hasTemplate && !!observedLocationTemplate;
 
     if (!sessionId) {{
       postSessionBridge({{
@@ -2776,9 +2815,13 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
         action: "navigate_session_ack",
         requestId,
         sessionId,
-        routeTemplate: routeTemplate || observedLocationTemplate,
+        routeTemplate: routeTemplate || observedLocationTemplate || "/?session={{session_id}}",
         applied: true,
-        reason: "navigated"
+        reason: hasTemplate
+          ? "navigated_with_route_template"
+          : usedObservedTemplate
+            ? "navigated_with_observed_template"
+            : "navigated_with_query_fallback"
       }});
     }} catch (_) {{
       postSessionBridge({{
@@ -3501,6 +3544,35 @@ mod tests {
         assert!(args_joined.contains("--port 57999"));
         assert!(!args_joined.contains("--network"));
         assert!(!args_joined.contains("--public"));
+    }
+
+    #[test]
+    fn extract_session_id_from_stream_path_handles_query_string() {
+        let value = extract_session_id_from_stream_path(
+            "/api/sessions/abc-123/stream?encoding=text&version=1",
+        );
+        assert_eq!(value.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn extract_session_id_from_stream_path_rejects_invalid_paths() {
+        assert!(extract_session_id_from_stream_path("/api/sessions//stream").is_none());
+        assert!(extract_session_id_from_stream_path("/api/sessions/abc/stream/extra").is_none());
+        assert!(extract_session_id_from_stream_path("/api/other/abc/stream").is_none());
+    }
+
+    #[test]
+    fn theme_bridge_script_contains_session_route_template_and_query_fallback() {
+        let script = theme_bridge_script_tag(57999);
+        assert!(
+            script.contains(r#"routeTemplate.indexOf("{{session_id}}")"#)
+                || script.contains(r#"routeTemplate.indexOf("{session_id}")"#)
+        );
+        assert!(script.contains("return buildQuerySessionFallback(sessionId);"));
+        assert!(
+            script.contains(r#"routeTemplate || observedLocationTemplate || "/?session={{session_id}}""#)
+                || script.contains(r#"routeTemplate || observedLocationTemplate || "/?session={session_id}""#)
+        );
     }
 
     #[test]

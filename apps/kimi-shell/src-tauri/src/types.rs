@@ -84,6 +84,15 @@ pub struct ShutdownProgressPayload {
     pub elapsed_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenRequestErrorPayload {
+    pub source: String,
+    pub stage: String,
+    pub message: String,
+    pub args_summary: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSessionBridgePayload {

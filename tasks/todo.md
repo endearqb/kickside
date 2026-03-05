@@ -1,5 +1,91 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（版本 +0.0.1 + 构建安装包）
+
+### 计划清单
+
+- [x] 在 `tasks/todo.md` 记录本轮计划与验收标准
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.5` 升级到 `0.0.6`
+- [x] 执行 `pnpm -C apps/kimi-shell sync:version` 同步 `Cargo.toml` 与 `tauri.conf.json`
+- [x] 构建 NSIS 安装包并确认产物路径
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `package.json` / `Cargo.toml` / `tauri.conf.json` 版本均为 `0.0.6`
+- [x] NSIS 安装包构建成功且可定位产物
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/package.json` 版本从 `0.0.5` 升级到 `0.0.6`。
+  - 执行 `pnpm -C apps/kimi-shell sync:version`，同步更新：
+    - `apps/kimi-shell/src-tauri/Cargo.toml`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - `apps/kimi-shell/src-tauri/Cargo.lock`
+  - 执行 `pnpm -C apps/kimi-shell tauri build --bundles nsis` 生成 `0.0.6` 安装包。
+- 验证结果：
+  - 版本字段检查通过：
+    - `apps/kimi-shell/package.json` = `0.0.6`
+    - `apps/kimi-shell/src-tauri/Cargo.toml` = `0.0.6`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json` = `0.0.6`
+  - 安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.6_x64-setup.exe`
+    - 大小：`3534480` bytes
+    - 构建时间：`2026-03-05 22:17:40`
+- 风险与后续：
+  - 本轮仅完成版本升级与打包，功能回归请继续按既有清单在目标机器手工验证。
+
+## 本轮计划（task0305-2 回归修复：标题栏跟随 + 关闭计时 + 文件右键失败提示）
+
+### 计划清单
+
+- [x] 在 `tasks/todo.md` 记录本轮计划、验收项与回顾
+- [x] 后端新增 `open-request-error` 事件与 `OpenRequestErrorPayload` 类型
+- [x] `open_request` 在 startup/forwarded parse 或 apply 失败时统一发出结构化错误事件并补日志
+- [x] `backend_manager` 在 WebSocket `/api/sessions/{id}/stream` 升级链路提取 session id 并上报 active-session hint
+- [x] `workspace_session` 增加按 `session_id` 即时回填 active session 的逻辑（并发出 `active_session_updated`）
+- [x] 前端监听 `active_session_updated` 后即时 merge 到 `status`，标题栏优先刷新
+- [x] 前端关闭进度改为本地连续计时（100ms tick）并在退出 stopping 后清理
+- [x] 前端监听 `open-request-error` 并在 alert 区域显示明确错误原因
+- [x] 增补 Rust 单测（session stream id 解析、session hint 回填、open request 错误事件）
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与风险说明
+
+### 验收标准
+
+- [ ] Kimi Web 侧栏切换 session 时，标题栏工作区在 2 秒内更新
+- [ ] 关闭应用弹层中的耗时数字连续变化（非静态）
+- [ ] 文件右键普通文档链路可用，不回归目录右键
+- [ ] 文件右键失败场景下，前端即时展示结构化错误提示
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - Rust：
+    - `apps/kimi-shell/src-tauri/src/types.rs` 新增 `OpenRequestErrorPayload`。
+    - `apps/kimi-shell/src-tauri/src/open_request.rs` 新增 `open-request-error` 事件发射；覆盖 startup/forwarded parse 与 apply 失败，输出结构化日志（含 source/stage/message/args）。
+    - `apps/kimi-shell/src-tauri/src/open_request.rs` 补充 `open-files` 失败上下文（workspace_root/workspace_dir/first_file/stage）提升诊断可读性。
+    - `apps/kimi-shell/src-tauri/src/backend_manager.rs` 在 WebSocket `/api/sessions/{id}/stream` 升级链路提取 `session_id`，调用 `workspace_session::note_session_stream_activity`。
+    - `apps/kimi-shell/src-tauri/src/workspace_session.rs` 新增基于 `session_id` 的即时回填逻辑，命中后立即触发 `active_session_updated`，并保留轮询兜底。
+    - 新增/更新单测：`open_request` 错误 payload、`backend_manager` stream path 解析、`workspace_session` session_id 匹配。
+  - 前端：
+    - `apps/kimi-shell/src/app/types.ts` 新增 `OpenRequestErrorPayload`。
+    - `apps/kimi-shell/src/app/useShellController.ts` 新增 `open-request-error` 监听，并将 `active_session_updated` 即时 merge 到 `status`。
+    - `apps/kimi-shell/src/app/useShellController.ts` 新增关闭进度本地连续计时器（100ms tick），在离开 `stopping` 或卸载时清理。
+    - `apps/kimi-shell/src/App.tsx` 关闭弹层耗时显示改为本地实时值 `shutdownElapsedMs`。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --nocapture` 通过（33/33）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 风险与后续：
+  - 本轮为代码与自动化验证；以下验收项仍需在目标桌面环境手工确认：
+    - Kimi Web 侧栏切换 session 时标题栏工作区 2 秒内跟随。
+    - 关闭弹层耗时数字在真实关闭流程中连续跳动。
+    - Explorer 文件右键普通文档链路与失败提示交互。
+
 ## 本轮计划（版本 0.0.5 发布：升级版本 + 安装包 + 更新说明）
 
 ### 计划清单
@@ -1490,3 +1576,43 @@
   - 本地日志可见 `blank-window recovery tick sent`，证明自救线程已生效。
 - 风险与后续：
   - 若目标机 WebView2 环境异常严重，`location.replace` 仍可能受限；此时需继续采集 WebView2 运行时版本与系统策略信息。
+
+## Iteration Plan (task0305-2 regression round: default session/prefill/switch perf/keepalive)
+
+### Checklist
+
+- [x] Implement backend bootstrap strategy: reuse latest session for current `work_dir`, create only when no match.
+- [x] Keep `workspace iframe` mounted across screen switches (no unmount on control center).
+- [x] Remove `screen === "workspace"` hard gate for session navigate/prefill dispatch; rely on runtime-ready + iframe-ready.
+- [x] Add route navigation fallback path so session navigation can still proceed when observed template is missing.
+- [x] Reduce control-center switch load: avoid eager config-center load, poll status-only every 1s, run diagnostics on runtime-center entry.
+- [x] Add/adjust Rust unit tests for work_dir session matching and navigation fallback coverage.
+- [x] Run verification: `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` and `pnpm -C apps/kimi-shell build`.
+- [x] Fill review notes and mark this section done after verification.
+
+### Review
+
+- Implemented work_dir-based bootstrap session reuse in `workspace_session.rs`:
+  - fetches `limit=500` session list
+  - selects latest session matching normalized work_dir
+  - falls back to create session only when no match
+  - emits bootstrap bridge with `route_template="/?session={{session_id}}"`
+- Implemented session navigation fallback in injected workspace bridge script:
+  - keeps existing template-based navigation
+  - adds query fallback (`/?session=...`) when no observed template is available
+  - sends richer `navigate_session_ack` reasons for observability
+- Implemented workspace keepalive rendering:
+  - `App.tsx` now keeps `WorkspaceView` mounted in a persistent base layer
+  - loading/control-center are rendered as overlay layers, so switching screens no longer unmounts iframe
+- Implemented prefill/session dispatch robustness and perf tuning:
+  - removed hard `screen === "workspace"` gate
+  - dispatch now depends on backend running + iframe ready + valid origin
+  - prefill retries increased to 12 and failure reason is surfaced in `actionError`
+  - 1s polling changed to status-only
+  - control-center no longer eagerly loads config center or diagnostics on every entry
+  - diagnostics refresh now triggers when entering `runtime_center`; config-center data loads lazily on onboarding section
+- Validation:
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed (36 tests).
+  - `pnpm -C apps/kimi-shell build` passed.
+  - release follow-up completed: version bumped `0.0.6 -> 0.0.7`, synced Tauri metadata, NSIS package built successfully:
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.7_x64-setup.exe`

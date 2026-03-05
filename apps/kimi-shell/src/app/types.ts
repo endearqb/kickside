@@ -83,6 +83,13 @@ export interface ShutdownProgressPayload {
   elapsedMs?: number;
 }
 
+export interface OpenRequestErrorPayload {
+  source: string;
+  stage: string;
+  message: string;
+  argsSummary?: string;
+}
+
 export interface WorkspaceSessionBridgePayload {
   action: string;
   source: string;

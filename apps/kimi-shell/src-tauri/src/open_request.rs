@@ -10,14 +10,16 @@ use std::{
 use chrono::Local;
 use rand::Rng;
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
 use crate::{
     app_state::AppState, backend_manager, log_manager, settings_store, window_manager,
-    workspace_session,
+    types::OpenRequestErrorPayload, workspace_session,
 };
 
+const MAIN_WINDOW_LABEL: &str = "main";
+const OPEN_REQUEST_ERROR_EVENT: &str = "open-request-error";
 const OPEN_FILES_DEBOUNCE_MS: u64 = 350;
 const WORKSPACE_STEM_MAX_LEN: usize = 40;
 const WORKSPACE_ATTEMPTS: usize = 24;
@@ -46,6 +48,7 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
     let current_dir = std::env::current_dir().ok();
     let parsed = parse_open_request(&args, current_dir.as_deref());
     log_open_request_parse(app, "startup", &args, current_dir.as_deref(), &parsed);
+    let args_summary = Some(format_args_for_log(&args));
 
     match parsed {
         Ok(Some(request)) => {
@@ -55,6 +58,13 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
                     app,
                     format!("failed to apply startup open request: {error}"),
                 );
+                emit_open_request_error(
+                    app,
+                    "startup",
+                    "apply_open_request",
+                    &error,
+                    args_summary.clone(),
+                );
             }
         }
         Ok(None) => {
@@ -62,6 +72,7 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
         }
         Err(error) => {
             log_manager::append_line(app, format!("invalid startup arguments: {error}"));
+            emit_open_request_error(app, "startup", "parse_open_request", &error, args_summary);
         }
     }
 }
@@ -77,19 +88,30 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
     let cwd_path = cwd.as_deref().map(PathBuf::from);
     let parsed = parse_open_request(&args, cwd_path.as_deref());
     log_open_request_parse(&app, "forwarded", &args, cwd_path.as_deref(), &parsed);
+    let args_summary = Some(format_args_for_log(&args));
     match parsed {
         Ok(Some(OpenRequest::OpenDir(path))) => {
+            let app_for_thread = app.clone();
+            let summary_for_thread = args_summary.clone();
             thread::spawn(move || {
-                if let Err(error) = apply_open_request(&app, OpenRequest::OpenDir(path)) {
+                if let Err(error) = apply_open_request(&app_for_thread, OpenRequest::OpenDir(path))
+                {
                     log_manager::append_line(
-                        &app,
+                        &app_for_thread,
                         format!("failed to apply forwarded directory request: {error}"),
+                    );
+                    emit_open_request_error(
+                        &app_for_thread,
+                        "forwarded",
+                        "apply_open_request",
+                        &error,
+                        summary_for_thread,
                     );
                 }
             });
         }
         Ok(Some(OpenRequest::OpenFiles(files))) => {
-            enqueue_open_files_request(app, files);
+            enqueue_open_files_request(app, files, "forwarded", args_summary);
         }
         Ok(None) => {
             log_non_matching_args(&app, "forwarded", &args);
@@ -97,12 +119,24 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
         }
         Err(error) => {
             log_manager::append_line(&app, format!("invalid forwarded arguments: {error}"));
+            emit_open_request_error(
+                &app,
+                "forwarded",
+                "parse_open_request",
+                &error,
+                args_summary,
+            );
             window_manager::show_and_focus(&app);
         }
     }
 }
 
-fn enqueue_open_files_request(app: AppHandle, files: Vec<PathBuf>) {
+fn enqueue_open_files_request(
+    app: AppHandle,
+    files: Vec<PathBuf>,
+    source: &str,
+    args_summary: Option<String>,
+) {
     let files = dedupe_paths(files);
     if files.is_empty() {
         window_manager::show_and_focus(&app);
@@ -115,6 +149,13 @@ fn enqueue_open_files_request(app: AppHandle, files: Vec<PathBuf>) {
             Ok(lock) => lock,
             Err(_) => {
                 log_manager::append_line(&app, "open-files batch lock poisoned; dropping request");
+                emit_open_request_error(
+                    &app,
+                    source,
+                    "enqueue_batch_lock",
+                    "open-files batch lock poisoned; dropping request",
+                    args_summary,
+                );
                 return;
             }
         };
@@ -134,6 +175,7 @@ fn enqueue_open_files_request(app: AppHandle, files: Vec<PathBuf>) {
         batch.sequence
     };
 
+    let source = source.to_string();
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(OPEN_FILES_DEBOUNCE_MS));
         let maybe_files = {
@@ -143,6 +185,13 @@ fn enqueue_open_files_request(app: AppHandle, files: Vec<PathBuf>) {
                 Ok(lock) => lock,
                 Err(_) => {
                     log_manager::append_line(&app, "open-files batch lock poisoned during flush");
+                    emit_open_request_error(
+                        &app,
+                        &source,
+                        "flush_batch_lock",
+                        "open-files batch lock poisoned during flush",
+                        args_summary.clone(),
+                    );
                     return;
                 }
             };
@@ -161,10 +210,21 @@ fn enqueue_open_files_request(app: AppHandle, files: Vec<PathBuf>) {
         };
 
         if let Some(files) = maybe_files {
+            let files_for_summary = files.clone();
             if let Err(error) = apply_open_request(&app, OpenRequest::OpenFiles(files)) {
+                let summary = args_summary
+                    .clone()
+                    .or_else(|| Some(format_paths_for_log(&files_for_summary)));
                 log_manager::append_line(
                     &app,
                     format!("failed to process open-files request: {error}"),
+                );
+                emit_open_request_error(
+                    &app,
+                    &source,
+                    "apply_open_request",
+                    &error,
+                    summary,
                 );
             }
         }
@@ -213,13 +273,45 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
         }
     }
 
-    let workspace_root = resolve_workspace_root(app)?;
-    let workspace_dir = create_workspace_dir(&workspace_root, &files)?;
-    copy_files_to_workspace(&files, &workspace_dir)?;
-    write_sources_manifest(&files, &workspace_dir)?;
+    let first_file = files
+        .first()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    let workspace_root = resolve_workspace_root(app).map_err(|error| {
+        format!(
+            "open-files stage=resolve_workspace_root failed (file_count={}, first_file={}): {error}",
+            files.len(),
+            first_file
+        )
+    })?;
+    let workspace_dir = create_workspace_dir(&workspace_root, &files).map_err(|error| {
+        format!(
+            "open-files stage=create_workspace_dir failed (workspace_root={}): {error}",
+            workspace_root.display()
+        )
+    })?;
+    copy_files_to_workspace(&files, &workspace_dir).map_err(|error| {
+        format!(
+            "open-files stage=copy_files failed (workspace_root={}, workspace_dir={}, first_file={}): {error}",
+            workspace_root.display(),
+            workspace_dir.display(),
+            first_file
+        )
+    })?;
+    write_sources_manifest(&files, &workspace_dir).map_err(|error| {
+        format!(
+            "open-files stage=write_sources_manifest failed (workspace_dir={}): {error}",
+            workspace_dir.display()
+        )
+    })?;
 
     backend_manager::set_session_work_dir(app, Some(workspace_dir.clone()))
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            format!(
+                "open-files stage=set_session_work_dir failed (workspace_dir={}): {error}",
+                workspace_dir.display()
+            )
+        })?;
     workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request");
 
     log_manager::append_line(
@@ -542,6 +634,56 @@ fn format_args_for_log(args: &[String]) -> String {
         joined.push_str("...");
     }
     joined
+}
+
+fn format_paths_for_log(paths: &[PathBuf]) -> String {
+    let as_args = paths
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<String>>();
+    format_args_for_log(&as_args)
+}
+
+fn build_open_request_error_payload(
+    source: &str,
+    stage: &str,
+    message: &str,
+    args_summary: Option<String>,
+) -> OpenRequestErrorPayload {
+    OpenRequestErrorPayload {
+        source: source.trim().to_string(),
+        stage: stage.trim().to_string(),
+        message: message.trim().to_string(),
+        args_summary: args_summary
+            .as_ref()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+    }
+}
+
+fn emit_open_request_error(
+    app: &AppHandle,
+    source: &str,
+    stage: &str,
+    message: &str,
+    args_summary: Option<String>,
+) {
+    let payload = build_open_request_error_payload(source, stage, message, args_summary);
+    let args_display = payload.args_summary.as_deref().unwrap_or("<none>");
+    log_manager::append_line(
+        app,
+        format!(
+            "open-request error (source={}, stage={}, message={}, args={})",
+            payload.source, payload.stage, payload.message, args_display
+        ),
+    );
+
+    if let Err(error) = app.emit_to(MAIN_WINDOW_LABEL, OPEN_REQUEST_ERROR_EVENT, &payload) {
+        log_manager::append_line(
+            app,
+            format!("failed to emit open-request error event: {error}"),
+        );
+    }
 }
 
 fn log_non_matching_args(app: &AppHandle, scope: &str, args: &[String]) {
@@ -908,5 +1050,31 @@ mod tests {
         let (stem, ext) = split_file_name("archive.tar.gz");
         assert_eq!(stem, "archive.tar");
         assert_eq!(ext, "gz");
+    }
+
+    #[test]
+    fn build_open_request_error_payload_uses_camel_case_fields() {
+        let payload = build_open_request_error_payload(
+            "forwarded",
+            "apply_open_request",
+            "copy failed",
+            Some("  \"a.md\"  ".to_string()),
+        );
+        assert_eq!(payload.source, "forwarded");
+        assert_eq!(payload.stage, "apply_open_request");
+        assert_eq!(payload.message, "copy failed");
+        assert_eq!(payload.args_summary.as_deref(), Some("\"a.md\""));
+    }
+
+    #[test]
+    fn format_paths_for_log_truncates_long_list() {
+        let paths = vec![
+            PathBuf::from("D:/workspace/alpha.md"),
+            PathBuf::from("D:/workspace/beta.md"),
+            PathBuf::from("D:/workspace/gamma.md"),
+        ];
+        let value = format_paths_for_log(&paths);
+        assert!(value.contains("alpha.md"));
+        assert!(value.contains("beta.md"));
     }
 }

@@ -47,90 +47,102 @@ function App() {
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}
 
-      {shell.screen === "workspace" ? (
-        <WorkspaceView
-          remoteUrl={shell.remoteUrl}
-          workspaceIframeRef={shell.workspaceIframeRef}
-          workspaceEmbedState={shell.workspaceEmbedState}
-          actionBusy={shell.actionBusy}
-          onRetry={shell.handleRetry}
-          onOpenLogs={shell.handleOpenLogs}
-          onOpenExternalUrl={shell.handleOpenExternalUrl}
-          onFrameLoad={shell.handleWorkspaceFrameLoad}
-          onFrameError={shell.handleWorkspaceFrameError}
-        />
-      ) : shell.screen === "loading" ? (
-        <LoadingView
-          status={shell.status}
-          statusText={shell.statusText}
-          remoteUrl={shell.remoteUrl}
-          actionBusy={shell.actionBusy}
-          workDirInput={shell.workDirInput}
-          hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
-          onWorkDirChange={shell.setWorkDirInput}
-          onRetry={shell.handleRetry}
-          onOpenLogs={shell.handleOpenLogs}
-          onOpenExternalUrl={shell.handleOpenExternalUrl}
-          onPickWorkDir={shell.handlePickWorkDir}
-          onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
-          onClearWorkDir={shell.handleClearWorkDir}
-        />
-      ) : (
-        <ControlCenterView
-          status={shell.status}
-          diagnostics={shell.diagnostics}
-          onboarding={shell.onboarding}
-          contextMenuStatus={shell.contextMenuStatus}
-          activeControlSection={shell.activeControlSection}
-          activeRuntimePanel={shell.activeRuntimePanel}
-          stepCompletion={shell.stepCompletion}
-          actionBusy={shell.actionBusy}
-          diagnosticsBusy={shell.diagnosticsBusy}
-          contextMenuBusy={shell.contextMenuBusy}
-          loginProbeBusy={shell.loginProbeBusy}
-          kimiPathInput={shell.kimiPathInput}
-          workDirInput={shell.workDirInput}
-          setActiveControlSection={shell.setActiveControlSection}
-          setActiveRuntimePanel={shell.setActiveRuntimePanel}
-          onWorkDirInputChange={shell.setWorkDirInput}
-          configCenterView={shell.configCenterView}
-          configCenterDraft={shell.configCenterDraft}
-          configCenterOpen={shell.configCenterOpen}
-          configCenterBusy={shell.configCenterBusy}
-          configCenterDirty={shell.configCenterDirty}
-          installProbe={shell.installProbe}
-          installSource={shell.installSource}
-          installBusy={shell.installBusy}
-          installMessage={shell.installMessage}
-          onRefreshCoreState={shell.refreshCoreState}
-          onRefreshDiagnostics={shell.refreshDiagnostics}
-          onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
-          onRefreshOnboarding={shell.refreshOnboarding}
-          onRetry={shell.handleRetry}
-          onOpenLogs={shell.handleOpenLogs}
-          onOpenFolder={shell.handleOpenFolder}
-          onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
-          onPickKimiPath={shell.handlePickKimiPath}
-          onSavePathAndRetry={shell.handleSavePathAndRetry}
-          onEnableContextMenu={shell.handleEnableContextMenu}
-          onDisableContextMenu={shell.handleDisableContextMenu}
-          onProbeLogin={shell.handleProbeLogin}
-          onPickWorkDir={shell.handlePickWorkDir}
-          onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
-          onClearWorkDir={shell.handleClearWorkDir}
-          onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
-          onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
-          onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
-          onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
-          onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
-          onInstallSourceChange={shell.handleInstallSourceChange}
-          onInstallDependencies={shell.handleInstallDependencies}
-          onInstallKimi={shell.handleInstallKimi}
-          onCompleteOnboarding={shell.handleCompleteOnboarding}
-          onSkipOnboarding={shell.handleSkipOnboarding}
-          onOpenExternalUrl={shell.handleOpenExternalUrl}
-        />
-      )}
+      <div className="shell-stage">
+        <div
+          className={`workspace-layer ${shell.screen === "workspace" ? "workspace-layer-visible" : "workspace-layer-hidden"}`}
+        >
+          <WorkspaceView
+            remoteUrl={shell.remoteUrl}
+            workspaceIframeRef={shell.workspaceIframeRef}
+            workspaceEmbedState={shell.workspaceEmbedState}
+            actionBusy={shell.actionBusy}
+            onRetry={shell.handleRetry}
+            onOpenLogs={shell.handleOpenLogs}
+            onOpenExternalUrl={shell.handleOpenExternalUrl}
+            onFrameLoad={shell.handleWorkspaceFrameLoad}
+            onFrameError={shell.handleWorkspaceFrameError}
+          />
+        </div>
+
+        {shell.screen === "loading" ? (
+          <div className="shell-overlay-layer">
+            <LoadingView
+              status={shell.status}
+              statusText={shell.statusText}
+              remoteUrl={shell.remoteUrl}
+              actionBusy={shell.actionBusy}
+              workDirInput={shell.workDirInput}
+              hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
+              onWorkDirChange={shell.setWorkDirInput}
+              onRetry={shell.handleRetry}
+              onOpenLogs={shell.handleOpenLogs}
+              onOpenExternalUrl={shell.handleOpenExternalUrl}
+              onPickWorkDir={shell.handlePickWorkDir}
+              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
+              onClearWorkDir={shell.handleClearWorkDir}
+            />
+          </div>
+        ) : null}
+
+        {shell.screen === "control_center" ? (
+          <div className="shell-overlay-layer">
+            <ControlCenterView
+              status={shell.status}
+              diagnostics={shell.diagnostics}
+              onboarding={shell.onboarding}
+              contextMenuStatus={shell.contextMenuStatus}
+              activeControlSection={shell.activeControlSection}
+              activeRuntimePanel={shell.activeRuntimePanel}
+              stepCompletion={shell.stepCompletion}
+              actionBusy={shell.actionBusy}
+              diagnosticsBusy={shell.diagnosticsBusy}
+              contextMenuBusy={shell.contextMenuBusy}
+              loginProbeBusy={shell.loginProbeBusy}
+              kimiPathInput={shell.kimiPathInput}
+              workDirInput={shell.workDirInput}
+              setActiveControlSection={shell.setActiveControlSection}
+              setActiveRuntimePanel={shell.setActiveRuntimePanel}
+              onWorkDirInputChange={shell.setWorkDirInput}
+              configCenterView={shell.configCenterView}
+              configCenterDraft={shell.configCenterDraft}
+              configCenterOpen={shell.configCenterOpen}
+              configCenterBusy={shell.configCenterBusy}
+              configCenterDirty={shell.configCenterDirty}
+              installProbe={shell.installProbe}
+              installSource={shell.installSource}
+              installBusy={shell.installBusy}
+              installMessage={shell.installMessage}
+              onRefreshCoreState={shell.refreshCoreState}
+              onRefreshDiagnostics={shell.refreshDiagnostics}
+              onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
+              onRefreshOnboarding={shell.refreshOnboarding}
+              onRetry={shell.handleRetry}
+              onOpenLogs={shell.handleOpenLogs}
+              onOpenFolder={shell.handleOpenFolder}
+              onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
+              onPickKimiPath={shell.handlePickKimiPath}
+              onSavePathAndRetry={shell.handleSavePathAndRetry}
+              onEnableContextMenu={shell.handleEnableContextMenu}
+              onDisableContextMenu={shell.handleDisableContextMenu}
+              onProbeLogin={shell.handleProbeLogin}
+              onPickWorkDir={shell.handlePickWorkDir}
+              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
+              onClearWorkDir={shell.handleClearWorkDir}
+              onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
+              onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
+              onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
+              onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
+              onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
+              onInstallSourceChange={shell.handleInstallSourceChange}
+              onInstallDependencies={shell.handleInstallDependencies}
+              onInstallKimi={shell.handleInstallKimi}
+              onCompleteOnboarding={shell.handleCompleteOnboarding}
+              onSkipOnboarding={shell.handleSkipOnboarding}
+              onOpenExternalUrl={shell.handleOpenExternalUrl}
+            />
+          </div>
+        ) : null}
+      </div>
 
       {shell.shutdownProgress && (
         <div className="shutdown-overlay" role="status" aria-live="assertive">
@@ -138,8 +150,8 @@ function App() {
             <div className="spinner" aria-hidden />
             <h3>正在关闭应用</h3>
             <p>{shell.shutdownProgress.detail ?? shell.shutdownProgress.stage}</p>
-            {typeof shell.shutdownProgress.elapsedMs === "number" && (
-              <small>耗时 {shell.shutdownProgress.elapsedMs} ms</small>
+            {typeof shell.shutdownElapsedMs === "number" && (
+              <small>耗时 {shell.shutdownElapsedMs} ms</small>
             )}
           </div>
         </div>

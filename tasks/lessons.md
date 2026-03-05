@@ -20,3 +20,4 @@
 - 遇到 WebView2 启动白屏且存在多阶段导航时，优先用 `main(hidden)+prefill/splash(visible)` 架构把主窗口文档加载次数压到 1，再用事件路由替代 `window.navigate`；这比继续堆叠恢复重试更稳。
 - Windows 右键菜单状态不能只看注册表“键是否存在”，还要校验命令值是否与当前版本一致；否则旧版残留命令会让 UI 误报“已启用”并把问题推迟到运行时（如文件右键链路 404）。
 - Windows 文件右键注册要做“多键覆盖 + 最保守命令模板”：仅写 `*\\shell` 在部分安装环境可能不触发，需同时覆盖 `AllFilesystemObjects\\shell`；命令参数优先用更兼容的 `--open-files "%1"`，literal `--` 作为解析兼容而非注册表强依赖。
+- When using a keepalive `iframe` workspace, do not gate bridge dispatch by visible screen. Gate by backend running + iframe ready + origin so session navigation/prefill can continue while control center is in front.

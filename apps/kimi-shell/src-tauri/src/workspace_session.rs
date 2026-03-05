@@ -19,6 +19,8 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT: &str = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT: &str = "workspace-session-bridge";
 const WORKSPACE_SESSION_POLL_INTERVAL_MS: u64 = 1_200;
+const SESSION_LIST_FETCH_LIMIT: usize = 500;
+const BOOTSTRAP_ROUTE_TEMPLATE: &str = "/?session={{session_id}}";
 
 #[derive(Debug, Clone, Deserialize)]
 struct ApiSession {
@@ -106,6 +108,68 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
     }
 }
 
+pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &str) {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return;
+    }
+
+    let (generation, workspace_port) = {
+        let state = app.state::<AppState>();
+        let lock = state.runtime.lock();
+        let Ok(runtime) = lock else {
+            return;
+        };
+        if !matches!(
+            runtime.state,
+            BackendState::Starting | BackendState::Running
+        ) {
+            return;
+        }
+        if runtime.active_session_id.as_deref() == Some(session_id)
+            && runtime.active_session_work_dir.is_some()
+        {
+            return;
+        }
+        (runtime.generation, runtime.workspace_port)
+    };
+
+    let Some(workspace_port) = workspace_port else {
+        return;
+    };
+
+    let source = source.to_string();
+    let session_id = session_id.to_string();
+    let app = app.clone();
+    thread::spawn(move || {
+        if !should_poll(&app, generation) {
+            return;
+        }
+
+        match fetch_session_by_id(workspace_port, &session_id) {
+            Ok(Some(snapshot)) => {
+                apply_active_session_snapshot(&app, Some(snapshot), &format!("stream_hint:{source}"));
+            }
+            Ok(None) => {
+                log_manager::append_line(
+                    &app,
+                    format!(
+                        "workspace stream hint ignored: session not found (source={source}, session_id={session_id})"
+                    ),
+                );
+            }
+            Err(error) => {
+                log_manager::append_line(
+                    &app,
+                    format!(
+                        "workspace stream hint fetch failed (source={source}, session_id={session_id}): {error}"
+                    ),
+                );
+            }
+        }
+    });
+}
+
 fn start_session_poller(app: AppHandle, generation: u64, workspace_port: u16) {
     thread::spawn(move || {
         let mut last_error: Option<String> = None;
@@ -151,19 +215,54 @@ fn spawn_bootstrap_session(
 ) {
     let source = source.to_string();
     thread::spawn(move || {
-        let response = create_session_for_work_dir(workspace_port, &work_dir);
-        let session = match response {
-            Ok(session) => session,
+        let existing_session = match fetch_sessions(workspace_port) {
+            Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
             Err(error) => {
                 log_manager::append_line(
                     &app,
                     format!(
-                        "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
+                        "workspace bootstrap failed to list sessions; fallback to create (source={source}, work_dir={}): {error}",
                         work_dir.display()
                     ),
                 );
-                return;
+                None
             }
+        };
+
+        let (session, snapshot_source) = if let Some(snapshot) = existing_session {
+            log_manager::append_line(
+                &app,
+                format!(
+                    "bootstrap_resume_existing source={source} work_dir={} session_id={}",
+                    work_dir.display(),
+                    snapshot.session_id
+                ),
+            );
+            (snapshot, "bootstrap_resume_existing")
+        } else {
+            let response = create_session_for_work_dir(workspace_port, &work_dir);
+            let created = match response {
+                Ok(session) => session,
+                Err(error) => {
+                    log_manager::append_line(
+                        &app,
+                        format!(
+                            "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
+                            work_dir.display()
+                        ),
+                    );
+                    return;
+                }
+            };
+            log_manager::append_line(
+                &app,
+                format!(
+                    "bootstrap_create_new source={source} work_dir={} session_id={}",
+                    work_dir.display(),
+                    created.session_id
+                ),
+            );
+            (session_snapshot_from_api(&created), "bootstrap_create_new")
         };
 
         if !is_generation_alive(&app, generation) {
@@ -174,20 +273,21 @@ fn spawn_bootstrap_session(
             .work_dir
             .clone()
             .or_else(|| Some(work_dir.to_string_lossy().to_string()));
+        let session_id = session.session_id.clone();
         let snapshot = SessionSnapshot {
-            session_id: session.session_id.clone(),
+            session_id: session_id.clone(),
             work_dir: work_dir_value.clone(),
         };
-        apply_active_session_snapshot(&app, Some(snapshot), "bootstrap");
+        apply_active_session_snapshot(&app, Some(snapshot), snapshot_source);
 
         let request_id = format!("ws-bootstrap-{}", unix_time_millis());
         let payload = WorkspaceSessionBridgePayload {
             action: "navigate_session".to_string(),
             source: source.clone(),
             request_id: Some(request_id),
-            session_id: Some(session.session_id),
+            session_id: Some(session_id.clone()),
             work_dir: work_dir_value,
-            route_template: None,
+            route_template: Some(BOOTSTRAP_ROUTE_TEMPLATE.to_string()),
             applied: None,
             reason: None,
         };
@@ -198,15 +298,28 @@ fn spawn_bootstrap_session(
         log_manager::append_line(
             &app,
             format!(
-                "workspace bootstrap session ready (source={source}, work_dir={})",
-                work_dir.display()
+                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE})",
+                work_dir.display(),
+                session_id
             ),
         );
     });
 }
 
 fn fetch_active_session(workspace_port: u16) -> Result<Option<SessionSnapshot>, String> {
-    let url = format!("http://127.0.0.1:{workspace_port}/api/sessions/?limit=100&offset=0");
+    let sessions = fetch_sessions(workspace_port)?;
+    Ok(select_active_session(&sessions))
+}
+
+fn fetch_session_by_id(workspace_port: u16, session_id: &str) -> Result<Option<SessionSnapshot>, String> {
+    let sessions = fetch_sessions(workspace_port)?;
+    Ok(select_session_by_id(&sessions, session_id))
+}
+
+fn fetch_sessions(workspace_port: u16) -> Result<Vec<ApiSession>, String> {
+    let url = format!(
+        "http://127.0.0.1:{workspace_port}/api/sessions/?limit={SESSION_LIST_FETCH_LIMIT}&offset=0"
+    );
     let client = Client::builder()
         .timeout(Duration::from_secs(6))
         .build()
@@ -230,7 +343,7 @@ fn fetch_active_session(workspace_port: u16) -> Result<Option<SessionSnapshot>, 
     let sessions: Vec<ApiSession> = response
         .json()
         .map_err(|error| format!("failed to decode sessions response: {error}"))?;
-    Ok(select_active_session(&sessions))
+    Ok(sessions)
 }
 
 fn create_session_for_work_dir(workspace_port: u16, work_dir: &Path) -> Result<ApiSession, String> {
@@ -354,10 +467,60 @@ fn select_active_session(sessions: &[ApiSession]) -> Option<SessionSnapshot> {
         .max_by_key(|session| parse_last_updated(&session.last_updated));
 
     let selected = running.or(fallback)?;
-    Some(SessionSnapshot {
-        session_id: selected.session_id.clone(),
-        work_dir: selected.work_dir.clone(),
-    })
+    Some(session_snapshot_from_api(selected))
+}
+
+fn select_session_by_id(sessions: &[ApiSession], session_id: &str) -> Option<SessionSnapshot> {
+    let target = session_id.trim();
+    if target.is_empty() {
+        return None;
+    }
+    sessions
+        .iter()
+        .find(|item| item.session_id == target)
+        .map(session_snapshot_from_api)
+}
+
+fn select_latest_session_for_work_dir(
+    sessions: &[ApiSession],
+    work_dir: &Path,
+) -> Option<SessionSnapshot> {
+    select_latest_session_for_work_dir_with_case(sessions, work_dir, cfg!(windows))
+}
+
+fn select_latest_session_for_work_dir_with_case(
+    sessions: &[ApiSession],
+    work_dir: &Path,
+    case_insensitive: bool,
+) -> Option<SessionSnapshot> {
+    if sessions.is_empty() {
+        return None;
+    }
+
+    let normalized_target = normalize_path_for_match_with_case(work_dir, case_insensitive);
+    if normalized_target.is_empty() {
+        return None;
+    }
+
+    sessions
+        .iter()
+        .filter(|session| {
+            let Some(session_work_dir) = session.work_dir.as_ref() else {
+                return false;
+            };
+            let normalized_session =
+                normalize_path_for_match_with_case(Path::new(session_work_dir), case_insensitive);
+            !normalized_session.is_empty() && normalized_session == normalized_target
+        })
+        .max_by_key(|session| parse_last_updated(&session.last_updated))
+        .map(session_snapshot_from_api)
+}
+
+fn session_snapshot_from_api(session: &ApiSession) -> SessionSnapshot {
+    SessionSnapshot {
+        session_id: session.session_id.clone(),
+        work_dir: session.work_dir.clone(),
+    }
 }
 
 fn parse_last_updated(value: &Option<String>) -> i64 {
@@ -378,6 +541,21 @@ fn normalize_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn normalize_path_for_match_with_case(path: &Path, case_insensitive: bool) -> String {
+    let normalized_path = normalize_path(path);
+    let mut value = normalized_path.to_string_lossy().replace('\\', "/");
+    while value.len() > 1 && value.ends_with('/') {
+        if value.len() == 3 && value.as_bytes().get(1) == Some(&b':') {
+            break;
+        }
+        value.pop();
+    }
+    if case_insensitive {
+        value = value.to_lowercase();
+    }
+    value
+}
+
 fn truncate_for_log(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
@@ -389,6 +567,7 @@ fn truncate_for_log(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn session(
         id: &str,
@@ -447,5 +626,77 @@ mod tests {
     fn parse_last_updated_handles_invalid_value() {
         assert_eq!(parse_last_updated(&Some("invalid".to_string())), 0);
         assert_eq!(parse_last_updated(&None), 0);
+    }
+
+    #[test]
+    fn select_session_by_id_returns_matching_session_snapshot() {
+        let sessions = vec![
+            session("first", false, Some("2026-03-05T08:20:00Z"), Some("D:/a")),
+            session("target", true, Some("2026-03-05T12:20:00Z"), Some("D:/b")),
+        ];
+
+        let selected = select_session_by_id(&sessions, "target").expect("must select target");
+        assert_eq!(selected.session_id, "target");
+        assert_eq!(selected.work_dir.as_deref(), Some("D:/b"));
+    }
+
+    #[test]
+    fn select_session_by_id_returns_none_when_missing() {
+        let sessions = vec![session(
+            "only",
+            false,
+            Some("2026-03-05T08:20:00Z"),
+            Some("D:/a"),
+        )];
+
+        assert!(select_session_by_id(&sessions, "missing").is_none());
+        assert!(select_session_by_id(&sessions, " ").is_none());
+    }
+
+    #[test]
+    fn select_latest_session_for_work_dir_prefers_latest_match() {
+        let sessions = vec![
+            session(
+                "older-match",
+                false,
+                Some("2026-03-05T08:20:00Z"),
+                Some("D:/Repo"),
+            ),
+            session(
+                "newer-match",
+                false,
+                Some("2026-03-05T12:20:00Z"),
+                Some("d:\\repo"),
+            ),
+            session(
+                "other-workdir",
+                true,
+                Some("2026-03-05T14:20:00Z"),
+                Some("D:/Other"),
+            ),
+        ];
+
+        let selected = select_latest_session_for_work_dir_with_case(
+            &sessions,
+            Path::new("D:/REPO"),
+            true,
+        )
+        .expect("must select matching session");
+        assert_eq!(selected.session_id, "newer-match");
+    }
+
+    #[test]
+    fn select_latest_session_for_work_dir_returns_none_when_no_match() {
+        let sessions = vec![
+            session("first", false, Some("2026-03-05T08:20:00Z"), Some("D:/a")),
+            session("second", false, Some("2026-03-05T12:20:00Z"), Some("D:/b")),
+        ];
+
+        let selected = select_latest_session_for_work_dir_with_case(
+            &sessions,
+            Path::new("D:/missing"),
+            true,
+        );
+        assert!(selected.is_none());
     }
 }

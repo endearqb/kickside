@@ -242,6 +242,54 @@
   background: var(--surface);
 }
 
+.control-center-shell-modal {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.cc-shell-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, #000 32%, transparent);
+}
+
+.cc-shell-modal {
+  width: min(1180px, 100%);
+  height: min(82vh, 900px);
+  border: 1px solid var(--chrome-border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.cc-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: color-mix(in srgb, var(--surface) 94%, var(--background));
+}
+
+.cc-modal-title h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.cc-modal-title p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .cc-layout {
   height: 100%;
   min-height: 0;
@@ -249,6 +297,10 @@
   grid-template-columns: 248px minmax(0, 1fr);
   background: #ffffff;
   background: var(--surface);
+}
+
+.cc-layout-dashboard {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .cc-sidebar {
@@ -342,6 +394,10 @@
   gap: 10px;
   background: #ffffff;
   background: var(--surface);
+}
+
+.cc-main-dashboard {
+  padding: 14px;
 }
 
 .cc-dashboard-grid {
@@ -1535,6 +1591,10 @@ input:focus {
   height: 24px;
 }
 
+.icon-btn.status-settings-btn {
+  border-color: transparent;
+}
+
 .status-workdir {
   min-width: 0;
   display: inline-flex;
@@ -1685,6 +1745,10 @@ input:focus {
     grid-template-columns: 1fr;
   }
 
+  .cc-shell-modal {
+    width: min(100%, 1120px);
+  }
+
   .cc-config-nav {
     border-right: 0;
     border-bottom: 1px solid var(--chrome-border);
@@ -1807,6 +1871,14 @@ input:focus {
 
   .cc-config-modal-overlay {
     padding: 8px;
+  }
+
+  .cc-shell-modal-overlay {
+    padding: 8px;
+  }
+
+  .cc-shell-modal {
+    height: min(92vh, 900px);
   }
 
   .cc-config-modal {

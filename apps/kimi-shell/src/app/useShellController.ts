@@ -16,6 +16,7 @@ import {
 import type {
   ActionableOnboardingStep,
   AppStatus,
+  ControlCenterChrome,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
@@ -147,6 +148,9 @@ export function useShellController() {
     useState<ControlSectionId>("overview");
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
+  const [controlCenterModalOpen, setControlCenterModalOpen] = useState(false);
+  const [controlCenterChrome, setControlCenterChrome] =
+    useState<ControlCenterChrome>("dashboard");
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
   const [listenersReady, setListenersReady] = useState(false);
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
@@ -293,6 +297,12 @@ export function useShellController() {
       window.location.hash = `/${normalized}`;
     }
     setRouteHash(window.location.hash);
+  }
+
+  function resetControlCenterNavigation(nextChrome: ControlCenterChrome = "dashboard") {
+    setActiveControlSection("overview");
+    setActiveRuntimePanel("paths");
+    setControlCenterChrome(nextChrome);
   }
 
   const enqueuePrefillPayload = useCallback(
@@ -895,6 +905,15 @@ export function useShellController() {
   }, [onboarding, workDirInput]);
 
   useEffect(() => {
+    if (screen === "workspace") {
+      return;
+    }
+    setControlCenterModalOpen(false);
+    setConfigCenterOpen(false);
+    resetControlCenterNavigation();
+  }, [screen]);
+
+  useEffect(() => {
     if (!tauriRuntime) {
       setIsWindowMaximized(false);
       return;
@@ -933,46 +952,34 @@ export function useShellController() {
 
   useEffect(() => {
     if (screen !== "control_center") return;
-    void refreshOnboarding();
-    void refreshContextMenuStatus();
-    void refreshInstallProbe().catch(() => {
-      // Best-effort probe.
-    });
-  }, [screen]);
-
-  useEffect(() => {
-    if (screen !== "control_center") return;
-    if (activeControlSection !== "runtime_center") return;
-    void refreshDiagnostics();
-  }, [activeControlSection, screen]);
-
-  useEffect(() => {
-    if (screen !== "control_center") return;
-    if (activeControlSection !== "onboarding") return;
-    if (configCenterView) return;
-    void loadKimiCliConfigCenter().catch(() => {
-      // Best-effort lazy loading.
-    });
-  }, [activeControlSection, configCenterView, screen]);
-
-  useEffect(() => {
-    if (screen !== "control_center") return;
 
     const hashRoute = parseHashRoute(routeHash);
+    if (hashRoute === "control-center") {
+      resetControlCenterNavigation("full");
+      return;
+    }
+
     if (hashRoute === "onboarding") {
       setActiveControlSection("onboarding");
+      setControlCenterChrome("full");
+      void refreshOnboarding();
       return;
     }
 
     if (hashRoute === "diagnostics") {
       setActiveControlSection("runtime_center");
       setActiveRuntimePanel("core");
+      setControlCenterChrome("full");
+      void refreshDiagnostics();
       return;
     }
 
     if (hashRoute === "logs_paths") {
       setActiveControlSection("runtime_center");
       setActiveRuntimePanel("paths");
+      setControlCenterChrome("full");
+      void Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
+      return;
     }
   }, [routeHash, screen]);
 
@@ -1002,10 +1009,34 @@ export function useShellController() {
     }
   }
 
+  async function handleRecoverMainWindowBoot() {
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await invoke("recover_main_window_boot");
+      await refreshCoreState();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function handleOpenLogs() {
     try {
       await invoke("open_logs_folder");
     } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handleQuitAppGracefully() {
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await invoke("quit_app_gracefully");
+    } catch (error) {
+      setActionBusy(false);
       setActionError(String(error));
     }
   }
@@ -1149,9 +1180,6 @@ export function useShellController() {
       await invoke("save_work_dir", { path: workDirInput.trim() });
       await invoke("retry_start_backend");
       await refreshCoreState();
-      if (screen === "control_center") {
-        await refreshDiagnostics();
-      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1167,9 +1195,6 @@ export function useShellController() {
       await invoke("save_work_dir", { path: "" });
       await invoke("retry_start_backend");
       await refreshCoreState();
-      if (screen === "control_center") {
-        await refreshDiagnostics();
-      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1239,12 +1264,8 @@ export function useShellController() {
         source: installSource,
       });
       setInstallMessage(summary.trim() || "依赖安装命令执行完成。");
-      await refreshCoreState();
       await refreshOnboarding();
       await refreshInstallProbe();
-      if (screen === "control_center") {
-        await refreshDiagnostics();
-      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1267,12 +1288,8 @@ export function useShellController() {
         source: installSource,
       });
       setInstallMessage(summary.trim() || "Kimi CLI 安装命令执行完成。");
-      await refreshCoreState();
       await refreshOnboarding();
       await refreshInstallProbe();
-      if (screen === "control_center") {
-        await refreshDiagnostics();
-      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1310,7 +1327,42 @@ export function useShellController() {
     }
   }
 
+  function closeControlCenterModal() {
+    setControlCenterModalOpen(false);
+    setConfigCenterOpen(false);
+    resetControlCenterNavigation();
+  }
+
+  async function openOnboardingFromDashboard() {
+    try {
+      await refreshOnboarding();
+    } finally {
+      setActiveControlSection("onboarding");
+      setControlCenterChrome("full");
+    }
+  }
+
+  async function openRuntimePanelFromDashboard(panel: RuntimePanelId) {
+    try {
+      if (panel === "paths") {
+        await Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
+      } else {
+        await refreshDiagnostics();
+      }
+    } finally {
+      setActiveControlSection("runtime_center");
+      setActiveRuntimePanel(panel);
+      setControlCenterChrome("full");
+    }
+  }
+
   function openControlCenter() {
+    if (screen === "workspace") {
+      setConfigCenterOpen(false);
+      resetControlCenterNavigation("dashboard");
+      setControlCenterModalOpen(true);
+      return;
+    }
     window.location.hash = "/control-center";
     setRouteHash(window.location.hash);
   }
@@ -1469,6 +1521,8 @@ export function useShellController() {
     setActiveControlSection,
     activeRuntimePanel,
     setActiveRuntimePanel,
+    controlCenterModalOpen,
+    controlCenterChrome,
     tauriRuntime,
     screen,
     statusText,
@@ -1490,9 +1544,12 @@ export function useShellController() {
     refreshCoreState,
     refreshDiagnostics,
     refreshContextMenuStatus,
+    refreshInstallProbe,
     refreshOnboarding,
     handleRetry,
+    handleRecoverMainWindowBoot,
     handleOpenLogs,
+    handleQuitAppGracefully,
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenKimiConfigDir,
@@ -1515,6 +1572,9 @@ export function useShellController() {
     handleCompleteOnboarding,
     handleSkipOnboarding,
     openControlCenter,
+    closeControlCenterModal,
+    openOnboardingFromDashboard,
+    openRuntimePanelFromDashboard,
     backToStatus,
     handleStartWindowDrag,
     handleMinimizeWindow,

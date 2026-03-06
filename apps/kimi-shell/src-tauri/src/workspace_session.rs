@@ -7,15 +7,15 @@ use std::{
 use chrono::{DateTime, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState},
     log_manager,
     types::{BackendState, WorkspaceSessionBridgePayload},
+    window_manager,
 };
 
-const MAIN_WINDOW_LABEL: &str = "main";
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT: &str = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT: &str = "workspace-session-bridge";
 const WORKSPACE_SESSION_POLL_INTERVAL_MS: u64 = 1_200;
@@ -148,7 +148,11 @@ pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &
 
         match fetch_session_by_id(workspace_port, &session_id) {
             Ok(Some(snapshot)) => {
-                apply_active_session_snapshot(&app, Some(snapshot), &format!("stream_hint:{source}"));
+                apply_active_session_snapshot(
+                    &app,
+                    Some(snapshot),
+                    &format!("stream_hint:{source}"),
+                );
             }
             Ok(None) => {
                 log_manager::append_line(
@@ -311,7 +315,10 @@ fn fetch_active_session(workspace_port: u16) -> Result<Option<SessionSnapshot>, 
     Ok(select_active_session(&sessions))
 }
 
-fn fetch_session_by_id(workspace_port: u16, session_id: &str) -> Result<Option<SessionSnapshot>, String> {
+fn fetch_session_by_id(
+    workspace_port: u16,
+    session_id: &str,
+) -> Result<Option<SessionSnapshot>, String> {
     let sessions = fetch_sessions(workspace_port)?;
     Ok(select_session_by_id(&sessions, session_id))
 }
@@ -424,9 +431,7 @@ fn emit_workspace_session_event(
     event_name: &str,
     payload: &WorkspaceSessionBridgePayload,
 ) {
-    if let Err(error) = app.emit_to(MAIN_WINDOW_LABEL, event_name, payload) {
-        log_manager::append_line(app, format!("failed to emit `{event_name}`: {error}"));
-    }
+    window_manager::publish_workspace_session_event(app, event_name, payload, "workspace_session");
 }
 
 fn should_poll(app: &AppHandle, generation: u64) -> bool {
@@ -676,12 +681,9 @@ mod tests {
             ),
         ];
 
-        let selected = select_latest_session_for_work_dir_with_case(
-            &sessions,
-            Path::new("D:/REPO"),
-            true,
-        )
-        .expect("must select matching session");
+        let selected =
+            select_latest_session_for_work_dir_with_case(&sessions, Path::new("D:/REPO"), true)
+                .expect("must select matching session");
         assert_eq!(selected.session_id, "newer-match");
     }
 
@@ -692,11 +694,8 @@ mod tests {
             session("second", false, Some("2026-03-05T12:20:00Z"), Some("D:/b")),
         ];
 
-        let selected = select_latest_session_for_work_dir_with_case(
-            &sessions,
-            Path::new("D:/missing"),
-            true,
-        );
+        let selected =
+            select_latest_session_for_work_dir_with_case(&sessions, Path::new("D:/missing"), true);
         assert!(selected.is_none());
     }
 }

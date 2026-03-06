@@ -18,6 +18,8 @@ import {
 import type {
   ActionableOnboardingStep,
   AppStatus,
+  ControlCenterChrome,
+  ControlCenterSurface,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
@@ -40,6 +42,8 @@ type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir";
 
 type ControlCenterViewProps = {
+  surface: ControlCenterSurface;
+  chrome: ControlCenterChrome;
   status: AppStatus | null;
   diagnostics: DiagnosticsInfo | null;
   onboarding: OnboardingStatus | null;
@@ -67,7 +71,11 @@ type ControlCenterViewProps = {
   onRefreshCoreState: () => Promise<void>;
   onRefreshDiagnostics: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;
+  onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
+  onClose: () => void;
+  onOpenOnboardingFromDashboard: () => Promise<void>;
+  onOpenRuntimePanelFromDashboard: (panel: RuntimePanelId) => Promise<void>;
   onRetry: () => Promise<void>;
   onOpenLogs: () => Promise<void>;
   onOpenFolder: (path: string) => Promise<void>;
@@ -204,6 +212,8 @@ function RuntimePanel({
 }
 
 export function ControlCenterView({
+  surface,
+  chrome,
   status,
   diagnostics,
   onboarding,
@@ -231,7 +241,11 @@ export function ControlCenterView({
   onRefreshCoreState,
   onRefreshDiagnostics,
   onRefreshContextMenuStatus,
+  onRefreshInstallProbe,
   onRefreshOnboarding,
+  onClose,
+  onOpenOnboardingFromDashboard,
+  onOpenRuntimePanelFromDashboard,
   onRetry,
   onOpenLogs,
   onOpenFolder,
@@ -282,6 +296,19 @@ export function ControlCenterView({
       installProbe?.python313Ready &&
       installProbe?.kimiReady,
   );
+  const showSidebar = surface === "fullscreen" || chrome === "full";
+  const isDashboardOnlyModal = surface === "modal" && chrome === "dashboard";
+  const runtimeContextMenuSupported =
+    contextMenuStatus?.supported ?? onboarding?.contextMenuSupported ?? false;
+  const runtimeContextMenuEnabled =
+    contextMenuStatus?.enabled ?? onboarding?.contextMenuEnabled ?? false;
+  const overviewContextMenuLabel = onboarding?.contextMenuSupported
+    ? onboarding.contextMenuEnabled
+      ? "已启用"
+      : "未启用"
+    : onboarding
+      ? "不支持"
+      : "-";
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -314,8 +341,11 @@ export function ControlCenterView({
     if (!isNarrowOnboarding) {
       return;
     }
-
+    const willExpand = expandedOnboardingStep !== step;
     setExpandedOnboardingStep((current) => (current === step ? null : step));
+    if (step === "install" && willExpand) {
+      void onRefreshInstallProbe();
+    }
   };
 
   const isStepExpanded = (step: OnboardingCardId) =>
@@ -343,8 +373,8 @@ export function ControlCenterView({
       variant="ghost"
       icon={<RefreshCcw size={15} />}
       className="cc-action-btn"
-      onClick={() => void onRetry()}
-      disabled={actionBusy}
+      onClick={() => void onRefreshInstallProbe()}
+      disabled={installBusy}
     >
       重新检测
     </Button>
@@ -437,14 +467,73 @@ export function ControlCenterView({
     </Button>
   );
 
-  const goRuntime = (panel: RuntimePanelId) => {
-    setActiveControlSection("runtime_center");
-    setActiveRuntimePanel(panel);
-  };
+  async function handleOpenOnboardingEntry() {
+    if (isDashboardOnlyModal) {
+      await onOpenOnboardingFromDashboard();
+      return;
+    }
+    try {
+      await onRefreshOnboarding();
+    } finally {
+      setActiveControlSection("onboarding");
+    }
+  }
+
+  async function handleSelectRuntimePanel(panel: RuntimePanelId) {
+    try {
+      if (panel === "paths") {
+        await Promise.all([onRefreshDiagnostics(), onRefreshContextMenuStatus()]);
+      } else {
+        await onRefreshDiagnostics();
+      }
+    } finally {
+      setActiveControlSection("runtime_center");
+      setActiveRuntimePanel(panel);
+    }
+  }
+
+  async function handleOpenRuntimeEntry(panel: RuntimePanelId) {
+    if (isDashboardOnlyModal) {
+      await onOpenRuntimePanelFromDashboard(panel);
+      return;
+    }
+    await handleSelectRuntimePanel(panel);
+  }
+
+  async function handleSelectControlSection(section: ControlSectionId) {
+    if (section === "overview") {
+      setActiveControlSection("overview");
+      return;
+    }
+    if (section === "onboarding") {
+      await handleOpenOnboardingEntry();
+      return;
+    }
+    await handleSelectRuntimePanel("paths");
+  }
 
   return (
-    <section className="control-center-shell">
-      <div className="cc-layout">
+    <section
+      className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""} ${isDashboardOnlyModal ? "control-center-shell-dashboard" : ""}`}
+    >
+      {surface === "modal" ? (
+        <header className="cc-modal-header">
+          <div className="cc-modal-title">
+            <h3>控制中心</h3>
+            <p>{showSidebar ? "引导配置、诊断与日志管理。" : "运行概览与控制中心入口。"}</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            icon={<X size={16} />}
+            onClick={onClose}
+            aria-label="关闭控制中心"
+          />
+        </header>
+      ) : null}
+      <div className={`cc-layout ${showSidebar ? "" : "cc-layout-dashboard"}`}>
+        {showSidebar ? (
         <aside className="cc-sidebar">
           <nav className="cc-nav" aria-label="Control center sections">
             {controlSections.map((section) => (
@@ -456,10 +545,7 @@ export function ControlCenterView({
                 className={`cc-nav-btn ${activeControlSection === section.id ? "active" : ""}`}
                 icon={section.icon}
                 onClick={() => {
-                  setActiveControlSection(section.id);
-                  if (section.id === "runtime_center") {
-                    setActiveRuntimePanel("paths");
-                  }
+                  void handleSelectControlSection(section.id);
                 }}
               >
                 <span className="cc-nav-text">
@@ -470,8 +556,9 @@ export function ControlCenterView({
             ))}
           </nav>
         </aside>
+        ) : null}
 
-        <div className="cc-main">
+        <div className={`cc-main ${isDashboardOnlyModal ? "cc-main-dashboard" : ""}`}>
           {activeControlSection === "overview" && (
             <>
               <section className="cc-card">
@@ -515,13 +602,7 @@ export function ControlCenterView({
                     </article>
                     <article className="cc-metric-card">
                       <span>右键菜单</span>
-                      <strong>
-                        {contextMenuStatus?.supported
-                          ? contextMenuStatus.enabled
-                            ? "已启用"
-                            : "未启用"
-                          : "不支持"}
-                      </strong>
+                      <strong>{overviewContextMenuLabel}</strong>
                     </article>
                   </div>
                   <div className="cc-actions">
@@ -572,7 +653,9 @@ export function ControlCenterView({
                       type="button"
                       icon={<SlidersHorizontal size={15} />}
                       className="cc-action-btn"
-                      onClick={() => setActiveControlSection("onboarding")}
+                      onClick={() => {
+                        void handleOpenOnboardingEntry();
+                      }}
                     >
                       进入引导配置
                     </Button>
@@ -581,7 +664,9 @@ export function ControlCenterView({
                       variant="outline"
                       icon={<Activity size={15} />}
                       className="cc-action-btn"
-                      onClick={() => goRuntime("core")}
+                      onClick={() => {
+                        void handleOpenRuntimeEntry("core");
+                      }}
                     >
                       进入核心诊断
                     </Button>
@@ -590,7 +675,9 @@ export function ControlCenterView({
                       variant="outline"
                       icon={<FileText size={15} />}
                       className="cc-action-btn"
-                      onClick={() => goRuntime("paths")}
+                      onClick={() => {
+                        void handleOpenRuntimeEntry("paths");
+                      }}
                     >
                       进入路径与菜单
                     </Button>
@@ -599,7 +686,9 @@ export function ControlCenterView({
                       variant="outline"
                       icon={<FileText size={15} />}
                       className="cc-action-btn"
-                      onClick={() => goRuntime("logs")}
+                      onClick={() => {
+                        void handleOpenRuntimeEntry("logs");
+                      }}
                     >
                       进入最近日志
                     </Button>
@@ -936,7 +1025,7 @@ export function ControlCenterView({
 
           {activeControlSection === "runtime_center" && (
             <section className="cc-card runtime-accordion">
-              <RuntimePanel active={activeRuntimePanel === "core"} onOpen={() => setActiveRuntimePanel("core")} title="核心运行诊断" description="端口、启动指标、版本与最后错误信息。">
+              <RuntimePanel active={activeRuntimePanel === "core"} onOpen={() => { void handleSelectRuntimePanel("core"); }} title="核心运行诊断" description="端口、启动指标、版本与最后错误信息。">
                 <div className="cc-actions">
                   <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
                   <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
@@ -959,15 +1048,30 @@ export function ControlCenterView({
                   <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
                   <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
                   <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
+                  <DiagnosticItem label="WebView Runtime" value={diagnostics?.webviewRuntimeKind ?? "-"} />
+                  <DiagnosticItem label="WebView Version" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
+                  <DiagnosticItem label="Startup Pending" value={String(diagnostics?.startupPending ?? false)} />
+                  <DiagnosticItem label="Startup Exit Cause" value={diagnostics?.startupExitCause ?? "-"} />
+                  <DiagnosticItem label="Main Create Mode" value={diagnostics?.mainCreateMode ?? "-"} />
+                  <DiagnosticItem label="Startup Attempt ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
+                  <DiagnosticItem label="Startup Phase" value={diagnostics?.startupPhase ?? "-"} />
+                  <DiagnosticItem label="Startup Failure Kind" value={diagnostics?.startupFailureKind ?? "-"} />
+                  <DiagnosticItem label="Startup Failure Detail" value={diagnostics?.startupFailureDetail ?? "-"} />
+                  <DiagnosticItem label="Startup Monitor State" value={diagnostics?.startupMonitorState ?? "-"} />
+                  <DiagnosticItem label="Startup Monitor Reason" value={diagnostics?.startupMonitorReason ?? "-"} />
+                  <DiagnosticItem label="Startup Monitor Target" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
+                  <DiagnosticItem label="Startup Monitor Detail" value={diagnostics?.startupMonitorDetail ?? "-"} />
                 </div>
+                <h4 className="log-tail-title">最近启动轨迹</h4>
+                <pre className="log-tail">{diagnostics?.startupTrace && diagnostics.startupTrace.length > 0 ? diagnostics.startupTrace.join("\n") : "暂无启动轨迹。"}</pre>
               </RuntimePanel>
 
-              <RuntimePanel active={activeRuntimePanel === "paths"} onOpen={() => setActiveRuntimePanel("paths")} title="路径与上下文菜单" description="查看路径配置并管理资源管理器右键菜单。">
-                <p className="hint">{contextMenuStatus?.supported ? `右键菜单：${contextMenuStatus.enabled ? "已启用" : "未启用"}` : "右键菜单：当前平台不支持"}</p>
+              <RuntimePanel active={activeRuntimePanel === "paths"} onOpen={() => { void handleSelectRuntimePanel("paths"); }} title="路径与上下文菜单" description="查看路径配置并管理资源管理器右键菜单。">
+                <p className="hint">{runtimeContextMenuSupported ? `右键菜单：${runtimeContextMenuEnabled ? "已启用" : "未启用"}` : "右键菜单：当前平台不支持"}</p>
                 {contextMenuStatus?.message && <p className="hint">{contextMenuStatus.message}</p>}
                 <div className="cc-actions">
-                  <Button type="button" icon={<Plus size={15} />} className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !contextMenuStatus?.supported}>启用右键菜单</Button>
-                  <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !contextMenuStatus?.supported}>禁用右键菜单</Button>
+                  <Button type="button" icon={<Plus size={15} />} className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用右键菜单</Button>
+                  <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用右键菜单</Button>
                   <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
                 </div>
                 <div className="diagnostics-grid">
@@ -983,7 +1087,7 @@ export function ControlCenterView({
                 </div>
               </RuntimePanel>
 
-              <RuntimePanel active={activeRuntimePanel === "logs"} onOpen={() => setActiveRuntimePanel("logs")} title="最近日志" description="快速查看应用与后端日志尾部内容。">
+              <RuntimePanel active={activeRuntimePanel === "logs"} onOpen={() => { void handleSelectRuntimePanel("logs"); }} title="最近日志" description="快速查看应用与后端日志尾部内容。">
                 <h4 className="log-tail-title">最近应用日志</h4>
                 <pre className="log-tail">{diagnostics?.appLogTail && diagnostics.appLogTail.length > 0 ? diagnostics.appLogTail.join("\n") : "暂无应用日志。"}</pre>
                 <h4 className="log-tail-title">最近后端日志</h4>
@@ -993,18 +1097,20 @@ export function ControlCenterView({
           )}
         </div>
       </div>
-      <ConfigCenterModal
-        open={configCenterOpen}
-        busy={configCenterBusy || actionBusy}
-        dirty={configCenterDirty}
-        view={configCenterView}
-        draft={configCenterDraft}
-        onDraftChange={onConfigCenterDraftChange}
-        onClose={onCloseConfigCenterModal}
-        onSave={onSaveKimiCliConfigCenter}
-        onReset={onResetConfigCenterDraft}
-        onOpenConfigDir={onOpenKimiConfigDir}
-      />
+      {showSidebar ? (
+        <ConfigCenterModal
+          open={configCenterOpen}
+          busy={configCenterBusy || actionBusy}
+          dirty={configCenterDirty}
+          view={configCenterView}
+          draft={configCenterDraft}
+          onDraftChange={onConfigCenterDraftChange}
+          onClose={onCloseConfigCenterModal}
+          onSave={onSaveKimiCliConfigCenter}
+          onReset={onResetConfigCenterDraft}
+          onOpenConfigDir={onOpenKimiConfigDir}
+        />
+      ) : null}
     </section>
   );
 }

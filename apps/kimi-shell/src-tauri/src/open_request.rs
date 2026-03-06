@@ -10,16 +10,14 @@ use std::{
 use chrono::Local;
 use rand::Rng;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use url::Url;
 
 use crate::{
-    app_state::AppState, backend_manager, log_manager, settings_store, window_manager,
-    types::OpenRequestErrorPayload, workspace_session,
+    app_state::AppState, backend_manager, log_manager, settings_store,
+    types::OpenRequestErrorPayload, window_manager, workspace_session,
 };
 
-const MAIN_WINDOW_LABEL: &str = "main";
-const OPEN_REQUEST_ERROR_EVENT: &str = "open-request-error";
 const OPEN_FILES_DEBOUNCE_MS: u64 = 350;
 const WORKSPACE_STEM_MAX_LEN: usize = 40;
 const WORKSPACE_ATTEMPTS: usize = 24;
@@ -219,13 +217,7 @@ fn enqueue_open_files_request(
                     &app,
                     format!("failed to process open-files request: {error}"),
                 );
-                emit_open_request_error(
-                    &app,
-                    &source,
-                    "apply_open_request",
-                    &error,
-                    summary,
-                );
+                emit_open_request_error(&app, &source, "apply_open_request", &error, summary);
             }
         }
     });
@@ -305,13 +297,12 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
         )
     })?;
 
-    backend_manager::set_session_work_dir(app, Some(workspace_dir.clone()))
-        .map_err(|error| {
-            format!(
-                "open-files stage=set_session_work_dir failed (workspace_dir={}): {error}",
-                workspace_dir.display()
-            )
-        })?;
+    backend_manager::set_session_work_dir(app, Some(workspace_dir.clone())).map_err(|error| {
+        format!(
+            "open-files stage=set_session_work_dir failed (workspace_dir={}): {error}",
+            workspace_dir.display()
+        )
+    })?;
     workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request");
 
     log_manager::append_line(
@@ -347,7 +338,7 @@ fn parse_open_request(args: &[String], cwd: Option<&Path>) -> Result<Option<Open
         return Ok(None);
     }
 
-    let args = normalize_cli_args(args);
+    let args = normalize_cli_args(args, cwd);
     if args.is_empty() {
         return Ok(None);
     }
@@ -363,8 +354,8 @@ fn parse_open_request(args: &[String], cwd: Option<&Path>) -> Result<Option<Open
     parse_implicit_candidates(&args, cwd)
 }
 
-fn normalize_cli_args(args: &[String]) -> Vec<String> {
-    strip_executable_arg(args)
+fn normalize_cli_args(args: &[String], cwd: Option<&Path>) -> Vec<String> {
+    strip_executable_arg(args, cwd)
         .iter()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
@@ -450,7 +441,7 @@ fn parse_implicit_candidates(
     args: &[String],
     cwd: Option<&Path>,
 ) -> Result<Option<OpenRequest>, String> {
-    let candidates = collect_candidate_paths(args, cwd, false);
+    let candidates = filter_self_launch_candidates(collect_candidate_paths(args, cwd, false));
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -502,6 +493,17 @@ fn collect_candidate_paths(
     candidates
 }
 
+fn filter_self_launch_candidates(candidates: Vec<CandidatePath>) -> Vec<CandidatePath> {
+    let Some(current_executable) = current_executable_path() else {
+        return candidates;
+    };
+
+    candidates
+        .into_iter()
+        .filter(|candidate| !paths_match(&candidate.resolved, &current_executable))
+        .collect()
+}
+
 fn classify_candidate_paths(candidates: Vec<CandidatePath>) -> CandidateClassification {
     let mut classification = CandidateClassification::default();
     for candidate in candidates {
@@ -542,18 +544,68 @@ fn build_open_files_parse_error(
     )
 }
 
-fn strip_executable_arg(args: &[String]) -> &[String] {
-    if args.len() < 2 {
+fn strip_executable_arg<'a>(args: &'a [String], cwd: Option<&Path>) -> &'a [String] {
+    if args.is_empty() {
         return args;
     }
 
     let first = &args[0];
+    if is_self_launch_artifact(first, cwd) {
+        return &args[1..];
+    }
+
+    if args.len() < 2 {
+        return args;
+    }
+
     let second = &args[1];
     let looks_like_exe = first.ends_with(".exe") || first.ends_with(".app");
     if looks_like_exe && second.starts_with("--") {
         return &args[1..];
     }
     args
+}
+
+fn is_self_launch_artifact(value: &str, cwd: Option<&Path>) -> bool {
+    let Some(current_executable) = current_executable_path() else {
+        return false;
+    };
+    let resolved = resolve_path(value, cwd);
+    paths_match(&resolved, &current_executable)
+}
+
+fn current_executable_path() -> Option<PathBuf> {
+    let current = std::env::current_exe().ok()?;
+    canonicalize_path(&current).or(Some(current))
+}
+
+fn canonicalize_path(path: &Path) -> Option<PathBuf> {
+    fs::canonicalize(path).ok()
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    if path_text_matches(left, right) {
+        return true;
+    }
+
+    match (canonicalize_path(left), canonicalize_path(right)) {
+        (Some(left), Some(right)) => path_text_matches(&left, &right),
+        _ => false,
+    }
+}
+
+fn path_text_matches(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        left.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+    }
+
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
 }
 
 fn resolve_path(raw: &str, cwd: Option<&Path>) -> PathBuf {
@@ -677,13 +729,7 @@ fn emit_open_request_error(
             payload.source, payload.stage, payload.message, args_display
         ),
     );
-
-    if let Err(error) = app.emit_to(MAIN_WINDOW_LABEL, OPEN_REQUEST_ERROR_EVENT, &payload) {
-        log_manager::append_line(
-            app,
-            format!("failed to emit open-request error event: {error}"),
-        );
-    }
+    window_manager::publish_open_request_error(app, &payload, source);
 }
 
 fn log_non_matching_args(app: &AppHandle, scope: &str, args: &[String]) {
@@ -1037,6 +1083,45 @@ mod tests {
         let error = parse_open_request(&args, Some(temp.path())).expect_err("should fail");
         assert!(error.contains("first_invalid_token=missing.md"));
         assert!(error.contains("reason=no_valid_files"));
+    }
+
+    #[test]
+    fn parse_implicit_current_executable_is_ignored() {
+        let current_exe = std::env::current_exe().expect("current exe should exist");
+        let args = vec![current_exe.to_string_lossy().to_string()];
+
+        let request = parse_open_request(&args, None).expect("parse should succeed");
+
+        assert_eq!(request, None);
+    }
+
+    #[test]
+    fn parse_implicit_ignores_current_executable_and_keeps_real_file() {
+        let temp = TempDirGuard::new("self-exe-plus-file");
+        let file_path = temp.path().join("note.md");
+        fs::write(&file_path, b"hello").expect("failed to write file");
+        let current_exe = std::env::current_exe().expect("current exe should exist");
+        let args = vec![
+            current_exe.to_string_lossy().to_string(),
+            "note.md".to_string(),
+        ];
+
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+
+        assert_eq!(request, Some(OpenRequest::OpenFiles(vec![file_path])));
+    }
+
+    #[test]
+    fn parse_implicit_filters_current_executable_after_shell_noise() {
+        let current_exe = std::env::current_exe().expect("current exe should exist");
+        let args = vec![
+            "/embedding".to_string(),
+            current_exe.to_string_lossy().to_string(),
+        ];
+
+        let request = parse_open_request(&args, None).expect("parse should succeed");
+
+        assert_eq!(request, None);
     }
 
     #[test]

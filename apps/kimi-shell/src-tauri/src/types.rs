@@ -14,6 +14,91 @@ pub enum BackendState {
     MissingKimi,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WebviewRuntimeKind {
+    Evergreen,
+    Fixed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MainCreateMode {
+    Auto,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupPhase {
+    Idle,
+    PrefillSurfaceShown,
+    MainBootRequested,
+    MainBuildTaskPosted,
+    MainBuildTaskEntered,
+    MainConfigLoaded,
+    MainBuilderConstructed,
+    MainBuildStarted,
+    MainWindowCreated,
+    MainPageLoadStarted,
+    MainPageLoadFinished,
+    FrontendReady,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupFailureKind {
+    MainThreadTaskStalled,
+    MainWebviewBuildHung,
+    FrontendReadyTimeout,
+    MainNavigationFailed,
+    MainWindowMissing,
+    MainDestroyedDuringStartup,
+    MainCloseRequestedDuringStartup,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupMonitorState {
+    Waiting,
+    RouteWorkspace,
+    RouteControlCenter,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupMonitorReason {
+    Starting,
+    OnboardingRequired,
+    MissingKimi,
+    BackendCrashed,
+    BackendReady,
+    StartupTimeout,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StartupMonitorTargetRoute {
+    Workspace,
+    Onboarding,
+    Diagnostics,
+    ControlCenter,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupMonitorStatus {
+    pub state: StartupMonitorState,
+    pub reason: StartupMonitorReason,
+    pub elapsed_ms: u64,
+    pub backend_state: BackendState,
+    pub detail: Option<String>,
+    pub target_route: Option<StartupMonitorTargetRoute>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
@@ -37,6 +122,14 @@ pub struct AppStatus {
     pub active_session_id: Option<String>,
     pub active_session_work_dir: Option<String>,
     pub session_source: Option<String>,
+    pub startup_attempt_id: u64,
+    pub startup_phase: StartupPhase,
+    pub startup_failure_kind: Option<StartupFailureKind>,
+    pub startup_failure_detail: Option<String>,
+    pub startup_monitor_state: Option<StartupMonitorState>,
+    pub startup_monitor_reason: Option<StartupMonitorReason>,
+    pub startup_monitor_target_route: Option<StartupMonitorTargetRoute>,
+    pub startup_monitor_detail: Option<String>,
     pub logs_dir: String,
     pub hotkey: String,
 }
@@ -74,6 +167,21 @@ pub struct SubmitPrefillAck {
     pub queued: bool,
     pub dispatched: bool,
     pub text_length: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrefillStatusState {
+    Idle,
+    OpeningMain,
+    StartupFailed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefillStatusPayload {
+    pub state: PrefillStatusState,
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +275,20 @@ pub struct DiagnosticsInfo {
     pub version_error: Option<String>,
     pub last_error: Option<String>,
     pub last_exit_reason: Option<String>,
+    pub webview_runtime_kind: WebviewRuntimeKind,
+    pub webview_runtime_version: Option<String>,
+    pub startup_pending: bool,
+    pub startup_exit_cause: Option<String>,
+    pub main_create_mode: MainCreateMode,
+    pub startup_attempt_id: u64,
+    pub startup_phase: StartupPhase,
+    pub startup_failure_kind: Option<StartupFailureKind>,
+    pub startup_failure_detail: Option<String>,
+    pub startup_monitor_state: Option<StartupMonitorState>,
+    pub startup_monitor_reason: Option<StartupMonitorReason>,
+    pub startup_monitor_target_route: Option<StartupMonitorTargetRoute>,
+    pub startup_monitor_detail: Option<String>,
+    pub startup_trace: Vec<String>,
     pub app_log_path: String,
     pub backend_log_path: String,
     pub app_log_tail: Vec<String>,

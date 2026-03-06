@@ -19,7 +19,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, RunEvent, Size};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
@@ -27,7 +27,8 @@ use types::{
     AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
     InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
     KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
-    ShutdownProgressPayload, SubmitPrefillAck, CURRENT_ONBOARDING_VERSION,
+    ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
+    StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -59,6 +60,14 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         active_session_id,
         active_session_work_dir,
         session_source,
+        startup_attempt_id,
+        startup_phase,
+        startup_failure_kind,
+        startup_failure_detail,
+        startup_monitor_state,
+        startup_monitor_reason,
+        startup_monitor_target_route,
+        startup_monitor_detail,
     ) = {
         let runtime = shared
             .runtime
@@ -94,6 +103,14 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             runtime.session_source.clone(),
+            runtime.startup_attempt_id,
+            runtime.startup_phase,
+            runtime.startup_failure_kind,
+            runtime.startup_failure_detail.clone(),
+            runtime.startup_monitor_state,
+            runtime.startup_monitor_reason,
+            runtime.startup_monitor_target_route,
+            runtime.startup_monitor_detail.clone(),
         )
     };
 
@@ -118,6 +135,14 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         active_session_id,
         active_session_work_dir,
         session_source,
+        startup_attempt_id,
+        startup_phase,
+        startup_failure_kind,
+        startup_failure_detail,
+        startup_monitor_state,
+        startup_monitor_reason,
+        startup_monitor_target_route,
+        startup_monitor_detail,
         logs_dir: logs_dir.to_string_lossy().to_string(),
         hotkey: settings.hotkey,
     })
@@ -177,12 +202,59 @@ fn notify_frontend_ready(app: AppHandle) -> Result<FrontendReadyAck, String> {
 }
 
 #[tauri::command]
+fn get_startup_monitor_status(app: AppHandle) -> Result<StartupMonitorStatus, String> {
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+
+    let status = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+
+        build_startup_monitor_status(
+            runtime.state,
+            runtime.workspace_port,
+            runtime.start_requested_at_ms,
+            runtime.startup_open_request_applied,
+            settings.onboarding_completed_version,
+            unix_time_millis(),
+        )
+    };
+
+    record_startup_monitor_observation(&app, &status, "get_startup_monitor_status_invoke");
+    Ok(status)
+}
+
+#[tauri::command]
+fn complete_startup_monitor_route(
+    app: AppHandle,
+    target_route: StartupMonitorTargetRoute,
+) -> Result<(), String> {
+    window_manager::complete_startup_monitor_route(
+        &app,
+        target_route,
+        "complete_startup_monitor_route_invoke",
+    )
+}
+
+#[tauri::command]
 fn submit_prefill(app: AppHandle, text: String) -> Result<SubmitPrefillAck, String> {
     Ok(window_manager::submit_prefill(
         &app,
         text,
         "submit_prefill_invoke",
     ))
+}
+
+#[tauri::command]
+fn recover_main_window_boot(app: AppHandle) -> Result<(), String> {
+    window_manager::recover_main_window_boot(&app, "recover_main_window_boot_invoke")
+}
+
+#[tauri::command]
+fn quit_app_gracefully(app: AppHandle) {
+    start_graceful_exit(app, "quit_app_gracefully_invoke");
 }
 
 #[tauri::command]
@@ -323,6 +395,20 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         launch_command,
         cli_contract_ok,
         cli_contract_error,
+        webview_runtime_kind,
+        webview_runtime_version,
+        startup_pending,
+        startup_exit_cause,
+        main_create_mode,
+        startup_attempt_id,
+        startup_phase,
+        startup_failure_kind,
+        startup_failure_detail,
+        startup_monitor_state,
+        startup_monitor_reason,
+        startup_monitor_target_route,
+        startup_monitor_detail,
+        startup_trace,
     ) = {
         let runtime = shared
             .runtime
@@ -356,6 +442,20 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
             runtime.launch_command.clone(),
             runtime.cli_contract_ok,
             runtime.cli_contract_error.clone(),
+            runtime.webview_runtime_kind,
+            runtime.webview_runtime_version.clone(),
+            runtime.startup_pending,
+            runtime.startup_exit_cause.clone(),
+            runtime.main_create_mode,
+            runtime.startup_attempt_id,
+            runtime.startup_phase,
+            runtime.startup_failure_kind,
+            runtime.startup_failure_detail.clone(),
+            runtime.startup_monitor_state,
+            runtime.startup_monitor_reason,
+            runtime.startup_monitor_target_route,
+            runtime.startup_monitor_detail.clone(),
+            runtime.startup_trace.clone(),
         )
     };
 
@@ -407,6 +507,20 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         version_error,
         last_error,
         last_exit_reason,
+        webview_runtime_kind,
+        webview_runtime_version,
+        startup_pending,
+        startup_exit_cause,
+        main_create_mode,
+        startup_attempt_id,
+        startup_phase,
+        startup_failure_kind,
+        startup_failure_detail,
+        startup_monitor_state,
+        startup_monitor_reason,
+        startup_monitor_target_route,
+        startup_monitor_detail,
+        startup_trace,
         app_log_path: app_log_path.to_string_lossy().to_string(),
         backend_log_path: backend_log_path.to_string_lossy().to_string(),
         app_log_tail: read_log_tail(&app_log_path, 60),
@@ -522,53 +636,6 @@ pub fn run() {
             let pid = shared.pid;
             app.manage(shared);
 
-            #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                if let Err(error) = window.set_decorations(false) {
-                    log_manager::append_line(
-                        app.handle(),
-                        format!("failed to disable window decorations: {error}"),
-                    );
-                }
-                if let Err(error) = window.set_shadow(true) {
-                    log_manager::append_line(
-                        app.handle(),
-                        format!("failed to enable window shadow: {error}"),
-                    );
-                }
-
-                if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
-                    900.0, 640.0,
-                )))) {
-                    log_manager::append_line(
-                        app.handle(),
-                        format!("failed to set window min size: {error}"),
-                    );
-                }
-
-                match window.outer_size() {
-                    Ok(size) if size.width < 900 || size.height < 640 => {
-                        log_manager::append_line(
-                            app.handle(),
-                            format!(
-                                "detected abnormal window size {}x{}, restoring default bounds",
-                                size.width, size.height
-                            ),
-                        );
-                        let _ = window.unminimize();
-                        let _ = window.set_size(Size::Logical(LogicalSize::new(1200.0, 820.0)));
-                        let _ = window.center();
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        log_manager::append_line(
-                            app.handle(),
-                            format!("failed to query window size: {error}"),
-                        );
-                    }
-                }
-            }
-
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
                 shortcut_manager::register_default_hotkey(app.handle())?;
@@ -586,6 +653,10 @@ pub fn run() {
                 );
             }
 
+            window_manager::create_startup_main_window(app.handle(), "setup_main_window")
+                .map_err(anyhow::Error::msg)?;
+            window_manager::record_prefill_shown(app.handle(), "setup");
+            initialize_webview_runtime_info(app.handle());
             auto_repair_context_menu(app.handle());
 
             open_request::apply_startup_cli_request(app.handle());
@@ -599,7 +670,11 @@ pub fn run() {
             retry_start_backend,
             report_loading_rendered,
             notify_frontend_ready,
+            get_startup_monitor_status,
+            complete_startup_monitor_route,
             submit_prefill,
+            recover_main_window_boot,
+            quit_app_gracefully,
             save_kimi_path,
             save_work_dir,
             get_diagnostics,
@@ -628,55 +703,38 @@ pub fn run() {
 
     app.run(|app_handle, event| match event {
         RunEvent::WindowEvent { label, event, .. } => {
-            if label == "prefill" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    if !window_manager::consume_prefill_close_allowance(app_handle) {
+            if label == MAIN_WINDOW_LABEL {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
-                        window_manager::complete_prefill_without_text(
+                        if !window_manager::handle_main_close_requested(
                             app_handle,
-                            "prefill_close_requested",
-                        );
-                    }
-                }
-                return;
-            }
-
-            if label == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let app = app_handle.clone();
-                    emit_shutdown_progress(
-                        &app,
-                        "close_requested",
-                        Some("正在关闭后端服务…"),
-                        Some(0),
-                    );
-                    thread::spawn(move || {
-                        let started = Instant::now();
-                        emit_shutdown_progress(
-                            &app,
-                            "stopping_backend",
-                            Some("正在关闭后端服务…"),
-                            Some(0),
-                        );
-                        if let Err(error) = backend_manager::stop_backend(&app) {
-                            log_manager::append_line(
-                                &app,
-                                format!("shutdown stop_backend failed: {error:#}"),
-                            );
+                            "main_close_requested",
+                        ) {
+                            start_graceful_exit(app_handle.clone(), "main_close_requested");
                         }
-                        emit_shutdown_progress(
-                            &app,
-                            "finalizing_exit",
-                            Some("正在退出应用…"),
-                            Some(duration_to_u64_ms(started.elapsed().as_millis())),
-                        );
-                        app.exit(0);
-                    });
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        window_manager::handle_main_window_destroyed(app_handle, "main_destroyed");
+                    }
+                    _ => {}
                 }
             }
         }
-        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+        RunEvent::ExitRequested { api, .. } => {
+            if window_manager::should_prevent_process_exit(app_handle) {
+                api.prevent_exit();
+                log_manager::append_line(
+                    app_handle,
+                    "prevented process exit because startup is still pending",
+                );
+                return;
+            }
+            if should_attempt_stop_backend(app_handle) {
+                let _ = backend_manager::stop_backend(app_handle);
+            }
+        }
+        RunEvent::Exit => {
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
             }
@@ -767,6 +825,160 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     })
 }
 
+fn build_startup_monitor_status(
+    backend_state: BackendState,
+    workspace_port: Option<u16>,
+    start_requested_at_ms: Option<u64>,
+    startup_open_request_applied: bool,
+    onboarding_completed_version: u32,
+    now_ms: u64,
+) -> StartupMonitorStatus {
+    const STARTUP_MONITOR_TIMEOUT_MS: u64 = 30_000;
+
+    let elapsed_ms = start_requested_at_ms
+        .and_then(|start| now_ms.checked_sub(start))
+        .unwrap_or(0);
+    let onboarding_required =
+        onboarding_completed_version < CURRENT_ONBOARDING_VERSION && !startup_open_request_applied;
+    let workspace_ready =
+        matches!(backend_state, BackendState::Running) && workspace_port.is_some();
+
+    if matches!(backend_state, BackendState::MissingKimi) {
+        return StartupMonitorStatus {
+            state: StartupMonitorState::RouteControlCenter,
+            reason: StartupMonitorReason::MissingKimi,
+            elapsed_ms,
+            backend_state,
+            detail: Some("未检测到 Kimi CLI，正在进入引导配置。".to_string()),
+            target_route: Some(StartupMonitorTargetRoute::Onboarding),
+        };
+    }
+
+    if matches!(backend_state, BackendState::Crashed) {
+        return StartupMonitorStatus {
+            state: StartupMonitorState::RouteControlCenter,
+            reason: StartupMonitorReason::BackendCrashed,
+            elapsed_ms,
+            backend_state,
+            detail: Some("后端启动失败，正在进入诊断页。".to_string()),
+            target_route: Some(StartupMonitorTargetRoute::Diagnostics),
+        };
+    }
+
+    if onboarding_required {
+        return StartupMonitorStatus {
+            state: StartupMonitorState::RouteControlCenter,
+            reason: StartupMonitorReason::OnboardingRequired,
+            elapsed_ms,
+            backend_state,
+            detail: Some("检测到首次安装或需要引导，正在进入控制中心。".to_string()),
+            target_route: Some(StartupMonitorTargetRoute::Onboarding),
+        };
+    }
+
+    if workspace_ready {
+        return StartupMonitorStatus {
+            state: StartupMonitorState::RouteWorkspace,
+            reason: StartupMonitorReason::BackendReady,
+            elapsed_ms,
+            backend_state,
+            detail: Some("后端已就绪，正在进入工作区。".to_string()),
+            target_route: Some(StartupMonitorTargetRoute::Workspace),
+        };
+    }
+
+    if elapsed_ms >= STARTUP_MONITOR_TIMEOUT_MS {
+        return StartupMonitorStatus {
+            state: StartupMonitorState::Failed,
+            reason: StartupMonitorReason::StartupTimeout,
+            elapsed_ms,
+            backend_state,
+            detail: Some("后端启动超时，请重试或打开日志排查。".to_string()),
+            target_route: None,
+        };
+    }
+
+    StartupMonitorStatus {
+        state: StartupMonitorState::Waiting,
+        reason: StartupMonitorReason::Starting,
+        elapsed_ms,
+        backend_state,
+        detail: Some("正在等待后端启动完成。".to_string()),
+        target_route: None,
+    }
+}
+
+fn record_startup_monitor_observation(
+    app: &AppHandle,
+    status: &StartupMonitorStatus,
+    source: &str,
+) {
+    let log_key = format!(
+        "{}:{}:{}:{}",
+        startup_monitor_state_label(status.state),
+        startup_monitor_reason_label(status.reason),
+        status
+            .target_route
+            .map(startup_monitor_target_route_label)
+            .unwrap_or("none"),
+        status.detail.as_deref().unwrap_or("")
+    );
+
+    let should_log = {
+        let state = app.state::<AppState>();
+        let Ok(mut runtime) = state.runtime.lock() else {
+            log_manager::append_line(
+                app,
+                format!(
+                    "runtime state mutex is poisoned while recording startup monitor status (source={source})"
+                ),
+            );
+            return;
+        };
+
+        runtime.startup_monitor_state = Some(status.state);
+        runtime.startup_monitor_reason = Some(status.reason);
+        runtime.startup_monitor_target_route = status.target_route;
+        runtime.startup_monitor_detail = status.detail.clone();
+
+        if runtime.startup_monitor_log_key.as_deref() == Some(log_key.as_str()) {
+            false
+        } else {
+            runtime.startup_monitor_log_key = Some(log_key.clone());
+            true
+        }
+    };
+
+    if !should_log {
+        return;
+    }
+
+    let log_line = match status.state {
+        StartupMonitorState::Waiting => "startup_monitor_waiting".to_string(),
+        StartupMonitorState::RouteWorkspace => "startup_monitor_route_workspace".to_string(),
+        StartupMonitorState::RouteControlCenter => format!(
+            "startup_monitor_route_control_center:{}",
+            status
+                .target_route
+                .map(startup_monitor_target_route_label)
+                .unwrap_or("control_center")
+        ),
+        StartupMonitorState::Failed => format!(
+            "startup_monitor_failed:{}",
+            startup_monitor_reason_label(status.reason)
+        ),
+    };
+
+    log_manager::append_line(
+        app,
+        format!(
+            "{log_line} (source={source}, backend_state={}, elapsed_ms={})",
+            format_backend_state_label(status.backend_state),
+            status.elapsed_ms
+        ),
+    );
+}
+
 fn should_show_onboarding(
     settings: &AppSettings,
     startup_open_request_applied: bool,
@@ -808,6 +1020,46 @@ fn recommend_onboarding_step(
         return OnboardingStep::ApiConfig;
     }
     OnboardingStep::Done
+}
+
+fn format_backend_state_label(state: BackendState) -> &'static str {
+    match state {
+        BackendState::Stopped => "stopped",
+        BackendState::Starting => "starting",
+        BackendState::Running => "running",
+        BackendState::Crashed => "crashed",
+        BackendState::Stopping => "stopping",
+        BackendState::MissingKimi => "missing_kimi",
+    }
+}
+
+fn startup_monitor_state_label(state: StartupMonitorState) -> &'static str {
+    match state {
+        StartupMonitorState::Waiting => "waiting",
+        StartupMonitorState::RouteWorkspace => "route_workspace",
+        StartupMonitorState::RouteControlCenter => "route_control_center",
+        StartupMonitorState::Failed => "failed",
+    }
+}
+
+fn startup_monitor_reason_label(reason: StartupMonitorReason) -> &'static str {
+    match reason {
+        StartupMonitorReason::Starting => "starting",
+        StartupMonitorReason::OnboardingRequired => "onboarding_required",
+        StartupMonitorReason::MissingKimi => "missing_kimi",
+        StartupMonitorReason::BackendCrashed => "backend_crashed",
+        StartupMonitorReason::BackendReady => "backend_ready",
+        StartupMonitorReason::StartupTimeout => "startup_timeout",
+    }
+}
+
+fn startup_monitor_target_route_label(route: StartupMonitorTargetRoute) -> &'static str {
+    match route {
+        StartupMonitorTargetRoute::Workspace => "workspace",
+        StartupMonitorTargetRoute::Onboarding => "onboarding",
+        StartupMonitorTargetRoute::Diagnostics => "diagnostics",
+        StartupMonitorTargetRoute::ControlCenter => "control_center",
+    }
 }
 
 fn mark_onboarding_completed(app: &AppHandle) -> Result<(), String> {
@@ -937,8 +1189,118 @@ fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {
     end.checked_sub(start)
 }
 
+fn compiled_webview_runtime_kind() -> WebviewRuntimeKind {
+    match option_env!("KIMI_WEBVIEW_RUNTIME_KIND")
+        .unwrap_or("evergreen")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "fixed" => WebviewRuntimeKind::Fixed,
+        "unknown" => WebviewRuntimeKind::Unknown,
+        _ => WebviewRuntimeKind::Evergreen,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_webview_runtime_version() -> Option<String> {
+    option_env!("KIMI_WEBVIEW_RUNTIME_VERSION")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(query_webview2_runtime_version_from_registry)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_webview_runtime_version() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn query_webview2_runtime_version_from_registry() -> Option<String> {
+    use winreg::{
+        enums::{
+            HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+        },
+        RegKey,
+    };
+
+    const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    let key_paths = [
+        format!(r"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT_ID}"),
+        format!(r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_CLIENT_ID}"),
+    ];
+    let hives = [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE];
+    let access_modes = [
+        KEY_READ,
+        KEY_READ | KEY_WOW64_32KEY,
+        KEY_READ | KEY_WOW64_64KEY,
+    ];
+
+    for hive in hives {
+        let root = RegKey::predef(hive);
+        for path in &key_paths {
+            for access in access_modes {
+                if let Ok(key) = root.open_subkey_with_flags(path, access) {
+                    if let Ok(version) = key.get_value::<String, _>("pv") {
+                        let trimmed = version.trim();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn initialize_webview_runtime_info(app: &AppHandle) {
+    let kind = compiled_webview_runtime_kind();
+    let version = resolve_webview_runtime_version();
+    window_manager::set_webview_runtime_info(app, kind, version, "setup");
+}
+
 fn duration_to_u64_ms(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn start_graceful_exit(app: AppHandle, source: &str) {
+    if is_graceful_exit_in_progress(&app) {
+        return;
+    }
+
+    window_manager::permit_process_exit(&app, source);
+    log_manager::append_line(&app, format!("graceful exit requested (source={source})"));
+    emit_shutdown_progress(&app, "close_requested", Some("正在关闭后端服务…"), Some(0));
+
+    let source = source.to_string();
+    thread::spawn(move || {
+        let started = Instant::now();
+        emit_shutdown_progress(&app, "stopping_backend", Some("正在关闭后端服务…"), Some(0));
+        if let Err(error) = backend_manager::stop_backend(&app) {
+            log_manager::append_line(
+                &app,
+                format!("shutdown stop_backend failed (source={source}): {error:#}"),
+            );
+        }
+        emit_shutdown_progress(
+            &app,
+            "finalizing_exit",
+            Some("正在退出应用…"),
+            Some(duration_to_u64_ms(started.elapsed().as_millis())),
+        );
+        app.exit(0);
+    });
+}
+
+fn is_graceful_exit_in_progress(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let lock = state.runtime.lock();
+    let Ok(runtime) = lock else {
+        return false;
+    };
+    matches!(runtime.state, BackendState::Stopping)
 }
 
 fn emit_shutdown_progress(
@@ -1047,5 +1409,113 @@ mod tests {
             false,
         );
         assert!(matches!(step, OnboardingStep::InstallKimi));
+    }
+
+    #[test]
+    fn startup_monitor_routes_workspace_when_backend_and_proxy_are_ready() {
+        let status = build_startup_monitor_status(
+            BackendState::Running,
+            Some(4000),
+            Some(10),
+            false,
+            CURRENT_ONBOARDING_VERSION,
+            1_000,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::RouteWorkspace);
+        assert_eq!(status.reason, StartupMonitorReason::BackendReady);
+        assert_eq!(
+            status.target_route,
+            Some(StartupMonitorTargetRoute::Workspace)
+        );
+    }
+
+    #[test]
+    fn startup_monitor_routes_onboarding_when_onboarding_is_required() {
+        let status = build_startup_monitor_status(
+            BackendState::Running,
+            Some(4000),
+            Some(10),
+            false,
+            0,
+            1_000,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::RouteControlCenter);
+        assert_eq!(status.reason, StartupMonitorReason::OnboardingRequired);
+        assert_eq!(
+            status.target_route,
+            Some(StartupMonitorTargetRoute::Onboarding)
+        );
+    }
+
+    #[test]
+    fn startup_monitor_routes_onboarding_when_kimi_is_missing() {
+        let status = build_startup_monitor_status(
+            BackendState::MissingKimi,
+            None,
+            Some(10),
+            false,
+            CURRENT_ONBOARDING_VERSION,
+            1_000,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::RouteControlCenter);
+        assert_eq!(status.reason, StartupMonitorReason::MissingKimi);
+        assert_eq!(
+            status.target_route,
+            Some(StartupMonitorTargetRoute::Onboarding)
+        );
+    }
+
+    #[test]
+    fn startup_monitor_routes_diagnostics_when_backend_crashes() {
+        let status = build_startup_monitor_status(
+            BackendState::Crashed,
+            None,
+            Some(10),
+            false,
+            CURRENT_ONBOARDING_VERSION,
+            1_000,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::RouteControlCenter);
+        assert_eq!(status.reason, StartupMonitorReason::BackendCrashed);
+        assert_eq!(
+            status.target_route,
+            Some(StartupMonitorTargetRoute::Diagnostics)
+        );
+    }
+
+    #[test]
+    fn startup_monitor_waits_before_timeout() {
+        let status = build_startup_monitor_status(
+            BackendState::Starting,
+            None,
+            Some(10),
+            false,
+            CURRENT_ONBOARDING_VERSION,
+            20_000,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::Waiting);
+        assert_eq!(status.reason, StartupMonitorReason::Starting);
+        assert!(status.target_route.is_none());
+    }
+
+    #[test]
+    fn startup_monitor_fails_after_timeout() {
+        let status = build_startup_monitor_status(
+            BackendState::Starting,
+            None,
+            Some(10),
+            false,
+            CURRENT_ONBOARDING_VERSION,
+            40_500,
+        );
+
+        assert_eq!(status.state, StartupMonitorState::Failed);
+        assert_eq!(status.reason, StartupMonitorReason::StartupTimeout);
+        assert!(status.target_route.is_none());
     }
 }

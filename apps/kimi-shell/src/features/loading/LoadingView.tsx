@@ -1,4 +1,4 @@
-import { Check, Eraser, FolderOpen, RefreshCcw } from "lucide-react";
+import { Check, Eraser, FolderOpen, RefreshCcw, X } from "lucide-react";
 import type { AppStatus } from "@/app/types";
 import { IconButton } from "@/components/common/IconButton";
 import { PathField } from "@/components/common/PathField";
@@ -12,7 +12,9 @@ type LoadingViewProps = {
   hotkeyOwnerLabel: string;
   onWorkDirChange: (value: string) => void;
   onRetry: () => void;
+  onRecoverMainWindowBoot: () => void;
   onOpenLogs: () => void;
+  onQuitAppGracefully: () => void;
   onOpenExternalUrl: (url: string) => void;
   onPickWorkDir: () => void;
   onSaveWorkDirAndRestart: () => void;
@@ -28,17 +30,25 @@ export function LoadingView({
   hotkeyOwnerLabel,
   onWorkDirChange,
   onRetry,
+  onRecoverMainWindowBoot,
   onOpenLogs,
+  onQuitAppGracefully,
   onOpenExternalUrl,
   onPickWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
 }: LoadingViewProps) {
+  const startupFailed = status?.startupPhase === "failed";
+  const failureDetail = status?.startupFailureDetail ?? "主界面打开失败，请重试或打开日志排查。";
+
   return (
     <section className="loading-view">
       <div className="block loading-main">
-        <div className="spinner" aria-hidden />
-        <p className="status-line">State: {statusText}</p>
+        {!startupFailed && <div className="spinner" aria-hidden />}
+        <p className="status-line">
+          {startupFailed ? "主界面启动失败" : `State: ${statusText}`}
+        </p>
+        {startupFailed && <p className="hint">{failureDetail}</p>}
         {typeof status?.loadingStartupMs === "number" && (
           <p className="hint">
             Shell to Loading: <strong>{status.loadingStartupMs} ms</strong>{" "}
@@ -65,22 +75,41 @@ export function LoadingView({
         )}
         <p className="hint">{hotkeyOwnerLabel}</p>
         <div className="actions">
-          <IconButton
-            icon={<RefreshCcw size={15} />}
-            label="Restart Backend"
-            onClick={onRetry}
-            disabled={actionBusy}
-          />
+          {startupFailed ? (
+            <IconButton
+              icon={<RefreshCcw size={15} />}
+              label="重试打开主界面"
+              onClick={onRecoverMainWindowBoot}
+              disabled={actionBusy}
+            />
+          ) : (
+            <IconButton
+              icon={<RefreshCcw size={15} />}
+              label="Restart Backend"
+              onClick={onRetry}
+              disabled={actionBusy}
+            />
+          )}
           <IconButton
             icon={<FolderOpen size={15} />}
             label="Open Logs Folder"
             onClick={onOpenLogs}
             className="ghost"
           />
+          {startupFailed && (
+            <IconButton
+              icon={<X size={15} />}
+              label="退出应用"
+              onClick={onQuitAppGracefully}
+              className="ghost"
+              disabled={actionBusy}
+            />
+          )}
         </div>
       </div>
 
-      <div className="block">
+      {!startupFailed && (
+        <div className="block">
         <label htmlFor="work-dir">Kimi work directory</label>
         <PathField
           id="work-dir"
@@ -108,7 +137,8 @@ export function LoadingView({
             disabled={actionBusy}
           />
         </div>
-      </div>
+        </div>
+      )}
     </section>
   );
 }

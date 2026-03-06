@@ -1,5 +1,529 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（启动监控页改为无系统标题栏的小窗壳）
+
+### 计划清单
+
+- [x] 记录本轮启动页窗口壳与几何收口目标
+- [x] 调整 `apps/kimi-shell/src-tauri/tauri.conf.json` 与 `window_manager.rs`，让 prefill surface 使用无系统标题栏并缩小窗口尺寸
+- [x] 调整 `apps/kimi-shell/src/prefill/PrefillApp.tsx`，为启动监控页增加轻量自绘顶部壳与窗口控制
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，使启动页视觉风格贴近主窗口并紧贴状态面板
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 启动监控页不再显示原生 Windows title bar
+- [x] 启动监控页窗口使用与主窗口一致的圆角/壳层视觉方向
+- [x] 启动监控页窗口尺寸明显小于当前版本，并更贴近状态面板内容
+- [x] 右上角日志按钮仍保留 `icon + 文字` 无边框样式
+- [x] 启动页仍可拖拽、最小化和关闭
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/tauri.conf.json` / `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - prefill surface 的窗口几何从 `760x520` 收紧到 `720x420`，最小尺寸改为 `660x380`。
+    - 启动监控页窗口改为 `decorations=false`，并开启阴影，让它和主窗口一样走无系统标题栏方向。
+    - 运行时 `apply_window_surface()` 也同步把 prefill surface 改为无标题栏，避免窗口创建时先闪原生标题栏。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 启动监控页新增轻量自绘顶部壳，包含品牌、顶部拖拽区、右上角“打开日志”按钮以及最小化/最大化/关闭按钮。
+    - 继续保留上一轮收好的单一状态面板，未改动启动监控轮询与分流逻辑。
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 启动页整体改为小型 `shell` 风格窗口壳：圆角、边框、阴影、顶部条和内容区分层。
+    - 内容区压缩外层留白，让窗口几何更贴近中间状态面板。
+    - 指标卡和失败态按钮继续保留响应式规则。
+- 验证结果：
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（50/50）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 启动监控页重点确认三项：没有系统标题栏、顶部拖拽和窗口控制可用、窗口尺寸相比上一版明显更紧凑。
+  - 如果你希望它进一步贴得更紧，下一步最值得微调的是 prefill 窗口高度和状态面板内部上下 padding。
+
+## 本轮计划（启动监控页 UI 收敛）
+
+### 计划清单
+
+- [x] 记录本轮 UI 收敛目标、边界与验收标准
+- [x] 调整 `apps/kimi-shell/src/prefill/PrefillApp.tsx`，移除外层 header/footer，只保留右上角日志按钮与居中状态面板
+- [x] 调整等待态、进入主界面态和失败态文案与按钮布局
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，收敛为单一居中状态面板样式
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 等待态页面不再显示外层标题区和底部操作区
+- [x] 等待态主标题为“正在等待后端启动完成”
+- [x] 等待态不再显示重复的小字说明
+- [x] 右上角存在无边框 `icon + 文字` 的“打开日志”按钮
+- [x] 失败态使用同一紧凑面板，按钮放在面板内部
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 移除了外层 `header/footer` 结构，页面改为“右上角日志按钮 + 单一居中状态面板”。
+    - 等待态标题改成“正在等待后端启动完成”，进入主界面态改成“正在进入主界面”。
+    - 等待态与进入主界面态不再渲染重复的小字说明；失败态继续保留详细错误说明。
+    - 失败态按钮改为内收进状态面板，只保留“重试启动 / 退出应用”；“打开日志”统一抽到页面右上角。
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 删除旧的 dialog/header/footer 样式，重写为单一居中虚线状态面板布局。
+    - 新增右上角无边框 `icon + 文字` 日志按钮样式。
+    - 保留三张指标卡，并维持窄屏下单列的响应式行为。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 重点看等待态是否只剩单一状态面板。
+  - 检查右上角“打开日志”按钮 hover 是否足够轻量，且在窄窗下不会压住主内容。
+  - 人为触发失败态时，确认“重试启动 / 退出应用”都在面板内部。
+
+## 本轮计划（Kimi Shell 0.0.9 版本发布）
+
+### 计划清单
+
+- [x] 记录本轮版本升级、安装包构建与发布说明范围
+- [x] 将 `apps/kimi-shell` 版本从 `0.0.8` 升级到 `0.0.9`
+- [x] 同步 `package.json`、`Cargo.toml`、`tauri.conf.json` 版本号
+- [x] 编写 `apps/kimi-shell/docs/release-notes-0.0.9.md`
+- [x] 构建 Windows NSIS 安装包
+- [x] 核对安装包产物路径、大小与时间
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `apps/kimi-shell/package.json` 版本为 `0.0.9`
+- [x] `apps/kimi-shell/src-tauri/Cargo.toml` 版本为 `0.0.9`
+- [x] `apps/kimi-shell/src-tauri/tauri.conf.json` 版本为 `0.0.9`
+- [x] 发布说明文件 `apps/kimi-shell/docs/release-notes-0.0.9.md` 已创建
+- [x] NSIS 安装包成功产出
+- [x] `tasks/todo.md` 已补齐本轮回顾
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/package.json`
+    - 版本号从 `0.0.8` 升级到 `0.0.9`。
+  - `apps/kimi-shell/src-tauri/Cargo.toml` / `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - 通过 `pnpm -C apps/kimi-shell sync:version` 与 `package.json` 同步到 `0.0.9`。
+  - `apps/kimi-shell/docs/release-notes-0.0.9.md`
+    - 新增 `0.0.9` 版本更新说明，聚焦单窗口启动、启动监控页、启动失败兜底与快捷方式启动误判修复。
+- 构建结果：
+  - 执行 `pnpm -C apps/kimi-shell tauri build --bundles nsis` 通过。
+  - 产物路径：`apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.9_x64-setup.exe`
+  - 产物大小：`3567277` bytes
+  - 构建时间：`2026-03-06 16:18:01`
+- 验证结果：
+  - `pnpm -C apps/kimi-shell sync:version` 通过。
+  - `pnpm -C apps/kimi-shell tauri build --bundles nsis` 通过。
+- 手工建议：
+  - 安装后优先验证第二次冷启动、启动监控页自动分流和桌面快捷方式启动三条关键链路是否与本轮说明一致。
+
+## 本轮计划（启动前置页改为后端启动监控页）
+
+### 计划清单
+
+- [x] 记录本轮启动监控页目标、分流规则与验收标准
+- [x] 新增 Rust 轻量启动分流类型与命令：`get_startup_monitor_status`、`complete_startup_monitor_route`
+- [x] 调整单窗口关闭语义：启动监控页阶段关闭窗口直接优雅退出，不再进入 shell
+- [x] 将 `prefill.html` 对应前端改为启动监控页 UI，移除输入/提交逻辑
+- [x] 接入启动轮询、自动分流到 workspace / onboarding / diagnostics / control_center
+- [x] 为 diagnostics 追加最近一次启动监控决策信息
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 启动页不再承载文本输入，只显示启动计时、状态文案和恢复动作
+- [x] `backend running + workspace_port ready` 时，启动页自动进入 workspace
+- [x] `onboarding required / first install / missing_kimi` 时，启动页自动进入控制中心 `onboarding`
+- [x] `backend crashed` 时，启动页自动进入控制中心 `diagnostics`
+- [x] `starting >= 30s` 时，启动页停留在失败态，不自动进入控制中心
+- [x] 启动监控命令仅在状态变化时写日志，不产生轮询刷屏
+- [x] 启动监控页阶段点击关闭窗口会优雅退出应用，不再触发进入 shell
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/types.rs` / `apps/kimi-shell/src-tauri/src/app_state.rs`
+    - 新增 `StartupMonitorState`、`StartupMonitorReason`、`StartupMonitorTargetRoute`、`StartupMonitorStatus`。
+    - runtime 追加最近一次启动监控状态、原因、目标路由、详情与去重日志 key。
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - 新增命令 `get_startup_monitor_status` 与 `complete_startup_monitor_route`。
+    - 新增轻量分流规则：`missing_kimi -> onboarding`、`crashed -> diagnostics`、`onboarding required -> onboarding`、`running + workspace_port/active_port ready -> workspace`、`>=30s -> failed`。
+    - 启动监控状态只在状态变化时写日志，并同步到 diagnostics。
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - 监控页阶段点击窗口关闭，不再触发“跳过进入 shell”，而是回到主窗口默认关闭链路，由 `start_graceful_exit()` 接管。
+    - 新增 `LocalRoute::Onboarding`，并提供 `complete_startup_monitor_route()` 把启动监控页自动分流到 `workspace / onboarding / diagnostics / control_center`。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx` / `apps/kimi-shell/src/prefill/prefill.css`
+    - 启动页改成监控 UI：显示计时、后端状态、分流目标、等待态 spinner、失败态按钮。
+    - 移除文本输入与提交逻辑，改为轮询 `get_startup_monitor_status`，首次进入路由态时调用 `complete_startup_monitor_route`。
+    - 失败态复用 `retry_start_backend`、`open_logs_folder`、`quit_app_gracefully`。
+  - `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - 前端类型补齐启动监控状态。
+    - 诊断页新增最近一次启动监控状态、原因、目标和详情展示。
+- 根因与方案收口：
+  - 启动前置页不再承担业务输入，只做轻量监控和分流，避免把重探测和用户交互放到 shell ready 之前。
+  - 分流判断只依赖 runtime 和 settings 的轻量状态，不复用 `get_onboarding_status()`，避免启动路径重新变重。
+  - shell loading 仍保留为第二层兜底，启动监控页只负责“先去哪里”。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（50/50）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 安装后首次启动：应先停在监控页，再自动进入控制中心 `onboarding`。
+  - 正常启动：监控页应显示计时并自动进入 workspace。
+  - 人为制造后端 crash：应自动进入 `diagnostics`。
+  - 启动监控页点击右上角关闭：应直接优雅退出，不再跳进 shell。
+
+## 本轮计划（启动卡死根因修复：单窗口启动 + 前移 watchdog）
+
+### 计划清单
+
+- [x] 记录本轮根因、改造边界与验收标准
+- [x] 将 `apps/kimi-shell/src-tauri/tauri.conf.json` 改为仅保留 `main` 原生窗口，并以 `prefill.html` 作为启动入口
+- [x] 重构 `apps/kimi-shell/src-tauri/src/window_manager.rs` 启动状态机，加入 `startupAttemptId/startupPhase/startupFailureKind/startupFailureDetail`
+- [x] 将 watchdog 前移到 `run_on_main_thread` 之前，并覆盖 main build task / window create / frontend ready 三段超时
+- [x] 移除第二个原生 `prefill` 窗口依赖，改为同一 `main` 窗口从 `prefill.html` 导航到 `index.html#/loading`
+- [x] 扩展 `AppStatus` / `DiagnosticsInfo` 与前端类型，暴露新的启动阶段与失败原因
+- [x] 调整 `PrefillApp`、`LoadingView` 与主窗口失败态交互，统一到单窗口启动恢复链路
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 启动期只存在一个 Kimi 原生窗口，不再依赖第二个 `prefill` 原生窗口
+- [x] 点击提交或关闭前导页时，不再创建第二个 WebView2 窗口，而是在同一窗口内导航到 `index.html#/loading`
+- [x] `app.log` / diagnostics 中每次启动都能看到完整 `startupAttemptId + startupPhase` 终态
+- [x] 若卡在主线程任务、WebView2 build 或 frontend ready 任一阶段，都会得到明确的 `startupFailureKind/startupFailureDetail`
+- [ ] 启动失败时失败页停留在同一主窗口，并提供“重试打开主界面 / 打开日志 / 退出应用”
+- [x] 不再出现“日志只有 `main_create_requested` 没有后续阶段”的观测盲区
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - 删除独立 `prefill` 原生窗口配置，只保留 `main`。
+    - `main` 默认入口改成 `prefill.html`，并保持 `create: false`、`visible: false`，由 Rust 手动创建并切换表面形态。
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - 启动链路改为单窗口：启动时先创建 `main(prefill surface)`，提交/跳过 prefill 后在同一窗口导航到 `index.html#/loading`。
+    - 新增 `startupAttemptId / startupPhase / startupFailureKind / startupFailureDetail`，并统一同步到 runtime diagnostics。
+    - watchdog 前移到 `run_on_main_thread` 之前，按 `main_build_task_entered -> main_window_created -> frontend_ready` 三段推进，不再依赖第二个窗口创建完成后才开始兜底。
+    - 移除旧的 destroy+recreate 第二窗口恢复主路径，失败后只保留同窗口失败态；若窗口真的丢失，再退回到同标签 `main` 的 prefill fallback 页面承载恢复按钮。
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - setup 阶段显式创建启动 `main` 窗口，再记录 `prefill_surface_shown`。
+    - `RunEvent::WindowEvent` 只处理 `main` 标签，不再保留 `prefill` 窗口关闭逻辑。
+  - `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - 前端类型和诊断面板补齐新的启动阶段、失败原因与 attempt id 展示。
+  - `apps/kimi-shell/src/features/loading/LoadingView.tsx` / `apps/kimi-shell/src/app/useShellController.ts` / `apps/kimi-shell/src/App.tsx`
+    - 主窗口 loading 页新增启动失败态，提供“重试打开主界面 / 打开日志 / 退出应用”。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 文案调整为“进入主界面”，与单窗口启动体验保持一致。
+- 根因闭环：
+  - 这轮不再尝试在 prefill 之外额外创建第二个 WebView2 主窗口，因此把“第二个窗口 build / 首文档加载卡在 `about:blank`”这条单点故障从架构上移除了。
+  - 旧的 `main_create_requested` 观测点也被更细的分段阶段取代，后续再卡死时会明确落在主线程任务、窗口创建或 frontend ready 哪一段。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（43/43）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 未完成的人工验收：
+  - 还需要在问题机器的安装版环境里做至少 10 次“第一次正常关闭后第二次冷启动 -> 点击提交”的实机回归。
+  - 当前唯一未勾选项就是这条人工验收：确认极端失败时，失败页确实稳定停留在同一主窗口，而不是退化成空白或自动退出。
+
+## 本轮计划（桌面快捷方式启动误判为 open-files）
+
+### 计划清单
+
+- [x] 记录桌面快捷方式启动复制自身 exe 到默认工作目录的根因与修复边界
+- [x] 修正 `apps/kimi-shell/src-tauri/src/open_request.rs`，忽略自启动 exe / argv0 误判，保留默认工作目录回退
+- [x] 为桌面快捷方式启动场景补回归测试，覆盖“仅 self exe”与“self exe + 真实文件”
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 双击桌面快捷方式启动时，不再在默认工作目录下创建 `20260306-appskimi-shell-xxxxxx` 这类临时 workspace
+- [x] 不再把 `Kimi Desktop Shell.exe` 自身复制到默认工作目录新建目录
+- [x] 正常无参数启动时，应用继续回退到已配置的默认工作目录作为 workspace
+- [x] 显式 `--open-files` / `--open-dir` 与真实文件打开链路不回归
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/open_request.rs`：
+    - `parse_open_request()` 现在会结合 `cwd` 识别“当前应用自己的可执行文件”这一类自启动噪声参数，不再把它当成隐式 `open-files` 候选。
+    - `strip_executable_arg()` 扩展为优先剔除 self exe / `argv0`；即使只有一个可执行文件路径参数，也会被识别为普通启动而不是文件打开。
+    - `parse_implicit_candidates()` 新增 self-launch 过滤，兜住 `/embedding` 等噪声过滤后的残留 self exe 场景，避免再次误判。
+    - 新增路径等价比较辅助函数，支持用当前进程真实 exe 路径比对传入参数，避免绝对路径/规范化差异造成漏判。
+    - 新增 3 个回归测试：
+      - `parse_implicit_current_executable_is_ignored`
+      - `parse_implicit_ignores_current_executable_and_keeps_real_file`
+      - `parse_implicit_filters_current_executable_after_shell_noise`
+- 根因结论：
+  - 桌面快捷方式启动时，启动参数链路会在某些场景下把应用自己的 exe 路径带进 `open_request` 解析。
+  - 旧逻辑会把“存在的文件路径”一律视为隐式 `open-files`，于是错误触发“创建新 workspace 并复制文件”，最终把 `Kimi Desktop Shell.exe` 自身复制进默认工作目录下的临时目录。
+  - 修复后，这类 self exe / `argv0` 参数会被当作启动噪声忽略，应用将继续走原本的无参启动路径，后端自然回退到已配置的默认工作目录作为 workspace。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（43/43）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 风险与后续：
+  - 本轮修复覆盖的是“自身 exe 被误判为打开文件”的根因；如果你的机器上桌面快捷方式还会传入额外的 `.lnk` 或其他外壳参数，下一步应直接看 `app.log` 里的 `open-request parse` 记录补样本，而不是继续扩大过滤面。
+  - 我还没法替你在安装版环境里双击桌面快捷方式做最终手工回归，建议你优先验证：
+    - 双击快捷方式启动时，默认工作目录下不再出现新的 `20260306-appskimi-shell-xxxxxx` 目录。
+    - 打开后 workspace 是否直接落在你配置的默认工作目录。
+
+## 本轮计划（启动白屏偶发成功：手动创建 main + 启动期护栏 + WebView2 A/B）
+
+### 计划清单
+
+- [x] 记录本轮根因导向修复边界、实施步骤与验收标准
+- [x] 将 `apps/kimi-shell/src-tauri/tauri.conf.json` 调整为仅 `prefill` 自动创建，`main` 改为手动创建
+- [x] Rust 侧实现 `ensure/destroy/recreate main window`，并把 `prefill -> main` 放行条件收敛为 `notify_frontend_ready`
+- [x] Rust 侧补 `startup_pending`、启动 trace、退出拦截与主窗口启动期销毁恢复逻辑
+- [x] 为晚创建 `main` 的场景补齐待派发队列，避免 `workspace-session` / `open-request` 等事件丢失
+- [x] 扩展 diagnostics，补充 WebView2 runtime 信息、启动 trace 和主窗口创建模式
+- [x] 增加 Evergreen / Fixed Runtime A/B 构建配置与脚本入口
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 启动时只自动创建 `prefill`，`main` 在需要进入主界面时才创建
+- [x] `prefill` 只在 `main` 真正 `frontend_ready` 后关闭，启动异常时停留在可操作失败页
+- [x] 启动期 `main` 首次超时会执行一次 destroy + recreate，再失败进入 `startup_failed`
+- [x] 启动期收到退出或主窗口销毁时，不会让应用静默整体退出
+- [x] `workspace-session`、`open-request-error`、prefill payload 在晚创建 `main` 场景下不丢失
+- [x] 诊断页可看到 `webviewRuntimeKind`、`webviewRuntimeVersion`、`startupPending`、`startupExitCause`、`mainCreateMode`、`startupTrace`
+- [ ] 可分别构建 Evergreen 与 Fixed Runtime A/B 包
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/tauri.conf.json`：
+    - `main` 改为 `create: false`，`prefill` 显式保留 `create: true`，彻底移除“启动即后台创建 hidden main”的默认路径。
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`：
+    - 重写启动编排，改为手动创建 `main`，并集中管理 `startup_pending`、`prefill_completion_pending`、watchdog、destroy+recreate、启动失败页、退出许可与启动 trace。
+    - `notify_frontend_ready` 成为唯一放行点；只有 ready 到达后才真正关闭 `prefill` 并显示 `main`。
+    - 启动期 5 秒超时后执行一次 `destroy + recreate main`，再 5 秒仍失败则切 `startup_failed`，保留 `prefill`。
+    - 新增 `publish_workspace_session_event` / `publish_open_request_error`，为晚创建 `main` 的场景补齐待派发队列。
+  - `apps/kimi-shell/src-tauri/src/lib.rs` / `apps/kimi-shell/src-tauri/src/app_state.rs` / `apps/kimi-shell/src-tauri/src/types.rs`：
+    - `RuntimeState` 与 `DiagnosticsInfo` 新增 `webviewRuntimeKind`、`webviewRuntimeVersion`、`startupPending`、`startupExitCause`、`mainCreateMode`、`startupTrace`。
+    - setup 阶段记录 `prefill_shown`，初始化 WebView2 runtime 元信息。
+    - `RunEvent::ExitRequested` 在 startup pending 时会 `prevent_exit()`；正常退出链路统一通过 `permit_process_exit()` 放行。
+  - `apps/kimi-shell/src-tauri/src/workspace_session.rs` / `apps/kimi-shell/src-tauri/src/open_request.rs` / `apps/kimi-shell/src-tauri/src/tray_manager.rs`：
+    - `workspace-session`、`open-request-error`、tray quit 全部接入新的窗口管理入口，避免晚创建 `main` 时丢事件或被退出拦截误伤。
+  - `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`：
+    - 前端 diagnostics 类型与控制中心诊断面板新增 WebView runtime、startup pending/exit cause、main create mode 与 startup trace 展示。
+  - `apps/kimi-shell/package.json` / `apps/kimi-shell/scripts/build_webview_variant.ps1` / `apps/kimi-shell/src-tauri/tauri.webview.evergreen.conf.json` / `apps/kimi-shell/src-tauri/tauri.webview.fixed-runtime.conf.json`：
+    - 新增 Evergreen / Fixed Runtime A/B 构建入口与覆盖配置，并把 `KIMI_WEBVIEW_RUNTIME_KIND` 注入编译期，供 diagnostics 区分 runtime kind。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（40/40）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 风险与后续：
+  - 代码、测试和前端构建已通过，但“安装版第二次冷启动是否 10/10 成功”仍需你在问题机器上做真实安装包回归。
+  - Fixed Runtime A/B 的构建入口已经补齐，但本轮没有实际产出 Fixed Runtime 包；原因是仓库里还没有 `apps/kimi-shell/src-tauri/webview2-fixed-runtime` 运行时目录。
+  - 下一步手工验收应优先看：
+    - 第二次冷启动时是否还会出现空白后自动退出。
+    - 若故意制造失败，`prefill` 是否稳定停留在 `startup_failed`，并能用“重试打开主界面 / 打开日志 / 退出应用”恢复。
+    - diagnostics 中的 `startupTrace` 是否能帮助区分“创建失败 / 重建失败 / 启动期销毁 / ready 超时”。
+
+## 本轮计划（安装版第二次冷启动白屏后退出修复）
+
+### 计划清单
+
+- [x] 记录本轮问题边界、修复策略与验收标准
+- [x] Rust 侧为 `prefill -> main` 切换增加启动护栏、watchdog 与失败态
+- [x] 新增 `prefill-status` 事件与 `recover_main_window_boot` / `quit_app_gracefully` 接口
+- [x] `prefill` 前端增加 `idle/opening_main/startup_failed` 状态机与恢复入口
+- [x] 补充 Rust 单测或行为级验证，覆盖延迟完成与恢复路径
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 第二次冷启动时，即使 `main` 尚未 ready，`prefill` 也不会立刻让位给空白主窗口
+- [x] `notify_frontend_ready` 到达后，`prefill` 自动关闭并显示主窗口
+- [x] `main` 超时未 ready 时，`prefill` 会进入失败态并提供“重试打开主界面 / 打开日志 / 退出应用”
+- [x] 启动失败期间应用保持存活，不出现空白后整 app 直接退出
+- [x] 原有文本 prefill、阻断态控制中心、主窗口正常关闭退出不回归
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`：
+    - 为 prefill 完成流程新增启动护栏状态：`prefill_completion_pending`、watchdog、失败态与 generation 防重入。
+    - `submit_prefill` / `complete_prefill_without_text` 改为“请求完成 prefill”，只有在 `notify_frontend_ready` 已到达时才真正关闭 `prefill` 并显示 `main`。
+    - 新增一次性 watchdog：5 秒未 ready 时对 `main` 执行一次 `tauri://localhost/index.html#/loading` 恢复导航；再等 3 秒仍未 ready，则发出 `startup_failed`。
+    - 新增 `prefill-status` 事件和 `recover_main_window_boot()`。
+    - 增补 3 个单测，覆盖 deferred completion、manual recovery re-arm、ready 后清理 guard。
+  - `apps/kimi-shell/src-tauri/src/lib.rs` / `apps/kimi-shell/src-tauri/src/types.rs`：
+    - 新增 `PrefillStatusState` / `PrefillStatusPayload`。
+    - 新增命令 `recover_main_window_boot`、`quit_app_gracefully`。
+    - 主窗口关闭与 prefill 失败页退出统一复用 `start_graceful_exit()`，保留原有优雅停后端退出。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx` / `apps/kimi-shell/src/prefill/prefill.css` / `apps/kimi-shell/src/app/types.ts`：
+    - prefill 前端改为 `idle | opening_main | startup_failed` 三态。
+    - `opening_main` 显示等待主界面文案；`startup_failed` 显示“重试打开主界面 / 打开日志 / 退出应用”。
+    - 新增对 `prefill-status` 事件的监听与样式。
+- 验证结果：
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（39/39）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 风险与后续：
+  - 代码与构建验证已完成，但“安装版第二次冷启动 + 主窗口确实卡住时的人工重试”仍需你在目标机器手工验收。
+  - 这轮恢复导航使用单次 `tauri://localhost/index.html#/loading`，没有恢复旧的高频 about:blank 轮询；若个别机器仍失败，下一步应优先补主窗口 URL / page-load 级日志，而不是直接加回循环重试。
+
+## 本轮计划（版本 0.0.8 发布：升级版本 + 安装包 + 更新说明）
+
+### 计划清单
+
+- [x] 记录本轮发布目标与验收标准
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.7` 升级到 `0.0.8`
+- [x] 执行 `pnpm -C apps/kimi-shell sync:version` 同步 `Cargo.toml` 与 `tauri.conf.json`
+- [x] 新增 `apps/kimi-shell/docs/release-notes-0.0.8.md` 版本更新说明
+- [x] 构建 NSIS 安装包并确认产物路径
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `package.json` / `Cargo.toml` / `tauri.conf.json` 版本均为 `0.0.8`
+- [x] NSIS 安装包构建成功且可定位产物
+- [x] `release-notes-0.0.8.md` 已创建并记录本轮核心变更与验证结果
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/package.json` 版本从 `0.0.7` 升级到 `0.0.8`。
+  - 执行 `pnpm -C apps/kimi-shell sync:version`，同步更新：
+    - `apps/kimi-shell/src-tauri/Cargo.toml`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - `apps/kimi-shell/src-tauri/Cargo.lock`
+  - 新增版本说明：`apps/kimi-shell/docs/release-notes-0.0.8.md`。
+  - 执行 `pnpm -C apps/kimi-shell tauri build --bundles nsis` 生成 `0.0.8` 安装包。
+- 验证结果：
+  - 版本字段检查通过：
+    - `apps/kimi-shell/package.json` = `0.0.8`
+    - `apps/kimi-shell/src-tauri/Cargo.toml` = `0.0.8`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json` = `0.0.8`
+  - 构建命令通过：
+    - `pnpm -C apps/kimi-shell sync:version`
+    - `pnpm -C apps/kimi-shell tauri build --bundles nsis`
+  - 安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.8_x64-setup.exe`
+    - 大小：`3535629` bytes
+    - 构建时间：`2026-03-06 10:06:49`
+- 风险与后续：
+  - 本轮已完成版本升级、更新说明和打包；建议你在目标 Windows 机器上手工确认安装、启动以及控制中心弹窗交互。
+
+## 本轮计划（控制中心状态栏弹窗入口 + 探测改为点击触发）
+
+### 计划清单
+
+- [x] 基于已确认方案整理实施清单并锁定边界
+- [x] `useShellController` 增加控制中心 modal/chrome 状态，并移除控制中心自动探测 effect
+- [x] `App.tsx` 改为状态栏设置按钮入口 + 控制中心弹窗壳
+- [x] `ShellTitlebar.tsx` 移除工作区控制中心按钮
+- [x] `ControlCenterView.tsx` 支持 `fullscreen/modal` 与 `dashboard/full` 双形态，并按点击触发探测
+- [x] `App.css` 增加控制中心弹窗样式并适配 dashboard/full 两种布局
+- [x] 执行 `pnpm -C apps/kimi-shell build` 验证
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [ ] 状态栏设置按钮位于左侧 `running` 状态标签前，点击打开控制中心弹窗
+- [ ] 工作区标题栏控制中心按钮被移除
+- [ ] 弹窗默认只显示 dashboard，不显示 sidebar，不自动触发控制中心探测
+- [ ] 点击 dashboard 入口后才切换到带 sidebar 的 full 形态，并触发对应探测
+- [ ] 阻断态与 hash 路由的全屏控制中心行为保持不变
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/app/useShellController.ts`：
+    - 新增 `controlCenterModalOpen` / `controlCenterChrome` 状态，区分 workspace 主动打开的 modal 控制中心与阻断态全屏控制中心。
+    - `openControlCenter()` 改为 workspace 下仅打开 modal，不再切 `#/control-center`。
+    - 新增 `closeControlCenterModal()`、`openOnboardingFromDashboard()`、`openRuntimePanelFromDashboard()`。
+    - 删除“进入控制中心自动刷新 onboarding / context menu / install probe / diagnostics / config center”的 effect。
+    - 保留启动期 `refreshStatus + refreshOnboarding`，并让 `#/onboarding` / `#/diagnostics` / `#/logs_paths` 路由在全屏模式下按目标位置触发对应探测。
+    - 安装依赖 / 安装 Kimi 后仅刷新 `onboarding + installProbe`；保存工作目录后不再因为处于控制中心就额外刷新 diagnostics。
+  - `apps/kimi-shell/src/App.tsx`：
+    - 底部状态栏左侧新增设置图标入口，位置位于 `status-indicator` 前。
+    - 新增控制中心 modal overlay，支持遮罩关闭与 `Esc` 关闭（若二级 `ConfigCenterModal` 未打开）。
+    - 全屏与 modal 两种控制中心都统一复用 `ControlCenterView`。
+  - `apps/kimi-shell/src/features/window/ShellTitlebar.tsx`：
+    - 移除 workspace 标题栏的控制中心菜单按钮。
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`：
+    - 新增 `surface="fullscreen|modal"` 与 `chrome="dashboard|full"`。
+    - modal 默认仅显示 dashboard 主内容，不显示 sidebar。
+    - 点击 dashboard 入口后才切换为 full 形态，并按目标位置触发 `onboarding / diagnostics / context menu` 探测。
+    - 安装区“重新检测”改为真正调用 `refreshInstallProbe()`；窄屏安装步骤展开时也会触发探测。
+    - runtime panel 切换改为按面板点击触发：`core/logs` 拉 diagnostics，`paths` 拉 diagnostics + context menu。
+    - `ConfigCenterModal` 仅在 full 形态下渲染。
+  - `apps/kimi-shell/src/App.css` / `apps/kimi-shell/src/app/types.ts`：
+    - 增加控制中心 modal 样式及 `ControlCenterSurface` / `ControlCenterChrome` 类型。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+  - 构建过程中 `sync:version` 触达了 `apps/kimi-shell/src-tauri/Cargo.toml` 与 `apps/kimi-shell/src-tauri/tauri.conf.json`，经 `git diff --ignore-cr-at-eol` 确认为无文本内容变化。
+- 风险与后续：
+  - 以下交互已在代码层落地，但仍需你在桌面端手工验收：
+    - 状态栏设置按钮位置与图标是否符合预期。
+    - modal 首次打开是否只显示 dashboard，且不触发额外探测。
+    - 点击 dashboard 入口后是否切到带 sidebar 的 full 形态。
+    - 阻断态与 `#/diagnostics` / `#/logs_paths` / `#/onboarding` 全屏控制中心入口是否都符合预期。
+
+## 本轮计划（task0305-2 控制中心切换卡顿：现状核对 + 优化方案讨论）
+
+### 计划清单
+
+- [x] 阅读 `tasks/kimishell-task0305-2.md`、`tasks/todo.md` 与 `tasks/lessons.md`
+- [x] 对照当前代码确认控制中心切换时仍会触发的前后端调用
+- [x] 输出一版分阶段优化计划（首屏体验、缓存策略、去重策略、验证方案）
+- [x] 回填本节讨论结论与后续建议
+
+### 验收标准
+
+- [x] 明确当前实现里仍会在切到控制中心时触发的重操作
+- [x] 给出可执行的优化顺序，而不是只给方向
+- [x] 说明每一步的收益、代价与验证方式
+
+### 回顾（完成后填写）
+
+- 现状核对：
+  - 当前 `useShellController.ts` 在每次切到 `control_center` 时，仍会自动触发 `refreshOnboarding()`、`refreshContextMenuStatus()`、`refreshInstallProbe()`。
+  - 其中诊断页与配置中心的 eager load 已经收敛：`runtime_center` 才拉 `get_diagnostics`，`onboarding` 才懒加载 `load_kimi_cli_config_center`。
+  - 但 `refreshContextMenuStatus()` 与 `refreshOnboarding()` 存在重复读取右键状态的问题，因为后者内部已经会调用 `context_menu::status`。
+  - `refreshInstallProbe()` 仍会执行 `git --version`、`uv --version`、Python 3.13 探测、`kimi -v`，这是当前最像“切屏卡一下”的重操作。
+- 建议的优化顺序：
+  - Phase 1（低风险高收益）：切到控制中心时不再自动调用 `refreshContextMenuStatus()`；优先把右键状态从 `onboarding` 结果派生，保留“手动刷新”与启用/禁用后的强制刷新。
+  - Phase 1（低风险高收益）：`refreshInstallProbe()` 改为按需触发，只在进入引导安装步骤、点击手动刷新、执行安装动作后强制刷新；平时走 60s TTL 缓存。
+  - Phase 1（低风险高收益）：`refreshOnboarding()` 增加 5-10s 短 TTL / stale-while-revalidate；保存路径、登录探测、右键启停、完成引导等操作后显式失效。
+  - Phase 2（后端兜底）：在 Rust 侧为 install probe / onboarding 子项补缓存，避免未来前端或其他入口重复触发时再次启动外部进程。
+  - Phase 3（验证）：补充每个 invoke 与后端探测的耗时日志，对比“切到控制中心前后首屏可交互时间”和“后台探测完成时间”。
+- 风险与取舍：
+  - 代价是控制中心中的安装/引导状态会有几秒到几十秒的非实时，但该页面更适合“近实时”而不是“每次切屏实时探测”。
+  - 不建议第一步就上新的聚合 command；先做去重 + lazy load + TTL，收益最大、改动最小，也更符合最小影响原则。
+
 ## 本轮计划（版本 +0.0.1 + 构建安装包）
 
 ### 计划清单

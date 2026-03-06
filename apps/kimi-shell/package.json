@@ -1,7 +1,7 @@
 {
   "name": "appskimi-shell",
   "private": true,
-  "version": "0.0.7",
+  "version": "0.0.9",
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync_version.mjs",
@@ -9,6 +9,8 @@
     "build": "pnpm sync:version && tsc && vite build",
     "preview": "vite preview",
     "tauri": "pnpm sync:version && tauri",
+    "tauri:build:webview:evergreen": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant evergreen",
+    "tauri:build:webview:fixed": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant fixed",
     "check:nfr:security": "node scripts/check_capabilities.mjs",
     "check:nfr:port-conflict": "powershell -ExecutionPolicy Bypass -File scripts/nfr_port_conflict.ps1",
     "check:nfr:reliability": "powershell -ExecutionPolicy Bypass -File scripts/nfr_reliability.ps1"

@@ -60,6 +60,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 }
             }
             MENU_QUIT => {
+                window_manager::permit_process_exit(app, "tray_quit");
                 if let Err(error) = backend_manager::stop_backend(app) {
                     eprintln!("failed to stop backend on quit: {error:#}");
                 }

@@ -10,7 +10,10 @@ use anyhow::Context;
 use fs2::FileExt;
 use tauri::{AppHandle, Manager};
 
-use crate::types::{BackendState, LoginProbeState};
+use crate::types::{
+    BackendState, LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
+};
 
 #[derive(Debug)]
 pub struct RuntimeState {
@@ -40,6 +43,21 @@ pub struct RuntimeState {
     pub startup_open_request_applied: bool,
     pub login_probe_state: Option<LoginProbeState>,
     pub login_probe_message: Option<String>,
+    pub webview_runtime_kind: WebviewRuntimeKind,
+    pub webview_runtime_version: Option<String>,
+    pub startup_pending: bool,
+    pub startup_exit_cause: Option<String>,
+    pub main_create_mode: MainCreateMode,
+    pub startup_attempt_id: u64,
+    pub startup_phase: StartupPhase,
+    pub startup_failure_kind: Option<StartupFailureKind>,
+    pub startup_failure_detail: Option<String>,
+    pub startup_monitor_state: Option<StartupMonitorState>,
+    pub startup_monitor_reason: Option<StartupMonitorReason>,
+    pub startup_monitor_target_route: Option<StartupMonitorTargetRoute>,
+    pub startup_monitor_detail: Option<String>,
+    pub startup_monitor_log_key: Option<String>,
+    pub startup_trace: Vec<String>,
 }
 
 impl Default for RuntimeState {
@@ -71,6 +89,21 @@ impl Default for RuntimeState {
             startup_open_request_applied: false,
             login_probe_state: None,
             login_probe_message: None,
+            webview_runtime_kind: WebviewRuntimeKind::Evergreen,
+            webview_runtime_version: None,
+            startup_pending: false,
+            startup_exit_cause: None,
+            main_create_mode: MainCreateMode::Manual,
+            startup_attempt_id: 0,
+            startup_phase: StartupPhase::Idle,
+            startup_failure_kind: None,
+            startup_failure_detail: None,
+            startup_monitor_state: None,
+            startup_monitor_reason: None,
+            startup_monitor_target_route: None,
+            startup_monitor_detail: None,
+            startup_monitor_log_key: None,
+            startup_trace: Vec::new(),
         }
     }
 }

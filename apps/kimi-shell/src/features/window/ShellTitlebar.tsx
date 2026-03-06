@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { Copy, FolderOpen, Menu, Minus, Monitor, RefreshCcw, Square, X } from "lucide-react";
+import { Copy, FolderOpen, Minus, Monitor, RefreshCcw, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KimiCliBrand } from "@/components/kimi-cli-brand";
 import { IconButton } from "@/components/common/IconButton";
@@ -26,7 +26,6 @@ type ShellTitlebarProps = {
   activeSessionWorkDir?: string;
   effectiveWorkDir?: string;
   onRetry: () => void;
-  onOpenControlCenter: () => void;
   onBackToStatus: () => void;
   onOpenFolder: (path: string) => void;
   onToggleTheme: () => void;
@@ -50,7 +49,6 @@ export function ShellTitlebar({
   activeSessionWorkDir,
   effectiveWorkDir,
   onRetry,
-  onOpenControlCenter,
   onBackToStatus,
   onOpenFolder,
   onToggleTheme,
@@ -86,14 +84,6 @@ export function ShellTitlebar({
       onDoubleClick={handleTitlebarDoubleClick}
     >
       <div className="titlebar-actions">
-        {screen === "workspace" ? (
-          <IconButton
-            icon={<Menu size={14} />}
-            label="控制中心"
-            onClick={onOpenControlCenter}
-            className="ghost mini titlebar-nav-btn"
-          />
-        ) : null}
         {screen === "control_center" && canOpenWorkspace ? (
           <IconButton
             icon={<Monitor size={14} />}

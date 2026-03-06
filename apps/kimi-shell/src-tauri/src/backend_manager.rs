@@ -3570,8 +3570,11 @@ mod tests {
         );
         assert!(script.contains("return buildQuerySessionFallback(sessionId);"));
         assert!(
-            script.contains(r#"routeTemplate || observedLocationTemplate || "/?session={{session_id}}""#)
-                || script.contains(r#"routeTemplate || observedLocationTemplate || "/?session={session_id}""#)
+            script.contains(
+                r#"routeTemplate || observedLocationTemplate || "/?session={{session_id}}""#
+            ) || script.contains(
+                r#"routeTemplate || observedLocationTemplate || "/?session={session_id}""#
+            )
         );
     }
 

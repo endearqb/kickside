@@ -1,5 +1,8 @@
+import { useEffect } from "react";
+import { Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { formatBackendState } from "@/app/types";
+import { IconButton } from "@/components/common/IconButton";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
@@ -14,6 +17,25 @@ function App() {
       : shell.status?.state === "crashed"
         ? "error"
         : "unsaved";
+
+  useEffect(() => {
+    if (!shell.controlCenterModalOpen || shell.configCenterOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        shell.closeControlCenterModal();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    shell.closeControlCenterModal,
+    shell.configCenterOpen,
+    shell.controlCenterModalOpen,
+  ]);
 
   return (
     <main
@@ -32,7 +54,6 @@ function App() {
         activeSessionWorkDir={shell.status?.activeSessionWorkDir}
         effectiveWorkDir={shell.status?.effectiveWorkDir}
         onRetry={shell.handleRetry}
-        onOpenControlCenter={shell.openControlCenter}
         onBackToStatus={shell.backToStatus}
         onOpenFolder={(path) => {
           void shell.handleOpenFolder(path);
@@ -75,7 +96,9 @@ function App() {
               hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
               onWorkDirChange={shell.setWorkDirInput}
               onRetry={shell.handleRetry}
+              onRecoverMainWindowBoot={shell.handleRecoverMainWindowBoot}
               onOpenLogs={shell.handleOpenLogs}
+              onQuitAppGracefully={shell.handleQuitAppGracefully}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
               onPickWorkDir={shell.handlePickWorkDir}
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
@@ -87,6 +110,8 @@ function App() {
         {shell.screen === "control_center" ? (
           <div className="shell-overlay-layer">
             <ControlCenterView
+              surface="fullscreen"
+              chrome="full"
               status={shell.status}
               diagnostics={shell.diagnostics}
               onboarding={shell.onboarding}
@@ -112,9 +137,13 @@ function App() {
               installSource={shell.installSource}
               installBusy={shell.installBusy}
               installMessage={shell.installMessage}
+              onClose={shell.backToStatus}
+              onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
+              onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
               onRefreshCoreState={shell.refreshCoreState}
               onRefreshDiagnostics={shell.refreshDiagnostics}
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
+              onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRetry}
               onOpenLogs={shell.handleOpenLogs}
@@ -144,6 +173,81 @@ function App() {
         ) : null}
       </div>
 
+      {shell.controlCenterModalOpen && shell.screen === "workspace" ? (
+        <div
+          className="cc-shell-modal-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              shell.closeControlCenterModal();
+            }
+          }}
+        >
+          <div className="cc-shell-modal" role="dialog" aria-modal="true" aria-label="控制中心">
+            <ControlCenterView
+              surface="modal"
+              chrome={shell.controlCenterChrome}
+              status={shell.status}
+              diagnostics={shell.diagnostics}
+              onboarding={shell.onboarding}
+              contextMenuStatus={shell.contextMenuStatus}
+              activeControlSection={shell.activeControlSection}
+              activeRuntimePanel={shell.activeRuntimePanel}
+              stepCompletion={shell.stepCompletion}
+              actionBusy={shell.actionBusy}
+              diagnosticsBusy={shell.diagnosticsBusy}
+              contextMenuBusy={shell.contextMenuBusy}
+              loginProbeBusy={shell.loginProbeBusy}
+              kimiPathInput={shell.kimiPathInput}
+              workDirInput={shell.workDirInput}
+              setActiveControlSection={shell.setActiveControlSection}
+              setActiveRuntimePanel={shell.setActiveRuntimePanel}
+              onWorkDirInputChange={shell.setWorkDirInput}
+              configCenterView={shell.configCenterView}
+              configCenterDraft={shell.configCenterDraft}
+              configCenterOpen={shell.configCenterOpen}
+              configCenterBusy={shell.configCenterBusy}
+              configCenterDirty={shell.configCenterDirty}
+              installProbe={shell.installProbe}
+              installSource={shell.installSource}
+              installBusy={shell.installBusy}
+              installMessage={shell.installMessage}
+              onClose={shell.closeControlCenterModal}
+              onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
+              onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
+              onRefreshCoreState={shell.refreshCoreState}
+              onRefreshDiagnostics={shell.refreshDiagnostics}
+              onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
+              onRefreshInstallProbe={shell.refreshInstallProbe}
+              onRefreshOnboarding={shell.refreshOnboarding}
+              onRetry={shell.handleRetry}
+              onOpenLogs={shell.handleOpenLogs}
+              onOpenFolder={shell.handleOpenFolder}
+              onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
+              onPickKimiPath={shell.handlePickKimiPath}
+              onSavePathAndRetry={shell.handleSavePathAndRetry}
+              onEnableContextMenu={shell.handleEnableContextMenu}
+              onDisableContextMenu={shell.handleDisableContextMenu}
+              onProbeLogin={shell.handleProbeLogin}
+              onPickWorkDir={shell.handlePickWorkDir}
+              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
+              onClearWorkDir={shell.handleClearWorkDir}
+              onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
+              onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
+              onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
+              onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
+              onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
+              onInstallSourceChange={shell.handleInstallSourceChange}
+              onInstallDependencies={shell.handleInstallDependencies}
+              onInstallKimi={shell.handleInstallKimi}
+              onCompleteOnboarding={shell.handleCompleteOnboarding}
+              onSkipOnboarding={shell.handleSkipOnboarding}
+              onOpenExternalUrl={shell.handleOpenExternalUrl}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {shell.shutdownProgress && (
         <div className="shutdown-overlay" role="status" aria-live="assertive">
           <div className="shutdown-card">
@@ -159,6 +263,14 @@ function App() {
 
       <footer className="statusbar" aria-live="polite">
         <div className="statusbar-left">
+          {shell.screen === "workspace" ? (
+            <IconButton
+              icon={<Settings size={14} />}
+              label="打开控制中心"
+              onClick={shell.openControlCenter}
+              className="ghost mini status-nav-btn status-settings-btn"
+            />
+          ) : null}
           <span className={`status-indicator ${statusChipClass}`}>
             {formatBackendState(shell.status?.state)}
           </span>

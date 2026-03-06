@@ -6,6 +6,54 @@ export type BackendState =
   | "stopping"
   | "missing_kimi";
 
+export type WebviewRuntimeKind = "evergreen" | "fixed" | "unknown";
+
+export type MainCreateMode = "auto" | "manual";
+
+export type StartupPhase =
+  | "idle"
+  | "prefill_surface_shown"
+  | "main_boot_requested"
+  | "main_build_task_posted"
+  | "main_build_task_entered"
+  | "main_config_loaded"
+  | "main_builder_constructed"
+  | "main_build_started"
+  | "main_window_created"
+  | "main_page_load_started"
+  | "main_page_load_finished"
+  | "frontend_ready"
+  | "failed";
+
+export type StartupFailureKind =
+  | "main_thread_task_stalled"
+  | "main_webview_build_hung"
+  | "frontend_ready_timeout"
+  | "main_navigation_failed"
+  | "main_window_missing"
+  | "main_destroyed_during_startup"
+  | "main_close_requested_during_startup";
+
+export type StartupMonitorState =
+  | "waiting"
+  | "route_workspace"
+  | "route_control_center"
+  | "failed";
+
+export type StartupMonitorReason =
+  | "starting"
+  | "onboarding_required"
+  | "missing_kimi"
+  | "backend_crashed"
+  | "backend_ready"
+  | "startup_timeout";
+
+export type StartupMonitorTargetRoute =
+  | "workspace"
+  | "onboarding"
+  | "diagnostics"
+  | "control_center";
+
 export type LoginProbeState = "logged_in" | "login_required" | "unknown";
 
 export type OnboardingStep =
@@ -39,6 +87,14 @@ export interface AppStatus {
   activeSessionId?: string;
   activeSessionWorkDir?: string;
   sessionSource?: string;
+  startupAttemptId: number;
+  startupPhase: StartupPhase;
+  startupFailureKind?: StartupFailureKind;
+  startupFailureDetail?: string;
+  startupMonitorState?: StartupMonitorState;
+  startupMonitorReason?: StartupMonitorReason;
+  startupMonitorTargetRoute?: StartupMonitorTargetRoute;
+  startupMonitorDetail?: string;
   logsDir: string;
   hotkey: string;
 }
@@ -68,6 +124,22 @@ export interface SubmitPrefillAck {
   queued: boolean;
   dispatched: boolean;
   textLength: number;
+}
+
+export interface StartupMonitorStatus {
+  state: StartupMonitorState;
+  reason: StartupMonitorReason;
+  elapsedMs: number;
+  backendState: BackendState;
+  detail?: string;
+  targetRoute?: StartupMonitorTargetRoute;
+}
+
+export type PrefillStatusState = "idle" | "opening_main" | "startup_failed";
+
+export interface PrefillStatusPayload {
+  state: PrefillStatusState;
+  detail?: string;
 }
 
 export interface PrefillBridgeAck {
@@ -125,6 +197,20 @@ export interface DiagnosticsInfo {
   versionError?: string;
   lastError?: string;
   lastExitReason?: string;
+  webviewRuntimeKind: WebviewRuntimeKind;
+  webviewRuntimeVersion?: string;
+  startupPending: boolean;
+  startupExitCause?: string;
+  mainCreateMode: MainCreateMode;
+  startupAttemptId: number;
+  startupPhase: StartupPhase;
+  startupFailureKind?: StartupFailureKind;
+  startupFailureDetail?: string;
+  startupMonitorState?: StartupMonitorState;
+  startupMonitorReason?: StartupMonitorReason;
+  startupMonitorTargetRoute?: StartupMonitorTargetRoute;
+  startupMonitorDetail?: string;
+  startupTrace: string[];
   appLogPath: string;
   backendLogPath: string;
   appLogTail: string[];
@@ -335,6 +421,10 @@ export type ControlSectionId =
   | "runtime_center";
 
 export type RuntimePanelId = "core" | "paths" | "logs";
+
+export type ControlCenterSurface = "fullscreen" | "modal";
+
+export type ControlCenterChrome = "dashboard" | "full";
 
 export const ONBOARDING_STEP_ORDER: ActionableOnboardingStep[] = [
   "install_kimi",

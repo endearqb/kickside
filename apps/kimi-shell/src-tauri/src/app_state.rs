@@ -18,6 +18,7 @@ use crate::types::{
 #[derive(Debug, Clone)]
 pub struct PendingWorkspaceBootstrap {
     pub work_dir: PathBuf,
+    pub auto_session: bool,
     pub force_create_new: bool,
     pub source: String,
 }

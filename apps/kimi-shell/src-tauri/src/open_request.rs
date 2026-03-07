@@ -1,10 +1,10 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use chrono::Local;
@@ -19,6 +19,7 @@ use crate::{
 };
 
 const OPEN_FILES_DEBOUNCE_MS: u64 = 350;
+const OPEN_REQUEST_DEDUPE_TTL_MS: u64 = 1_500;
 const WORKSPACE_STEM_MAX_LEN: usize = 40;
 const WORKSPACE_ATTEMPTS: usize = 24;
 const CLI_LOG_ARG_MAX_CHARS: usize = 480;
@@ -35,7 +36,13 @@ struct OpenFilesBatch {
     files: Vec<PathBuf>,
 }
 
+#[derive(Default)]
+struct RecentOpenRequestCache {
+    seen_at: HashMap<String, Instant>,
+}
+
 static OPEN_FILES_BATCH: OnceLock<Mutex<OpenFilesBatch>> = OnceLock::new();
+static RECENT_OPEN_REQUESTS: OnceLock<Mutex<RecentOpenRequestCache>> = OnceLock::new();
 
 pub fn apply_startup_cli_request(app: &AppHandle) {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,6 +57,10 @@ pub fn apply_startup_cli_request(app: &AppHandle) {
 
     match parsed {
         Ok(Some(request)) => {
+            if is_duplicate_open_request(app, &request, "startup") {
+                window_manager::show_and_focus(app);
+                return;
+            }
             mark_startup_open_request(app);
             if let Err(error) = apply_open_request(app, request) {
                 log_manager::append_line(
@@ -89,11 +100,15 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
     let args_summary = Some(format_args_for_log(&args));
     match parsed {
         Ok(Some(OpenRequest::OpenDir(path))) => {
+            let request = OpenRequest::OpenDir(path);
+            if is_duplicate_open_request(&app, &request, "forwarded") {
+                window_manager::show_and_focus(&app);
+                return;
+            }
             let app_for_thread = app.clone();
             let summary_for_thread = args_summary.clone();
             thread::spawn(move || {
-                if let Err(error) = apply_open_request(&app_for_thread, OpenRequest::OpenDir(path))
-                {
+                if let Err(error) = apply_open_request(&app_for_thread, request) {
                     log_manager::append_line(
                         &app_for_thread,
                         format!("failed to apply forwarded directory request: {error}"),
@@ -109,6 +124,11 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
             });
         }
         Ok(Some(OpenRequest::OpenFiles(files))) => {
+            let request = OpenRequest::OpenFiles(files.clone());
+            if is_duplicate_open_request(&app, &request, "forwarded") {
+                window_manager::show_and_focus(&app);
+                return;
+            }
             enqueue_open_files_request(app, files, "forwarded", args_summary);
         }
         Ok(None) => {
@@ -239,7 +259,14 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
 
     backend_manager::set_session_work_dir(app, Some(directory.clone()))
         .map_err(|error| error.to_string())?;
-    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request", false);
+    workspace_session::clear_active_session_runtime(app, "open_dir_request");
+    workspace_session::queue_workspace_bootstrap(
+        app,
+        &directory,
+        "open_dir_request",
+        false,
+        false,
+    );
     log_manager::append_line(
         app,
         format!(
@@ -303,7 +330,14 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
             workspace_dir.display()
         )
     })?;
-    workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request", false);
+    workspace_session::clear_active_session_runtime(app, "open_files_request");
+    workspace_session::queue_workspace_bootstrap(
+        app,
+        &workspace_dir,
+        "open_files_request",
+        false,
+        false,
+    );
 
     log_manager::append_line(
         app,
@@ -761,6 +795,64 @@ fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         }
     }
     deduped
+}
+
+fn is_duplicate_open_request(app: &AppHandle, request: &OpenRequest, scope: &str) -> bool {
+    let fingerprint = open_request_fingerprint(request);
+    let cache = RECENT_OPEN_REQUESTS.get_or_init(|| Mutex::new(RecentOpenRequestCache::default()));
+    let Ok(mut recent) = cache.lock() else {
+        log_manager::append_line(
+            app,
+            format!(
+                "open-request dedupe cache mutex poisoned; allowing request (scope={scope}, fingerprint={fingerprint})"
+            ),
+        );
+        return false;
+    };
+
+    let now = Instant::now();
+    let ttl = Duration::from_millis(OPEN_REQUEST_DEDUPE_TTL_MS);
+    recent
+        .seen_at
+        .retain(|_, seen_at| now.saturating_duration_since(*seen_at) <= ttl);
+
+    if let Some(previous) = recent.seen_at.get(&fingerprint) {
+        let age_ms = now.saturating_duration_since(*previous).as_millis();
+        log_manager::append_line(
+            app,
+            format!(
+                "ignored duplicate open-request (scope={scope}, age_ms={age_ms}, fingerprint={fingerprint})"
+            ),
+        );
+        return true;
+    }
+
+    recent.seen_at.insert(fingerprint, now);
+    false
+}
+
+fn open_request_fingerprint(request: &OpenRequest) -> String {
+    match request {
+        OpenRequest::OpenDir(path) => format!("dir:{}", path_fingerprint(path)),
+        OpenRequest::OpenFiles(files) => {
+            let mut normalized = files.iter().map(|path| path_fingerprint(path)).collect::<Vec<_>>();
+            normalized.sort_unstable();
+            format!("files:{}", normalized.join("|"))
+        }
+    }
+}
+
+fn path_fingerprint(path: &Path) -> String {
+    let normalized = canonicalize_path(path).unwrap_or_else(|| path.to_path_buf());
+    #[cfg(windows)]
+    {
+        normalized.to_string_lossy().to_lowercase()
+    }
+
+    #[cfg(not(windows))]
+    {
+        normalized.to_string_lossy().to_string()
+    }
 }
 
 fn resolve_workspace_root(app: &AppHandle) -> Result<PathBuf, String> {

@@ -38,7 +38,7 @@
   height: 40px;
   min-height: 40px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   background: #f6f7f8;
   border-bottom: 1px solid #d1d5db;
@@ -59,6 +59,8 @@
   align-items: center;
   gap: 6px;
   padding: 0 8px;
+  justify-self: start;
+  min-width: 0;
 }
 
 .titlebar-actions,
@@ -92,6 +94,15 @@
   justify-content: center;
   gap: 6px;
   text-align: center;
+  justify-self: center;
+  width: min(72vw, calc(100% - 320px));
+  max-width: 760px;
+  overflow: hidden;
+}
+
+.titlebar-identity.is-workspace {
+  width: min(76vw, calc(100% - 320px));
+  max-width: 880px;
 }
 
 .titlebar-brand .kimi-brand {
@@ -119,30 +130,41 @@
 }
 
 .titlebar-workspace-line {
+  width: 100%;
   min-width: 0;
-  max-width: 100%;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 22px;
   align-items: center;
   gap: 6px;
+}
+
+.titlebar-workspace-spacer {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
 }
 
 .titlebar-workspace-main {
   min-width: 0;
-  max-width: min(68vw, 760px);
-  display: inline-flex;
+  width: 100%;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.2;
+  overflow: hidden;
 }
 
 .titlebar-workspace-divider {
   opacity: 0.8;
+  flex: 0 0 auto;
 }
 
 .titlebar-workspace-path {
   min-width: 0;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -158,6 +180,8 @@
   height: 100%;
   display: flex;
   align-items: stretch;
+  justify-self: end;
+  min-width: 0;
 }
 
 .window-control-btn {
@@ -2010,6 +2034,8 @@ input:focus {
     align-items: flex-start;
     padding-left: 8px;
     text-align: left;
+    width: auto;
+    max-width: none;
   }
 
   .titlebar-status-wrap {
@@ -2018,6 +2044,7 @@ input:focus {
 
   .titlebar-workspace-main {
     max-width: min(56vw, 360px);
+    justify-content: flex-start;
   }
 
   .titlebar-window-controls {

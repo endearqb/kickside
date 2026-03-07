@@ -112,9 +112,10 @@ export function ShellTitlebar({
         />
       </div>
 
-      <div className="titlebar-identity">
+      <div className={`titlebar-identity${screen === "workspace" ? " is-workspace" : ""}`}>
         {screen === "workspace" ? (
           <div className="titlebar-workspace-line">
+            <span className="titlebar-workspace-spacer" aria-hidden />
             <div className="titlebar-drag titlebar-workspace-main">
               <span>Workspace</span>
               <span className="titlebar-workspace-divider" aria-hidden>

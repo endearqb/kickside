@@ -49,6 +49,7 @@ pub fn queue_workspace_bootstrap(
     app: &AppHandle,
     work_dir: &Path,
     source: &str,
+    auto_session: bool,
     force_create_new: bool,
 ) {
     let normalized = normalize_path(work_dir);
@@ -66,14 +67,15 @@ pub fn queue_workspace_bootstrap(
 
     runtime.pending_workspace_bootstrap = Some(PendingWorkspaceBootstrap {
         work_dir: normalized.clone(),
+        auto_session,
         force_create_new,
         source: source.to_string(),
     });
     log_manager::append_line(
         app,
         format!(
-            "queued workspace bootstrap (source={source}, work_dir={}, force_create_new={force_create_new})",
-            normalized.display(),
+            "queued workspace bootstrap (source={source}, work_dir={}, auto_session={auto_session}, force_create_new={force_create_new})",
+            normalized.display()
         ),
     );
 }
@@ -109,6 +111,7 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
                     .clone()
                     .map(|work_dir| PendingWorkspaceBootstrap {
                         work_dir,
+                        auto_session: true,
                         force_create_new: false,
                         source: "backend_ready_bootstrap".to_string(),
                     })
@@ -116,6 +119,19 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
     };
 
     if let Some(request) = bootstrap_target {
+        if !request.auto_session {
+            log_manager::append_line(
+                app,
+                format!(
+                    "workspace bootstrap skipped (source={}, work_dir={}, auto_session=false)",
+                    request.source,
+                    request.work_dir.display()
+                ),
+            );
+            clear_active_session_runtime(app, &format!("skip_bootstrap:{}", request.source));
+            return;
+        }
+
         spawn_bootstrap_session(app.clone(), generation, workspace_port, request);
     }
 }
@@ -229,6 +245,7 @@ fn spawn_bootstrap_session(
     request: PendingWorkspaceBootstrap,
 ) {
     let work_dir = request.work_dir;
+    let auto_session = request.auto_session;
     let source = request.source;
     let force_create_new = request.force_create_new;
     thread::spawn(move || {
@@ -328,7 +345,7 @@ fn spawn_bootstrap_session(
         log_manager::append_line(
             &app,
             format!(
-                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE}, force_create_new={force_create_new})",
+                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE}, auto_session={auto_session}, force_create_new={force_create_new})",
                 work_dir.display(),
                 session_id
             ),

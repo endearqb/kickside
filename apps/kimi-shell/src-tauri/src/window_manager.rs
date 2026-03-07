@@ -1230,6 +1230,9 @@ fn run_main_shell_navigation_on_main_thread(app: &AppHandle, source: &str) {
         return;
     };
 
+    // Hide the visible prefill surface before resizing/navigating to shell,
+    // otherwise the user can briefly see the intermediate loading document.
+    let _ = window.hide();
     advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
     apply_window_surface(app, &window, MainWindowSurface::Shell, source);
     advance_startup_phase(app, StartupPhase::MainBuilderConstructed, source);
@@ -1260,7 +1263,6 @@ fn run_main_shell_navigation_on_main_thread(app: &AppHandle, source: &str) {
         }
     }
 
-    let _ = window.hide();
     advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
 }
 

@@ -28,3 +28,7 @@ apps/kimi-shell/src-tauri/.cargo/
 .env.*
 !.env.example
 
+# Local planning / docs (keep local, don't track)
+/docs/
+/tasks/
+

@@ -2849,3 +2849,34 @@
   - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
   - `cargo check --all-targets --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
   - No dead_code warnings are currently emitted by cargo in this workspace target.
+## Current Plan (prefill layout + context-menu session bootstrap polish)
+
+### Checklist
+
+- [x] Push a baseline checkpoint commit to `origin/main` before polishing
+- [x] Increase prefill window height and remove waiting-stage vertical scrollbar
+- [x] Update context-menu labels so folder-related entry removes `(Copy to Workspace)`
+- [x] Add `MUIVerb` validation into context-menu health check for startup self-heal
+- [x] Force new session creation for all open-request routes (non-double-click launch)
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+
+### Review
+
+- Actual changes:
+  - Prefill geometry/style:
+    - Raised prefill surface size to `720x520` (`min 660x460`) in Tauri runtime sizing and static config.
+    - Updated `prefill-stage` to centered symmetric padding and hidden vertical overflow in waiting state.
+  - Context menu:
+    - Folder-related label now uses `Open in Kimi Web Shell` (without copy suffix).
+    - File label keeps `Open in Kimi Web Shell (Copy to Workspace)`.
+    - Added `MUIVerb` checks to context-menu status inspection to trigger auto-repair on legacy labels.
+  - Session bootstrap policy:
+    - Replaced `pending_workspace_bootstrap: Option<PathBuf>` with structured request:
+      `work_dir + force_create_new + source`.
+    - Open-request flows (`open_dir`, `open_files`) now enqueue bootstrap with `force_create_new=true`.
+    - Bootstrap now skips same-dir resume when forced and always creates a new session.
+    - Added visible open-request error emission when forced session creation fails.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.

@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    app_state::{unix_time_millis, AppState},
+    app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
     log_manager,
-    types::{BackendState, WorkspaceSessionBridgePayload},
+    types::{BackendState, OpenRequestErrorPayload, WorkspaceSessionBridgePayload},
     window_manager,
 };
 
@@ -45,7 +45,12 @@ struct SessionSnapshot {
     work_dir: Option<String>,
 }
 
-pub fn queue_workspace_bootstrap(app: &AppHandle, work_dir: &Path, source: &str) {
+pub fn queue_workspace_bootstrap(
+    app: &AppHandle,
+    work_dir: &Path,
+    source: &str,
+    force_create_new: bool,
+) {
     let normalized = normalize_path(work_dir);
     let state = app.state::<AppState>();
     let lock = state.runtime.lock();
@@ -59,12 +64,16 @@ pub fn queue_workspace_bootstrap(app: &AppHandle, work_dir: &Path, source: &str)
         return;
     };
 
-    runtime.pending_workspace_bootstrap = Some(normalized.clone());
+    runtime.pending_workspace_bootstrap = Some(PendingWorkspaceBootstrap {
+        work_dir: normalized.clone(),
+        force_create_new,
+        source: source.to_string(),
+    });
     log_manager::append_line(
         app,
         format!(
-            "queued workspace bootstrap (source={source}, work_dir={})",
-            normalized.display()
+            "queued workspace bootstrap (source={source}, work_dir={}, force_create_new={force_create_new})",
+            normalized.display(),
         ),
     );
 }
@@ -94,17 +103,20 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
         runtime
             .pending_workspace_bootstrap
             .take()
-            .or_else(|| runtime.effective_work_dir.clone())
+            .or_else(|| {
+                runtime
+                    .effective_work_dir
+                    .clone()
+                    .map(|work_dir| PendingWorkspaceBootstrap {
+                        work_dir,
+                        force_create_new: false,
+                        source: "backend_ready_bootstrap".to_string(),
+                    })
+            })
     };
 
-    if let Some(work_dir) = bootstrap_target {
-        spawn_bootstrap_session(
-            app.clone(),
-            generation,
-            workspace_port,
-            work_dir,
-            "backend_ready_bootstrap",
-        );
+    if let Some(request) = bootstrap_target {
+        spawn_bootstrap_session(app.clone(), generation, workspace_port, request);
     }
 }
 
@@ -214,22 +226,27 @@ fn spawn_bootstrap_session(
     app: AppHandle,
     generation: u64,
     workspace_port: u16,
-    work_dir: PathBuf,
-    source: &str,
+    request: PendingWorkspaceBootstrap,
 ) {
-    let source = source.to_string();
+    let work_dir = request.work_dir;
+    let source = request.source;
+    let force_create_new = request.force_create_new;
     thread::spawn(move || {
-        let existing_session = match fetch_sessions(workspace_port) {
-            Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
-            Err(error) => {
-                log_manager::append_line(
-                    &app,
-                    format!(
-                        "workspace bootstrap failed to list sessions; fallback to create (source={source}, work_dir={}): {error}",
-                        work_dir.display()
-                    ),
-                );
-                None
+        let existing_session = if force_create_new {
+            None
+        } else {
+            match fetch_sessions(workspace_port) {
+                Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
+                Err(error) => {
+                    log_manager::append_line(
+                        &app,
+                        format!(
+                            "workspace bootstrap failed to list sessions; fallback to create (source={source}, work_dir={}): {error}",
+                            work_dir.display()
+                        ),
+                    );
+                    None
+                }
             }
         };
 
@@ -248,13 +265,22 @@ fn spawn_bootstrap_session(
             let created = match response {
                 Ok(session) => session,
                 Err(error) => {
+                    let error_message = format!(
+                        "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
+                        work_dir.display()
+                    );
                     log_manager::append_line(
                         &app,
-                        format!(
-                            "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
-                            work_dir.display()
-                        ),
+                        error_message.clone(),
                     );
+                    if force_create_new {
+                        emit_bootstrap_open_request_error(
+                            &app,
+                            &source,
+                            "create_session_for_work_dir",
+                            &error_message,
+                        );
+                    }
                     return;
                 }
             };
@@ -302,12 +328,22 @@ fn spawn_bootstrap_session(
         log_manager::append_line(
             &app,
             format!(
-                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE})",
+                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE}, force_create_new={force_create_new})",
                 work_dir.display(),
                 session_id
             ),
         );
     });
+}
+
+fn emit_bootstrap_open_request_error(app: &AppHandle, source: &str, stage: &str, message: &str) {
+    let payload = OpenRequestErrorPayload {
+        source: source.to_string(),
+        stage: stage.to_string(),
+        message: message.to_string(),
+        args_summary: None,
+    };
+    window_manager::publish_open_request_error(app, &payload, "workspace_session_bootstrap");
 }
 
 fn fetch_active_session(workspace_port: u16) -> Result<Option<SessionSnapshot>, String> {

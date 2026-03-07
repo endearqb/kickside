@@ -239,7 +239,7 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
 
     backend_manager::set_session_work_dir(app, Some(directory.clone()))
         .map_err(|error| error.to_string())?;
-    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request");
+    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request", true);
     log_manager::append_line(
         app,
         format!(
@@ -303,7 +303,7 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
             workspace_dir.display()
         )
     })?;
-    workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request");
+    workspace_session::queue_workspace_bootstrap(app, &workspace_dir, "open_files_request", true);
 
     log_manager::append_line(
         app,

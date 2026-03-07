@@ -30,9 +30,9 @@ const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const PREFILL_WIDTH: f64 = 720.0;
-const PREFILL_HEIGHT: f64 = 420.0;
+const PREFILL_HEIGHT: f64 = 520.0;
 const PREFILL_MIN_WIDTH: f64 = 660.0;
-const PREFILL_MIN_HEIGHT: f64 = 380.0;
+const PREFILL_MIN_HEIGHT: f64 = 460.0;
 const SHELL_WIDTH: f64 = 1200.0;
 const SHELL_HEIGHT: f64 = 820.0;
 const SHELL_MIN_WIDTH: f64 = 900.0;

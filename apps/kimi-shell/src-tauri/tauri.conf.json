@@ -19,9 +19,9 @@
         "visible": false,
         "center": true,
         "width": 720,
-        "height": 420,
+        "height": 520,
         "minWidth": 660,
-        "minHeight": 380,
+        "minHeight": 460,
         "decorations": false,
         "transparent": false,
         "shadow": true

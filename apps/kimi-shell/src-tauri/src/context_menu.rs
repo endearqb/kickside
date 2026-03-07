@@ -4,8 +4,9 @@ use crate::types::ContextMenuStatus;
 
 const VERB_KEY_NAME: &str = "KimiWebShell";
 const DIR_BACKGROUND_MUIVERB: &str = "Open Kimi Web Shell here";
-const DIR_MUIVERB: &str = "Open Kimi Web Shell";
+const DIR_MUIVERB: &str = "Open in Kimi Web Shell";
 const FILE_MUIVERB: &str = "Open in Kimi Web Shell (Copy to Workspace)";
+const ALL_FILESYSTEM_OBJECTS_MUIVERB: &str = "Open in Kimi Web Shell";
 
 #[cfg(target_os = "windows")]
 const DIR_BACKGROUND_KEY: &str = "Software\\Classes\\Directory\\Background\\shell\\KimiWebShell";
@@ -106,13 +107,14 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             hkcu: &RegKey,
             key_path: &str,
             command_key_path: &str,
+            menu_label: &str,
             expected: &ExpectedContextMenuCommands,
         ) -> Result<(), String> {
             let (file_key, _) = hkcu
                 .create_subkey(key_path)
                 .map_err(|error| format!("failed to create `{key_path}`: {error}"))?;
             file_key
-                .set_value("MUIVerb", &FILE_MUIVERB)
+                .set_value("MUIVerb", &menu_label)
                 .map_err(|error| {
                     format!("failed to write MUIVerb for files `{key_path}`: {error}")
                 })?;
@@ -175,11 +177,12 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             .set_value("", &expected.open_dir_command)
             .map_err(|error| format!("failed to write command for directory: {error}"))?;
 
-        write_file_verb(&hkcu, FILE_KEY, FILE_COMMAND_KEY, &expected)?;
+        write_file_verb(&hkcu, FILE_KEY, FILE_COMMAND_KEY, FILE_MUIVERB, &expected)?;
         write_file_verb(
             &hkcu,
             ALL_FILESYSTEM_OBJECTS_KEY,
             ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
+            ALL_FILESYSTEM_OBJECTS_MUIVERB,
             &expected,
         )?;
 
@@ -269,6 +272,33 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
             expected.open_files_command.as_str(),
         ),
     ];
+
+    let verb_checks = [
+        (DIR_BACKGROUND_KEY, DIR_BACKGROUND_MUIVERB),
+        (DIR_KEY, DIR_MUIVERB),
+        (FILE_KEY, FILE_MUIVERB),
+        (ALL_FILESYSTEM_OBJECTS_KEY, ALL_FILESYSTEM_OBJECTS_MUIVERB),
+    ];
+
+    for (menu_key, expected_verb) in verb_checks {
+        let key = hkcu
+            .open_subkey(menu_key)
+            .map_err(|error| format!("failed to open `{menu_key}`: {error}"))?;
+        let actual_verb: String = key
+            .get_value("MUIVerb")
+            .map_err(|error| format!("failed to read MUIVerb of `{menu_key}`: {error}"))?;
+        if !command_matches_expected(&actual_verb, expected_verb) {
+            let actual = truncate_for_status_message(&actual_verb, 80);
+            let expected = truncate_for_status_message(expected_verb, 80);
+            return Ok(ContextMenuStatus {
+                supported: true,
+                enabled: false,
+                message: Some(format!(
+                    "Context menu needs repair: MUIVerb mismatch at `{menu_key}` (current={actual}; expected={expected})."
+                )),
+            });
+        }
+    }
 
     for (command_key, expected_value) in checks {
         let key = hkcu

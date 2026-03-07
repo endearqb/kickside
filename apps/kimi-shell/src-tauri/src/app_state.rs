@@ -15,6 +15,13 @@ use crate::types::{
     StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
 };
 
+#[derive(Debug, Clone)]
+pub struct PendingWorkspaceBootstrap {
+    pub work_dir: PathBuf,
+    pub force_create_new: bool,
+    pub source: String,
+}
+
 #[derive(Debug)]
 pub struct RuntimeState {
     pub state: BackendState,
@@ -36,7 +43,7 @@ pub struct RuntimeState {
     pub cli_contract_error: Option<String>,
     pub last_exit_reason: Option<String>,
     pub session_work_dir: Option<PathBuf>,
-    pub pending_workspace_bootstrap: Option<PathBuf>,
+    pub pending_workspace_bootstrap: Option<PendingWorkspaceBootstrap>,
     pub active_session_id: Option<String>,
     pub active_session_work_dir: Option<PathBuf>,
     pub session_source: Option<String>,

@@ -1,6 +1,6 @@
 [package]
 name = "appskimi-shell"
-version = "0.0.9"
+version = "0.0.12"
 description = "Kimi Desktop Shell"
 authors = ["kimi-shell"]
 edition = "2021"

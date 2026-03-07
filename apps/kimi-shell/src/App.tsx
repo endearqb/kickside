@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { formatBackendState } from "@/app/types";
@@ -7,14 +7,16 @@ import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
+import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
 
 function App() {
   const shell = useShellController();
+  const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const statusChipClass =
-    shell.status?.state === "running"
+    shell.uiBackendState === "running"
       ? "saved"
-      : shell.status?.state === "crashed"
+      : shell.uiBackendState === "crashed"
         ? "error"
         : "unsaved";
 
@@ -37,13 +39,22 @@ function App() {
     shell.controlCenterModalOpen,
   ]);
 
+  useEffect(() => {
+    if (shell.shutdownProgress) {
+      setShutdownTip((current) => current ?? pickRandomAgentTip());
+      return;
+    }
+
+    setShutdownTip(null);
+  }, [shell.shutdownProgress]);
+
   return (
     <main
       className={`shell-root theme-${shell.themeMode} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
     >
       <ShellTitlebar
         screen={shell.screen}
-        backendState={shell.status?.state}
+        backendState={shell.uiBackendState}
         themeMode={shell.themeMode}
         statusText={shell.statusText}
         shellScreenLabel={shell.shellScreenLabel}
@@ -85,24 +96,19 @@ function App() {
           />
         </div>
 
-        {shell.screen === "loading" ? (
+        {shell.showLoadingView ? (
           <div className="shell-overlay-layer">
             <LoadingView
               status={shell.status}
               statusText={shell.statusText}
               remoteUrl={shell.remoteUrl}
               actionBusy={shell.actionBusy}
-              workDirInput={shell.workDirInput}
               hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
-              onWorkDirChange={shell.setWorkDirInput}
               onRetry={shell.handleRetry}
               onRecoverMainWindowBoot={shell.handleRecoverMainWindowBoot}
               onOpenLogs={shell.handleOpenLogs}
               onQuitAppGracefully={shell.handleQuitAppGracefully}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
-              onPickWorkDir={shell.handlePickWorkDir}
-              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
-              onClearWorkDir={shell.handleClearWorkDir}
             />
           </div>
         ) : null}
@@ -136,7 +142,11 @@ function App() {
               installProbe={shell.installProbe}
               installSource={shell.installSource}
               installBusy={shell.installBusy}
+              installAction={shell.installAction}
               installMessage={shell.installMessage}
+              installCommandsOpen={shell.installCommandsOpen}
+              installCommandsBusy={shell.installCommandsBusy}
+              installCommandCatalog={shell.installCommandCatalog}
               onClose={shell.backToStatus}
               onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
               onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
@@ -165,6 +175,10 @@ function App() {
               onInstallSourceChange={shell.handleInstallSourceChange}
               onInstallDependencies={shell.handleInstallDependencies}
               onInstallKimi={shell.handleInstallKimi}
+              onUpgradeKimi={shell.handleUpgradeKimi}
+              onInstallNodejs={shell.handleInstallNodejs}
+              onOpenInstallCommands={shell.handleOpenInstallCommands}
+              onCloseInstallCommands={shell.handleCloseInstallCommands}
               onCompleteOnboarding={shell.handleCompleteOnboarding}
               onSkipOnboarding={shell.handleSkipOnboarding}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
@@ -211,7 +225,11 @@ function App() {
               installProbe={shell.installProbe}
               installSource={shell.installSource}
               installBusy={shell.installBusy}
+              installAction={shell.installAction}
               installMessage={shell.installMessage}
+              installCommandsOpen={shell.installCommandsOpen}
+              installCommandsBusy={shell.installCommandsBusy}
+              installCommandCatalog={shell.installCommandCatalog}
               onClose={shell.closeControlCenterModal}
               onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
               onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
@@ -240,6 +258,10 @@ function App() {
               onInstallSourceChange={shell.handleInstallSourceChange}
               onInstallDependencies={shell.handleInstallDependencies}
               onInstallKimi={shell.handleInstallKimi}
+              onUpgradeKimi={shell.handleUpgradeKimi}
+              onInstallNodejs={shell.handleInstallNodejs}
+              onOpenInstallCommands={shell.handleOpenInstallCommands}
+              onCloseInstallCommands={shell.handleCloseInstallCommands}
               onCompleteOnboarding={shell.handleCompleteOnboarding}
               onSkipOnboarding={shell.handleSkipOnboarding}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
@@ -251,12 +273,25 @@ function App() {
       {shell.shutdownProgress && (
         <div className="shutdown-overlay" role="status" aria-live="assertive">
           <div className="shutdown-card">
-            <div className="spinner" aria-hidden />
-            <h3>正在关闭应用</h3>
-            <p>{shell.shutdownProgress.detail ?? shell.shutdownProgress.stage}</p>
-            {typeof shell.shutdownElapsedMs === "number" && (
-              <small>耗时 {shell.shutdownElapsedMs} ms</small>
-            )}
+            <div className="shutdown-card-status">
+              <div className="spinner" aria-hidden />
+              <h3>正在关闭应用</h3>
+              <p>{shell.shutdownProgress.detail ?? shell.shutdownProgress.stage}</p>
+              {typeof shell.shutdownElapsedMs === "number" && (
+                <small>耗时 {shell.shutdownElapsedMs} ms</small>
+              )}
+            </div>
+
+            {shutdownTip ? (
+              <div className="shutdown-tip-card">
+                <div className="shutdown-tip-meta">
+                  <span className="shutdown-tip-badge">随机提示</span>
+                  <span className="shutdown-tip-number">{shutdownTip.numberLabel}</span>
+                </div>
+                <strong className="shutdown-tip-title">{shutdownTip.title}</strong>
+                <p className="shutdown-tip-body">{shutdownTip.body}</p>
+              </div>
+            ) : null}
           </div>
         </div>
       )}
@@ -272,7 +307,7 @@ function App() {
             />
           ) : null}
           <span className={`status-indicator ${statusChipClass}`}>
-            {formatBackendState(shell.status?.state)}
+            {formatBackendState(shell.uiBackendState)}
           </span>
           {shell.isLoading && (
             <span className="status-text">Checking backend status...</span>

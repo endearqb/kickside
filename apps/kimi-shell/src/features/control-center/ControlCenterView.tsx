@@ -23,6 +23,7 @@ import type {
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  InstallCommandCatalog,
   InstallProbeStatus,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
@@ -37,6 +38,7 @@ import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
+import { InstallCommandsModal } from "@/features/control-center/InstallCommandsModal";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir";
@@ -56,6 +58,7 @@ type ControlCenterViewProps = {
   contextMenuBusy: boolean;
   loginProbeBusy: boolean;
   installBusy: boolean;
+  installAction: "dependencies" | "kimi" | "upgrade_kimi" | "nodejs" | null;
   kimiPathInput: string;
   workDirInput: string;
   configCenterView: KimiCliConfigCenterView | null;
@@ -65,6 +68,9 @@ type ControlCenterViewProps = {
   configCenterDirty: boolean;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
+  installCommandsOpen: boolean;
+  installCommandsBusy: boolean;
+  installCommandCatalog: InstallCommandCatalog | null;
   setActiveControlSection: (section: ControlSectionId) => void;
   setActiveRuntimePanel: (panel: RuntimePanelId) => void;
   onWorkDirInputChange: (value: string) => void;
@@ -96,6 +102,10 @@ type ControlCenterViewProps = {
   onInstallSourceChange: (source: "official" | "mirror") => void;
   onInstallDependencies: () => Promise<void>;
   onInstallKimi: () => Promise<void>;
+  onUpgradeKimi: () => Promise<void>;
+  onInstallNodejs: () => Promise<void>;
+  onOpenInstallCommands: () => Promise<void>;
+  onCloseInstallCommands: () => void;
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;
@@ -226,6 +236,7 @@ export function ControlCenterView({
   contextMenuBusy,
   loginProbeBusy,
   installBusy,
+  installAction,
   kimiPathInput,
   workDirInput,
   configCenterView,
@@ -235,6 +246,9 @@ export function ControlCenterView({
   configCenterDirty,
   installProbe,
   installSource,
+  installCommandsOpen,
+  installCommandsBusy,
+  installCommandCatalog,
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
@@ -266,6 +280,10 @@ export function ControlCenterView({
   onInstallSourceChange,
   onInstallDependencies,
   onInstallKimi,
+  onUpgradeKimi,
+  onInstallNodejs,
+  onOpenInstallCommands,
+  onCloseInstallCommands,
   onCompleteOnboarding,
   onSkipOnboarding,
   onOpenExternalUrl,
@@ -277,6 +295,7 @@ export function ControlCenterView({
       ? window.matchMedia("(max-width: 480px)").matches
       : false,
   );
+  const [installProbeRequested, setInstallProbeRequested] = useState(false);
   const [expandedOnboardingStep, setExpandedOnboardingStep] =
     useState<OnboardingCardId | null>(null);
   const completedSteps = ONBOARDING_STEP_ORDER.filter(
@@ -290,12 +309,10 @@ export function ControlCenterView({
       ? `已选择：${installPathDisplay}`
       : "尚未检测到 Kimi CLI，请先安装后点击浏览选择可执行文件路径。";
   const effectiveWorkDir = status?.effectiveWorkDir ?? onboarding?.workDir ?? "";
-  const hideInstallControls = Boolean(
-    installProbe?.gitReady &&
-      installProbe?.uvReady &&
-      installProbe?.python313Ready &&
-      installProbe?.kimiReady,
+  const canUpgradeKimi = Boolean(
+    installProbe?.uvReady && installProbe?.python313Ready && installProbe?.kimiReady,
   );
+  const hideInstallControls = true;
   const showSidebar = surface === "fullscreen" || chrome === "full";
   const isDashboardOnlyModal = surface === "modal" && chrome === "dashboard";
   const runtimeContextMenuSupported =
@@ -354,6 +371,30 @@ export function ControlCenterView({
   const stepContextMenuExpanded = isStepExpanded("context_menu");
   const stepAuthExpanded = isStepExpanded("auth");
   const stepWorkDirExpanded = isStepExpanded("work_dir");
+
+  useEffect(() => {
+    if (installProbe) {
+      setInstallProbeRequested(true);
+      return;
+    }
+    if (
+      installProbeRequested ||
+      activeControlSection !== "onboarding" ||
+      !stepInstallExpanded
+    ) {
+      return;
+    }
+    setInstallProbeRequested(true);
+    void onRefreshInstallProbe().catch(() => {
+      // Error state is handled by the caller; keep the one-shot gate latched.
+    });
+  }, [
+    activeControlSection,
+    installProbe,
+    installProbeRequested,
+    onRefreshInstallProbe,
+    stepInstallExpanded,
+  ]);
 
   const installPrimaryAction = (
     <Button
@@ -786,6 +827,91 @@ export function ControlCenterView({
                           </Button>
                         </div>
                       ) : null}
+                      <div className="cc-install-command-row">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<FileText size={14} />}
+                          className="cc-action-btn"
+                          onClick={() => void onOpenInstallCommands()}
+                          disabled={installCommandsBusy}
+                        >
+                          查看完整安装命令
+                        </Button>
+                      </div>
+                      <div className="cc-install-action-row">
+                        <div className="cc-source-switch" role="group" aria-label="安装源">
+                          <button
+                            type="button"
+                            className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
+                            onClick={() => onInstallSourceChange("official")}
+                            disabled={installBusy}
+                          >
+                            官方源
+                          </button>
+                          <button
+                            type="button"
+                            className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
+                            onClick={() => onInstallSourceChange("mirror")}
+                            disabled={installBusy}
+                          >
+                            镜像源
+                          </button>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<Plus size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void onInstallDependencies()}
+                          disabled={installBusy}
+                        >
+                          安装依赖（Git / uv）
+                        </Button>
+                        <Button
+                          type="button"
+                          icon={<Check size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void onInstallKimi()}
+                          disabled={installBusy}
+                        >
+                          安装 Kimi
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<RefreshCw size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void onUpgradeKimi()}
+                          disabled={installBusy || !canUpgradeKimi}
+                        >
+                          升级 Kimi
+                        </Button>
+                      </div>
+                      <div className="cc-install-secondary-row">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<Plus size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void onInstallNodejs()}
+                          disabled={installBusy}
+                        >
+                          安装 Node.js
+                        </Button>
+                      </div>
+                      {installBusy && installAction ? (
+                        <p className="hint cc-step-meta">
+                          当前动作：
+                          {installAction === "dependencies"
+                            ? "安装依赖"
+                            : installAction === "kimi"
+                              ? "安装 Kimi"
+                              : installAction === "upgrade_kimi"
+                                ? "升级 Kimi"
+                                : "安装 Node.js"}
+                        </p>
+                      ) : null}
                       {installMessage ? (
                         <p className="hint cc-step-meta">{installMessage}</p>
                       ) : null}
@@ -1111,6 +1237,12 @@ export function ControlCenterView({
           onOpenConfigDir={onOpenKimiConfigDir}
         />
       ) : null}
+      <InstallCommandsModal
+        open={installCommandsOpen}
+        busy={installCommandsBusy}
+        catalog={installCommandCatalog}
+        onClose={onCloseInstallCommands}
+      />
     </section>
   );
 }

@@ -2,15 +2,26 @@
   min-height: 100dvh;
   height: 100dvh;
   width: 100%;
-  border: 1px solid var(--chrome-border);
+  border: 0;
   border-radius: 18px;
-  background: var(--chrome-bg);
+  background:
+    radial-gradient(
+      circle at top center,
+      color-mix(in srgb, var(--accent) 9%, transparent) 0%,
+      transparent 54%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--chrome-bg) 94%, var(--surface)) 0%,
+      var(--surface) 100%
+    );
   box-shadow: var(--shadow-pane);
   overflow: hidden;
 }
 
 .prefill-titlebar {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  border-bottom: none;
 }
 
 .prefill-titlebar-left,
@@ -39,20 +50,6 @@
   gap: 6px;
 }
 
-.prefill-titlebar-center {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.prefill-titlebar-caption {
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-}
-
 .prefill-open-logs {
   height: 28px;
   margin-right: 6px;
@@ -75,89 +72,236 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
-  background: var(--surface);
+  gap: 16px;
+  padding: 20px 22px 22px;
+  overflow-y: auto;
 }
 
-.prefill-status-shell {
-  width: min(100%, 668px);
+.prefill-stage.is-failed {
+  gap: 14px;
+}
+
+.prefill-tip-card {
+  width: min(100%, 548px);
+  display: grid;
+  gap: 12px;
+  padding: 24px 26px 22px;
+  border-radius: 24px;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+}
+
+.prefill-tip-card-hero {
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 78%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, transparent) 0%,
+      color-mix(in srgb, var(--surface-muted) 96%, transparent) 100%
+    );
+}
+
+.prefill-tip-card-secondary {
+  width: min(100%, 520px);
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 76%, transparent);
+  opacity: 0.88;
+}
+
+.prefill-tip-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.prefill-tip-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.prefill-tip-number {
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.prefill-tip-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.28;
+}
+
+.prefill-tip-card-secondary .prefill-tip-title {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.prefill-tip-body {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.72;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.prefill-tip-card-secondary .prefill-tip-body {
+  font-size: 12px;
+  line-height: 1.62;
+  -webkit-line-clamp: 2;
 }
 
 .prefill-status-panel {
-  width: 100%;
-  min-height: 286px;
+  width: min(100%, 548px);
   display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 14px;
-  padding: 32px 24px 28px;
-  border: 1px solid var(--chrome-border);
-  border-radius: 16px;
-  background: var(--surface-muted);
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+  box-shadow: var(--shadow-card);
+}
+
+.prefill-status-strip {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+
+.prefill-status-headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.prefill-status-headline .spinner {
+  margin-bottom: 0;
+}
+
+.prefill-status-chips {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.prefill-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 54%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.prefill-status-chip-label {
+  color: var(--text-secondary);
+}
+
+.prefill-status-chip strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.prefill-status-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.prefill-status-meta strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.prefill-failure-card {
+  width: min(100%, 520px);
+  gap: 12px;
+  padding: 24px 24px 22px;
+  border: 1px solid color-mix(in srgb, var(--error) 22%, var(--chrome-border));
+  border-radius: 22px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, transparent) 0%,
+      color-mix(in srgb, var(--surface-muted) 96%, transparent) 100%
+    );
+  box-shadow: var(--shadow-card);
   text-align: center;
+}
+
+.prefill-failure-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  color: color-mix(in srgb, var(--error) 76%, var(--text-primary));
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }
 
 .prefill-status-title {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.35;
 }
 
 .prefill-status-detail {
-  margin: -2px 0 0;
+  margin: 0;
   max-width: 440px;
   color: var(--text-secondary);
   font-size: 13px;
-  line-height: 1.55;
-}
-
-.prefill-metrics {
-  width: min(100%, 560px);
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 2px;
-}
-
-.prefill-metric {
-  min-height: 98px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--chrome-border);
-  background: var(--surface);
-}
-
-.prefill-metric-label {
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.prefill-metric strong {
-  font-size: 15px;
-  line-height: 1.4;
-  word-break: break-word;
+  line-height: 1.62;
 }
 
 .prefill-error {
   margin: 0;
-  max-width: 500px;
+  max-width: 540px;
   color: var(--error);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.52;
+}
+
+.prefill-failure-card .prefill-error {
+  text-align: center;
 }
 
 .prefill-status-actions {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   margin-top: 2px;
 }
 
@@ -170,10 +314,6 @@
     padding-left: 8px;
   }
 
-  .prefill-titlebar-caption {
-    display: none;
-  }
-
   .prefill-open-logs {
     margin-right: 2px;
     padding: 0 8px;
@@ -181,17 +321,36 @@
   }
 
   .prefill-stage {
-    padding: 12px;
+    gap: 14px;
+    padding: 16px 14px 18px;
   }
 
-  .prefill-status-panel {
-    min-height: 0;
-    padding: 24px 16px 20px;
-    border-radius: 14px;
+  .prefill-tip-card {
+    gap: 10px;
+    padding: 18px 18px 16px;
+    border-radius: 20px;
   }
 
-  .prefill-metrics {
-    grid-template-columns: 1fr;
+  .prefill-tip-title {
+    font-size: 19px;
+  }
+
+  .prefill-tip-card-secondary .prefill-tip-title {
+    font-size: 15px;
+  }
+
+  .prefill-status-panel,
+  .prefill-failure-card {
+    width: 100%;
+  }
+
+  .prefill-status-chips {
+    gap: 6px;
+  }
+
+  .prefill-status-chip {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .prefill-status-actions {
@@ -201,5 +360,10 @@
 
   .prefill-status-actions .ui-btn {
     width: 100%;
+  }
+
+  .prefill-failure-card {
+    padding: 20px 18px 18px;
+    border-radius: 18px;
   }
 }

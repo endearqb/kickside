@@ -1,5 +1,216 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（关闭应用读秒窗接入随机 Tips）
+
+### 计划清单
+
+- [x] 记录本轮关闭应用读秒窗 tips 接入目标、边界与验收标准
+- [x] 提取共享 tips 数据模块，避免主界面依赖 `prefill/` 目录
+- [x] 调整 `apps/kimi-shell/src/App.tsx`，在 shutdown overlay 中固定显示本次退出流程的随机 tip
+- [x] 调整 `apps/kimi-shell/src/App.css`，让居中的 shutdown card 适度变大并容纳摘要 tips 区
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 点击关闭应用后，读秒小窗内会显示 1 条随机 tip
+- [x] 单次退出流程中 tip 固定不变，不随 shutdown stage 切换重抽
+- [x] 读秒小窗仍保持居中显示，尺寸仅适度扩大
+- [x] 退出状态信息优先级仍高于 tips
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/lib/agentTips.ts`
+    - 提取共享 tips 数据与 `pickRandomAgentTip()` helper，供前置页和主界面关闭读秒窗共同使用。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 改为消费共享 tips 模块，不再依赖 `prefill/` 私有数据文件。
+  - `apps/kimi-shell/src/App.tsx`
+    - 为 shutdown overlay 新增本地 `shutdownTip` 状态。
+    - 在 `shutdownProgress` 从空变为非空时随机锁定 1 条 tip，并在退出流程结束后清空。
+    - 读秒窗内新增摘要 tips 区，显示编号、标题和 2 行正文摘要。
+  - `apps/kimi-shell/src/App.css`
+    - `shutdown-card` 保持居中逻辑不变，宽度从 `360px` 适度放宽到 `420px`，并增大圆角和内边距。
+    - 新增 shutdown tips 摘要块样式，保持退出状态区优先级更高。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 重点验证标题栏关闭和界面内“退出应用”两条路径，确认单次退出流程中的 tip 不变化，而不同退出流程有机会变化。
+
+## 本轮计划（基于当前工作区重新构建安装包）
+
+### 计划清单
+
+- [x] 记录本轮安装包重构建目标、边界与验收标准
+- [x] 执行 `pnpm -C apps/kimi-shell tauri build`
+- [x] 核对安装包产物路径、文件名、大小与时间
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `pnpm -C apps/kimi-shell tauri build` 通过
+- [x] `apps/kimi-shell/src-tauri/target/release/bundle` 下生成当前版本安装包
+- [x] 可明确给出本次构建产物路径、文件大小和时间
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 未新增业务代码改动；基于当前工作区内容重新执行安装包构建。
+  - 构建链路仍使用现有 `pnpm -C apps/kimi-shell tauri build`，自动包含 `sync:version`、前端生产构建和 Tauri bundle。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build` 通过。
+  - 当前版本：`0.0.10`
+  - 安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.10_x64_en-US.msi`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.10_x64-setup.exe`
+  - 产物大小与时间：
+    - MSI `5193728` bytes，`2026-03-06 23:18:53`
+    - NSIS EXE `3569558` bytes，`2026-03-06 23:19:03`
+- 手工建议：
+  - 如果这次构建用于分发，下一步优先做安装、启动和卸载实机验收，确认前置页最新 UI 也包含在安装包内。
+
+## 本轮计划（去掉前置页 titlebar 与 shell-root 边框）
+
+### 计划清单
+
+- [x] 记录本轮前置页边框收口目标与验收标准
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，移除前置页 `shell-root` 外边框
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，局部覆盖去掉前置页 `titlebar` 下边框
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 前置页 `shell-root` 不再显示外边框
+- [x] 前置页 `titlebar` 不再显示下边框
+- [x] 改动不影响右上角按钮和前置页布局
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 将前置页 `shell-root` 的 `border` 从 `1px solid` 改为 `0`。
+    - 为 `prefill-titlebar` 增加局部 `border-bottom: none`，只影响前置页，不改全局 `titlebar` 样式。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 重点看前置页顶部与窗口外缘是否已经完全去线，同时确认右上角“打开日志”和关闭按钮在无边框状态下仍然对齐正常。
+
+## 本轮计划（版本递增到 0.0.10 并构建安装包）
+
+### 计划清单
+
+- [x] 记录本轮版本递增与安装包构建目标、边界和验收标准
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.9` 递增到 `0.0.10`
+- [x] 执行版本同步链路，确保 `Cargo.toml` 与 `tauri.conf.json` 跟随到 `0.0.10`
+- [x] 执行 `pnpm -C apps/kimi-shell tauri build`
+- [x] 核对安装包产物路径、文件名、大小和时间
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `apps/kimi-shell/package.json` 版本为 `0.0.10`
+- [x] `apps/kimi-shell/src-tauri/Cargo.toml` 版本为 `0.0.10`
+- [x] `apps/kimi-shell/src-tauri/tauri.conf.json` 版本为 `0.0.10`
+- [x] `apps/kimi-shell/src-tauri/target/release/bundle` 下生成可分发安装包
+- [x] 可明确给出本次安装包文件名与所在路径
+- [x] `pnpm -C apps/kimi-shell tauri build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/package.json`
+    - 版本号从 `0.0.9` 递增到 `0.0.10`。
+  - `apps/kimi-shell/src-tauri/Cargo.toml` / `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - 通过现有 `sync:version` 链路同步到 `0.0.10`，未手工分散改版本号。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build` 通过。
+  - 安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.10_x64_en-US.msi`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.10_x64-setup.exe`
+  - 产物大小与时间：
+    - MSI `5193728` bytes，`2026-03-06 22:53:31`
+    - NSIS EXE `3569859` bytes，`2026-03-06 22:53:43`
+- 手工建议：
+  - 若你准备发包，下一步优先在目标 Windows 机器做一次实际安装、启动和卸载回归。
+
+## 本轮计划（前置页 Tips 主视觉化与状态区降权）
+
+### 计划清单
+
+- [x] 记录本轮前置页 Tips 主视觉化目标、边界与验收标准
+- [x] 新增本地 `prefillTips` 数据模块，整理 `docs/Tips_of_Agent.md` 中 25 条 tips
+- [x] 调整 `apps/kimi-shell/src/prefill/PrefillApp.tsx`，接入随机 tips、主视觉卡片与失败态优先布局
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，将状态区收敛为轻量状态条/状态 chips，减少边框和层级感
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 前置页等待态/进入主界面态的视觉中心为随机 tips 卡片
+- [x] 同一次前置页停留期间 tips 保持固定，不因轮询重抽
+- [x] 启动状态仍可见，但不再是三张独立指标卡
+- [x] 失败态切回恢复卡片为主视觉，tips 退为次级块
+- [x] 右上角“打开日志”、关闭按钮和标题栏拖拽保持可用
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/prefill/prefillTips.ts`
+    - 新增 25 条结构化 tips 数据，作为前置页的本地内容源，不在运行时解析 `docs/Tips_of_Agent.md`。
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 前置页首次挂载时随机选择一条 tip，并在本次前置页生命周期内固定。
+    - 等待态与进入主界面态改为“hero tip 卡片 + 轻量状态条”布局，状态信息保留但降为次级层级。
+    - 失败态改为恢复卡片重新占主视觉，并把随机 tip 作为下方次级块保留。
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 删除旧的“三张指标卡主导”视觉结构，改为单一 tips 主卡和低对比状态 chips。
+    - 收紧页面内部边框数量，更多依赖留白、字号和柔和背景区分主次。
+    - 保留移动端下 tips 主卡、状态 chips 和失败态按钮的纵向堆叠规则。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 重点看三种状态是否符合预期：等待态 tips 为主、进入主界面态 tips 不重抽、失败态恢复卡重新成为主视觉。
+
+## 本轮计划（前置页 UI 进一步收敛）
+
+### 计划清单
+
+- [x] 记录本轮前置页顶栏与状态面板收敛目标
+- [x] 调整 `apps/kimi-shell/src/prefill/PrefillApp.tsx`，移除标题栏中部文案以及最小化/最大化逻辑
+- [x] 调整 `apps/kimi-shell/src/prefill/PrefillApp.tsx`，删除 `prefill-stage` / `prefill-status-shell` 包裹层，只保留 `prefill-status-panel`
+- [x] 调整 `apps/kimi-shell/src/prefill/prefill.css`，把居中和宽度约束并入 `prefill-status-panel`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 顶栏不再显示“启动监控”
+- [x] 顶栏窗口控制仅保留关闭按钮
+- [x] 标题栏仍可拖拽窗口
+- [x] 主内容区不再存在 `prefill-stage` / `prefill-status-shell`
+- [x] `prefill-status-panel` 仍保持居中和原有状态内容
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 删除 `prefill-titlebar-center` 与“启动监控”文案。
+    - 删除最小化、最大化/还原按钮及对应状态、初始化副作用和双击最大化逻辑。
+    - 保留标题栏拖拽与右上角“打开日志 + 关闭”结构。
+    - 删除 `prefill-stage` / `prefill-status-shell` 包裹层，让 `prefill-status-panel` 直接挂在 `header` 下。
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 顶栏 grid 改为左右两列，适配“左品牌 + 右操作”布局。
+    - 删除 `prefill-titlebar-center`、`prefill-stage`、`prefill-status-shell` 的样式定义。
+    - 将原本外层负责的居中、外边距和宽度约束并入 `prefill-status-panel`，保持状态面板尺寸与内部内容结构基本不变。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 启动监控页重点确认三项：标题栏只剩品牌与右侧操作、关闭按钮可用、状态面板在桌面和窄窗下都仍然居中。
+
 ## 本轮计划（启动监控页改为无系统标题栏的小窗壳）
 
 ### 计划清单
@@ -2140,3 +2351,501 @@
   - `pnpm -C apps/kimi-shell build` passed.
   - release follow-up completed: version bumped `0.0.6 -> 0.0.7`, synced Tauri metadata, NSIS package built successfully:
     - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.7_x64-setup.exe`
+
+## 本轮计划（构建安装包，2026-03-06）
+
+### 计划清单
+
+- [x] 确认当前桌面端打包脚本、Tauri bundle 配置与目标产物类型
+- [x] 执行安装包构建，产出可分发安装文件
+- [x] 核对构建日志与产物路径，确认版本号和文件落盘
+- [x] 回填本节验收与回顾
+
+### 验收标准
+
+- [x] `pnpm -C apps/kimi-shell tauri build` 构建通过
+- [x] `apps/kimi-shell/src-tauri/target/release/bundle` 下生成安装包产物
+- [x] 可明确给出本次安装包文件名与所在路径
+
+### 回顾
+
+- 实际变更：
+  - 未修改业务代码；仅按现有打包链路执行 `pnpm tauri build`，并在 `tasks/todo.md` 记录本轮计划与结果。
+  - 构建过程中 `sync_version.mjs` 再次确认 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 版本号均为 `0.0.9`。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build` 通过，前端 `vite build`、Rust `release` 编译与 Tauri bundle 全部成功。
+  - 产物已落盘：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.9_x64_en-US.msi`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.9_x64-setup.exe`
+  - 文件时间戳与大小已核对：
+    - MSI `5193728` bytes，`2026-03-06 21:35:44`
+    - NSIS EXE `3566739` bytes，`2026-03-06 21:35:56`
+- 风险与后续：
+  - 当前验证覆盖“可构建并产出安装包”，未在目标 Windows 机器上执行安装与启动验收。
+  - `bundle` 目录保留旧版本安装包；若后续要做发布归档，建议按版本清理或单独整理产物目录。
+## 本轮计划（安装链路对齐 execlink）
+### 计划清单
+
+- [ ] 记录本轮安装链路对齐目标、边界与验收标准
+- [ ] 调整 Rust 安装命令为外置 PowerShell 终端执行，并补齐 Node.js / Kimi 升级 / 完整命令目录接口
+- [ ] 扩展安装探测类型与前端状态管理，加入 `nodeReady`、安装动作分类和命令弹窗状态
+- [ ] 调整控制中心安装卡，加入 `升级 Kimi`、`安装 Node.js` 和 `查看完整安装命令`
+- [ ] 新增完整安装命令弹窗，支持分段复制与复制全部
+- [ ] 执行 `pnpm -C apps/kimi-shell build`
+- [ ] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [ ] 安装卡始终显示 `安装依赖（Git / uv）`、`安装 Kimi`、`升级 Kimi`、`安装 Node.js`、`查看完整安装命令`
+- [ ] `升级 Kimi` 在未检测到 Kimi 时禁用，检测到后可点击
+- [ ] 所有安装相关动作都改为启动外置终端，不再后台静默执行
+- [ ] `安装依赖` 的完成标准仅为 `gitReady && uvReady`
+- [ ] `InstallProbeStatus` 新增 `nodeReady`
+- [ ] 完整安装命令弹窗可展示全部脚本并支持复制
+- [ ] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+## 本轮计划（安装链路对齐 execlink）
+### 计划清单
+
+- [x] 补齐 Rust 安装命令、外置终端启动、安装探测与命令目录输出
+- [x] 扩展前端安装探测类型与状态管理，加入 `nodeReady`、安装动作分类和命令弹窗状态
+- [x] 调整控制中心安装卡，加入 `升级 Kimi`、`安装 Node.js` 和 `查看完整安装命令`
+- [x] 运行 `pnpm -C apps/kimi-shell build`
+- [x] 运行 `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 安装卡始终显示 `安装依赖（Git / uv）`、`安装 Kimi`、`升级 Kimi`、`安装 Node.js`、`查看完整安装命令`
+- [x] 安装动作改为启动外置 PowerShell，并由前端轮询安装探测结果
+- [x] `InstallProbeStatus` 新增 `nodeReady`
+- [x] 命令弹窗可展示完整安装/升级/验证命令目录
+- [x] `pnpm -C apps/kimi-shell build` 通过
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+
+### 回顾（完成后填写）
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - 安装依赖、安装 Kimi、升级 Kimi、安装 Node.js 全部改为“写入临时 `.ps1` + 启动外置 PowerShell”。
+    - 安装探测增加 `git/uv/python/node/kimi` 常见安装路径兜底，减少 PATH 未刷新导致的误判。
+    - 新增 `upgrade_kimi_cli()`、`install_nodejs()`、`get_install_command_catalog()`。
+  - `apps/kimi-shell/src-tauri/src/types.rs` / `apps/kimi-shell/src-tauri/src/lib.rs`
+    - 扩展 `InstallProbeStatus.nodeReady`，并接入新的 Tauri 命令和安装命令目录类型。
+  - `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/app/useShellController.ts`
+    - 前端安装状态改为“启动外置终端 -> 轮询 probe -> 超时/成功消息”。
+    - 新增安装动作分类、命令弹窗开关、命令目录获取、`升级 Kimi` 和 `安装 Node.js` handler。
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - 安装卡新增 `升级 Kimi`、`安装 Node.js`、`查看完整安装命令` 入口，并保留源切换。
+  - `apps/kimi-shell/src/features/control-center/InstallCommandsModal.tsx`
+    - 新增完整安装命令弹窗，支持分段复制和复制全部。
+  - `apps/kimi-shell/src/App.tsx` / `apps/kimi-shell/src/App.css`
+    - 两处控制中心入口都接入新安装 props，并补齐命令弹窗样式。
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过。
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+- 剩余说明：
+  - Rust 侧仍保留旧的隐藏安装脚本常量和旧 helper，当前仅产生 `dead_code` warning，不影响编译和运行。
+  - 还未做 GUI 手工验收；需要重点验证外置终端、UAC 提升、单次安装轮询超时提示和命令弹窗复制体验。
+## 本轮计划（修复安装后 Notification Area 缺少托盘图标）
+### 计划清单
+
+- [ ] 排查托盘图标创建逻辑、图标资源引用与安装后启动路径
+- [ ] 实现最小修复，确保安装后启动时 `Kimi Shell` 在 Windows Notification Area / Overflow 中可见
+- [ ] 运行构建验证并回填本节回顾
+
+### 验收标准
+
+- [ ] 应用启动后会创建托盘图标，而不是只创建主窗口
+- [ ] 安装版与开发版共用同一套托盘资源解析逻辑，不依赖开发路径
+- [ ] `pnpm -C apps/kimi-shell build` 通过
+- [ ] 如有 Rust 侧改动，`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+## 本轮计划（修复安装后托盘图标缺失）
+### 计划清单
+
+- [x] 排查托盘图标创建逻辑、图标资源引用与安装后启动路径
+- [x] 实现最小修复，确保安装后启动时 `Kimi Shell` 在 Windows Notification Area / Overflow 中可见
+- [x] 运行构建验证并回填本节回顾
+
+### 验收标准
+
+- [x] 应用启动后会创建带图标的托盘项，而不是仅创建菜单
+- [x] 托盘图标使用应用默认图标资源，安装版与开发版共用同一解析逻辑
+- [x] `pnpm -C apps/kimi-shell build` 通过
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+
+### 回顾
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/tray_manager.rs`
+    - 将 `TrayIconBuilder::new()` 改为显式设置 `id`、`tooltip`
+    - 在构建 tray 时绑定 `app.default_window_icon().cloned()`，避免 Windows 创建无 icon 的托盘项
+- 验证结果：
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+  - `pnpm -C apps/kimi-shell build` 通过
+- 结论：
+  - 根因是托盘创建代码只设置了菜单，没有显式设置 icon；Tauri tray builder 默认不会自动补一个可见托盘图标
+  - 当前修复已确保托盘使用打包后的默认应用图标资源
+## 本轮计划（版本递增并构建安装包）
+### 计划清单
+
+- [ ] 将 `apps/kimi-shell/package.json` 版本从 `0.0.10` 递增到 `0.0.11`
+- [ ] 通过现有 `sync:version` 链路同步 `Cargo.toml` 与 `tauri.conf.json`
+- [ ] 运行 `pnpm -C apps/kimi-shell tauri build`
+- [ ] 核对安装包输出路径、文件名、大小与时间
+- [ ] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [ ] `apps/kimi-shell/package.json` 版本为 `0.0.11`
+- [ ] `apps/kimi-shell/src-tauri/Cargo.toml` 版本为 `0.0.11`
+- [ ] `apps/kimi-shell/src-tauri/tauri.conf.json` 版本为 `0.0.11`
+- [ ] `apps/kimi-shell/src-tauri/target/release/bundle` 下生成新版本安装包
+- [ ] `pnpm -C apps/kimi-shell tauri build` 通过
+## 本轮回顾（版本递增并构建安装包）
+
+### 完成项
+
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.10` 递增到 `0.0.11`
+- [x] 通过 `sync:version` 同步 `apps/kimi-shell/src-tauri/Cargo.toml` 与 `apps/kimi-shell/src-tauri/tauri.conf.json`
+- [x] 执行 `pnpm -C apps/kimi-shell tauri build`
+- [x] 核对 MSI / NSIS 安装包产物路径、大小与时间
+
+### 验证结果
+
+- [x] `apps/kimi-shell/package.json` 版本为 `0.0.11`
+- [x] `apps/kimi-shell/src-tauri/Cargo.toml` 版本为 `0.0.11`
+- [x] `apps/kimi-shell/src-tauri/tauri.conf.json` 版本为 `0.0.11`
+- [x] 已生成新版本安装包
+- [x] `pnpm -C apps/kimi-shell tauri build` 通过
+
+### 产物
+
+- MSI: `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.11_x64_en-US.msi`，`5197824` bytes，`2026-03-07 00:44:49`
+- NSIS: `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.11_x64-setup.exe`，`3576855` bytes，`2026-03-07 00:44:59`
+
+### 说明
+
+- 本轮仅做版本号递增和安装包构建，没有新增功能改动。
+- 还未做安装包实际安装、启动和卸载验收。
+## 本轮计划（关闭应用读秒窗完整展示 tips）
+
+### 计划清单
+
+- [x] 排查关闭应用读秒窗 tips 被截断的根因并明确最小修复范围
+- [x] 调整 `shutdown-card` 尺寸和 `shutdown-tip-body` 样式，保证 tips 正文完整显示
+- [x] 为极端矮视口补充安全兜底，避免内容不可达
+- [x] 运行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 关闭应用读秒窗仍保持居中显示
+- [x] `shutdown-tip-body` 不再被 `2` 行截断
+- [x] 默认窗口下 tips 可以完整显示，不裁切、不重叠
+- [x] 极端小视口下内容仍可访问
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/App.css`
+    - 将 `shutdown-card` 宽度从 `420px` 放宽到 `460px`
+    - 增加 `max-height: calc(100dvh - 32px)` 和 `overflow-y: auto`，作为极端矮视口兜底
+    - 将卡片 `padding` 从 `18px` 调整为 `20px`，`gap` 从 `12px` 调整为 `14px`
+    - 将 `shutdown-tip-card` 的内部间距从 `12px 13px` 调整为 `14px 15px`
+    - 去掉 `shutdown-tip-body` 的 `-webkit-line-clamp: 2`、`display: -webkit-box` 和 `overflow: hidden`
+    - 改为普通换行展示，并增加 `overflow-wrap: anywhere` / `word-break: break-word`
+- 根因结论：
+  - 关闭应用读秒窗 tips 不能显示全，根因是 CSS 明确把 `shutdown-tip-body` 截成了 `2` 行，而不是卡片本身固定高度
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过
+- 剩余说明：
+  - 当前仅做样式层修复，没有改动 `shutdownTip` 的随机逻辑、退出阶段状态或 JSX 结构
+  - 还未做 GUI 手工验收；需要重点确认默认窗口下最长 tips 是否已经无需滚动即可完整显示
+## 本轮计划（启动过渡收敛到前置页）
+
+### 计划清单
+
+- [x] 将 loading 页中的工作目录编辑能力并入前置页
+- [x] 在主壳首次握手阶段增加 boot hint，正常启动直达 workspace / control_center，不再可见旧 loading 页
+- [x] 将 `LoadingView` 降级为异常恢复兜底页，删除工作目录编辑区
+- [x] 保持 `report_loading_rendered` 指标在正常启动路径下仍可上报
+- [x] 运行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 正常启动时只看到前置页，不再出现旧 `Loading | State: starting` 页面
+- [x] 前置页显示 tips、启动状态和工作目录编辑
+- [x] 前置页可执行 `浏览`、`保存并重启`、`清空并使用默认`
+- [x] `missing_kimi` / onboarding / crashed 仍能正常分流
+- [x] `loadingStartupMs` 不回归为缺失
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/prefill/PrefillApp.tsx`
+    - 前置页新增工作目录编辑能力，复用 `get_app_status`、`save_work_dir`、`retry_start_backend`、`open_logs_folder`
+    - 等待态改为 `hero tip + support row(status/workdir)`，失败态改为 `failure card + support row(workdir/tip)`
+  - `apps/kimi-shell/src/prefill/prefill.css`
+    - 前置页新增 `prefill-support-row` 与 `prefill-workdir-card` 样式
+    - 为容纳工作目录区，将辅助区改成双列 support row，避免默认窗口纵向挤爆
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - 新增一次性 `bootHint` 和 `shellBootPending`
+    - 主壳握手 `notify_frontend_ready` 后，若已具备 `running + workspaceUrl`，在首轮真实状态刷新前直接按 workspace 渲染
+    - `report_loading_rendered` 改为在握手阶段也补报，避免正常启动跳过 loading 后指标缺失
+    - 初始加载不再立即渲染旧 loading 视图，loading 保留为异常恢复兜底
+  - `apps/kimi-shell/src/features/loading/LoadingView.tsx`
+    - 删除工作目录编辑卡，仅保留状态、日志、重试、退出等恢复能力
+  - `apps/kimi-shell/src/App.tsx` / `apps/kimi-shell/src/App.css`
+    - 主壳改为根据 `showLoadingView` 决定是否显示 loading 覆盖层
+    - loading 兜底页改为单列居中布局
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过
+- 剩余说明：
+  - 还未做 GUI 手工验收，尤其需要确认“前置页 -> 直接进入 workspace”是否已经完全看不到旧 loading 页
+  - `loading` 路由仍然保留，用于主壳异常恢复、手动返回状态页和其他 fallback 场景
+## 本轮计划（统一替换 kimilogo 并构建安装包）
+
+### 计划清单
+
+- [x] 核对 `apps/kimi-shell/public/kimilogo.png`、前端品牌图引用和 Tauri 打包 icon 资源
+- [x] 将前端 logo 统一切换到 `kimilogo.png`
+- [x] 用 `kimilogo.png` 覆盖生成 `src-tauri/icons` 下的安装包图标资源
+- [x] 将 `apps/kimi-shell/package.json` 版本从 `0.0.11` 递增到 `0.0.12`
+- [x] 运行 `pnpm -C apps/kimi-shell tauri build`
+- [x] 核对安装包产物并回填本节回顾
+
+### 验收标准
+
+- [x] 应用内品牌 logo 使用 `kimilogo.png`
+- [x] 安装包与应用图标资源使用 `kimilogo.png` 生成
+- [x] `package.json` / `Cargo.toml` / `tauri.conf.json` 版本均为 `0.0.12`
+- [x] 生成新的 MSI / NSIS 安装包
+- [x] `pnpm -C apps/kimi-shell tauri build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src/components/kimi-cli-brand.tsx`
+    - 品牌组件图片从 `/logo.png` 切换为 `/kimilogo.png`
+  - `apps/kimi-shell/package.json`
+    - 版本从 `0.0.11` 递增到 `0.0.12`
+  - `apps/kimi-shell/src-tauri/icons`
+    - 通过 `pnpm -C apps/kimi-shell tauri icon public/kimilogo.png --output src-tauri/icons` 重建整套图标资源
+    - 已覆盖 `icon.ico`、`icon.icns`、`32x32.png`、`128x128.png` 等平台图标
+- 资源核对：
+  - `apps/kimi-shell/public/kimilogo.png` 尺寸为 `1024x1024`
+  - 生成后的 `icon.ico` / `icon.icns` 时间戳为 `2026-03-07 10:58:06`
+- 构建结果：
+  - `pnpm -C apps/kimi-shell tauri build` 通过
+  - MSI: `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.12_x64_en-US.msi`，`6795264` bytes，`2026-03-07 10:59:58`
+  - NSIS: `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.12_x64-setup.exe`，`5154958` bytes，`2026-03-07 11:00:12`
+- 剩余说明：
+  - Rust 侧现存 `dead_code` warning 仍在，但不影响本次打包
+  - 还未做安装后手工验收，尤其建议确认桌面快捷方式、窗口左上角、托盘和安装程序中的新图标是否全部生效
+## 本轮计划（前置页收敛、启动静默与图标残留修正）
+
+### 计划清单
+
+- [ ] 收敛前置页：移除独立 work directory 卡，仅在状态卡内显示 `Effective directory`
+- [ ] 修正主壳 handoff：正常启动不再露出 `Loading | State: starting`
+- [ ] 调整安装探测时机：应用启动不做 `git/uv/node/python` 完整探测，仅在控制中心安装步骤或显式安装动作时探测
+- [ ] 静默化 probe 命令：`git/uv/node` 探测不再弹出短暂终端
+- [ ] 清理 favicon 与旧 logo 残留入口，统一到 `kimilogo`
+- [ ] 运行构建验证并回填本节结果
+
+### 验收标准
+
+- [ ] 前置页正常态只保留 tips hero 和单一状态卡
+- [ ] 前置页不再出现单独的 work directory 卡片
+- [ ] 状态卡中可见 `Effective directory`
+- [ ] 正常启动时不再出现旧 `Loading | State: starting` 页面
+- [ ] 应用冷启动和状态检查时不会触发 `git/uv/node` 完整探测
+- [ ] 仅在控制中心“安装 Kimi”步骤展开或显式安装动作时才执行完整 install probe
+- [ ] 检查/探测命令不再弹出短暂终端
+- [ ] favicon、品牌图、托盘/安装包图标链路统一到 `kimilogo`
+- [ ] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+### 回顾（本轮完成）
+- 完成项：
+  - 前置页删除独立 work directory 卡，`Effective directory` 并入状态卡/失败卡
+  - 正常启动链路去掉默认 install probe；完整 install probe 只在控制中心安装步骤或显式安装动作时触发
+  - `git/uv/node/python` probe 改为静默执行，不再使用可见终端
+  - `notify_frontend_ready -> report_loading_rendered -> complete_pending_prefill_handoff` 重新串联，避免正常启动露出旧 loading 页
+  - `index.html` favicon 改为 `/kimilogo.png`，`public/logo.png` 已覆盖成 `kimilogo.png`
+- 验证结果：
+  - `pnpm -C apps/kimi-shell build` 通过
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+  - 代码引用已无 `vite.svg` 或 `/logo.png` 入口，只保留 `/kimilogo.png`
+- 剩余说明：
+  - `apps/kimi-shell/public/vite.svg` 文件本身仍在工作区，但已无任何引用入口
+  - Rust 侧仍有既存 `dead_code` warning，未在本轮顺手清理
+  - 尚未做 GUI 手工验收，重点应核对 `prefill -> workspace` 是否完全无 loading 闪现，以及 onboarding 安装步骤的惰性探测是否符合预期
+## 本轮计划（基于当前工作区重建安装包）
+
+### 计划清单
+
+- [x] 记录本轮安装包重建目标与验收标准
+- [x] 执行 `pnpm -C apps/kimi-shell tauri build`
+- [x] 核对 MSI / NSIS 产物路径、大小与时间
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] `pnpm -C apps/kimi-shell tauri build` 通过
+- [x] 生成当前版本 `0.0.12` 的 MSI / NSIS 安装包
+- [x] 可给出产物绝对路径、大小与时间
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - 未新增代码改动；基于当前工作区内容重新执行安装包构建
+  - 构建链路仍为 `pnpm -C apps/kimi-shell tauri build`
+- 验证结果：
+  - `pnpm -C apps/kimi-shell tauri build` 通过
+  - MSI: `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\msi\Kimi Desktop Shell_0.0.12_x64_en-US.msi`，`6782976` bytes，`2026-03-07 11:43:01`
+  - NSIS: `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\nsis\Kimi Desktop Shell_0.0.12_x64-setup.exe`，`5142243` bytes，`2026-03-07 11:43:08`
+- 剩余说明：
+  - Rust 侧既存 `dead_code` warning 仍在，但不影响打包成功
+  - 还没做安装后手工验收
+## Current Plan (Windows shortcut + taskbar icon refresh)
+
+### Checklist
+
+- [x] Confirm the stale icon source is shortcut metadata / shell refresh, not the packaged exe icon itself
+- [x] Add a Windows runtime shortcut repair helper for installer-managed Start Menu and Desktop shortcuts
+- [x] Wire shortcut repair into app startup without launching visible terminals
+- [x] Add installer-level shortcut fixes for WiX and NSIS
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/shortcut_manager.rs`
+    - Added a Windows-only Shell COM shortcut repair path that updates target path, icon, working directory, description, and AppUserModelID.
+    - Added a process-level `SetCurrentProcessExplicitAppUserModelID` call so the running app groups under the current app identity.
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - Runs shortcut repair during startup setup.
+  - `apps/kimi-shell/src-tauri/windows/main.wxs`
+    - The Desktop shortcut now explicitly sets `Icon="ProductIcon"` and `System.AppUserModel.ID`.
+  - `apps/kimi-shell/src-tauri/windows/nsis-hooks.nsh`
+    - Rebuilds the current-app Start Menu shortcut after install, rebuilds the Desktop shortcut only if it already exists, and asks Windows Shell to refresh icons.
+  - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - Registers the custom WiX template and NSIS installer hooks.
+  - `apps/kimi-shell/src-tauri/Cargo.toml`
+    - Adds the Windows crate features required for native shortcut repair.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell tauri build` passed and produced both MSI and NSIS bundles.
+  - Generated WiX output contains Desktop shortcut `Icon="ProductIcon"` and `System.AppUserModel.ID`.
+  - Generated NSIS output includes the repo `nsis-hooks.nsh` file.
+- Remaining note:
+  - Historical pinned items that target other executables, such as old `Kimi 智能助手` installs, remain untouched by design.
+## Current Plan (installed app hidden window startup fix)
+
+### Checklist
+
+- [x] Reproduce the installed build startup failure and verify whether the process stays alive without a visible window
+- [x] Trace the prefill-to-shell handoff and identify the hidden-window deadlock point
+- [x] Replace hidden-window `requestAnimationFrame` startup reporting with a timer-based handoff trigger
+- [x] Rebuild the frontend and verify the installed exe now creates a visible main window
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Added a dedicated startup-report timer ref/cleanup path.
+    - Replaced the hidden-window `requestAnimationFrame(reportVisibleRender)` call after `notify_frontend_ready` with `setTimeout(..., 0)` so the Rust-side `report_loading_rendered -> complete_pending_prefill_handoff -> show()` chain can run even while the shell window is hidden.
+- Verification:
+  - Reproduced the issue with the installed exe at `C:\Users\Qian\AppData\Local\Kimi Desktop Shell\appskimi-shell.exe`: the process stayed alive with `MainWindowHandle=0`, which confirmed a hidden-window handoff deadlock rather than an install-path failure.
+  - `pnpm -C apps/kimi-shell build` passed after the change.
+  - Launching the installed exe after the change produced a visible main window handle instead of leaving the process headless.
+- Remaining note:
+  - The previous hidden background process needed to be terminated before retesting, otherwise the single-instance forward path could mask the fix.
+## Current Plan (rollback windows icon refresh chain to restore installer/startup stability)
+
+### Checklist
+
+- [x] Remove custom Windows packager overrides from `tauri.conf.json`
+- [x] Remove `src-tauri/windows/main.wxs` and `src-tauri/windows/nsis-hooks.nsh`
+- [x] Remove runtime shortcut repair call from app setup
+- [x] Roll back `shortcut_manager.rs` to hotkey-only implementation
+- [x] Remove direct `windows` crate dependency added for shortcut COM operations
+- [x] Keep hidden-window startup handoff fix (`setTimeout` startup report path)
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+
+### Review
+
+- Actual changes:
+  - Removed custom packager wiring from `apps/kimi-shell/src-tauri/tauri.conf.json`.
+  - Deleted `apps/kimi-shell/src-tauri/windows/main.wxs`.
+  - Deleted `apps/kimi-shell/src-tauri/windows/nsis-hooks.nsh`.
+  - Removed `shortcut_manager::repair_managed_shortcuts(app.handle())` from `apps/kimi-shell/src-tauri/src/lib.rs`.
+  - Replaced `apps/kimi-shell/src-tauri/src/shortcut_manager.rs` with a hotkey-only implementation.
+  - Removed direct `windows` dependency block from `apps/kimi-shell/src-tauri/Cargo.toml` (kept `winreg`).
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - Generated NSIS script no longer includes the custom hooks file.
+  - New artifacts:
+    - `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\msi\Kimi Desktop Shell_0.0.12_x64_en-US.msi`
+    - `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\nsis\Kimi Desktop Shell_0.0.12_x64-setup.exe`
+- Remaining note:
+  - Existing dead_code warnings in `backend_manager.rs` remain unrelated to this rollback.
+## Current Plan (optimize single dead_code warning)
+
+### Checklist
+
+- [x] Remove unused `MAX_INSTALL_OUTPUT_CHARS` constant in `backend_manager.rs`
+- [x] Keep truncate behavior unchanged by inlining the same limit value
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - Removed `MAX_INSTALL_OUTPUT_CHARS`.
+    - Replaced its two usages in `truncate_install_output` with the same numeric limit (`1500`), preserving behavior.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - The specific warning `constant MAX_INSTALL_OUTPUT_CHARS is never used` no longer appears.
+- Remaining note:
+  - Other pre-existing `dead_code` warnings in `backend_manager.rs` still remain.
+## 本轮计划（清理剩余 dead_code 警告）
+### 计划清单
+
+- [ ] 修复 `apps/kimi-shell/src-tauri/src/backend_manager.rs` 当前语法损坏，恢复可编译状态
+- [ ] 运行 `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 获取最新 dead_code 清单
+- [ ] 逐条删除剩余 dead_code（13 条）对应的废弃常量和 helper
+- [ ] 复跑 `cargo check` 验证 dead_code 警告已清理
+- [ ] 回填本节“回顾”与验证结果
+
+### 验收标准
+
+- [ ] `cargo check` 可通过（至少无语法错误）
+- [ ] 本轮定位的 dead_code 警告全部消失
+- [ ] 仅做最小改动，不引入行为回归
+## Current Plan (clear remaining dead_code warnings)
+
+### Checklist
+
+- [x] Repair syntax breakage in `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` to refresh warnings
+- [x] Remove remaining dead_code entries with minimal edits
+- [x] Run `cargo check --all-targets --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - Fixed broken string literals in install action success messages.
+    - Replaced corrupted install-command-catalog labels/descriptions with stable text.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `cargo check --all-targets --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - No dead_code warnings are currently emitted by cargo in this workspace target.

@@ -540,11 +540,13 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
         state.frontend_ready = true;
         let queued_route = state.queued_route.take();
         let queued_main_events = std::mem::take(&mut state.pending_main_events);
-        let pending_prefill = state.pending_prefill.take();
         let should_complete_prefill = state.prefill_completion_pending;
-        if should_complete_prefill {
-            clear_boot_guard_locked(&mut state);
+        let pending_prefill = if should_complete_prefill {
+            None
         } else {
+            state.pending_prefill.take()
+        };
+        if !should_complete_prefill {
             state.startup_pending = false;
             state.startup_exit_cause = None;
         }
@@ -587,16 +589,16 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
 
     flush_pending_main_events(app, queued_main_events, source);
 
-    if should_complete_prefill {
-        finalize_main_window_boot(app, pending_prefill.clone(), source);
-    } else if let Some(payload) = pending_prefill.clone() {
-        if !emit_prefill_event(app, &payload, source) {
-            requeue_prefill(
-                app,
-                payload.clone(),
-                source,
-                "emit_failed_after_frontend_ready",
-            );
+    if !should_complete_prefill {
+        if let Some(payload) = pending_prefill.clone() {
+            if !emit_prefill_event(app, &payload, source) {
+                requeue_prefill(
+                    app,
+                    payload.clone(),
+                    source,
+                    "emit_failed_after_frontend_ready",
+                );
+            }
         }
     }
 
@@ -604,6 +606,33 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
         accepted,
         pending_prefill,
     }
+}
+
+pub fn complete_pending_prefill_handoff(app: &AppHandle, source: &str) {
+    let (pending_prefill, snapshot) = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            log_manager::append_line(
+                app,
+                format!(
+                    "navigation state mutex poisoned while completing prefill handoff (source={source})"
+                ),
+            );
+            return;
+        };
+
+        if !state.frontend_ready || !state.prefill_completion_pending {
+            return;
+        }
+
+        let pending_prefill = state.pending_prefill.take();
+        clear_boot_guard_locked(&mut state);
+        let snapshot = snapshot_from_state(&state);
+        (pending_prefill, snapshot)
+    };
+
+    sync_runtime_startup_snapshot(app, &snapshot);
+    finalize_main_window_boot(app, pending_prefill, source);
 }
 
 pub fn show_missing_kimi(app: &AppHandle, source: &str) {
@@ -1143,8 +1172,6 @@ fn create_main_window_direct(
         window
             .navigate(loading_url)
             .map_err(|error| format!("failed to navigate shell loading page: {error}"))?;
-        let _ = window.show();
-        let _ = window.set_focus();
     } else {
         let _ = window.show();
         let _ = window.set_focus();
@@ -1233,9 +1260,8 @@ fn run_main_shell_navigation_on_main_thread(app: &AppHandle, source: &str) {
         }
     }
 
+    let _ = window.hide();
     advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
-    let _ = window.show();
-    let _ = window.set_focus();
 }
 
 fn apply_window_surface(

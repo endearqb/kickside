@@ -407,6 +407,19 @@ export interface InstallProbeStatus {
   uvReady: boolean;
   python313Ready: boolean;
   kimiReady: boolean;
+  nodeReady: boolean;
+}
+
+export interface InstallCommandEntry {
+  id: string;
+  title: string;
+  description: string;
+  requiresElevation: boolean;
+  command: string;
+}
+
+export interface InstallCommandCatalog {
+  entries: InstallCommandEntry[];
 }
 
 export type Screen = "loading" | "control_center" | "workspace";

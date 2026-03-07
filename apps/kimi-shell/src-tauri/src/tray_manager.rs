@@ -45,8 +45,15 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    let _tray = TrayIconBuilder::new()
+    let mut tray_builder = TrayIconBuilder::with_id("kimi-shell-tray")
         .menu(&menu)
+        .tooltip("Kimi Shell");
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray_builder = tray_builder.icon(icon);
+    }
+
+    let _tray = tray_builder
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_TOGGLE_WINDOW => window_manager::toggle_window(app),
             MENU_RESTART_BACKEND => backend_manager::restart_backend(app.clone()),

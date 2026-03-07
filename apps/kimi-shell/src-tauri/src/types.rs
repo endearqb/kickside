@@ -552,4 +552,22 @@ pub struct InstallProbeStatus {
     pub uv_ready: bool,
     pub python313_ready: bool,
     pub kimi_ready: bool,
+    pub node_ready: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallCommandEntry {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub requires_elevation: bool,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallCommandCatalog {
+    #[serde(default)]
+    pub entries: Vec<InstallCommandEntry>,
 }

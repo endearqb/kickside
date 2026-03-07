@@ -20,6 +20,7 @@ import type {
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  InstallCommandCatalog,
   FrontendReadyAck,
   InstallProbeStatus,
   KimiCliConfigCenterInput,
@@ -50,10 +51,17 @@ const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
 const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
+const INSTALL_PROBE_TIMEOUT_MS = 180_000;
+const INSTALL_PROBE_INTERVAL_MS = 1500;
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type InstallSource = "official" | "mirror";
+type InstallAction = "dependencies" | "kimi" | "upgrade_kimi" | "nodejs";
+type BootHint = Pick<
+  FrontendReadyAck,
+  "backendState" | "workspaceUrl" | "startCycleId"
+>;
 
 function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
   return {
@@ -138,8 +146,13 @@ export function useShellController() {
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installBusy, setInstallBusy] = useState(false);
+  const [installAction, setInstallAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
+  const [installCommandsOpen, setInstallCommandsOpen] = useState(false);
+  const [installCommandsBusy, setInstallCommandsBusy] = useState(false);
+  const [installCommandCatalog, setInstallCommandCatalog] =
+    useState<InstallCommandCatalog | null>(null);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [workspaceEmbedState, setWorkspaceEmbedState] =
     useState<WorkspaceEmbedState>("idle");
@@ -159,6 +172,10 @@ export function useShellController() {
   const [shutdownProgress, setShutdownProgress] =
     useState<ShutdownProgressPayload | null>(null);
   const [shutdownElapsedMs, setShutdownElapsedMs] = useState<number | null>(null);
+  const [bootHint, setBootHint] = useState<BootHint | null>(null);
+  const [shellBootPending, setShellBootPending] = useState(
+    () => parseHashRoute(window.location.hash) === "loading",
+  );
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
@@ -166,6 +183,7 @@ export function useShellController() {
   const pendingPrefillRef = useRef<PrefillChatPayload | null>(null);
   const prefillRetryTimerRef = useRef<number | null>(null);
   const prefillAckTimerRef = useRef<number | null>(null);
+  const frontendReadyReportTimerRef = useRef<number | null>(null);
   const prefillDispatchRef = useRef<((source: string) => void) | null>(null);
   const prefillAttemptsRef = useRef<Record<string, number>>({});
   const handledPrefillIdsRef = useRef<Set<string>>(new Set());
@@ -179,9 +197,14 @@ export function useShellController() {
   const shutdownElapsedStartedAtRef = useRef<number>(0);
   const shutdownElapsedTimerRef = useRef<number | null>(null);
   const workspaceRemoteUrlRef = useRef<string | null>(null);
+  const hashRoute = parseHashRoute(routeHash);
+  const useBootHintWorkspace =
+    hashRoute === "loading" &&
+    !status &&
+    bootHint?.backendState === "running" &&
+    Boolean(bootHint.workspaceUrl?.trim());
 
   const screen: Screen = useMemo(() => {
-    const hashRoute = parseHashRoute(routeHash);
     if (hashRoute === "control-center") return "control_center";
     if (
       hashRoute === "diagnostics" ||
@@ -201,15 +224,24 @@ export function useShellController() {
       return "control_center";
     }
 
+    if (useBootHintWorkspace) {
+      return "workspace";
+    }
+
     if (status?.state === "running" && typeof status.activePort === "number") {
       return "workspace";
     }
 
     return "loading";
-  }, [onboarding, routeHash, status]);
+  }, [hashRoute, onboarding, status, useBootHintWorkspace]);
 
   const workspacePort = status?.workspacePort ?? status?.activePort;
-  const remoteUrl = workspacePort ? `http://127.0.0.1:${workspacePort}` : null;
+  const remoteUrl =
+    useBootHintWorkspace && bootHint?.workspaceUrl?.trim()
+      ? bootHint.workspaceUrl.trim()
+      : workspacePort
+        ? `http://127.0.0.1:${workspacePort}`
+        : null;
   const workspaceOrigin = useMemo(() => {
     if (!remoteUrl) return null;
     try {
@@ -224,6 +256,14 @@ export function useShellController() {
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
+
+  useEffect(() => {
+    if (hashRoute === "loading") {
+      return;
+    }
+    setShellBootPending(false);
+    setBootHint(null);
+  }, [hashRoute]);
 
   useEffect(() => {
     try {
@@ -252,6 +292,13 @@ export function useShellController() {
     if (prefillAckTimerRef.current !== null) {
       window.clearTimeout(prefillAckTimerRef.current);
       prefillAckTimerRef.current = null;
+    }
+  }
+
+  function clearFrontendReadyReportTimer() {
+    if (frontendReadyReportTimerRef.current !== null) {
+      window.clearTimeout(frontendReadyReportTimerRef.current);
+      frontendReadyReportTimerRef.current = null;
     }
   }
 
@@ -476,6 +523,7 @@ export function useShellController() {
     try {
       const data = await invoke<AppStatus>("get_app_status");
       setStatus(data);
+      setBootHint(null);
       if (data.state !== "stopping") {
         setShutdownProgress(null);
         clearShutdownElapsedTimer(true);
@@ -484,6 +532,7 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
     } finally {
+      setShellBootPending(false);
       setIsLoading(false);
     }
   }
@@ -699,13 +748,40 @@ export function useShellController() {
     frontendReadyHandshakeSent = true;
     void invoke<FrontendReadyAck>("notify_frontend_ready")
       .then((ack) => {
+        if (ack.backendState === "running" && ack.workspaceUrl?.trim()) {
+          setBootHint({
+            backendState: ack.backendState,
+            workspaceUrl: ack.workspaceUrl.trim(),
+            startCycleId: ack.startCycleId,
+          });
+        }
         if (ack.pendingPrefill) {
           enqueuePrefillPayload(ack.pendingPrefill, "ready_ack");
         }
+        const reportVisibleRender = () => {
+          if (loadingReportCycleRef.current !== ack.startCycleId) {
+            loadingReportCycleRef.current = ack.startCycleId;
+            void invoke("report_loading_rendered", {
+              startCycleId: ack.startCycleId,
+            }).catch(() => {
+              // Best-effort metric reporting.
+            });
+          }
+          setShellBootPending(false);
+        };
+        // Hidden startup windows can stall requestAnimationFrame entirely,
+        // which deadlocks the Rust-side show() handoff.
+        clearFrontendReadyReportTimer();
+        frontendReadyReportTimerRef.current = window.setTimeout(() => {
+          frontendReadyReportTimerRef.current = null;
+          reportVisibleRender();
+        }, 0);
         void refreshCoreState();
       })
       .catch(() => {
         // Best-effort startup handshake.
+        clearFrontendReadyReportTimer();
+        setShellBootPending(false);
       });
   }, [enqueuePrefillPayload, listenersReady, tauriRuntime]);
 
@@ -849,6 +925,7 @@ export function useShellController() {
 
   useEffect(
     () => () => {
+      clearFrontendReadyReportTimer();
       clearPrefillTimers();
       clearSessionNavigateTimer();
       clearShutdownElapsedTimer(true);
@@ -878,14 +955,85 @@ export function useShellController() {
     return data;
   }
 
+  async function waitForInstallProbe(
+    predicate: (probe: InstallProbeStatus) => boolean,
+    timeoutMs = INSTALL_PROBE_TIMEOUT_MS,
+  ) {
+    const startedAt = Date.now();
+    let probe = await refreshInstallProbe();
+    if (predicate(probe)) {
+      return probe;
+    }
+
+    while (Date.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => window.setTimeout(resolve, INSTALL_PROBE_INTERVAL_MS));
+      probe = await refreshInstallProbe();
+      if (predicate(probe)) {
+        return probe;
+      }
+    }
+
+    throw new Error("安装复检超时，请检查外置终端输出并确认安装是否完成。");
+  }
+
+  async function runInstallAction({
+    action,
+    invokeCommand,
+    invokeArgs,
+    alreadyInstalled,
+    alreadyMessage,
+    successMessage,
+    predicate,
+  }: {
+    action: InstallAction;
+    invokeCommand:
+      | "install_kimi_dependencies"
+      | "install_kimi_cli"
+      | "upgrade_kimi_cli"
+      | "install_nodejs";
+    invokeArgs?: Record<string, unknown>;
+    alreadyInstalled: (probe: InstallProbeStatus) => boolean;
+    alreadyMessage: string;
+    successMessage: string;
+    predicate: (probe: InstallProbeStatus) => boolean;
+  }) {
+    setActionError(null);
+    try {
+      const currentProbe = await refreshInstallProbe();
+      if (alreadyInstalled(currentProbe)) {
+        setInstallMessage(alreadyMessage);
+        return currentProbe;
+      }
+
+      setInstallBusy(true);
+      setInstallAction(action);
+      const summary = await invoke<string>(invokeCommand, invokeArgs);
+      setInstallMessage(summary.trim() || "已启动外置终端，正在等待安装复检。");
+      const nextProbe = await waitForInstallProbe(predicate);
+      setInstallMessage(successMessage);
+      await refreshOnboarding();
+      return nextProbe;
+    } catch (error) {
+      const detail = String(error);
+      setInstallMessage(detail);
+      setActionError(detail);
+      return null;
+    } finally {
+      setInstallBusy(false);
+      setInstallAction(null);
+    }
+  }
+
   useEffect(() => {
-    void refreshStatus();
+    if (!tauriRuntime) {
+      void refreshStatus();
+    }
     void refreshOnboarding();
     const timer = window.setInterval(() => {
       void refreshStatus();
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [tauriRuntime]);
 
   useEffect(() => {
     if (!status) return;
@@ -910,6 +1058,7 @@ export function useShellController() {
     }
     setControlCenterModalOpen(false);
     setConfigCenterOpen(false);
+    setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }, [screen]);
 
@@ -1297,6 +1446,72 @@ export function useShellController() {
     }
   }
 
+  async function handleInstallDependenciesExternal() {
+    await runInstallAction({
+      action: "dependencies",
+      invokeCommand: "install_kimi_dependencies",
+      invokeArgs: { source: installSource },
+      alreadyInstalled: (probe) => probe.gitReady && probe.uvReady,
+      alreadyMessage: "已检测到 Git 和 uv，无需重复安装。",
+      successMessage: "依赖安装复检通过：Git 和 uv 已就绪。",
+      predicate: (probe) => probe.gitReady && probe.uvReady,
+    });
+  }
+
+  async function handleInstallKimiExternal() {
+    await runInstallAction({
+      action: "kimi",
+      invokeCommand: "install_kimi_cli",
+      invokeArgs: { source: installSource },
+      alreadyInstalled: (probe) => probe.python313Ready && probe.kimiReady,
+      alreadyMessage: "已检测到 Python 3.13 和 Kimi CLI，无需重复安装。",
+      successMessage: "Kimi 安装复检通过：Python 3.13 和 Kimi CLI 已就绪。",
+      predicate: (probe) => probe.python313Ready && probe.kimiReady,
+    });
+  }
+
+  async function handleUpgradeKimi() {
+    await runInstallAction({
+      action: "upgrade_kimi",
+      invokeCommand: "upgrade_kimi_cli",
+      invokeArgs: { source: installSource },
+      alreadyInstalled: (probe) =>
+        !(probe.uvReady && probe.python313Ready && probe.kimiReady),
+      alreadyMessage: "升级前请先确认 uv、Python 3.13 和 Kimi CLI 已安装。",
+      successMessage: "Kimi 升级复检通过。",
+      predicate: (probe) => probe.kimiReady,
+    });
+  }
+
+  async function handleInstallNodejs() {
+    await runInstallAction({
+      action: "nodejs",
+      invokeCommand: "install_nodejs",
+      alreadyInstalled: (probe) => probe.nodeReady,
+      alreadyMessage: "已检测到 Node.js，无需重复安装。",
+      successMessage: "Node.js 安装复检通过。",
+      predicate: (probe) => probe.nodeReady,
+    });
+  }
+
+  async function handleOpenInstallCommands() {
+    setInstallCommandsBusy(true);
+    setActionError(null);
+    try {
+      const catalog = await invoke<InstallCommandCatalog>("get_install_command_catalog");
+      setInstallCommandCatalog(catalog);
+      setInstallCommandsOpen(true);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setInstallCommandsBusy(false);
+    }
+  }
+
+  function handleCloseInstallCommands() {
+    setInstallCommandsOpen(false);
+  }
+
   async function handleCompleteOnboarding() {
     setActionBusy(true);
     setActionError(null);
@@ -1330,6 +1545,7 @@ export function useShellController() {
   function closeControlCenterModal() {
     setControlCenterModalOpen(false);
     setConfigCenterOpen(false);
+    setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }
 
@@ -1450,6 +1666,9 @@ export function useShellController() {
     return () => window.clearTimeout(timer);
   }, [remoteUrl]);
 
+  void handleInstallDependencies;
+  void handleInstallKimi;
+
   const stepCompletion = useMemo<StepCompletion>(
     () => ({
       install_kimi: onboarding?.kimiInstalled ?? false,
@@ -1469,12 +1688,15 @@ export function useShellController() {
     [configCenterDraft, configCenterSnapshot],
   );
 
+  const uiBackendState =
+    status?.state ?? (useBootHintWorkspace ? bootHint?.backendState : undefined);
   const canOpenWorkspace =
-    status?.state === "running" &&
-    typeof status.activePort === "number" &&
-    !onboarding?.shouldShowOnboarding;
+    (status?.state === "running" &&
+      typeof status.activePort === "number" &&
+      !onboarding?.shouldShowOnboarding) ||
+    useBootHintWorkspace;
 
-  const statusText = status?.state ?? "starting";
+  const statusText = uiBackendState ?? "starting";
   const shellScreenLabel =
     screen === "workspace"
       ? "Workspace"
@@ -1484,6 +1706,7 @@ export function useShellController() {
   const hotkeyOwnerLabel = status?.isHotkeyOwner
     ? "This instance owns global hotkey."
     : "Global hotkey is owned by another running instance.";
+  const showLoadingView = screen === "loading" && !(shellBootPending && !status);
 
   function handleWorkspaceFrameLoad() {
     setWorkspaceEmbedState("ready");
@@ -1525,6 +1748,8 @@ export function useShellController() {
     controlCenterChrome,
     tauriRuntime,
     screen,
+    uiBackendState,
+    showLoadingView,
     statusText,
     shellScreenLabel,
     hotkeyOwnerLabel,
@@ -1540,7 +1765,11 @@ export function useShellController() {
     installProbe,
     installSource,
     installBusy,
+    installAction,
     installMessage,
+    installCommandsOpen,
+    installCommandsBusy,
+    installCommandCatalog,
     refreshCoreState,
     refreshDiagnostics,
     refreshContextMenuStatus,
@@ -1564,8 +1793,12 @@ export function useShellController() {
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleInstallSourceChange,
-    handleInstallDependencies,
-    handleInstallKimi,
+    handleInstallDependencies: handleInstallDependenciesExternal,
+    handleInstallKimi: handleInstallKimiExternal,
+    handleUpgradeKimi,
+    handleInstallNodejs,
+    handleOpenInstallCommands,
+    handleCloseInstallCommands,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,

@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
     io::{Read, Write},
@@ -20,10 +20,10 @@ use crate::{
     app_state::{unix_time_millis, AppState},
     cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
     types::{
-        AppSettings, BackendState, EnvOverrideStatus, InstallProbeStatus, KeyValueEntry,
-        KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-        KimiCliConfigCenterView, LoopControlEntry, McpServerEntry, ModelEntry, ProviderEntry,
-        ServiceEntry, TypedFieldEntry, TypedFieldType,
+        AppSettings, BackendState, EnvOverrideStatus, InstallCommandCatalog, InstallCommandEntry,
+        InstallProbeStatus, KeyValueEntry, KimiCliApiConfigInput, KimiCliApiConfigView,
+        KimiCliConfigCenterInput, KimiCliConfigCenterView, LoopControlEntry, McpServerEntry,
+        ModelEntry, ProviderEntry, ServiceEntry, TypedFieldEntry, TypedFieldType,
     },
     window_manager, workspace_session,
 };
@@ -38,7 +38,6 @@ const EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-external-link-bridge";
 const SHELL_SESSION_SYNC_SOURCE: &str = "kimi-shell-session-sync";
 const SESSION_BRIDGE_SOURCE: &str = "kimi-shell-session-bridge";
 const MAX_UPSTREAM_HEADER_BYTES: usize = 64 * 1024;
-const MAX_INSTALL_OUTPUT_CHARS: usize = 1500;
 const ENV_VALUE_VISIBLE_EDGE: usize = 2;
 
 struct EnvOverrideDefinition {
@@ -125,10 +124,10 @@ const ENV_OVERRIDE_DEFINITIONS: &[EnvOverrideDefinition] = &[
     },
 ];
 
-const POWERSHELL_INSTALL_DEPS_OFFICIAL: &str = r#"
+const POWERSHELL_INSTALL_DEPS_OFFICIAL_LAUNCH: &str = r#"
 $ErrorActionPreference='Stop'
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-  throw '未检测到 winget，请先安装 App Installer（https://aka.ms/getwinget）。'
+  throw '鏈娴嬪埌 winget锛岃鍏堝畨瑁?App Installer 鍚庨噸璇曘€?
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
@@ -138,7 +137,7 @@ if (-not $uvCmd) {
   try {
     winget install --id astral-sh.uv -e --source winget --accept-source-agreements --accept-package-agreements
   } catch {
-    Write-Host 'winget 安装 uv 失败，继续尝试官方安装脚本。'
+    Write-Host 'winget 瀹夎 uv 澶辫触锛岀户缁皾璇曞畼鏂瑰畨瑁呰剼鏈€?
   }
 }
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
@@ -152,49 +151,92 @@ foreach ($dir in $uvCandidateDirs) {
   }
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  throw 'uv 安装失败，请手动执行：winget install --id astral-sh.uv -e'
+  throw 'uv 瀹夎澶辫触锛岃鎵嬪姩鎵ц锛歸inget install --id astral-sh.uv -e'
 }
 $gitVer = git --version
 $uvVer = uv --version
-Write-Output "依赖安装完成。$gitVer | $uvVer"
+Write-Output "宸插惎鍔ㄤ緷璧栧畨瑁呫€?gitVer | $uvVer"
 "#;
 
-const POWERSHELL_INSTALL_DEPS_MIRROR: &str = r#"
+const POWERSHELL_INSTALL_DEPS_MIRROR_LAUNCH: &str = r#"
 $ErrorActionPreference='Stop'
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   $latestReleaseUrl = 'https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/'
   $baseUri = [System.Uri]$latestReleaseUrl
-  $latestReleasePage = Invoke-WebRequest -Uri $latestReleaseUrl
+  $latestReleasePage = Invoke-WebRequest -Uri $latestReleaseUrl -TimeoutSec 45 -ErrorAction Stop
   $latestLinks = @($latestReleasePage.Links | Where-Object { $_.href })
   $installerHref = $latestLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git-[^/]*-64-bit\.exe$' } | Select-Object -First 1
   $versionDirHref = $latestLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git%20for%20Windows%20v[^/]+/?$' } | Select-Object -First 1
   if ((-not $installerHref) -and $versionDirHref) {
     $versionDirUrl = [System.Uri]::new($baseUri, $versionDirHref).AbsoluteUri
-    $versionPage = Invoke-WebRequest -Uri $versionDirUrl
+    $versionPage = Invoke-WebRequest -Uri $versionDirUrl -TimeoutSec 45 -ErrorAction Stop
     $versionLinks = @($versionPage.Links | Where-Object { $_.href })
     $installerHref = $versionLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git-[^/]*-64-bit\.exe$' } | Select-Object -First 1
     if ($installerHref) { $baseUri = [System.Uri]$versionDirUrl }
   }
-  if (-not $installerHref) { throw '清华源页面未找到 Git for Windows 64-bit 安装包链接。' }
-  $tunaUrl = [System.Uri]::new($baseUri, $installerHref).AbsoluteUri
-  $installerPath = Join-Path $env:TEMP 'Git-Installer.exe'
-  Invoke-WebRequest -Uri $tunaUrl -OutFile $installerPath
-  Start-Process -FilePath $installerPath -Wait
+  if (-not $installerHref) { throw '娓呭崕闀滃儚椤垫湭鎵惧埌 Git 瀹夎鍖呫€? }
+  $gitInstallerUrl = [System.Uri]::new($baseUri, $installerHref).AbsoluteUri
+  $gitInstallerPath = Join-Path $env:TEMP 'kimi-shell-git-installer.exe'
+  Invoke-WebRequest -Uri $gitInstallerUrl -OutFile $gitInstallerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+  Start-Process -FilePath $gitInstallerPath -Wait
 }
+
 $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
 if (-not $uvCmd) {
-  if (Get-Command winget -ErrorAction SilentlyContinue) {
+  $releaseUrls = @(
+    'https://mirrors.tuna.tsinghua.edu.cn/github-release/astral-sh/uv/LatestRelease/',
+    'https://mirrors.aliyun.com/github-release/astral-sh/uv/LatestRelease/'
+  )
+  $assetPattern = '(?i)uv-x86_64-pc-windows-msvc\.zip$'
+  $uvInstallDir = Join-Path $HOME '.local\bin'
+  $uvZipPath = Join-Path $env:TEMP 'kimi-shell-uv.zip'
+  $uvExtractDir = Join-Path $env:TEMP 'kimi-shell-uv'
+  New-Item -ItemType Directory -Force -Path $uvInstallDir | Out-Null
+  $uvInstalled = $false
+
+  foreach ($releaseUrl in $releaseUrls) {
     try {
-      winget install --id astral-sh.uv -e --source winget --accept-source-agreements --accept-package-agreements
+      $baseUri = [System.Uri]$releaseUrl
+      $releasePage = Invoke-WebRequest -Uri $releaseUrl -TimeoutSec 45 -ErrorAction Stop
+      $releaseLinks = @($releasePage.Links | Where-Object { $_.href })
+      $assetHref = $releaseLinks | ForEach-Object { $_.href } | Where-Object { $_ -match $assetPattern } | Select-Object -First 1
+      if (-not $assetHref) { throw 'release page missing uv windows zip' }
+      $assetUrl = [System.Uri]::new($baseUri, $assetHref).AbsoluteUri
+
+      if (Test-Path $uvZipPath) { Remove-Item $uvZipPath -Force -ErrorAction SilentlyContinue }
+      if (Test-Path $uvExtractDir) { Remove-Item $uvExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+      Invoke-WebRequest -Uri $assetUrl -OutFile $uvZipPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+      Expand-Archive -Path $uvZipPath -DestinationPath $uvExtractDir -Force
+      $uvExe = Get-ChildItem -Path $uvExtractDir -Recurse -Filter 'uv.exe' | Select-Object -First 1
+      if (-not $uvExe) { throw 'expanded archive does not contain uv.exe' }
+
+      Copy-Item -Path $uvExe.FullName -Destination (Join-Path $uvInstallDir 'uv.exe') -Force
+      $uvInstalled = $true
+      break
     } catch {
-      Write-Host 'winget 安装 uv 失败，继续尝试官方安装脚本。'
+      Write-Host ('uv 闀滃儚瀹夎澶辫触锛岀户缁皾璇曚笅涓€涓簮锛? + $releaseUrl)
     }
   }
+
+  foreach ($dir in @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))) {
+    if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
+      $env:Path = "$dir;$env:Path"
+    }
+  }
+
+  if ((-not $uvInstalled) -or (-not (Get-Command uv -ErrorAction SilentlyContinue))) {
+    throw 'uv 闀滃儚瀹夎澶辫触锛岃妫€鏌ョ綉缁滃悗閲嶈瘯銆?
+  }
 }
-$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
-if (-not $uvCmd) {
-  Invoke-RestMethod -Uri 'https://astral.sh/uv/install.ps1' | Invoke-Expression
-}
+
+$gitVer = git --version
+$uvVer = uv --version
+Write-Output "宸插惎鍔ㄩ暅鍍忎緷璧栧畨瑁呫€?gitVer | $uvVer"
+"#;
+
+const POWERSHELL_INSTALL_KIMI_OFFICIAL_LAUNCH: &str = r#"
+$ErrorActionPreference='Stop'
 $uvCandidateDirs = @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
 foreach ($dir in $uvCandidateDirs) {
   if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
@@ -202,30 +244,80 @@ foreach ($dir in $uvCandidateDirs) {
   }
 }
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  throw 'uv 安装失败，请先手动安装。'
-}
-$gitVer = git --version
-$uvVer = uv --version
-Write-Output "镜像依赖安装完成。$gitVer | $uvVer"
-"#;
-
-const POWERSHELL_INSTALL_KIMI_OFFICIAL: &str = r#"
-$ErrorActionPreference='Stop'
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  throw '未检测到 uv，请先执行“一键安装依赖”。'
+  throw '鏈娴嬪埌 uv锛岃鍏堟墽琛屸€滃畨瑁呬緷璧栵紙Git / uv锛夆€濄€?
 }
 uv python install 3.13
 uv tool install kimi-cli --python 3.13 --upgrade
 $kimiVer = kimi -v
-Write-Output "Kimi 安装完成。$kimiVer"
+Write-Output "Kimi 瀹夎瀹屾垚銆?kimiVer"
 "#;
 
-const POWERSHELL_INSTALL_KIMI_MIRROR: &str = r#"
+const POWERSHELL_INSTALL_KIMI_MIRROR_LAUNCH: &str = r#"
 $ErrorActionPreference='Stop'
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  throw '未检测到 uv，请先执行“一键安装依赖”。'
+$uvCandidateDirs = @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
+foreach ($dir in $uvCandidateDirs) {
+  if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
+    $env:Path = "$dir;$env:Path"
+  }
 }
-uv python install 3.13
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+  throw '鏈娴嬪埌 uv锛岃鍏堟墽琛屸€滃畨瑁呬緷璧栵紙Git / uv锛夆€濄€?
+}
+
+$pythonReady = $false
+$pythonUserExe = Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe'
+if ((Test-Path $pythonUserExe)) {
+  & $pythonUserExe --version
+  if ($LASTEXITCODE -eq 0) { $pythonReady = $true }
+}
+if (-not $pythonReady) {
+  $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyLauncher) {
+    & py -3.13 --version
+    if ($LASTEXITCODE -eq 0) { $pythonReady = $true }
+  }
+}
+
+if (-not $pythonReady) {
+  $pythonMirrors = @(
+    'https://mirrors.tuna.tsinghua.edu.cn/python/3.13.12/python-3.13.12-amd64.exe',
+    'https://mirrors.aliyun.com/python-release/windows/python-3.13.12-amd64.exe'
+  )
+  $pythonInstallerPath = Join-Path $env:TEMP 'kimi-shell-python-3.13.12-amd64.exe'
+  $pythonInstalled = $false
+  foreach ($mirrorUrl in $pythonMirrors) {
+    try {
+      if (Test-Path $pythonInstallerPath) { Remove-Item $pythonInstallerPath -Force -ErrorAction SilentlyContinue }
+      Invoke-WebRequest -Uri $mirrorUrl -OutFile $pythonInstallerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+      $proc = Start-Process -FilePath $pythonInstallerPath -ArgumentList @('/quiet','InstallAllUsers=0','PrependPath=1','Include_pip=1','Include_test=0') -Wait -PassThru
+      if ($null -eq $proc) { throw 'python installer process unavailable' }
+      if ($proc.ExitCode -ne 0) { throw ('python installer exit_code=' + $proc.ExitCode) }
+      if ((Test-Path $pythonUserExe)) {
+        & $pythonUserExe --version
+        if ($LASTEXITCODE -eq 0) {
+          $pythonInstalled = $true
+          break
+        }
+      }
+      $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+      if ($pyLauncher) {
+        & py -3.13 --version
+        if ($LASTEXITCODE -eq 0) {
+          $pythonInstalled = $true
+          break
+        }
+      }
+    } catch {
+      Write-Host ('Python 闀滃儚瀹夎澶辫触锛岀户缁皾璇曚笅涓€涓簮锛? + $mirrorUrl)
+    }
+  }
+
+  if (-not $pythonInstalled) {
+    throw 'Python 3.13 闀滃儚瀹夎澶辫触锛岃妫€鏌ョ綉缁滃悗閲嶈瘯銆?
+  }
+}
+
+$pythonSpec = if (Test-Path $pythonUserExe) { $pythonUserExe } else { '3.13' }
 $indexes = @(
   'https://pypi.tuna.tsinghua.edu.cn/simple/',
   'https://mirrors.aliyun.com/pypi/simple/'
@@ -233,18 +325,87 @@ $indexes = @(
 $installed = $false
 foreach ($index in $indexes) {
   try {
-    uv tool install kimi-cli --python 3.13 --upgrade -i $index
+    uv tool install kimi-cli --python "$pythonSpec" --upgrade -i $index
     $installed = $true
     break
   } catch {
-    Write-Host ("镜像安装失败，继续尝试下一个索引：" + $index)
+    Write-Host ('Kimi 闀滃儚瀹夎澶辫触锛岀户缁皾璇曚笅涓€涓储寮曪細' + $index)
   }
 }
 if (-not $installed) {
-  throw 'Kimi CLI 镜像安装失败，请检查网络后重试。'
+  throw 'Kimi CLI 闀滃儚瀹夎澶辫触锛岃妫€鏌ョ綉缁滃悗閲嶈瘯銆?
 }
 $kimiVer = kimi -v
-Write-Output "Kimi 镜像安装完成。$kimiVer"
+Write-Output "Kimi 闀滃儚瀹夎瀹屾垚銆?kimiVer"
+"#;
+
+const POWERSHELL_UPGRADE_KIMI_OFFICIAL_LAUNCH: &str = r#"
+$ErrorActionPreference='Stop'
+$uvCandidateDirs = @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
+foreach ($dir in $uvCandidateDirs) {
+  if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
+    $env:Path = "$dir;$env:Path"
+  }
+}
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+  throw '鏈娴嬪埌 uv锛岃鍏堝畨瑁呬緷璧栥€?
+}
+uv tool install kimi-cli --python 3.13 --upgrade
+$kimiVer = kimi -v
+Write-Output "Kimi 鍗囩骇瀹屾垚銆?kimiVer"
+"#;
+
+const POWERSHELL_UPGRADE_KIMI_MIRROR_LAUNCH: &str = r#"
+$ErrorActionPreference='Stop'
+$uvCandidateDirs = @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
+foreach ($dir in $uvCandidateDirs) {
+  if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
+    $env:Path = "$dir;$env:Path"
+  }
+}
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+  throw '鏈娴嬪埌 uv锛岃鍏堝畨瑁呬緷璧栥€?
+}
+$pythonUserExe = Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe'
+$pythonSpec = if (Test-Path $pythonUserExe) { $pythonUserExe } else { '3.13' }
+$indexes = @(
+  'https://pypi.tuna.tsinghua.edu.cn/simple/',
+  'https://mirrors.aliyun.com/pypi/simple/'
+)
+$upgraded = $false
+foreach ($index in $indexes) {
+  try {
+    uv tool install kimi-cli --python "$pythonSpec" --upgrade -i $index
+    $upgraded = $true
+    break
+  } catch {
+    Write-Host ('Kimi 闀滃儚鍗囩骇澶辫触锛岀户缁皾璇曚笅涓€涓储寮曪細' + $index)
+  }
+}
+if (-not $upgraded) {
+  throw 'Kimi CLI 闀滃儚鍗囩骇澶辫触锛岃妫€鏌ョ綉缁滃悗閲嶈瘯銆?
+}
+$kimiVer = kimi -v
+Write-Output "Kimi 闀滃儚鍗囩骇瀹屾垚銆?kimiVer"
+"#;
+
+const POWERSHELL_INSTALL_NODEJS_OFFICIAL_LAUNCH: &str = r#"
+$ErrorActionPreference='Stop'
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+  throw '鏈娴嬪埌 winget锛岃鍏堝畨瑁?App Installer 鍚庨噸璇曘€?
+}
+winget install OpenJS.NodeJS --accept-source-agreements --accept-package-agreements
+$nodeVer = node -v
+Write-Output "Node.js 瀹夎瀹屾垚銆?nodeVer"
+"#;
+
+const POWERSHELL_VERIFY_COMMANDS_LAUNCH: &str = r#"
+git --version
+uv --version
+py -3.13 --version
+kimi -v
+node -v
+npm -v
 "#;
 
 pub fn start_backend(app: AppHandle) {
@@ -643,28 +804,137 @@ pub fn save_kimi_cli_config_center(
 
 pub fn install_kimi_dependencies(source: &str) -> Result<String, String> {
     let source = parse_install_source(source)?;
-    let script = match source {
-        InstallSource::Official => POWERSHELL_INSTALL_DEPS_OFFICIAL,
-        InstallSource::Mirror => POWERSHELL_INSTALL_DEPS_MIRROR,
+    let (action, script) = match source {
+        InstallSource::Official => (
+            "install-dependencies-official",
+            POWERSHELL_INSTALL_DEPS_OFFICIAL_LAUNCH,
+        ),
+        InstallSource::Mirror => (
+            "install-dependencies-mirror",
+            POWERSHELL_INSTALL_DEPS_MIRROR_LAUNCH,
+        ),
     };
-    run_windows_powershell_install(script)
+    launch_windows_powershell_install(
+        action,
+        script,
+        true,
+        "External PowerShell launched: install dependencies (Git / uv).",
+    )
 }
 
 pub fn install_kimi_cli(source: &str) -> Result<String, String> {
     let source = parse_install_source(source)?;
-    let script = match source {
-        InstallSource::Official => POWERSHELL_INSTALL_KIMI_OFFICIAL,
-        InstallSource::Mirror => POWERSHELL_INSTALL_KIMI_MIRROR,
+    let (action, script) = match source {
+        InstallSource::Official => (
+            "install-kimi-official",
+            POWERSHELL_INSTALL_KIMI_OFFICIAL_LAUNCH,
+        ),
+        InstallSource::Mirror => ("install-kimi-mirror", POWERSHELL_INSTALL_KIMI_MIRROR_LAUNCH),
     };
-    run_windows_powershell_install(script)
+    launch_windows_powershell_install(
+        action,
+        script,
+        false,
+        "External PowerShell launched: install Kimi.",
+    )
 }
 
-pub fn get_install_probe_status() -> InstallProbeStatus {
+pub fn upgrade_kimi_cli(source: &str) -> Result<String, String> {
+    let source = parse_install_source(source)?;
+    let (action, script) = match source {
+        InstallSource::Official => (
+            "upgrade-kimi-official",
+            POWERSHELL_UPGRADE_KIMI_OFFICIAL_LAUNCH,
+        ),
+        InstallSource::Mirror => ("upgrade-kimi-mirror", POWERSHELL_UPGRADE_KIMI_MIRROR_LAUNCH),
+    };
+    launch_windows_powershell_install(
+        action,
+        script,
+        false,
+        "External PowerShell launched: upgrade Kimi.",
+    )
+}
+
+pub fn install_nodejs() -> Result<String, String> {
+    launch_windows_powershell_install(
+        "install-nodejs",
+        POWERSHELL_INSTALL_NODEJS_OFFICIAL_LAUNCH,
+        true,
+        "External PowerShell launched: install Node.js.",
+    )
+}
+
+pub fn get_install_probe_status(app: &AppHandle) -> InstallProbeStatus {
     InstallProbeStatus {
-        git_ready: command_success("git", &["--version"]),
-        uv_ready: command_success("uv", &["--version"]),
+        git_ready: git_ready(),
+        uv_ready: uv_ready(),
         python313_ready: python313_ready(),
-        kimi_ready: command_success_kimi("kimi", &["-v"]),
+        kimi_ready: kimi_ready(app),
+        node_ready: node_ready(),
+    }
+}
+
+pub fn get_install_command_catalog() -> InstallCommandCatalog {
+    InstallCommandCatalog {
+        entries: vec![
+            build_install_command_entry(
+                "install_deps_official",
+                "Install dependencies (official)",
+                "Install Git and uv via official channels. Requires elevation.",
+                true,
+                POWERSHELL_INSTALL_DEPS_OFFICIAL_LAUNCH,
+            ),
+            build_install_command_entry(
+                "install_deps_mirror",
+                "Install dependencies (mirror)",
+                "Install Git and uv via mirror fallback chain. Requires elevation.",
+                true,
+                POWERSHELL_INSTALL_DEPS_MIRROR_LAUNCH,
+            ),
+            build_install_command_entry(
+                "install_kimi_official",
+                "Install Kimi (official)",
+                "Install Python 3.13 and kimi-cli from official source.",
+                false,
+                POWERSHELL_INSTALL_KIMI_OFFICIAL_LAUNCH,
+            ),
+            build_install_command_entry(
+                "install_kimi_mirror",
+                "Install Kimi (mirror)",
+                "Install Python 3.13 and kimi-cli via mirror fallback chain.",
+                false,
+                POWERSHELL_INSTALL_KIMI_MIRROR_LAUNCH,
+            ),
+            build_install_command_entry(
+                "upgrade_kimi_official",
+                "Upgrade Kimi (official)",
+                "Upgrade kimi-cli from official source only.",
+                false,
+                POWERSHELL_UPGRADE_KIMI_OFFICIAL_LAUNCH,
+            ),
+            build_install_command_entry(
+                "upgrade_kimi_mirror",
+                "Upgrade Kimi (mirror)",
+                "Upgrade kimi-cli via mirror indexes only.",
+                false,
+                POWERSHELL_UPGRADE_KIMI_MIRROR_LAUNCH,
+            ),
+            build_install_command_entry(
+                "install_nodejs",
+                "Install Node.js",
+                "Install Node.js via winget. Requires elevation.",
+                true,
+                POWERSHELL_INSTALL_NODEJS_OFFICIAL_LAUNCH,
+            ),
+            build_install_command_entry(
+                "verify_commands",
+                "Verify commands",
+                "Verify Git, uv, Python 3.13, Kimi, and Node.js in PowerShell.",
+                false,
+                POWERSHELL_VERIFY_COMMANDS_LAUNCH,
+            ),
+        ],
     }
 }
 
@@ -683,57 +953,127 @@ fn parse_install_source(source: &str) -> Result<InstallSource, String> {
     }
 }
 
-fn run_windows_powershell_install(script: &str) -> Result<String, String> {
+fn build_install_command_entry(
+    id: &str,
+    title: &str,
+    description: &str,
+    requires_elevation: bool,
+    command: &str,
+) -> InstallCommandEntry {
+    InstallCommandEntry {
+        id: id.to_string(),
+        title: title.to_string(),
+        description: description.to_string(),
+        requires_elevation,
+        command: normalize_install_catalog_command(command),
+    }
+}
+
+fn normalize_install_catalog_command(command: &str) -> String {
+    command.trim().replace("\r\n", "\n")
+}
+
+fn launch_windows_powershell_install(
+    action: &str,
+    script: &str,
+    requires_elevation: bool,
+    success_message: &str,
+) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = action;
         let _ = script;
-        return Err("该安装动作仅支持 Windows。".to_string());
+        let _ = requires_elevation;
+        let _ = success_message;
+        return Err("This install action is only supported on Windows.".to_string());
     }
 
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                script,
-            ])
-            .output()
-            .map_err(|error| format!("failed to run powershell install command: {error}"))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if output.status.success() {
-            if !stdout.is_empty() {
-                return Ok(truncate_install_output(&stdout));
-            }
-            return Ok("安装命令执行成功。".to_string());
-        }
-
-        let detail = if !stderr.is_empty() {
-            stderr
-        } else if !stdout.is_empty() {
-            stdout
-        } else {
-            format!("exit status: {}", output.status)
-        };
-        Err(truncate_install_output(&detail))
+        let script_path = write_windows_powershell_script(action, script)?;
+        launch_windows_powershell_wrapper(&script_path, requires_elevation)?;
+        Ok(success_message.to_string())
     }
 }
 
-fn truncate_install_output(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.chars().count() <= MAX_INSTALL_OUTPUT_CHARS {
-        return trimmed.to_string();
+#[cfg(target_os = "windows")]
+fn write_windows_powershell_script(action: &str, script: &str) -> Result<PathBuf, String> {
+    let sanitized_action: String = action
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let script_dir = std::env::temp_dir().join("kimi-shell-installer");
+    fs::create_dir_all(&script_dir)
+        .map_err(|error| format!("failed to create temp install directory: {error}"))?;
+    let script_path = script_dir.join(format!("{sanitized_action}-{}.ps1", unix_time_millis()));
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&script_path)
+        .map_err(|error| format!("failed to create temp install script: {error}"))?;
+    file.write_all(&[0xEF, 0xBB, 0xBF])
+        .map_err(|error| format!("failed to write script bom: {error}"))?;
+    file.write_all(script.trim().as_bytes())
+        .map_err(|error| format!("failed to write temp install script: {error}"))?;
+    file.write_all(b"\r\n")
+        .map_err(|error| format!("failed to finalize temp install script: {error}"))?;
+    Ok(script_path)
+}
+
+#[cfg(target_os = "windows")]
+fn powershell_single_quote(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+#[cfg(target_os = "windows")]
+fn launch_windows_powershell_wrapper(
+    script_path: &Path,
+    requires_elevation: bool,
+) -> Result<(), String> {
+    let escaped_path = powershell_single_quote(&script_path.to_string_lossy());
+    let argument_list =
+        format!("@('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File','{escaped_path}')");
+    let command = if requires_elevation {
+        format!(
+            "Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList {argument_list}"
+        )
+    } else {
+        format!("Start-Process -FilePath 'powershell.exe' -ArgumentList {argument_list}")
+    };
+
+    let status = Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+        ])
+        .arg(command)
+        .status()
+        .map_err(|error| format!("failed to launch powershell wrapper: {error}"))?;
+
+    if !status.success() {
+        return Err(format!(
+            "failed to launch external install terminal (exit status: {status})"
+        ));
     }
-    let shortened: String = trimmed.chars().take(MAX_INSTALL_OUTPUT_CHARS).collect();
-    format!("{shortened}…")
+    Ok(())
 }
 
 fn command_success(command: &str, args: &[&str]) -> bool {
-    Command::new(command)
+    let mut process = Command::new(command);
+    command_utils::configure_system_command(&mut process);
+    process
         .args(args)
         .output()
         .map(|output| output.status.success())
@@ -750,6 +1090,64 @@ fn command_success_kimi(command: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+fn command_success_path(path: &Path, args: &[&str], configure_kimi: bool) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let mut process = Command::new(path);
+    if configure_kimi {
+        command_utils::configure_kimi_query_command(&mut process);
+    } else {
+        command_utils::configure_system_command(&mut process);
+    }
+    process
+        .args(args)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn git_ready() -> bool {
+    command_success("git", &["--version"])
+        || git_candidate_paths()
+            .iter()
+            .any(|path| command_success_path(path, &["--version"], false))
+}
+
+fn uv_ready() -> bool {
+    command_success("uv", &["--version"])
+        || uv_candidate_paths()
+            .iter()
+            .any(|path| command_success_path(path, &["--version"], false))
+}
+
+fn node_ready() -> bool {
+    command_success("node", &["-v"])
+        || node_candidate_paths()
+            .iter()
+            .any(|path| command_success_path(path, &["-v"], false))
+}
+
+fn kimi_ready(app: &AppHandle) -> bool {
+    let settings = settings_store::load_or_default(app).unwrap_or_default();
+    if let Ok(path) = kimi_locator::locate(&settings) {
+        if command_success_path(&path, &["-v"], true)
+            || command_success_path(&path, &["--version"], true)
+        {
+            return true;
+        }
+    }
+
+    if command_success_kimi("kimi", &["-v"]) || command_success_kimi("kimi", &["--version"]) {
+        return true;
+    }
+
+    kimi_candidate_paths().iter().any(|path| {
+        command_success_path(path, &["-v"], true)
+            || command_success_path(path, &["--version"], true)
+    })
+}
+
 fn python313_ready() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -759,7 +1157,19 @@ fn python313_ready() -> bool {
         if command_success("python3.13", &["--version"]) {
             return true;
         }
+        if python_candidate_paths()
+            .iter()
+            .any(|path| command_success_path(path, &["--version"], false))
+        {
+            return true;
+        }
         if command_success("uv", &["python", "find", "3.13"]) {
+            return true;
+        }
+        if uv_candidate_paths()
+            .iter()
+            .any(|path| command_success_path(path, &["python", "find", "3.13"], false))
+        {
             return true;
         }
         false
@@ -775,6 +1185,100 @@ fn python313_ready() -> bool {
         }
         false
     }
+}
+
+#[cfg(target_os = "windows")]
+fn user_home_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(PathBuf::from)
+}
+
+#[cfg(target_os = "windows")]
+fn local_app_data_dir() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+}
+
+#[cfg(target_os = "windows")]
+fn program_files_dirs() -> Vec<PathBuf> {
+    ["ProgramFiles", "ProgramFiles(x86)"]
+        .iter()
+        .filter_map(|key| std::env::var_os(key).map(PathBuf::from))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn git_candidate_paths() -> Vec<PathBuf> {
+    program_files_dirs()
+        .into_iter()
+        .map(|base| base.join("Git").join("cmd").join("git.exe"))
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn git_candidate_paths() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn uv_candidate_paths() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home_dir) = user_home_dir() {
+        candidates.push(home_dir.join(".local").join("bin").join("uv.exe"));
+        candidates.push(home_dir.join(".cargo").join("bin").join("uv.exe"));
+    }
+    candidates
+}
+
+#[cfg(not(target_os = "windows"))]
+fn uv_candidate_paths() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn node_candidate_paths() -> Vec<PathBuf> {
+    program_files_dirs()
+        .into_iter()
+        .map(|base| base.join("nodejs").join("node.exe"))
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn node_candidate_paths() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn python_candidate_paths() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(local_app_data) = local_app_data_dir() {
+        candidates.push(
+            local_app_data
+                .join("Programs")
+                .join("Python")
+                .join("Python313")
+                .join("python.exe"),
+        );
+    }
+    candidates
+}
+
+#[cfg(not(target_os = "windows"))]
+fn python_candidate_paths() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn kimi_candidate_paths() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home_dir) = user_home_dir() {
+        candidates.push(home_dir.join(".local").join("bin").join("kimi.exe"));
+        candidates.push(home_dir.join(".cargo").join("bin").join("kimi.exe"));
+    }
+    candidates
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kimi_candidate_paths() -> Vec<PathBuf> {
+    Vec::new()
 }
 
 fn collect_config_center_warnings(view: &KimiCliConfigCenterView) -> Vec<String> {
@@ -2863,9 +3367,9 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
 
   function findComposerElement() {{
     const selectors = [
-      "textarea[placeholder*='发送']",
+      "textarea[placeholder*='鍙戦€?]",
       "textarea[placeholder*='Send']",
-      "textarea[aria-label*='发送']",
+      "textarea[aria-label*='鍙戦€?]",
       "textarea[aria-label*='Send']",
       "textarea",
       "[contenteditable='true'][role='textbox']",
@@ -2937,7 +3441,7 @@ fn theme_bridge_script_tag(upstream_port: u16) -> String {
   function findSendButton() {{
     const selectors = [
       "button[type='submit']",
-      "button[aria-label*='发送']",
+      "button[aria-label*='鍙戦€?]",
       "button[aria-label*='Send']",
       "button[data-testid*='send']",
       "button[data-icon*='send']"
@@ -3737,3 +4241,4 @@ api_key = "legacy-key"
         assert_ne!(masked, "sk-test-secret");
     }
 }
+

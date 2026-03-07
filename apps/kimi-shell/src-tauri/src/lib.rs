@@ -25,10 +25,11 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
-    InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
-    ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
-    StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
+    InstallCommandCatalog, InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView,
+    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
+    OnboardingStatus, OnboardingStep, ShutdownProgressPayload, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
+    WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
 
 const MAIN_WINDOW_LABEL: &str = "main";
@@ -169,6 +170,12 @@ fn report_loading_rendered(app: AppHandle, start_cycle_id: Option<u64>) -> Resul
         runtime.loading_reported_at_ms = Some(unix_time_millis());
         runtime.loading_reported_cycle_id = Some(cycle_id);
     }
+    drop(runtime);
+
+    window_manager::complete_pending_prefill_handoff(
+        &app,
+        "report_loading_rendered_invoke",
+    );
 
     Ok(())
 }
@@ -362,8 +369,23 @@ fn install_kimi_cli(source: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_install_probe_status() -> InstallProbeStatus {
-    backend_manager::get_install_probe_status()
+fn upgrade_kimi_cli(source: String) -> Result<String, String> {
+    backend_manager::upgrade_kimi_cli(&source)
+}
+
+#[tauri::command]
+fn install_nodejs() -> Result<String, String> {
+    backend_manager::install_nodejs()
+}
+
+#[tauri::command]
+fn get_install_probe_status(app: AppHandle) -> InstallProbeStatus {
+    backend_manager::get_install_probe_status(&app)
+}
+
+#[tauri::command]
+fn get_install_command_catalog() -> InstallCommandCatalog {
+    backend_manager::get_install_command_catalog()
 }
 
 #[tauri::command]
@@ -688,7 +710,10 @@ pub fn run() {
             save_kimi_cli_config_center,
             install_kimi_dependencies,
             install_kimi_cli,
+            upgrade_kimi_cli,
+            install_nodejs,
             get_install_probe_status,
+            get_install_command_catalog,
             get_context_menu_status,
             enable_context_menu,
             disable_context_menu,

@@ -21,3 +21,7 @@
 - Windows 右键菜单状态不能只看注册表“键是否存在”，还要校验命令值是否与当前版本一致；否则旧版残留命令会让 UI 误报“已启用”并把问题推迟到运行时（如文件右键链路 404）。
 - Windows 文件右键注册要做“多键覆盖 + 最保守命令模板”：仅写 `*\\shell` 在部分安装环境可能不触发，需同时覆盖 `AllFilesystemObjects\\shell`；命令参数优先用更兼容的 `--open-files "%1"`，literal `--` 作为解析兼容而非注册表强依赖。
 - When using a keepalive `iframe` workspace, do not gate bridge dispatch by visible screen. Gate by backend running + iframe ready + origin so session navigation/prefill can continue while control center is in front.
+- Do not eager-run full install dependency probes on normal shell startup. For Kimi-only startup, gate `git`/`uv`/`node`/`python` probing behind the control-center install step or explicit install actions.
+- Replacing Windows app icons is not enough by itself. Validate the packaged exe icon, installer-created shortcut metadata, AppUserModelID, and shell refresh behavior together, otherwise desktop/taskbar surfaces can keep showing stale icons even when the binary resource is already updated.
+- Do not rely on `requestAnimationFrame` to complete a startup handoff while the Tauri window is intentionally hidden. Hidden windows can stall RAF indefinitely, which leaves the process alive with no visible main window.
+- Do not run heavyweight Windows shortcut COM repair synchronously in Tauri setup before window creation. If it blocks, users see install/startup hangs and the process may stay alive without showing a window.

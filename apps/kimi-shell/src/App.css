@@ -228,13 +228,14 @@
   padding: 12px;
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, min(560px, 100%));
   gap: 10px;
   align-content: start;
+  justify-content: center;
 }
 
 .loading-main {
-  min-height: 180px;
+  min-height: 160px;
 }
 
 .control-center-shell {
@@ -655,6 +656,15 @@
   gap: 6px;
 }
 
+.cc-install-command-row,
+.cc-install-secondary-row {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .cc-source-switch {
   display: inline-flex;
   align-items: center;
@@ -1046,6 +1056,151 @@
   padding: 10px 14px;
   display: grid;
   gap: 8px;
+}
+
+.cc-install-commands-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: color-mix(in srgb, #000 40%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.cc-install-commands-modal {
+  width: min(980px, 100%);
+  max-height: min(82vh, 880px);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.cc-install-commands-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.cc-install-commands-modal-title h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.cc-install-commands-modal-title p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cc-install-commands-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cc-install-commands-modal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: color-mix(in srgb, var(--surface) 92%, var(--background));
+}
+
+.cc-install-commands-modal-meta p {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cc-install-commands-modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.cc-install-command-list {
+  display: grid;
+  gap: 10px;
+}
+
+.cc-install-command-card {
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.cc-install-command-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+}
+
+.cc-install-command-title h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.cc-install-command-title p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cc-install-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cc-install-command-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--background));
+}
+
+.cc-install-command-code {
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--surface) 92%, var(--background));
+}
+
+.cc-install-commands-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--text-secondary);
 }
 
 .cc-config-footer-meta {
@@ -1527,15 +1682,23 @@ input:focus {
 }
 
 .shutdown-card {
-  width: min(360px, 100%);
+  width: min(460px, 100%);
+  max-height: calc(100dvh - 32px);
   border: 1px solid var(--chrome-border);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow-card);
-  padding: 14px;
+  padding: 20px;
   display: grid;
   justify-items: center;
   text-align: center;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.shutdown-card-status {
+  display: grid;
+  justify-items: center;
   gap: 4px;
 }
 
@@ -1553,6 +1716,58 @@ input:focus {
 .shutdown-card small {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.shutdown-tip-card {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px 15px;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 72%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
+  text-align: left;
+}
+
+.shutdown-tip-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shutdown-tip-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.shutdown-tip-number {
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.shutdown-tip-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.shutdown-card .shutdown-tip-body {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .statusbar {
@@ -1760,6 +1975,14 @@ input:focus {
     min-width: 150px;
     flex: 0 0 auto;
   }
+
+  .cc-install-command-head {
+    flex-direction: column;
+  }
+
+  .cc-install-command-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1810,6 +2033,15 @@ input:focus {
   .cc-step-inline-row,
   .cc-install-top-row {
     grid-template-columns: 1fr;
+  }
+
+  .cc-install-commands-modal-header {
+    flex-direction: column;
+  }
+
+  .cc-install-commands-modal-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .cc-api-form-grid {

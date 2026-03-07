@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Copy, FolderOpen, Minus, Square, X } from "lucide-react";
+import { FolderOpen, X } from "lucide-react";
 import { getInitialThemeMode } from "@/app/theme";
 import type {
+  AppStatus,
   PrefillStatusPayload,
   PrefillStatusState,
   StartupMonitorStatus,
@@ -12,6 +13,7 @@ import type {
 import { KimiCliBrand } from "@/components/kimi-cli-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { Button } from "@/components/ui/button";
+import { pickRandomAgentTip } from "@/lib/agentTips";
 
 const PREFILL_STATUS_EVENT = "prefill-status";
 const STARTUP_MONITOR_POLL_MS = 1000;
@@ -32,40 +34,15 @@ function formatElapsed(elapsedMs: number | undefined): string {
 
 export function PrefillApp() {
   const themeMode = useMemo(() => getInitialThemeMode(), []);
+  const selectedTip = useMemo(() => pickRandomAgentTip(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusState, setStatusState] = useState<PrefillStatusState>("idle");
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
   const [monitorStatus, setMonitorStatus] = useState<StartupMonitorStatus | null>(null);
+  const [appStatus, setAppStatus] = useState<AppStatus | null>(null);
   const [polling, setPolling] = useState(true);
-  const [windowControlsReady, setWindowControlsReady] = useState(false);
-  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const routedRef = useRef(false);
-
-  useEffect(() => {
-    let disposed = false;
-
-    void (async () => {
-      try {
-        const appWindow = getCurrentWindow();
-        const maximized = await appWindow.isMaximized();
-        if (disposed) {
-          return;
-        }
-        setIsWindowMaximized(maximized);
-        setWindowControlsReady(true);
-      } catch {
-        if (disposed) {
-          return;
-        }
-        setWindowControlsReady(false);
-      }
-    })();
-
-    return () => {
-      disposed = true;
-    };
-  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -107,54 +84,63 @@ export function PrefillApp() {
     let timer: number | undefined;
 
     const tick = async () => {
-      try {
-        const nextStatus = await invoke<StartupMonitorStatus>(
-          "get_startup_monitor_status",
-        );
-        if (disposed) {
-          return;
-        }
+      const [monitorResult, appStatusResult] = await Promise.allSettled([
+        invoke<StartupMonitorStatus>("get_startup_monitor_status"),
+        invoke<AppStatus>("get_app_status"),
+      ]);
 
-        setMonitorStatus(nextStatus);
-        if (nextStatus.state === "failed") {
-          setStatusState("startup_failed");
-          setStatusDetail(
-            nextStatus.detail?.trim() || "后端启动超时，请重试或打开日志排查。",
-          );
-          setPolling(false);
-          routedRef.current = false;
-          return;
-        }
+      if (disposed) {
+        return;
+      }
 
-        if (
-          (nextStatus.state === "route_workspace" ||
-            nextStatus.state === "route_control_center") &&
-          nextStatus.targetRoute &&
-          !routedRef.current
-        ) {
-          routedRef.current = true;
-          setStatusState("opening_main");
-          setStatusDetail(nextStatus.detail?.trim() || "正在进入主界面…");
-          setPolling(false);
-          await invoke("complete_startup_monitor_route", {
-            targetRoute: nextStatus.targetRoute,
-          });
-          return;
-        }
+      if (appStatusResult.status === "fulfilled") {
+        setAppStatus(appStatusResult.value);
+      } else {
+        setError((current) => current ?? String(appStatusResult.reason));
+      }
 
-        if (nextStatus.state === "waiting") {
-          setStatusState("idle");
-          setStatusDetail(nextStatus.detail?.trim() || null);
-        }
-      } catch (invokeError) {
-        if (disposed) {
-          return;
-        }
-        setError(String(invokeError));
+      if (monitorResult.status !== "fulfilled") {
+        setError(String(monitorResult.reason));
         setStatusState("startup_failed");
-        setStatusDetail("启动状态获取失败，请重试或打开日志排查。");
+        setStatusDetail("Failed to read startup status. Please retry or open logs.");
         setPolling(false);
         routedRef.current = false;
+        return;
+      }
+
+      const nextStatus = monitorResult.value;
+      setMonitorStatus(nextStatus);
+
+      if (nextStatus.state === "failed") {
+        setStatusState("startup_failed");
+        setStatusDetail(
+          nextStatus.detail?.trim() ||
+            "Backend startup timed out. Please retry or inspect the logs.",
+        );
+        setPolling(false);
+        routedRef.current = false;
+        return;
+      }
+
+      if (
+        (nextStatus.state === "route_workspace" ||
+          nextStatus.state === "route_control_center") &&
+        nextStatus.targetRoute &&
+        !routedRef.current
+      ) {
+        routedRef.current = true;
+        setStatusState("opening_main");
+        setStatusDetail(nextStatus.detail?.trim() || "Opening the main shell...");
+        setPolling(false);
+        await invoke("complete_startup_monitor_route", {
+          targetRoute: nextStatus.targetRoute,
+        });
+        return;
+      }
+
+      if (nextStatus.state === "waiting") {
+        setStatusState("idle");
+        setStatusDetail(nextStatus.detail?.trim() || null);
       }
     };
 
@@ -183,7 +169,7 @@ export function PrefillApp() {
       routedRef.current = false;
       setMonitorStatus(null);
       setStatusState("idle");
-      setStatusDetail("正在重新启动后端…");
+      setStatusDetail("Restarting backend...");
       setPolling(true);
     } catch (invokeError) {
       setStatusState("startup_failed");
@@ -224,28 +210,9 @@ export function PrefillApp() {
     }
   }
 
-  async function handleMinimizeWindow() {
-    try {
-      await getCurrentWindow().minimize();
-    } catch (invokeError) {
-      setError(String(invokeError));
-    }
-  }
-
   async function handleStartWindowDrag() {
     try {
       await getCurrentWindow().startDragging();
-    } catch (invokeError) {
-      setError(String(invokeError));
-    }
-  }
-
-  async function handleToggleMaximizeWindow() {
-    try {
-      const appWindow = getCurrentWindow();
-      await appWindow.toggleMaximize();
-      const maximized = await appWindow.isMaximized();
-      setIsWindowMaximized(maximized);
     } catch (invokeError) {
       setError(String(invokeError));
     }
@@ -260,45 +227,27 @@ export function PrefillApp() {
   }
 
   const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
-    if (!windowControlsReady) return;
     if (event.button !== 0) return;
     if (!isTitlebarDragTarget(event.target)) return;
     void handleStartWindowDrag();
   };
 
-  const handleTitlebarDoubleClick = (event: MouseEvent<HTMLElement>) => {
-    if (!windowControlsReady) return;
-    if (event.button !== 0) return;
-    if (!isTitlebarDragTarget(event.target)) return;
-    void handleToggleMaximizeWindow();
-  };
-
-  const title =
-    statusState === "startup_failed"
-      ? "后端启动失败"
-      : statusState === "opening_main"
-        ? "正在进入主界面"
-        : "正在等待后端启动完成";
-  const detail =
-    statusState === "startup_failed"
-      ? statusDetail ?? "后端启动超时，请重试或打开日志排查。"
-      : null;
+  const isStartupFailed = statusState === "startup_failed";
+  const statusHeadline =
+    statusState === "opening_main"
+      ? "Opening main window..."
+      : statusDetail ?? "Waiting for backend startup to finish...";
+  const failureDetail =
+    statusDetail ?? "Backend startup timed out. Please retry or inspect the logs.";
+  const effectiveWorkDir = appStatus?.effectiveWorkDir?.trim() || "-";
 
   return (
     <main className={`prefill-page shell-root theme-${themeMode}`}>
-      <header
-        className="prefill-titlebar titlebar"
-        onMouseDown={handleTitlebarMouseDown}
-        onDoubleClick={handleTitlebarDoubleClick}
-      >
+      <header className="prefill-titlebar titlebar" onMouseDown={handleTitlebarMouseDown}>
         <div className="prefill-titlebar-left">
           <div className="prefill-titlebar-brand titlebar-drag">
             <KimiCliBrand compact />
           </div>
-        </div>
-
-        <div className="prefill-titlebar-center titlebar-drag">
-          <span className="prefill-titlebar-caption">启动监控</span>
         </div>
 
         <div className="prefill-titlebar-right" data-no-drag="true">
@@ -314,62 +263,71 @@ export function PrefillApp() {
           >
             打开日志
           </Button>
-          {windowControlsReady ? (
-            <div className="titlebar-window-controls">
-              <IconButton
-                icon={<Minus size={14} />}
-                label="Minimize window"
-                onClick={() => {
-                  void handleMinimizeWindow();
-                }}
-                className="window-control-btn"
-              />
-              <IconButton
-                icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
-                label={isWindowMaximized ? "Restore window" : "Maximize window"}
-                onClick={() => {
-                  void handleToggleMaximizeWindow();
-                }}
-                className="window-control-btn"
-              />
-              <IconButton
-                icon={<X size={14} />}
-                label="Close window"
-                onClick={() => {
-                  void handleCloseWindow();
-                }}
-                className="window-control-btn close"
-              />
-            </div>
-          ) : null}
+          <div className="titlebar-window-controls">
+            <IconButton
+              icon={<X size={14} />}
+              label="Close window"
+              onClick={() => {
+                void handleCloseWindow();
+              }}
+              className="window-control-btn close"
+            />
+          </div>
         </div>
       </header>
 
-      <section className="prefill-stage">
-        <div className="prefill-status-shell">
-          <div className="prefill-status-panel" role="status" aria-live="polite">
-            {statusState !== "startup_failed" && <div className="spinner" aria-hidden />}
-            <p className="prefill-status-title">{title}</p>
-            {detail ? <p className="prefill-status-detail">{detail}</p> : null}
+      <section className={`prefill-stage${isStartupFailed ? " is-failed" : ""}`}>
+        {!isStartupFailed ? (
+          <>
+            <article className="prefill-tip-card prefill-tip-card-hero">
+              <div className="prefill-tip-meta">
+                <span className="prefill-tip-badge">随机提示</span>
+                <span className="prefill-tip-number">{selectedTip.numberLabel}</span>
+              </div>
+              <h1 className="prefill-tip-title">{selectedTip.title}</h1>
+              <p className="prefill-tip-body">{selectedTip.body}</p>
+            </article>
 
-            <div className="prefill-metrics" aria-label="启动状态详情">
-              <div className="prefill-metric">
-                <span className="prefill-metric-label">累计耗时</span>
-                <strong>{formatElapsed(monitorStatus?.elapsedMs)}</strong>
+            <div className="prefill-status-panel" role="status" aria-live="polite">
+              <div className="prefill-status-strip">
+                <div className="prefill-status-headline">
+                  <div className="spinner" aria-hidden />
+                  <span>{statusHeadline}</span>
+                </div>
+
+                <div className="prefill-status-chips" aria-label="Startup details">
+                  <div className="prefill-status-chip">
+                    <span className="prefill-status-chip-label">Elapsed</span>
+                    <strong>{formatElapsed(monitorStatus?.elapsedMs)}</strong>
+                  </div>
+                  <div className="prefill-status-chip">
+                    <span className="prefill-status-chip-label">Backend</span>
+                    <strong>{monitorStatus?.backendState ?? "starting"}</strong>
+                  </div>
+                  <div className="prefill-status-chip">
+                    <span className="prefill-status-chip-label">Route</span>
+                    <strong>{monitorStatus?.targetRoute ?? "-"}</strong>
+                  </div>
+                </div>
               </div>
-              <div className="prefill-metric">
-                <span className="prefill-metric-label">后端状态</span>
-                <strong>{monitorStatus?.backendState ?? "starting"}</strong>
-              </div>
-              <div className="prefill-metric">
-                <span className="prefill-metric-label">分流目标</span>
-                <strong>{monitorStatus?.targetRoute ?? "-"}</strong>
-              </div>
+              <p className="prefill-status-meta" title={effectiveWorkDir}>
+                Effective directory: <strong>{effectiveWorkDir}</strong>
+              </p>
+              {error ? <p className="prefill-error">{error}</p> : null}
             </div>
+          </>
+        ) : (
+          <>
+            <div
+              className="prefill-status-panel prefill-failure-card"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="prefill-failure-badge">启动恢复</div>
+              <p className="prefill-status-title">后端启动失败</p>
+              <p className="prefill-status-detail">{failureDetail}</p>
+              {error ? <p className="prefill-error">{error}</p> : null}
 
-            {error ? <p className="prefill-error">{error}</p> : null}
-
-            {statusState === "startup_failed" ? (
               <div className="prefill-status-actions">
                 <Button
                   type="button"
@@ -392,9 +350,21 @@ export function PrefillApp() {
                   退出应用
                 </Button>
               </div>
-            ) : null}
-          </div>
-        </div>
+              <p className="prefill-status-meta" title={effectiveWorkDir}>
+                Effective directory: <strong>{effectiveWorkDir}</strong>
+              </p>
+            </div>
+
+            <article className="prefill-tip-card prefill-tip-card-secondary">
+              <div className="prefill-tip-meta">
+                <span className="prefill-tip-badge">今日提示</span>
+                <span className="prefill-tip-number">{selectedTip.numberLabel}</span>
+              </div>
+              <h2 className="prefill-tip-title">{selectedTip.title}</h2>
+              <p className="prefill-tip-body">{selectedTip.body}</p>
+            </article>
+          </>
+        )}
       </section>
     </main>
   );

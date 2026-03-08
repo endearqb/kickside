@@ -3037,14 +3037,14 @@
 - [x] Add a root `README_zh.md` with a Chinese version of the repository overview, setup, and release output notes
 - [x] Update the root `README.md` to link to the Chinese README entry point
 - [x] Write the GitHub repository About description and verify it remotely
-- [ ] Commit the documentation changes and push `main` to `origin`
+- [x] Commit the documentation changes and push `main` to `origin`
 
 ### Acceptance Criteria
 
 - [x] Root `README_zh.md` exists and accurately describes the project in Chinese
 - [x] Root `README.md` includes a visible link to the Chinese README
 - [x] GitHub repo About description is no longer empty
-- [ ] `origin/main` contains the new documentation commit
+- [x] `origin/main` contains the new documentation commit
 
 ### Review
 
@@ -3055,5 +3055,6 @@
 - Verification:
 - `Get-Content -Encoding utf8 README_zh.md` confirmed the Chinese README content is present and readable.
 - `gh repo view endearqb/kimi-app --json description,url,visibility` confirmed the About description is populated and the repo remains public.
+- `git push origin main` pushed commit `05a736b` to `origin/main`.
 - Remaining note:
-- Commit and push are still pending.
+- None.

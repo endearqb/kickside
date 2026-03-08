@@ -1,5 +1,88 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（v0.0.16 发布）
+
+### 计划清单
+
+- [ ] 记录本轮 `0.0.16` 发布目标、边界与验收标准
+- [ ] 编写 `apps/kimi-shell/docs/release-notes-0.0.16.md`
+- [ ] 核对 `apps/kimi-shell/package.json`、`Cargo.toml`、`tauri.conf.json` 版本号均为 `0.0.16`
+- [ ] 核对 `0.0.16` MSI / NSIS 安装包路径、大小与时间
+- [ ] 提交当前发布内容并创建 `v0.0.16` tag
+- [ ] 推送 `main` 与 `v0.0.16` tag 到 `origin`
+- [ ] 创建 GitHub Release 并上传 `0.0.16` 安装包
+- [ ] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [ ] `apps/kimi-shell/docs/release-notes-0.0.16.md` 完成并准确描述本次改动
+- [ ] `apps/kimi-shell/package.json`、`apps/kimi-shell/src-tauri/Cargo.toml`、`apps/kimi-shell/src-tauri/tauri.conf.json` 版本均为 `0.0.16`
+- [ ] `apps/kimi-shell/src-tauri/target/release/bundle` 下存在 `0.0.16` MSI / NSIS 安装包
+- [ ] `origin/main` 包含本次发布提交
+- [ ] GitHub 上存在 `v0.0.16` Release，且包含 MSI / NSIS 两个附件
+
+### 回顾（完成后填写）
+
+- 实际变更：
+- 验证结果：
+- 手工建议：
+
+## 本轮计划（启动双窗口交接改造）
+
+### 计划清单
+
+- [x] 记录本轮双窗口启动交接的目标、边界与验收标准
+- [x] 调整 `apps/kimi-shell/src-tauri/tauri.conf.json`，新增 `prefill` 窗口并将 `main` 固定为隐藏 shell 预热窗口
+- [x] 补齐 `apps/kimi-shell/docs/startup-dual-window-handoff.md` 设计文档
+- [x] 重构 `apps/kimi-shell/src-tauri/src/window_manager.rs`，移除单窗口 surface 切换并落地双窗口启动状态机
+- [x] 调整 `apps/kimi-shell/src-tauri/src/lib.rs`、`open_request.rs`、`tray_manager.rs` 的窗口入口与关闭行为，使启动期优先操作 `prefill`
+- [x] 调整事件目标与退出反馈，确保 `prefill-status` / 启动期 `shutdown-progress` 在 `prefill` 可见态可用
+- [x] 补充 / 更新 `window_manager` 相关 Rust 单测，覆盖 handoff、失败回退、重试与启动期窗口选择
+- [x] 执行 `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml window_manager`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [x] 启动期使用“可见 `prefill` + 隐藏 `main`”双窗口模型，不再复用同一 `main` 窗口在 prefill/shell 间切换
+- [x] `complete_startup_monitor_route` 仅请求 handoff，不再驱动可见窗口 `hide -> navigate -> show`
+- [x] 仅当 `handoff_requested && frontend_ready && loading_rendered && !startup_guard_failed` 时才关闭 `prefill` 并显示 `main`
+- [x] 启动失败时仅保留或恢复 `prefill` 为可见窗口，并销毁隐藏 `main`
+- [x] 启动期间托盘、快捷键、单实例转发、打开请求不会提前暴露隐藏 `main`
+- [x] `prefill-status` 发往 `prefill`；`shell-route`、`prefill-chat`、workspace session、`open-request-error` 继续发往 `main`
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml window_manager` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - 新增独立 `prefill` 窗口配置，`main` 改为固定加载 `index.html#/loading` 的隐藏 shell 预热窗口。
+  - `apps/kimi-shell/docs/startup-dual-window-handoff.md`
+    - 补齐双窗口启动交接设计说明，作为仓库内落地文档。
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - 删除单窗口 `MainWindowSurface` / `apply_window_surface` 切面逻辑，重写为显式双窗口状态机。
+    - 新增 `create_prefill_window`、`create_hidden_main_window`、`ensure_prefill_window`、`destroy_hidden_main_window`、`prepare_for_backend_restart` 等双窗口 helper。
+    - 引入 `handoff_requested`、`loading_rendered` 与启动期窗口关闭抑制标记，改为基于多条件锁存的 handoff。
+    - `prefill-status` 改为发给 `prefill`，`shell-route` / `prefill-chat` / workspace session / open-request error 继续发给 `main`。
+    - `toggle_window` / `show_and_focus` 在启动期优先操作 `prefill`，避免暴露隐藏 `main`。
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - setup 改为先创建并显示 `prefill`，再创建隐藏 `main`。
+    - `retry_start_backend` 先重建双窗口启动态，再重启 backend。
+    - 窗口事件按 `main` / `prefill` 分开处理：启动期关闭 `prefill` 触发整应用优雅退出，程序化关闭 prefill/main 则通过抑制标记放行。
+    - `shutdown-progress` 同时发给 `main` 与 `prefill`，兼容启动失败页退出流程。
+- 验证结果：
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml window_manager` 通过（5/5）。
+  - `pnpm -C apps/kimi-shell build` 通过（含 `sync:version`、`tsc`、`vite build`）。
+- 手工建议：
+  - 冷启动验证 `workspace`：只看到 prefill，最终直接进入主 shell，无原生闪烁或尺寸突变。
+  - 冷启动验证 `onboarding` / `diagnostics` / `control-center`：prefill 关闭后直接落到目标路由。
+  - 人为制造启动失败，确认只剩 prefill，可重试、打开日志、退出；重试后旧 `main` 不残留。
+  - 启动过程中触发托盘、快捷键、单实例转发和资源管理器打开请求，确认不会提前暴露隐藏 `main`。
+
 ## 本轮计划（引导配置安装命令弹窗改造）
 
 ### 计划清单

@@ -32,7 +32,6 @@ use types::{
     WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
 
-const MAIN_WINDOW_LABEL: &str = "main";
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
 
 #[tauri::command]
@@ -151,6 +150,12 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
 
 #[tauri::command]
 fn retry_start_backend(app: AppHandle) {
+    if let Err(error) = window_manager::prepare_for_backend_restart(&app, "retry_start_backend") {
+        log_manager::append_line(
+            &app,
+            format!("failed to prepare dual-window startup retry: {error}"),
+        );
+    }
     backend_manager::restart_backend(app);
 }
 
@@ -675,9 +680,11 @@ pub fn run() {
                 );
             }
 
-            window_manager::create_startup_main_window(app.handle(), "setup_main_window")
+            window_manager::create_prefill_window(app.handle(), "setup_prefill_window")
                 .map_err(anyhow::Error::msg)?;
             window_manager::record_prefill_shown(app.handle(), "setup");
+            window_manager::create_hidden_main_window(app.handle(), "setup_hidden_main")
+                .map_err(anyhow::Error::msg)?;
             initialize_webview_runtime_info(app.handle());
             auto_repair_context_menu(app.handle());
 
@@ -728,7 +735,7 @@ pub fn run() {
 
     app.run(|app_handle, event| match event {
         RunEvent::WindowEvent { label, event, .. } => {
-            if label == MAIN_WINDOW_LABEL {
+            if label == window_manager::MAIN_WINDOW_LABEL {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
@@ -741,6 +748,26 @@ pub fn run() {
                     }
                     tauri::WindowEvent::Destroyed => {
                         window_manager::handle_main_window_destroyed(app_handle, "main_destroyed");
+                    }
+                    _ => {}
+                }
+            } else if label == window_manager::PREFILL_WINDOW_LABEL {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        if window_manager::allow_prefill_close_request(
+                            app_handle,
+                            "prefill_close_requested",
+                        ) {
+                            return;
+                        }
+                        api.prevent_close();
+                        start_graceful_exit(app_handle.clone(), "prefill_close_requested");
+                    }
+                    tauri::WindowEvent::Destroyed => {
+                        window_manager::handle_prefill_window_destroyed(
+                            app_handle,
+                            "prefill_destroyed",
+                        );
                     }
                     _ => {}
                 }
@@ -1339,10 +1366,24 @@ fn emit_shutdown_progress(
         detail: detail.map(|value| value.to_string()),
         elapsed_ms,
     };
-    if let Err(error) = app.emit_to(MAIN_WINDOW_LABEL, SHUTDOWN_PROGRESS_EVENT, payload) {
+    if let Err(error) = app.emit_to(
+        window_manager::MAIN_WINDOW_LABEL,
+        SHUTDOWN_PROGRESS_EVENT,
+        payload.clone(),
+    ) {
         log_manager::append_line(
             app,
-            format!("failed to emit shutdown progress event: {error}"),
+            format!("failed to emit shutdown progress event to main: {error}"),
+        );
+    }
+    if let Err(error) = app.emit_to(
+        window_manager::PREFILL_WINDOW_LABEL,
+        SHUTDOWN_PROGRESS_EVENT,
+        payload,
+    ) {
+        log_manager::append_line(
+            app,
+            format!("failed to emit shutdown progress event to prefill: {error}"),
         );
     }
 }

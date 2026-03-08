@@ -5,8 +5,7 @@ use std::{
 };
 
 use tauri::{
-    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, Url,
-    WebviewWindowBuilder,
+    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindowBuilder,
 };
 
 use crate::{
@@ -19,7 +18,9 @@ use crate::{
     },
 };
 
-const MAIN_WINDOW_LABEL: &str = "main";
+pub const MAIN_WINDOW_LABEL: &str = "main";
+pub const PREFILL_WINDOW_LABEL: &str = "prefill";
+
 const SHELL_ROUTE_EVENT: &str = "shell-route";
 const PREFILL_CHAT_EVENT: &str = "prefill-chat";
 const PREFILL_STATUS_EVENT: &str = "prefill-status";
@@ -55,33 +56,31 @@ pub enum LocalRoute {
     ControlCenter,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MainWindowSurface {
-    Prefill,
-    Shell,
-}
-
 #[derive(Debug, Clone)]
 struct NavigationState {
     stage: NavigationStage,
     route: Option<LocalRoute>,
     frontend_ready: bool,
+    loading_rendered: bool,
     queued_route: Option<LocalRoute>,
     pending_prefill: Option<PrefillChatPayload>,
     pending_main_events: Vec<QueuedMainEvent>,
     next_prefill_id: u64,
     allow_process_exit: bool,
-    prefill_completion_pending: bool,
+    handoff_requested: bool,
     startup_pending: bool,
     startup_exit_cause: Option<String>,
     startup_attempt_id: u64,
     startup_phase: StartupPhase,
     startup_failure_kind: Option<StartupFailureKind>,
     startup_failure_detail: Option<String>,
-    main_ready_watchdog_armed: bool,
     startup_guard_failed: bool,
+    main_ready_watchdog_armed: bool,
     main_ready_watchdog_generation: u64,
-    main_window_surface: MainWindowSurface,
+    suppress_next_main_close_requested: bool,
+    suppress_next_main_destroyed: bool,
+    suppress_next_prefill_close_requested: bool,
+    suppress_next_prefill_destroyed: bool,
 }
 
 impl Default for NavigationState {
@@ -90,22 +89,26 @@ impl Default for NavigationState {
             stage: NavigationStage::Init,
             route: None,
             frontend_ready: false,
+            loading_rendered: false,
             queued_route: None,
             pending_prefill: None,
             pending_main_events: Vec::new(),
             next_prefill_id: 0,
             allow_process_exit: false,
-            prefill_completion_pending: false,
+            handoff_requested: false,
             startup_pending: false,
             startup_exit_cause: None,
             startup_attempt_id: 0,
             startup_phase: StartupPhase::Idle,
             startup_failure_kind: None,
             startup_failure_detail: None,
-            main_ready_watchdog_armed: false,
             startup_guard_failed: false,
+            main_ready_watchdog_armed: false,
             main_ready_watchdog_generation: 0,
-            main_window_surface: MainWindowSurface::Prefill,
+            suppress_next_main_close_requested: false,
+            suppress_next_main_destroyed: false,
+            suppress_next_prefill_close_requested: false,
+            suppress_next_prefill_destroyed: false,
         }
     }
 }
@@ -119,6 +122,16 @@ enum QueuedMainEvent {
     OpenRequestError(OpenRequestErrorPayload),
 }
 
+#[derive(Debug, Clone)]
+struct StartupSnapshot {
+    attempt_id: u64,
+    pending: bool,
+    exit_cause: Option<String>,
+    phase: StartupPhase,
+    failure_kind: Option<StartupFailureKind>,
+    failure_detail: Option<String>,
+}
+
 pub struct FrontendReadyTransition {
     pub accepted: bool,
     pub pending_prefill: Option<PrefillChatPayload>,
@@ -130,34 +143,89 @@ enum DispatchOutcome {
     Skipped,
 }
 
-enum MainWindowBootDecision {
-    FinalizeNow {
-        pending_prefill: Option<PrefillChatPayload>,
-    },
-    Deferred {
-        startup_attempt_id: u64,
-        arm_watchdog: bool,
-        watchdog_generation: u64,
-    },
-}
-
-#[derive(Debug, Clone)]
-struct StartupSnapshot {
-    attempt_id: u64,
-    pending: bool,
-    exit_cause: Option<String>,
-    phase: StartupPhase,
-    failure_kind: Option<StartupFailureKind>,
-    failure_detail: Option<String>,
-}
-
 fn shared_navigation_state() -> &'static Mutex<NavigationState> {
     static STATE: OnceLock<Mutex<NavigationState>> = OnceLock::new();
     STATE.get_or_init(|| Mutex::new(NavigationState::default()))
 }
 
-pub fn create_startup_main_window(app: &AppHandle, source: &str) -> Result<(), String> {
-    create_main_window_direct(app, source, MainWindowSurface::Prefill)
+pub fn create_prefill_window(app: &AppHandle, source: &str) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
+        apply_prefill_window_geometry(app, &window, source);
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let config = window_config(app, PREFILL_WINDOW_LABEL)?;
+    let window = WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|error| format!("failed to construct prefill builder: {error}"))?
+        .build()
+        .map_err(|error| format!("failed to build prefill window: {error}"))?;
+
+    apply_prefill_window_geometry(app, &window, source);
+    let _ = window.show();
+    let _ = window.set_focus();
+    log_manager::append_line(app, format!("prefill window prepared (source={source})"));
+    Ok(())
+}
+
+pub fn create_hidden_main_window(app: &AppHandle, source: &str) -> Result<(), String> {
+    let (startup_attempt_id, watchdog_generation, snapshot) = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            let message = format!(
+                "navigation state mutex poisoned while preparing hidden main window (source={source})"
+            );
+            log_manager::append_line(app, &message);
+            return Err(message);
+        };
+
+        prepare_hidden_main_boot_locked(&mut state);
+        let snapshot = snapshot_from_state(&state);
+        (
+            state.startup_attempt_id,
+            state.main_ready_watchdog_generation,
+            snapshot,
+        )
+    };
+
+    sync_runtime_startup_snapshot(app, &snapshot);
+    spawn_main_ready_watchdog(
+        app.clone(),
+        startup_attempt_id,
+        watchdog_generation,
+        source.to_string(),
+    );
+
+    advance_startup_phase(app, StartupPhase::MainBuildTaskPosted, source);
+    let app_handle = app.clone();
+    let source_owned = source.to_string();
+    app.run_on_main_thread(move || {
+        run_create_hidden_main_on_main_thread(&app_handle, &source_owned);
+    })
+    .map_err(|error| format!("failed to schedule hidden main creation: {error}"))
+}
+
+pub fn prepare_for_backend_restart(app: &AppHandle, source: &str) -> Result<(), String> {
+    let snapshot = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            let message = format!(
+                "navigation state mutex poisoned while preparing backend restart (source={source})"
+            );
+            log_manager::append_line(app, &message);
+            return Err(message);
+        };
+
+        reset_for_retry_locked(&mut state);
+        snapshot_from_state(&state)
+    };
+
+    sync_runtime_startup_snapshot(app, &snapshot);
+    ensure_prefill_window(app, &format!("{source}:ensure_prefill"))?;
+    destroy_hidden_main_window(app, &format!("{source}:destroy_main"));
+    record_prefill_shown(app, source);
+    create_hidden_main_window(app, &format!("{source}:create_hidden_main"))
 }
 
 pub fn record_prefill_shown(app: &AppHandle, source: &str) {
@@ -166,31 +234,23 @@ pub fn record_prefill_shown(app: &AppHandle, source: &str) {
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
-                format!("navigation state mutex poisoned while recording prefill shown (source={source})"),
+                format!(
+                    "navigation state mutex poisoned while recording prefill shown (source={source})"
+                ),
             );
             return;
         };
 
-        state.main_window_surface = MainWindowSurface::Prefill;
         state.startup_phase = StartupPhase::PrefillSurfaceShown;
         state.startup_failure_kind = None;
         state.startup_failure_detail = None;
         state.startup_guard_failed = false;
-        state.startup_pending = false;
-        state.startup_exit_cause = None;
+        state.allow_process_exit = false;
         snapshot_from_state(&state)
     };
 
     sync_runtime_startup_snapshot(app, &snapshot);
-    record_startup_trace(
-        app,
-        format!(
-            "attempt={} phase={}:{}",
-            snapshot.attempt_id,
-            startup_phase_label(snapshot.phase),
-            source
-        ),
-    );
+    record_startup_trace(app, format!("prefill shown (source={source})"));
 }
 
 pub fn set_webview_runtime_info(
@@ -236,36 +296,78 @@ pub fn should_prevent_process_exit(_app: &AppHandle) -> bool {
     !state.allow_process_exit && (state.startup_pending || state.startup_guard_failed)
 }
 
+pub fn allow_prefill_close_request(app: &AppHandle, source: &str) -> bool {
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!(
+                "navigation state mutex poisoned while handling prefill close request (source={source})"
+            ),
+        );
+        return false;
+    };
+
+    if state.suppress_next_prefill_close_requested {
+        state.suppress_next_prefill_close_requested = false;
+        return true;
+    }
+
+    false
+}
+
+pub fn handle_prefill_window_destroyed(app: &AppHandle, source: &str) {
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!(
+                "navigation state mutex poisoned while handling prefill destroy (source={source})"
+            ),
+        );
+        return;
+    };
+
+    if state.suppress_next_prefill_destroyed {
+        state.suppress_next_prefill_destroyed = false;
+        return;
+    }
+
+    log_manager::append_line(
+        app,
+        format!("prefill window destroyed (source={source}, startup_pending={})", state.startup_pending),
+    );
+}
+
 pub fn handle_main_close_requested(app: &AppHandle, source: &str) -> bool {
     let action = {
         let lock = shared_navigation_state().lock();
-        let Ok(state) = lock else {
+        let Ok(mut state) = lock else {
             return false;
         };
 
-        if state.main_window_surface == MainWindowSurface::Prefill {
-            1_u8
+        if state.suppress_next_main_close_requested {
+            state.suppress_next_main_close_requested = false;
+            0_u8
         } else if state.startup_pending && !state.allow_process_exit {
-            2_u8
+            1_u8
         } else {
             0_u8
         }
     };
 
-    match action {
-        1 => false,
-        2 => {
-            mark_startup_guard_failed(
-                app,
-                StartupFailureKind::MainCloseRequestedDuringStartup,
-                "主界面在启动过程中被关闭，请重试。",
-                source,
-                Some("main_close_requested_during_startup"),
-            );
-            true
-        }
-        _ => false,
+    if action == 1 {
+        mark_startup_guard_failed(
+            app,
+            StartupFailureKind::MainCloseRequestedDuringStartup,
+            "主界面在启动过程中被关闭，请重试。",
+            source,
+            Some("main_close_requested_during_startup"),
+        );
+        return true;
     }
+
+    false
 }
 
 pub fn complete_startup_monitor_route(
@@ -282,7 +384,6 @@ pub fn complete_startup_monitor_route(
                 source,
                 true,
             );
-            request_main_window_boot(app, &format!("{source}:startup_monitor_workspace"));
         }
         StartupMonitorTargetRoute::Onboarding => {
             transition(
@@ -313,11 +414,27 @@ pub fn complete_startup_monitor_route(
         }
     }
 
+    {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            return Err("navigation state mutex is poisoned".to_string());
+        };
+        state.handoff_requested = true;
+    }
+
+    record_startup_trace(
+        app,
+        format!(
+            "handoff requested (source={source}, route={})",
+            route_label(current_route(app))
+        ),
+    );
+    maybe_finalize_startup_handoff(app, source);
     Ok(())
 }
 
 pub fn handle_main_window_destroyed(app: &AppHandle, source: &str) {
-    let (startup_failed, snapshot) = {
+    let snapshot = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             log_manager::append_line(
@@ -329,47 +446,49 @@ pub fn handle_main_window_destroyed(app: &AppHandle, source: &str) {
             return;
         };
 
-        if state.startup_pending {
-            state.startup_pending = false;
-            state.startup_guard_failed = true;
-            state.main_ready_watchdog_armed = false;
-            state.startup_phase = StartupPhase::Failed;
-            state.startup_failure_kind = Some(StartupFailureKind::MainDestroyedDuringStartup);
-            state.startup_failure_detail = Some("主界面在启动过程中被销毁，请重试。".to_string());
-            state.startup_exit_cause = Some("main_destroyed_during_startup".to_string());
-            (true, snapshot_from_state(&state))
-        } else {
-            (false, snapshot_from_state(&state))
+        if state.suppress_next_main_destroyed {
+            state.suppress_next_main_destroyed = false;
+            return;
         }
+
+        if !state.startup_pending {
+            return;
+        }
+
+        state.startup_pending = false;
+        state.startup_guard_failed = true;
+        state.main_ready_watchdog_armed = false;
+        state.frontend_ready = false;
+        state.loading_rendered = false;
+        state.startup_phase = StartupPhase::Failed;
+        state.startup_failure_kind = Some(StartupFailureKind::MainDestroyedDuringStartup);
+        state.startup_failure_detail = Some("主界面在启动过程中被销毁，请重试。".to_string());
+        state.startup_exit_cause = Some("main_destroyed_during_startup".to_string());
+        snapshot_from_state(&state)
     };
 
     sync_runtime_startup_snapshot(app, &snapshot);
-    if startup_failed {
-        record_startup_trace(
-            app,
-            format!(
-                "attempt={} phase=failed:{}:{}",
-                snapshot.attempt_id,
-                startup_failure_kind_label(
-                    snapshot
-                        .failure_kind
-                        .unwrap_or(StartupFailureKind::MainDestroyedDuringStartup)
-                ),
-                source
+    record_startup_trace(
+        app,
+        format!(
+            "attempt={} phase=failed:{}:{}",
+            snapshot.attempt_id,
+            startup_failure_kind_label(
+                snapshot
+                    .failure_kind
+                    .unwrap_or(StartupFailureKind::MainDestroyedDuringStartup)
             ),
-        );
-        emit_prefill_status(
-            app,
-            PrefillStatusState::StartupFailed,
-            snapshot.failure_detail.as_deref(),
-            source,
-        );
-        ensure_failure_fallback_window(app, &format!("{source}:destroyed_fallback"));
-        if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-    }
+            source
+        ),
+    );
+    let _ = ensure_prefill_window(app, &format!("{source}:ensure_prefill"));
+    emit_prefill_status(
+        app,
+        PrefillStatusState::StartupFailed,
+        snapshot.failure_detail.as_deref(),
+        source,
+    );
+    focus_prefill_window(app);
 }
 
 pub fn publish_workspace_session_event(
@@ -383,7 +502,9 @@ pub fn publish_workspace_session_event(
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
-                format!("navigation state mutex poisoned while publishing workspace event (source={source})"),
+                format!(
+                    "navigation state mutex poisoned while publishing workspace event (source={source})"
+                ),
             );
             return;
         };
@@ -435,7 +556,9 @@ pub fn publish_open_request_error(
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
-                format!("navigation state mutex poisoned while publishing open-request error (source={source})"),
+                format!(
+                    "navigation state mutex poisoned while publishing open-request error (source={source})"
+                ),
             );
             return;
         };
@@ -472,6 +595,12 @@ pub fn publish_open_request_error(
 }
 
 pub fn toggle_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         match window.is_visible() {
             Ok(true) => {
@@ -483,20 +612,20 @@ pub fn toggle_window(app: &AppHandle) {
             }
             Err(_) => {}
         }
-        return;
     }
-
-    let _ = navigate_main_window_to_shell(app, "toggle_window_auto_create", true);
 }
 
 pub fn show_and_focus(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+    if let Some(window) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
         return;
     }
 
-    let _ = navigate_main_window_to_shell(app, "show_and_focus_auto_create", true);
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 pub fn enter_local_boot(app: &AppHandle, source: &str) {
@@ -519,7 +648,6 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
         queued_route,
         queued_main_events,
         pending_prefill,
-        should_complete_prefill,
         snapshot,
     ) = {
         let lock = shared_navigation_state().lock();
@@ -538,38 +666,24 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
 
         let accepted = !state.frontend_ready;
         state.frontend_ready = true;
-        let queued_route = state.queued_route.take();
-        let queued_main_events = std::mem::take(&mut state.pending_main_events);
-        let should_complete_prefill = state.prefill_completion_pending;
-        let pending_prefill = if should_complete_prefill {
-            None
-        } else {
-            state.pending_prefill.take()
-        };
-        if !should_complete_prefill {
-            state.startup_pending = false;
-            state.startup_exit_cause = None;
-        }
         state.startup_phase = StartupPhase::FrontendReady;
         state.startup_failure_kind = None;
         state.startup_failure_detail = None;
+        let queued_route = state.queued_route.take();
+        let queued_main_events = std::mem::take(&mut state.pending_main_events);
+        let pending_prefill = state.pending_prefill.take();
         let snapshot = snapshot_from_state(&state);
         (
             accepted,
             queued_route,
             queued_main_events,
             pending_prefill,
-            should_complete_prefill,
             snapshot,
         )
     };
 
     sync_runtime_startup_snapshot(app, &snapshot);
     if accepted {
-        log_manager::append_line(
-            app,
-            format!("frontend ready acknowledged (source={source})"),
-        );
         record_startup_trace(
             app,
             format!(
@@ -589,18 +703,13 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
 
     flush_pending_main_events(app, queued_main_events, source);
 
-    if !should_complete_prefill {
-        if let Some(payload) = pending_prefill.clone() {
-            if !emit_prefill_event(app, &payload, source) {
-                requeue_prefill(
-                    app,
-                    payload.clone(),
-                    source,
-                    "emit_failed_after_frontend_ready",
-                );
-            }
+    if let Some(payload) = pending_prefill.clone() {
+        if !emit_prefill_event(app, &payload, source) {
+            requeue_prefill(app, payload.clone(), source, "emit_failed_after_frontend_ready");
         }
     }
+
+    maybe_finalize_startup_handoff(app, source);
 
     FrontendReadyTransition {
         accepted,
@@ -609,30 +718,30 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
 }
 
 pub fn complete_pending_prefill_handoff(app: &AppHandle, source: &str) {
-    let (pending_prefill, snapshot) = {
+    let should_attempt = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
                 format!(
-                    "navigation state mutex poisoned while completing prefill handoff (source={source})"
+                    "navigation state mutex poisoned while recording loading render (source={source})"
                 ),
             );
             return;
         };
 
-        if !state.frontend_ready || !state.prefill_completion_pending {
-            return;
+        if state.loading_rendered {
+            false
+        } else {
+            state.loading_rendered = true;
+            true
         }
-
-        let pending_prefill = state.pending_prefill.take();
-        clear_boot_guard_locked(&mut state);
-        let snapshot = snapshot_from_state(&state);
-        (pending_prefill, snapshot)
     };
 
-    sync_runtime_startup_snapshot(app, &snapshot);
-    finalize_main_window_boot(app, pending_prefill, source);
+    if should_attempt {
+        record_startup_trace(app, format!("loading rendered (source={source})"));
+    }
+    maybe_finalize_startup_handoff(app, source);
 }
 
 pub fn show_missing_kimi(app: &AppHandle, source: &str) {
@@ -666,7 +775,7 @@ pub fn show_diagnostics(app: &AppHandle, source: &str) {
 }
 
 pub fn recover_main_window_boot(app: &AppHandle, source: &str) -> Result<(), String> {
-    let (decision, snapshot) = {
+    let snapshot = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             let message = format!(
@@ -675,56 +784,42 @@ pub fn recover_main_window_boot(app: &AppHandle, source: &str) -> Result<(), Str
             log_manager::append_line(app, &message);
             return Err(message);
         };
-        let decision = plan_main_window_boot_locked(&mut state, true);
-        let snapshot = snapshot_from_state(&state);
-        (decision, snapshot)
-    };
-    sync_runtime_startup_snapshot(app, &snapshot);
 
-    match decision {
-        MainWindowBootDecision::FinalizeNow { pending_prefill } => {
-            log_manager::append_line(
-                app,
-                format!("manual main recovery completed immediately (source={source})"),
-            );
-            finalize_main_window_boot(app, pending_prefill, source);
-            Ok(())
-        }
-        MainWindowBootDecision::Deferred {
-            startup_attempt_id,
-            watchdog_generation,
-            arm_watchdog,
-        } => {
-            log_manager::append_line(
-                app,
-                format!("manual main recovery requested (source={source})"),
-            );
-            if arm_watchdog {
-                spawn_main_ready_watchdog(
-                    app.clone(),
-                    startup_attempt_id,
-                    watchdog_generation,
-                    source.to_string(),
-                );
-            }
-            navigate_main_window_to_shell(app, source, true)?;
-            Ok(())
-        }
-    }
+        state.frontend_ready = false;
+        state.loading_rendered = false;
+        state.startup_pending = false;
+        state.startup_guard_failed = false;
+        state.startup_failure_kind = None;
+        state.startup_failure_detail = None;
+        state.startup_exit_cause = None;
+        snapshot_from_state(&state)
+    };
+
+    sync_runtime_startup_snapshot(app, &snapshot);
+    let _ = ensure_prefill_window(app, &format!("{source}:ensure_prefill"));
+    destroy_hidden_main_window(app, &format!("{source}:destroy_main"));
+    create_hidden_main_window(app, &format!("{source}:create_hidden_main"))
 }
 
 pub fn submit_prefill(app: &AppHandle, text: String, source: &str) -> SubmitPrefillAck {
+    let text = text.trim().to_string();
     let text_length = text.chars().count();
-    let trimmed_is_empty = text.trim().is_empty();
+    if text.is_empty() {
+        return SubmitPrefillAck {
+            accepted: false,
+            request_id: None,
+            queued: false,
+            dispatched: false,
+            text_length: 0,
+        };
+    }
 
-    let (request_id, queued, payload_for_dispatch) = {
+    let (request_id, queued, payload) = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
-                format!(
-                    "navigation state mutex poisoned, submit_prefill dropped (source={source})"
-                ),
+                format!("navigation state mutex poisoned while submitting prefill (source={source})"),
             );
             return SubmitPrefillAck {
                 accepted: false,
@@ -735,184 +830,267 @@ pub fn submit_prefill(app: &AppHandle, text: String, source: &str) -> SubmitPref
             };
         };
 
-        if trimmed_is_empty {
-            (None, false, None)
-        } else {
-            let next_request_id = next_prefill_request_id_locked(&mut state);
-            let payload = PrefillChatPayload {
-                request_id: next_request_id.clone(),
-                text,
-                auto_send: true,
-            };
-
-            if state.frontend_ready {
-                (Some(next_request_id), false, Some(payload))
-            } else {
-                state.pending_prefill = Some(payload);
-                (Some(next_request_id), true, None)
-            }
+        let request_id = next_prefill_request_id_locked(&mut state);
+        let payload = PrefillChatPayload {
+            request_id: request_id.clone(),
+            text: text.clone(),
+            auto_send: true,
+        };
+        let queued = !state.frontend_ready || app.get_webview_window(MAIN_WINDOW_LABEL).is_none();
+        if queued {
+            state.pending_prefill = Some(payload.clone());
         }
+        (request_id, queued, payload)
     };
 
-    request_main_window_boot(app, source);
-
-    let mut dispatched = false;
-    if let Some(payload) = payload_for_dispatch {
-        dispatched = emit_prefill_event(app, &payload, source);
-        if !dispatched {
-            requeue_prefill(app, payload, source, "emit_failed_after_submit");
-        }
-    }
-
-    if let Some(request_id) = request_id.as_deref() {
-        log_manager::append_line(
-            app,
-            format!(
-                "prefill submitted (source={source}, request_id={request_id}, text_length={text_length}, queued={queued}, dispatched={dispatched})"
-            ),
-        );
+    let dispatched = if queued {
+        false
+    } else if emit_prefill_event(app, &payload, source) {
+        true
     } else {
-        log_manager::append_line(
-            app,
-            format!("prefill submitted with empty text (source={source})"),
-        );
-    }
+        requeue_prefill(app, payload.clone(), source, "emit_failed_during_submit");
+        false
+    };
 
     SubmitPrefillAck {
         accepted: true,
-        request_id,
+        request_id: Some(request_id),
         queued,
         dispatched,
         text_length,
     }
 }
 
-fn request_main_window_boot(app: &AppHandle, source: &str) {
-    let (decision, snapshot) = {
+pub fn ensure_prefill_window(app: &AppHandle, source: &str) -> Result<(), String> {
+    create_prefill_window(app, source)
+}
+
+pub fn destroy_hidden_main_window(app: &AppHandle, source: &str) {
+    let should_close = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
                 format!(
-                    "navigation state mutex poisoned while preparing main window boot (source={source})"
+                    "navigation state mutex poisoned while destroying hidden main (source={source})"
                 ),
             );
             return;
         };
-        let decision = plan_main_window_boot_locked(&mut state, false);
-        let snapshot = snapshot_from_state(&state);
-        (decision, snapshot)
-    };
-    sync_runtime_startup_snapshot(app, &snapshot);
 
-    match decision {
-        MainWindowBootDecision::FinalizeNow { pending_prefill } => {
-            log_manager::append_line(
-                app,
-                format!("main window boot proceeding immediately (source={source})"),
-            );
-            finalize_main_window_boot(app, pending_prefill, source);
+        if app.get_webview_window(MAIN_WINDOW_LABEL).is_none() {
+            false
+        } else {
+            state.suppress_next_main_close_requested = true;
+            state.suppress_next_main_destroyed = true;
+            state.frontend_ready = false;
+            state.loading_rendered = false;
+            true
         }
-        MainWindowBootDecision::Deferred {
-            startup_attempt_id,
-            arm_watchdog,
-            watchdog_generation,
-        } => {
+    };
+
+    if !should_close {
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.hide();
+        let _ = window.close();
+        log_manager::append_line(app, format!("hidden main destroyed (source={source})"));
+    }
+}
+
+fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
+    advance_startup_phase(app, StartupPhase::MainBuildTaskEntered, source);
+
+    if let Some(existing) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        apply_main_window_geometry(app, &existing, source);
+        let _ = existing.hide();
+        advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
+        log_manager::append_line(
+            app,
+            format!("hidden main already exists, reusing (source={source})"),
+        );
+        return;
+    }
+
+    let config = match window_config(app, MAIN_WINDOW_LABEL) {
+        Ok(config) => config,
+        Err(error) => {
+            mark_startup_guard_failed(
+                app,
+                StartupFailureKind::MainWindowMissing,
+                &format!("主界面窗口配置缺失：{error}"),
+                &format!("{source}:main_config_missing"),
+                Some("main_config_missing"),
+            );
+            return;
+        }
+    };
+
+    advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
+    let app_for_load = app.clone();
+    let builder = match WebviewWindowBuilder::from_config(app, &config) {
+        Ok(builder) => builder.on_page_load(move |_window, payload| {
+            let url = payload.url().to_string();
+            if !is_shell_document_url(&url) {
+                return;
+            }
+
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    advance_startup_phase(
+                        &app_for_load,
+                        StartupPhase::MainPageLoadStarted,
+                        &format!("main_page_load_started:{url}"),
+                    );
+                }
+                PageLoadEvent::Finished => {
+                    advance_startup_phase(
+                        &app_for_load,
+                        StartupPhase::MainPageLoadFinished,
+                        &format!("main_page_load_finished:{url}"),
+                    );
+                }
+            }
+        }),
+        Err(error) => {
+            mark_startup_guard_failed(
+                app,
+                StartupFailureKind::MainWindowMissing,
+                &format!("主界面窗口创建器初始化失败：{error}"),
+                &format!("{source}:main_builder_failed"),
+                Some("main_builder_failed"),
+            );
+            return;
+        }
+    };
+
+    advance_startup_phase(app, StartupPhase::MainBuilderConstructed, source);
+    advance_startup_phase(app, StartupPhase::MainBuildStarted, source);
+
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(error) => {
+            mark_startup_guard_failed(
+                app,
+                StartupFailureKind::MainWebviewBuildHung,
+                &format!("主界面窗口创建失败：{error}"),
+                &format!("{source}:main_build_failed"),
+                Some("main_build_failed"),
+            );
+            return;
+        }
+    };
+
+    apply_main_window_geometry(app, &window, source);
+    let _ = window.hide();
+    advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
+    record_startup_trace(app, format!("hidden main created (source={source})"));
+}
+
+fn maybe_finalize_startup_handoff(app: &AppHandle, source: &str) {
+    let (route, pending_prefill, queued_main_events, snapshot) = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
                 format!(
-                    "main window boot deferred until frontend is ready (source={source}, watchdog_armed={arm_watchdog})"
+                    "navigation state mutex poisoned while attempting startup handoff (source={source})"
                 ),
             );
-            if arm_watchdog {
-                spawn_main_ready_watchdog(
-                    app.clone(),
-                    startup_attempt_id,
-                    watchdog_generation,
-                    source.to_string(),
-                );
-            }
+            return;
+        };
 
-            if let Err(error) = navigate_main_window_to_shell(app, source, false) {
-                mark_startup_guard_failed(
-                    app,
-                    StartupFailureKind::MainNavigationFailed,
-                    &format!("主界面导航失败：{error}"),
-                    &format!("{source}:navigate_failed"),
-                    Some("main_navigation_failed"),
-                );
-                return;
-            }
+        if !can_finalize_handoff_locked(&state) {
+            return;
         }
-    }
-}
 
-fn finalize_main_window_boot(
-    app: &AppHandle,
-    pending_prefill: Option<PrefillChatPayload>,
-    source: &str,
-) {
-    if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = main.show();
-        let _ = main.set_focus();
-    }
-
-    if let Some(payload) = pending_prefill {
-        if !emit_prefill_event(app, &payload, source) {
-            requeue_prefill(app, payload, source, "emit_failed_after_finalize");
-        }
-    }
-}
-
-fn plan_main_window_boot_locked(
-    state: &mut NavigationState,
-    force_rearm_watchdog: bool,
-) -> MainWindowBootDecision {
-    if state.frontend_ready {
+        let route = state.route;
         let pending_prefill = state.pending_prefill.take();
-        clear_boot_guard_locked(state);
-        MainWindowBootDecision::FinalizeNow { pending_prefill }
-    } else {
-        let should_increment_attempt = force_rearm_watchdog
-            || !state.startup_pending
-            || state.startup_phase == StartupPhase::Failed
-            || state.main_window_surface == MainWindowSurface::Prefill;
-        if should_increment_attempt {
-            state.startup_attempt_id = state.startup_attempt_id.saturating_add(1);
-        }
-
-        state.prefill_completion_pending = true;
+        let queued_main_events = std::mem::take(&mut state.pending_main_events);
+        state.handoff_requested = false;
+        state.startup_pending = false;
+        state.main_ready_watchdog_armed = false;
         state.startup_guard_failed = false;
-        state.startup_pending = true;
-        state.startup_exit_cause = None;
-        state.startup_phase = StartupPhase::MainBootRequested;
         state.startup_failure_kind = None;
         state.startup_failure_detail = None;
-        state.main_window_surface = MainWindowSurface::Shell;
-        let arm_watchdog = force_rearm_watchdog || !state.main_ready_watchdog_armed;
-        if arm_watchdog {
-            state.main_ready_watchdog_armed = true;
-            state.main_ready_watchdog_generation =
-                state.main_ready_watchdog_generation.saturating_add(1);
-        }
+        state.startup_exit_cause = None;
+        let snapshot = snapshot_from_state(&state);
+        (route, pending_prefill, queued_main_events, snapshot)
+    };
 
-        MainWindowBootDecision::Deferred {
-            startup_attempt_id: state.startup_attempt_id,
-            arm_watchdog,
-            watchdog_generation: state.main_ready_watchdog_generation,
+    sync_runtime_startup_snapshot(app, &snapshot);
+
+    let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+        mark_startup_guard_failed(
+            app,
+            StartupFailureKind::MainWindowMissing,
+            "主界面窗口不存在，请重试。",
+            &format!("{source}:main_missing_during_handoff"),
+            Some("main_missing_during_handoff"),
+        );
+        return;
+    };
+
+    if let Some(route) = route {
+        if !emit_shell_route_event(app, route, source) {
+            requeue_route(app, route, source, "emit_failed_during_handoff");
         }
     }
+
+    flush_pending_main_events(app, queued_main_events, source);
+    if let Some(payload) = pending_prefill {
+        if !emit_prefill_event(app, &payload, source) {
+            requeue_prefill(app, payload, source, "emit_failed_during_handoff");
+        }
+    }
+
+    move_main_window_near_prefill(&main, app);
+    close_prefill_window(app, &format!("{source}:handoff_close_prefill"));
+    let _ = main.show();
+    let _ = main.set_focus();
+    record_startup_trace(app, format!("main shown (source={source})"));
 }
 
-fn clear_boot_guard_locked(state: &mut NavigationState) {
-    state.prefill_completion_pending = false;
-    state.startup_pending = false;
+fn prepare_hidden_main_boot_locked(state: &mut NavigationState) {
+    state.startup_attempt_id = state.startup_attempt_id.saturating_add(1);
+    state.frontend_ready = false;
+    state.loading_rendered = false;
+    state.startup_pending = true;
     state.startup_exit_cause = None;
-    state.main_ready_watchdog_armed = false;
-    state.startup_guard_failed = false;
-    state.startup_phase = StartupPhase::FrontendReady;
+    state.startup_phase = StartupPhase::MainBootRequested;
     state.startup_failure_kind = None;
     state.startup_failure_detail = None;
+    state.startup_guard_failed = false;
+    state.main_ready_watchdog_armed = true;
+    state.main_ready_watchdog_generation = state.main_ready_watchdog_generation.saturating_add(1);
+}
+
+fn reset_for_retry_locked(state: &mut NavigationState) {
+    state.stage = NavigationStage::Init;
+    state.route = None;
+    state.frontend_ready = false;
+    state.loading_rendered = false;
+    state.queued_route = None;
+    state.pending_prefill = None;
+    state.pending_main_events.clear();
+    state.allow_process_exit = false;
+    state.handoff_requested = false;
+    state.startup_pending = false;
+    state.startup_exit_cause = None;
+    state.startup_phase = StartupPhase::PrefillSurfaceShown;
+    state.startup_failure_kind = None;
+    state.startup_failure_detail = None;
+    state.startup_guard_failed = false;
+    state.main_ready_watchdog_armed = false;
+}
+
+fn can_finalize_handoff_locked(state: &NavigationState) -> bool {
+    state.handoff_requested
+        && state.frontend_ready
+        && state.loading_rendered
+        && !state.startup_guard_failed
 }
 
 fn spawn_main_ready_watchdog(
@@ -997,7 +1175,6 @@ fn watchdog_snapshot(
     if state.startup_attempt_id != startup_attempt_id
         || state.main_ready_watchdog_generation != watchdog_generation
         || !state.main_ready_watchdog_armed
-        || state.frontend_ready
         || !state.startup_pending
         || state.startup_guard_failed
     {
@@ -1049,13 +1226,15 @@ fn mark_startup_guard_failed_for_attempt(
                 return;
             }
         }
-        if state.frontend_ready || state.startup_phase == StartupPhase::FrontendReady {
+        if !state.startup_pending {
             return;
         }
 
-        state.prefill_completion_pending = true;
+        state.handoff_requested = false;
         state.startup_pending = false;
         state.main_ready_watchdog_armed = false;
+        state.frontend_ready = false;
+        state.loading_rendered = false;
         state.startup_guard_failed = true;
         state.startup_phase = StartupPhase::Failed;
         state.startup_failure_kind = Some(kind);
@@ -1074,266 +1253,286 @@ fn mark_startup_guard_failed_for_attempt(
             source
         ),
     );
-    log_manager::append_line(
-        app,
-        format!(
-            "startup guard failed (source={source}, kind={}): {detail}",
-            startup_failure_kind_label(kind)
-        ),
-    );
-
-    ensure_failure_fallback_window(app, &format!("{source}:failure_fallback"));
+    destroy_hidden_main_window(app, &format!("{source}:destroy_hidden_main"));
+    let _ = ensure_prefill_window(app, &format!("{source}:ensure_prefill"));
     emit_prefill_status(app, PrefillStatusState::StartupFailed, Some(detail), source);
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    focus_prefill_window(app);
 }
 
-fn ensure_failure_fallback_window(app: &AppHandle, source: &str) {
-    if app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
-        return;
-    }
-
-    if let Err(error) = create_main_window_direct(app, source, MainWindowSurface::Prefill) {
-        log_manager::append_line(
-            app,
-            format!("failed to create startup failure fallback window (source={source}): {error}"),
-        );
-    }
-}
-
-fn create_main_window_direct(
-    app: &AppHandle,
-    source: &str,
-    surface: MainWindowSurface,
-) -> Result<(), String> {
-    if let Some(existing) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        apply_window_surface(app, &existing, surface, source);
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        return Ok(());
-    }
-
-    let config = app
-        .config()
-        .app
-        .windows
-        .iter()
-        .find(|window| window.label == MAIN_WINDOW_LABEL)
-        .cloned()
-        .ok_or_else(|| "main window config is missing".to_string())?;
-
-    if surface == MainWindowSurface::Shell {
-        advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
-    }
-
-    let app_for_load = app.clone();
-    let builder = WebviewWindowBuilder::from_config(app, &config)
-        .map_err(|error| format!("failed to construct main builder: {error}"))?
-        .on_page_load(move |_window, payload| {
-            let url = payload.url().to_string();
-            if !is_shell_document_url(&url) {
-                return;
-            }
-
-            match payload.event() {
-                PageLoadEvent::Started => {
-                    advance_startup_phase(
-                        &app_for_load,
-                        StartupPhase::MainPageLoadStarted,
-                        &format!("main_page_load_started:{url}"),
-                    );
-                }
-                PageLoadEvent::Finished => {
-                    advance_startup_phase(
-                        &app_for_load,
-                        StartupPhase::MainPageLoadFinished,
-                        &format!("main_page_load_finished:{url}"),
-                    );
-                }
-            }
-        });
-
-    if surface == MainWindowSurface::Shell {
-        advance_startup_phase(app, StartupPhase::MainBuilderConstructed, source);
-        advance_startup_phase(app, StartupPhase::MainBuildStarted, source);
-    }
-
-    let window = builder
-        .build()
-        .map_err(|error| format!("failed to build main window: {error}"))?;
-
-    apply_window_surface(app, &window, surface, source);
-
-    if surface == MainWindowSurface::Shell {
-        advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
-        let loading_url = shell_loading_url()?;
-        window
-            .navigate(loading_url)
-            .map_err(|error| format!("failed to navigate shell loading page: {error}"))?;
-    } else {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-
-    log_manager::append_line(
-        app,
-        format!(
-            "main window prepared (source={source}, surface={})",
-            main_window_surface_label(surface)
-        ),
-    );
-
-    Ok(())
-}
-
-fn navigate_main_window_to_shell(
-    app: &AppHandle,
-    source: &str,
-    _force_rearm_watchdog: bool,
-) -> Result<(), String> {
-    advance_startup_phase(app, StartupPhase::MainBuildTaskPosted, source);
-
-    let app_handle = app.clone();
-    let source_owned = source.to_string();
-    app.run_on_main_thread(move || {
-        run_main_shell_navigation_on_main_thread(&app_handle, &source_owned);
-    })
-    .map_err(|error| format!("failed to schedule main window navigation: {error}"))
-}
-
-fn run_main_shell_navigation_on_main_thread(app: &AppHandle, source: &str) {
-    advance_startup_phase(app, StartupPhase::MainBuildTaskEntered, source);
-
-    if app.get_webview_window(MAIN_WINDOW_LABEL).is_none() {
-        if let Err(error) = create_main_window_direct(app, source, MainWindowSurface::Shell) {
-            mark_startup_guard_failed(
+fn close_prefill_window(app: &AppHandle, source: &str) {
+    {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            log_manager::append_line(
                 app,
-                StartupFailureKind::MainWindowMissing,
-                &format!("主界面窗口创建失败：{error}"),
-                &format!("{source}:main_window_create_failed"),
-                Some("main_window_create_failed"),
-            );
-        }
-        return;
-    }
-
-    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
-        mark_startup_guard_failed(
-            app,
-            StartupFailureKind::MainWindowMissing,
-            "主界面窗口不存在，请重试。",
-            &format!("{source}:main_window_missing"),
-            Some("main_window_missing"),
-        );
-        return;
-    };
-
-    // Hide the visible prefill surface before resizing/navigating to shell,
-    // otherwise the user can briefly see the intermediate loading document.
-    let _ = window.hide();
-    advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
-    apply_window_surface(app, &window, MainWindowSurface::Shell, source);
-    advance_startup_phase(app, StartupPhase::MainBuilderConstructed, source);
-    advance_startup_phase(app, StartupPhase::MainBuildStarted, source);
-
-    match shell_loading_url() {
-        Ok(url) => {
-            if let Err(error) = window.navigate(url) {
-                mark_startup_guard_failed(
-                    app,
-                    StartupFailureKind::MainNavigationFailed,
-                    &format!("主界面导航失败：{error}"),
-                    &format!("{source}:main_window_navigate_failed"),
-                    Some("main_navigation_failed"),
-                );
-                return;
-            }
-        }
-        Err(error) => {
-            mark_startup_guard_failed(
-                app,
-                StartupFailureKind::MainNavigationFailed,
-                &format!("主界面地址解析失败：{error}"),
-                &format!("{source}:main_window_url_parse_failed"),
-                Some("main_navigation_failed"),
+                format!(
+                    "navigation state mutex poisoned while closing prefill window (source={source})"
+                ),
             );
             return;
-        }
+        };
+        state.suppress_next_prefill_close_requested = true;
+        state.suppress_next_prefill_destroyed = true;
     }
 
-    advance_startup_phase(app, StartupPhase::MainWindowCreated, source);
+    if let Some(window) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
+        let _ = window.close();
+        record_startup_trace(app, format!("prefill closed (source={source})"));
+    }
 }
 
-fn apply_window_surface(
+fn focus_prefill_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn move_main_window_near_prefill(main: &tauri::WebviewWindow, app: &AppHandle) {
+    if let Some(prefill) = app.get_webview_window(PREFILL_WINDOW_LABEL) {
+        let _ = prefill.current_monitor();
+    }
+    let _ = main.center();
+}
+
+fn transition(
     app: &AppHandle,
-    window: &tauri::WebviewWindow,
-    surface: MainWindowSurface,
+    stage: NavigationStage,
+    route: Option<LocalRoute>,
     source: &str,
+    force_navigate: bool,
 ) {
-    let (width, height, min_width, min_height, decorations) = match surface {
-        MainWindowSurface::Prefill => (
-            PREFILL_WIDTH,
-            PREFILL_HEIGHT,
-            PREFILL_MIN_WIDTH,
-            PREFILL_MIN_HEIGHT,
-            false,
-        ),
-        MainWindowSurface::Shell => (
-            SHELL_WIDTH,
-            SHELL_HEIGHT,
-            SHELL_MIN_WIDTH,
-            SHELL_MIN_HEIGHT,
-            false,
-        ),
+    let (
+        dispatch_outcome,
+        final_route_for_log,
+        stage_changed,
+        route_changed,
+        previous_stage,
+        previous_route,
+    ) = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            log_manager::append_line(
+                app,
+                format!("navigation state mutex poisoned, skip transition (source={source})"),
+            );
+            return;
+        };
+
+        let previous_stage = state.stage;
+        let previous_route = state.route;
+
+        let stage_changed = state.stage != stage;
+        if stage_changed {
+            state.stage = stage;
+        }
+
+        let mut route_changed = false;
+        let mut dispatch_outcome = DispatchOutcome::Skipped;
+        if let Some(next_route) = route {
+            route_changed = state.route != Some(next_route);
+            state.route = Some(next_route);
+
+            if force_navigate || route_changed {
+                dispatch_outcome = request_route_locked(&mut state, next_route);
+            }
+        }
+
+        (
+            dispatch_outcome,
+            state.route,
+            stage_changed,
+            route_changed,
+            previous_stage,
+            previous_route,
+        )
     };
 
-    if let Err(error) = window.set_decorations(decorations) {
+    if stage_changed || route_changed {
         log_manager::append_line(
             app,
             format!(
-                "failed to set window decorations (source={source}, surface={}): {error}",
-                main_window_surface_label(surface)
+                "navigation transition (source={source}) stage: {} -> {}; route: {} -> {}",
+                stage_label(previous_stage),
+                stage_label(stage),
+                route_label(previous_route),
+                route_label(final_route_for_log),
             ),
         );
     }
+
+    match dispatch_outcome {
+        DispatchOutcome::Dispatch(route) => {
+            if !emit_shell_route_event(app, route, source) {
+                requeue_route(app, route, source, "emit_failed");
+            }
+        }
+        DispatchOutcome::Queued(route, reason) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "navigation queued (source={source}, route={}, reason={reason})",
+                    route_label(Some(route))
+                ),
+            );
+        }
+        DispatchOutcome::Skipped => {}
+    }
+}
+
+fn request_route_locked(state: &mut NavigationState, route: LocalRoute) -> DispatchOutcome {
+    if !state.frontend_ready {
+        state.queued_route = Some(route);
+        return DispatchOutcome::Queued(route, "frontend_not_ready");
+    }
+    DispatchOutcome::Dispatch(route)
+}
+
+fn requeue_route(app: &AppHandle, route: LocalRoute, source: &str, detail: &str) {
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!(
+                "navigation state mutex poisoned while re-queueing route (source={source}, detail={detail})"
+            ),
+        );
+        return;
+    };
+
+    state.queued_route = Some(route);
+    log_manager::append_line(
+        app,
+        format!(
+            "navigation event dispatch failed and route re-queued (source={source}, route={}, detail={detail})",
+            route_label(Some(route))
+        ),
+    );
+}
+
+fn requeue_prefill(app: &AppHandle, payload: PrefillChatPayload, source: &str, detail: &str) {
+    let request_id = payload.request_id.clone();
+    let text_length = payload.text.chars().count();
+
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!(
+                "navigation state mutex poisoned while re-queueing prefill (source={source}, detail={detail})"
+            ),
+        );
+        return;
+    };
+
+    state.pending_prefill = Some(payload);
+    log_manager::append_line(
+        app,
+        format!(
+            "prefill event dispatch failed and payload re-queued (source={source}, request_id={request_id}, text_length={text_length}, detail={detail})"
+        ),
+    );
+}
+
+fn requeue_main_event(app: &AppHandle, event: QueuedMainEvent, source: &str, detail: &str) {
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!(
+                "navigation state mutex poisoned while re-queueing main event (source={source}, detail={detail})"
+            ),
+        );
+        return;
+    };
+
+    state.pending_main_events.push(event);
+    log_manager::append_line(
+        app,
+        format!("main event dispatch failed and was re-queued (source={source}, detail={detail})"),
+    );
+}
+
+fn flush_pending_main_events(app: &AppHandle, events: Vec<QueuedMainEvent>, source: &str) {
+    for event in events {
+        let dispatched = match &event {
+            QueuedMainEvent::WorkspaceSession {
+                event_name,
+                payload,
+            } => emit_workspace_session_event(app, event_name, payload, source),
+            QueuedMainEvent::OpenRequestError(payload) => {
+                emit_open_request_error_event(app, payload, source)
+            }
+        };
+
+        if !dispatched {
+            requeue_main_event(app, event, source, "flush_failed_after_frontend_ready");
+        }
+    }
+}
+
+fn apply_prefill_window_geometry(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    source: &str,
+) {
+    if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
+        PREFILL_MIN_WIDTH,
+        PREFILL_MIN_HEIGHT,
+    )))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set prefill min size (source={source}): {error}"),
+        );
+    }
+    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(PREFILL_WIDTH, PREFILL_HEIGHT))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set prefill size (source={source}): {error}"),
+        );
+    }
+    let _ = window.set_decorations(false);
     #[cfg(target_os = "windows")]
-    if let Err(error) = window.set_shadow(true) {
-        log_manager::append_line(
-            app,
-            format!(
-                "failed to set window shadow (source={source}, surface={}): {error}",
-                main_window_surface_label(surface)
-            ),
-        );
-    }
-    if let Err(error) =
-        window.set_min_size(Some(Size::Logical(LogicalSize::new(min_width, min_height))))
-    {
-        log_manager::append_line(
-            app,
-            format!(
-                "failed to set window min size (source={source}, surface={}): {error}",
-                main_window_surface_label(surface)
-            ),
-        );
-    }
-    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(width, height))) {
-        log_manager::append_line(
-            app,
-            format!(
-                "failed to set window size (source={source}, surface={}): {error}",
-                main_window_surface_label(surface)
-            ),
-        );
-    }
+    let _ = window.set_shadow(true);
     let _ = window.center();
 }
 
-fn shell_loading_url() -> Result<Url, String> {
-    Url::parse("http://tauri.localhost/index.html#/loading")
-        .map_err(|error| format!("invalid shell loading url: {error}"))
+fn apply_main_window_geometry(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    source: &str,
+) {
+    if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
+        SHELL_MIN_WIDTH,
+        SHELL_MIN_HEIGHT,
+    )))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set main min size (source={source}): {error}"),
+        );
+    }
+    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(SHELL_WIDTH, SHELL_HEIGHT))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set main size (source={source}): {error}"),
+        );
+    }
+    let _ = window.set_decorations(false);
+    #[cfg(target_os = "windows")]
+    let _ = window.set_shadow(true);
+}
+
+fn window_config(
+    app: &AppHandle,
+    label: &str,
+) -> Result<tauri::utils::config::WindowConfig, String> {
+    app.config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == label)
+        .cloned()
+        .ok_or_else(|| format!("{label} window config is missing"))
 }
 
 fn snapshot_from_state(state: &NavigationState) -> StartupSnapshot {
@@ -1456,194 +1655,54 @@ fn startup_failure_kind_label(kind: StartupFailureKind) -> &'static str {
     }
 }
 
-fn main_window_surface_label(surface: MainWindowSurface) -> &'static str {
-    match surface {
-        MainWindowSurface::Prefill => "prefill",
-        MainWindowSurface::Shell => "shell",
+fn stage_label(stage: NavigationStage) -> &'static str {
+    match stage {
+        NavigationStage::Init => "init",
+        NavigationStage::LocalBoot => "local_boot",
+        NavigationStage::BackendReady => "backend_ready",
+        NavigationStage::ControlCenter => "control_center",
+        NavigationStage::Diagnostics => "diagnostics",
     }
 }
 
-fn transition(
-    app: &AppHandle,
-    stage: NavigationStage,
-    route: Option<LocalRoute>,
-    source: &str,
-    force_navigate: bool,
-) {
-    let (
-        dispatch_outcome,
-        final_route_for_log,
-        stage_changed,
-        route_changed,
-        previous_stage,
-        previous_route,
-    ) = {
-        let lock = shared_navigation_state().lock();
-        let Ok(mut state) = lock else {
-            log_manager::append_line(
-                app,
-                format!("navigation state mutex poisoned, skip transition (source={source})"),
-            );
-            return;
-        };
-
-        let previous_stage = state.stage;
-        let previous_route = state.route;
-
-        let stage_changed = state.stage != stage;
-        if stage_changed {
-            state.stage = stage;
-        }
-
-        let mut route_changed = false;
-        let mut dispatch_outcome = DispatchOutcome::Skipped;
-        if let Some(next_route) = route {
-            route_changed = state.route != Some(next_route);
-            state.route = Some(next_route);
-
-            if force_navigate || route_changed {
-                dispatch_outcome = request_route_locked(&mut state, next_route);
-            }
-        }
-
-        (
-            dispatch_outcome,
-            state.route,
-            stage_changed,
-            route_changed,
-            previous_stage,
-            previous_route,
-        )
-    };
-
-    if stage_changed || route_changed {
-        log_manager::append_line(
-            app,
-            format!(
-                "navigation transition (source={source}) stage: {} -> {}; route: {} -> {}",
-                stage_label(previous_stage),
-                stage_label(stage),
-                route_label(previous_route),
-                route_label(final_route_for_log),
-            ),
-        );
-    }
-
-    match dispatch_outcome {
-        DispatchOutcome::Dispatch(route) => {
-            if !emit_shell_route_event(app, route, source) {
-                requeue_route(app, route, source, "emit_failed");
-            }
-        }
-        DispatchOutcome::Queued(route, reason) => {
-            log_manager::append_line(
-                app,
-                format!(
-                    "navigation queued (source={source}, route={}, reason={reason})",
-                    route_label(Some(route))
-                ),
-            );
-        }
-        DispatchOutcome::Skipped => {}
-    }
-
-    if matches!(
-        route,
-        Some(LocalRoute::Onboarding | LocalRoute::Diagnostics | LocalRoute::ControlCenter)
-    ) {
-        request_main_window_boot(app, &format!("{source}:route_requires_main"));
+fn route_label(route: Option<LocalRoute>) -> &'static str {
+    match route {
+        Some(LocalRoute::Loading) => "loading",
+        Some(LocalRoute::Onboarding) => "onboarding",
+        Some(LocalRoute::Diagnostics) => "diagnostics",
+        Some(LocalRoute::ControlCenter) => "control_center",
+        None => "none",
     }
 }
 
-fn request_route_locked(state: &mut NavigationState, route: LocalRoute) -> DispatchOutcome {
-    if !state.frontend_ready {
-        state.queued_route = Some(route);
-        return DispatchOutcome::Queued(route, "frontend_not_ready");
+fn route_path(route: LocalRoute) -> &'static str {
+    match route {
+        LocalRoute::Loading => "loading",
+        LocalRoute::Onboarding => "onboarding",
+        LocalRoute::Diagnostics => "diagnostics",
+        LocalRoute::ControlCenter => "control-center",
     }
-    DispatchOutcome::Dispatch(route)
 }
 
-fn requeue_route(app: &AppHandle, route: LocalRoute, source: &str, detail: &str) {
-    let lock = shared_navigation_state().lock();
-    let Ok(mut state) = lock else {
-        log_manager::append_line(
-            app,
-            format!(
-                "navigation state mutex poisoned while re-queueing route (source={source}, detail={detail})"
-            ),
-        );
-        return;
-    };
-
-    state.queued_route = Some(route);
-    log_manager::append_line(
-        app,
-        format!(
-            "navigation event dispatch failed and route re-queued (source={source}, route={}, detail={detail})",
-            route_label(Some(route))
-        ),
-    );
-}
-
-fn requeue_prefill(app: &AppHandle, payload: PrefillChatPayload, source: &str, detail: &str) {
-    let request_id = payload.request_id.clone();
-    let text_length = payload.text.chars().count();
-
-    let lock = shared_navigation_state().lock();
-    let Ok(mut state) = lock else {
-        log_manager::append_line(
-            app,
-            format!(
-                "navigation state mutex poisoned while re-queueing prefill (source={source}, detail={detail})"
-            ),
-        );
-        return;
-    };
-
-    state.pending_prefill = Some(payload);
-    log_manager::append_line(
-        app,
-        format!(
-            "prefill event dispatch failed and payload re-queued (source={source}, request_id={request_id}, text_length={text_length}, detail={detail})"
-        ),
-    );
-}
-
-fn requeue_main_event(app: &AppHandle, event: QueuedMainEvent, source: &str, detail: &str) {
-    let lock = shared_navigation_state().lock();
-    let Ok(mut state) = lock else {
-        log_manager::append_line(
-            app,
-            format!(
-                "navigation state mutex poisoned while re-queueing main event (source={source}, detail={detail})"
-            ),
-        );
-        return;
-    };
-
-    state.pending_main_events.push(event);
-    log_manager::append_line(
-        app,
-        format!("main event dispatch failed and was re-queued (source={source}, detail={detail})"),
-    );
-}
-
-fn flush_pending_main_events(app: &AppHandle, events: Vec<QueuedMainEvent>, source: &str) {
-    for event in events {
-        let dispatched = match &event {
-            QueuedMainEvent::WorkspaceSession {
-                event_name,
-                payload,
-            } => emit_workspace_session_event(app, event_name, payload, source),
-            QueuedMainEvent::OpenRequestError(payload) => {
-                emit_open_request_error_event(app, payload, source)
-            }
-        };
-
-        if !dispatched {
-            requeue_main_event(app, event, source, "flush_failed_after_frontend_ready");
-        }
+fn prefill_status_label(state: PrefillStatusState) -> &'static str {
+    match state {
+        PrefillStatusState::Idle => "idle",
+        PrefillStatusState::OpeningMain => "opening_main",
+        PrefillStatusState::StartupFailed => "startup_failed",
     }
+}
+
+fn webview_runtime_kind_label(kind: WebviewRuntimeKind) -> &'static str {
+    match kind {
+        WebviewRuntimeKind::Evergreen => "evergreen",
+        WebviewRuntimeKind::Fixed => "fixed",
+        WebviewRuntimeKind::Unknown => "unknown",
+    }
+}
+
+fn current_route(_app: &AppHandle) -> Option<LocalRoute> {
+    let lock = shared_navigation_state().lock().ok()?;
+    lock.route
 }
 
 fn emit_shell_route_event(app: &AppHandle, route: LocalRoute, source: &str) -> bool {
@@ -1736,7 +1795,7 @@ fn emit_prefill_status(
         detail: detail.map(|value| value.to_string()),
     };
 
-    match app.emit_to(MAIN_WINDOW_LABEL, PREFILL_STATUS_EVENT, payload) {
+    match app.emit_to(PREFILL_WINDOW_LABEL, PREFILL_STATUS_EVENT, payload) {
         Ok(_) => true,
         Err(error) => {
             log_manager::append_line(
@@ -1773,60 +1832,12 @@ fn record_startup_trace(app: &AppHandle, event: String) {
     let trace_event = event.clone();
     with_runtime_state(app, move |runtime| {
         runtime.startup_trace.push(trace_event);
-        let overflow = runtime
-            .startup_trace
-            .len()
-            .saturating_sub(STARTUP_TRACE_LIMIT);
+        let overflow = runtime.startup_trace.len().saturating_sub(STARTUP_TRACE_LIMIT);
         if overflow > 0 {
             runtime.startup_trace.drain(0..overflow);
         }
     });
     log_manager::append_line(app, format!("startup trace -> {event}"));
-}
-
-fn stage_label(stage: NavigationStage) -> &'static str {
-    match stage {
-        NavigationStage::Init => "init",
-        NavigationStage::LocalBoot => "local_boot",
-        NavigationStage::BackendReady => "backend_ready",
-        NavigationStage::ControlCenter => "control_center",
-        NavigationStage::Diagnostics => "diagnostics",
-    }
-}
-
-fn route_label(route: Option<LocalRoute>) -> &'static str {
-    match route {
-        Some(LocalRoute::Loading) => "loading",
-        Some(LocalRoute::Onboarding) => "onboarding",
-        Some(LocalRoute::Diagnostics) => "diagnostics",
-        Some(LocalRoute::ControlCenter) => "control_center",
-        None => "none",
-    }
-}
-
-fn route_path(route: LocalRoute) -> &'static str {
-    match route {
-        LocalRoute::Loading => "loading",
-        LocalRoute::Onboarding => "onboarding",
-        LocalRoute::Diagnostics => "diagnostics",
-        LocalRoute::ControlCenter => "control-center",
-    }
-}
-
-fn prefill_status_label(state: PrefillStatusState) -> &'static str {
-    match state {
-        PrefillStatusState::Idle => "idle",
-        PrefillStatusState::OpeningMain => "opening_main",
-        PrefillStatusState::StartupFailed => "startup_failed",
-    }
-}
-
-fn webview_runtime_kind_label(kind: WebviewRuntimeKind) -> &'static str {
-    match kind {
-        WebviewRuntimeKind::Evergreen => "evergreen",
-        WebviewRuntimeKind::Fixed => "fixed",
-        WebviewRuntimeKind::Unknown => "unknown",
-    }
 }
 
 #[cfg(test)]
@@ -1842,139 +1853,97 @@ mod tests {
     }
 
     #[test]
-    fn deferred_main_boot_arms_watchdog_and_sets_startup_pending() {
-        let mut state = NavigationState::default();
-        state.pending_prefill = Some(sample_payload());
-
-        let decision = plan_main_window_boot_locked(&mut state, false);
-
-        match decision {
-            MainWindowBootDecision::Deferred {
-                startup_attempt_id,
-                arm_watchdog,
-                watchdog_generation,
-            } => {
-                assert_eq!(startup_attempt_id, 1);
-                assert!(arm_watchdog);
-                assert_eq!(watchdog_generation, 1);
-            }
-            MainWindowBootDecision::FinalizeNow { .. } => {
-                panic!("expected deferred boot");
-            }
-        }
-
-        assert!(state.prefill_completion_pending);
-        assert!(state.startup_pending);
-        assert!(state.main_ready_watchdog_armed);
-        assert!(!state.startup_guard_failed);
-        assert!(state.startup_exit_cause.is_none());
-        assert_eq!(state.startup_phase, StartupPhase::MainBootRequested);
-        assert_eq!(state.main_window_surface, MainWindowSurface::Shell);
-    }
-
-    #[test]
-    fn manual_recovery_rearms_watchdog_with_new_generation() {
-        let mut state = NavigationState::default();
-        state.main_ready_watchdog_armed = true;
-        state.main_ready_watchdog_generation = 4;
-        state.prefill_completion_pending = true;
-        state.startup_pending = true;
-        state.startup_guard_failed = true;
-        state.startup_attempt_id = 9;
-        state.startup_phase = StartupPhase::Failed;
-        state.startup_exit_cause = Some("previous_failure".to_string());
-
-        let decision = plan_main_window_boot_locked(&mut state, true);
-
-        match decision {
-            MainWindowBootDecision::Deferred {
-                startup_attempt_id,
-                arm_watchdog,
-                watchdog_generation,
-            } => {
-                assert_eq!(startup_attempt_id, 10);
-                assert!(arm_watchdog);
-                assert_eq!(watchdog_generation, 5);
-            }
-            MainWindowBootDecision::FinalizeNow { .. } => {
-                panic!("expected deferred boot");
-            }
-        }
-
-        assert!(state.main_ready_watchdog_armed);
-        assert!(state.startup_pending);
-        assert!(!state.startup_guard_failed);
-        assert!(state.startup_exit_cause.is_none());
-        assert_eq!(state.startup_phase, StartupPhase::MainBootRequested);
-    }
-
-    #[test]
-    fn ready_boot_clears_guard_and_returns_pending_payload() {
-        let mut state = NavigationState::default();
-        state.frontend_ready = true;
-        state.pending_prefill = Some(sample_payload());
-        state.prefill_completion_pending = true;
-        state.startup_pending = true;
-        state.main_ready_watchdog_armed = true;
-        state.startup_guard_failed = true;
-        state.startup_exit_cause = Some("timeout".to_string());
-
-        let decision = plan_main_window_boot_locked(&mut state, false);
-
-        match decision {
-            MainWindowBootDecision::FinalizeNow { pending_prefill } => {
-                assert!(pending_prefill.is_some());
-            }
-            MainWindowBootDecision::Deferred { .. } => {
-                panic!("expected immediate finalization");
-            }
-        }
-
-        assert!(!state.prefill_completion_pending);
-        assert!(!state.startup_pending);
-        assert!(!state.main_ready_watchdog_armed);
-        assert!(!state.startup_guard_failed);
-        assert!(state.startup_exit_cause.is_none());
-        assert_eq!(state.startup_phase, StartupPhase::FrontendReady);
-    }
-
-    #[test]
-    fn clear_boot_guard_resets_startup_state() {
-        let mut state = NavigationState::default();
-        state.prefill_completion_pending = true;
-        state.startup_pending = true;
-        state.main_ready_watchdog_armed = true;
-        state.startup_guard_failed = true;
-        state.startup_phase = StartupPhase::Failed;
-        state.startup_failure_kind = Some(StartupFailureKind::FrontendReadyTimeout);
-        state.startup_failure_detail = Some("timeout".to_string());
-        state.startup_exit_cause = Some("close_requested".to_string());
-
-        clear_boot_guard_locked(&mut state);
-
-        assert!(!state.prefill_completion_pending);
-        assert!(!state.startup_pending);
-        assert!(!state.main_ready_watchdog_armed);
-        assert!(!state.startup_guard_failed);
-        assert!(state.startup_exit_cause.is_none());
-        assert_eq!(state.startup_phase, StartupPhase::FrontendReady);
-        assert!(state.startup_failure_kind.is_none());
-        assert!(state.startup_failure_detail.is_none());
-    }
-
-    #[test]
-    fn closing_prefill_surface_is_not_handled_as_enter_shell() {
-        let mut state = NavigationState::default();
-        state.main_window_surface = MainWindowSurface::Prefill;
-
-        let action = if state.main_window_surface == MainWindowSurface::Prefill {
-            1_u8
-        } else if state.startup_pending && !state.allow_process_exit {
-            2_u8
-        } else {
-            0_u8
+    fn prepare_hidden_main_boot_resets_startup_flags_and_increments_attempt() {
+        let mut state = NavigationState {
+            startup_attempt_id: 4,
+            startup_guard_failed: true,
+            frontend_ready: true,
+            loading_rendered: true,
+            ..NavigationState::default()
         };
 
-        assert_eq!(action, 1);
+        prepare_hidden_main_boot_locked(&mut state);
+
+        assert_eq!(state.startup_attempt_id, 5);
+        assert!(state.startup_pending);
+        assert!(state.main_ready_watchdog_armed);
+        assert!(!state.startup_guard_failed);
+        assert!(!state.frontend_ready);
+        assert!(!state.loading_rendered);
+        assert_eq!(state.startup_phase, StartupPhase::MainBootRequested);
+    }
+
+    #[test]
+    fn can_finalize_handoff_requires_all_latches() {
+        let mut state = NavigationState {
+            handoff_requested: true,
+            frontend_ready: true,
+            loading_rendered: false,
+            ..NavigationState::default()
+        };
+
+        assert!(!can_finalize_handoff_locked(&state));
+        state.loading_rendered = true;
+        assert!(can_finalize_handoff_locked(&state));
+        state.startup_guard_failed = true;
+        assert!(!can_finalize_handoff_locked(&state));
+    }
+
+    #[test]
+    fn reset_for_retry_clears_route_handoff_and_queued_payloads() {
+        let mut state = NavigationState {
+            stage: NavigationStage::Diagnostics,
+            route: Some(LocalRoute::Diagnostics),
+            frontend_ready: true,
+            loading_rendered: true,
+            queued_route: Some(LocalRoute::Onboarding),
+            pending_prefill: Some(sample_payload()),
+            pending_main_events: vec![QueuedMainEvent::OpenRequestError(OpenRequestErrorPayload {
+                source: "test".to_string(),
+                stage: "parse".to_string(),
+                message: "boom".to_string(),
+                args_summary: None,
+            })],
+            handoff_requested: true,
+            startup_pending: true,
+            startup_guard_failed: true,
+            startup_phase: StartupPhase::Failed,
+            ..NavigationState::default()
+        };
+
+        reset_for_retry_locked(&mut state);
+
+        assert_eq!(state.stage, NavigationStage::Init);
+        assert!(state.route.is_none());
+        assert!(state.queued_route.is_none());
+        assert!(state.pending_prefill.is_none());
+        assert!(state.pending_main_events.is_empty());
+        assert!(!state.handoff_requested);
+        assert!(!state.frontend_ready);
+        assert!(!state.loading_rendered);
+        assert!(!state.startup_pending);
+        assert!(!state.startup_guard_failed);
+    }
+
+    #[test]
+    fn request_route_is_queued_until_frontend_ready() {
+        let mut state = NavigationState::default();
+        let outcome = request_route_locked(&mut state, LocalRoute::ControlCenter);
+
+        match outcome {
+            DispatchOutcome::Queued(route, reason) => {
+                assert_eq!(route, LocalRoute::ControlCenter);
+                assert_eq!(reason, "frontend_not_ready");
+            }
+            _ => panic!("expected queued outcome"),
+        }
+        assert_eq!(state.queued_route, Some(LocalRoute::ControlCenter));
+    }
+
+    #[test]
+    fn next_prefill_id_monotonically_increments() {
+        let mut state = NavigationState::default();
+        assert_eq!(next_prefill_request_id_locked(&mut state), "prefill-0000000001");
+        assert_eq!(next_prefill_request_id_locked(&mut state), "prefill-0000000002");
     }
 }

@@ -3029,3 +3029,31 @@
 - GitHub repository visibility changed from `private` to `public`.
 - Remaining note:
 - None.
+
+## Current Plan (repo about + README_zh)
+
+### Checklist
+
+- [x] Add a root `README_zh.md` with a Chinese version of the repository overview, setup, and release output notes
+- [x] Update the root `README.md` to link to the Chinese README entry point
+- [x] Write the GitHub repository About description and verify it remotely
+- [ ] Commit the documentation changes and push `main` to `origin`
+
+### Acceptance Criteria
+
+- [x] Root `README_zh.md` exists and accurately describes the project in Chinese
+- [x] Root `README.md` includes a visible link to the Chinese README
+- [x] GitHub repo About description is no longer empty
+- [ ] `origin/main` contains the new documentation commit
+
+### Review
+
+- Actual changes:
+- Added a new root `README_zh.md` with a Chinese repository overview, local development notes, release output paths, and license pointer.
+- Added a language switch link at the top of `README.md` so the Chinese README has an explicit entry point.
+- Updated the GitHub repository About description to: `Kimi Web 的 Windows 桌面壳，基于 Tauri v2 + React，集成启动监控、工作区接管与安装包分发。`
+- Verification:
+- `Get-Content -Encoding utf8 README_zh.md` confirmed the Chinese README content is present and readable.
+- `gh repo view endearqb/kimi-app --json description,url,visibility` confirmed the About description is populated and the repo remains public.
+- Remaining note:
+- Commit and push are still pending.

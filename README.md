@@ -1,5 +1,7 @@
 # Kimi App
 
+[中文说明](README_zh.md)
+
 Kimi App is an MIT-licensed repository for the Windows desktop shell around Kimi Web.
 The main deliverable is `apps/kimi-shell`, a Tauri v2 + React application that packages
 startup flow, workspace handoff, diagnostics, and Windows installers into a single app.

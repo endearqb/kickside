@@ -21,9 +21,10 @@ use crate::{
     cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
     types::{
         AppSettings, BackendState, EnvOverrideStatus, InstallCommandCatalog, InstallCommandEntry,
-        InstallProbeStatus, KeyValueEntry, KimiCliApiConfigInput, KimiCliApiConfigView,
-        KimiCliConfigCenterInput, KimiCliConfigCenterView, LoopControlEntry, McpServerEntry,
-        ModelEntry, ProviderEntry, ServiceEntry, TypedFieldEntry, TypedFieldType,
+        InstallCommandStep, InstallProbeStatus, KeyValueEntry, KimiCliApiConfigInput,
+        KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+        LoopControlEntry, McpServerEntry, ModelEntry, ProviderEntry, ServiceEntry,
+        TypedFieldEntry, TypedFieldType,
     },
     window_manager, workspace_session,
 };
@@ -397,15 +398,6 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 winget install OpenJS.NodeJS --accept-source-agreements --accept-package-agreements
 $nodeVer = node -v
 Write-Output "Node.js 瀹夎瀹屾垚銆?nodeVer"
-"#;
-
-const POWERSHELL_VERIFY_COMMANDS_LAUNCH: &str = r#"
-git --version
-uv --version
-py -3.13 --version
-kimi -v
-node -v
-npm -v
 "#;
 
 pub fn start_backend(app: AppHandle) {
@@ -880,59 +872,420 @@ pub fn get_install_command_catalog() -> InstallCommandCatalog {
         entries: vec![
             build_install_command_entry(
                 "install_deps_official",
-                "Install dependencies (official)",
-                "Install Git and uv via official channels. Requires elevation.",
+                "安装依赖（官方源）",
+                "按顺序安装 Git 与 uv。建议使用管理员 PowerShell。",
+                "official",
                 true,
-                POWERSHELL_INSTALL_DEPS_OFFICIAL_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "install_git_official",
+                        "安装 Git",
+                        "通过 winget 安装 Git for Windows。",
+                        r#"
+winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
+"#,
+                    ),
+                    build_install_command_step(
+                        "install_uv_official",
+                        "安装 uv",
+                        "通过 winget 安装 uv。",
+                        r#"
+winget install --id astral-sh.uv -e --source winget --accept-source-agreements --accept-package-agreements
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_uv_official",
+                        "确认 uv 可用",
+                        "输出版本号即表示安装成功。",
+                        r#"
+uv --version
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "install_deps_mirror",
-                "Install dependencies (mirror)",
-                "Install Git and uv via mirror fallback chain. Requires elevation.",
+                "安装依赖（镜像源）",
+                "按顺序通过镜像安装 Git 与 uv。建议使用管理员 PowerShell。",
+                "mirror",
                 true,
-                POWERSHELL_INSTALL_DEPS_MIRROR_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "install_git_mirror",
+                        "安装 Git",
+                        "优先从清华镜像获取 Git 安装包，找不到时自动回退版本目录。",
+                        r#"
+$ErrorActionPreference='Stop'
+$latestReleaseUrl = 'https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/'
+$baseUri = [System.Uri]$latestReleaseUrl
+$latestReleasePage = Invoke-WebRequest -Uri $latestReleaseUrl -TimeoutSec 45 -ErrorAction Stop
+$latestLinks = @($latestReleasePage.Links | Where-Object { $_.href })
+$installerHref = $latestLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git-[^/]*-64-bit\.exe$' } | Select-Object -First 1
+$versionDirHref = $latestLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git%20for%20Windows%20v[^/]+/?$' } | Select-Object -First 1
+if ((-not $installerHref) -and $versionDirHref) {
+  $versionDirUrl = [System.Uri]::new($baseUri, $versionDirHref).AbsoluteUri
+  $versionPage = Invoke-WebRequest -Uri $versionDirUrl -TimeoutSec 45 -ErrorAction Stop
+  $versionLinks = @($versionPage.Links | Where-Object { $_.href })
+  $installerHref = $versionLinks | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git-[^/]*-64-bit\.exe$' } | Select-Object -First 1
+  if ($installerHref) { $baseUri = [System.Uri]$versionDirUrl }
+}
+if (-not $installerHref) { throw '清华镜像未找到 Git 安装包。' }
+$gitInstallerUrl = [System.Uri]::new($baseUri, $installerHref).AbsoluteUri
+$gitInstallerPath = Join-Path $env:TEMP 'kimi-shell-git-installer.exe'
+Invoke-WebRequest -Uri $gitInstallerUrl -OutFile $gitInstallerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+Start-Process -FilePath $gitInstallerPath -Wait
+"#,
+                    ),
+                    build_install_command_step(
+                        "install_uv_mirror",
+                        "安装 uv",
+                        "依次尝试清华和阿里镜像，下载 zip 后解压到用户目录。",
+                        r#"
+$ErrorActionPreference='Stop'
+$releaseUrls = @(
+  'https://mirrors.tuna.tsinghua.edu.cn/github-release/astral-sh/uv/LatestRelease/',
+  'https://mirrors.aliyun.com/github-release/astral-sh/uv/LatestRelease/'
+)
+$assetPattern = '(?i)uv-x86_64-pc-windows-msvc\.zip$'
+$uvInstallDir = Join-Path $HOME '.local\bin'
+$uvZipPath = Join-Path $env:TEMP 'kimi-shell-uv.zip'
+$uvExtractDir = Join-Path $env:TEMP 'kimi-shell-uv'
+New-Item -ItemType Directory -Force -Path $uvInstallDir | Out-Null
+$uvInstalled = $false
+
+foreach ($releaseUrl in $releaseUrls) {
+  try {
+    $baseUri = [System.Uri]$releaseUrl
+    $releasePage = Invoke-WebRequest -Uri $releaseUrl -TimeoutSec 45 -ErrorAction Stop
+    $releaseLinks = @($releasePage.Links | Where-Object { $_.href })
+    $assetHref = $releaseLinks | ForEach-Object { $_.href } | Where-Object { $_ -match $assetPattern } | Select-Object -First 1
+    if (-not $assetHref) { throw 'release page missing uv windows zip' }
+    $assetUrl = [System.Uri]::new($baseUri, $assetHref).AbsoluteUri
+
+    if (Test-Path $uvZipPath) { Remove-Item $uvZipPath -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $uvExtractDir) { Remove-Item $uvExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    Invoke-WebRequest -Uri $assetUrl -OutFile $uvZipPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+    Expand-Archive -Path $uvZipPath -DestinationPath $uvExtractDir -Force
+    $uvExe = Get-ChildItem -Path $uvExtractDir -Recurse -Filter 'uv.exe' | Select-Object -First 1
+    if (-not $uvExe) { throw 'expanded archive does not contain uv.exe' }
+
+    Copy-Item -Path $uvExe.FullName -Destination (Join-Path $uvInstallDir 'uv.exe') -Force
+    $uvInstalled = $true
+    break
+  } catch {
+    Write-Host ('uv 镜像安装失败，继续尝试下一个源：' + $releaseUrl)
+  }
+}
+
+foreach ($dir in @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))) {
+  if ((Test-Path $dir) -and ($env:Path -notlike "*$dir*")) {
+    $env:Path = "$dir;$env:Path"
+  }
+}
+
+if ((-not $uvInstalled) -or (-not (Get-Command uv -ErrorAction SilentlyContinue))) {
+  throw 'uv 镜像安装失败，请检查网络后重试。'
+}
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_deps_mirror",
+                        "验证依赖",
+                        "确认 Git 与 uv 已可在当前 PowerShell 中调用。",
+                        r#"
+git --version
+uv --version
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "install_kimi_official",
-                "Install Kimi (official)",
-                "Install Python 3.13 and kimi-cli from official source.",
+                "安装 Kimi（官方源）",
+                "先安装 Python 3.13，再安装 kimi-cli。",
+                "official",
                 false,
-                POWERSHELL_INSTALL_KIMI_OFFICIAL_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "install_python_official",
+                        "安装 Python 3.13",
+                        "通过 uv 安装 Python 3.13 运行时。",
+                        r#"
+uv python install 3.13
+"#,
+                    ),
+                    build_install_command_step(
+                        "install_kimi_cli_official",
+                        "安装 kimi-cli",
+                        "使用 Python 3.13 安装或升级 kimi-cli。",
+                        r#"
+uv tool install kimi-cli --python 3.13 --upgrade
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_kimi_official",
+                        "验证 Kimi",
+                        "输出版本号即表示安装成功。",
+                        r#"
+kimi -v
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "install_kimi_mirror",
-                "Install Kimi (mirror)",
-                "Install Python 3.13 and kimi-cli via mirror fallback chain.",
+                "安装 Kimi（镜像源）",
+                "按顺序安装 Python 3.13 与 kimi-cli 镜像源版本。",
+                "mirror",
                 false,
-                POWERSHELL_INSTALL_KIMI_MIRROR_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "install_python_mirror",
+                        "安装 Python 3.13",
+                        "依次尝试清华和阿里镜像，静默安装 Python 3.13。",
+                        r#"
+$ErrorActionPreference='Stop'
+$pythonMirrors = @(
+  'https://mirrors.tuna.tsinghua.edu.cn/python/3.13.12/python-3.13.12-amd64.exe',
+  'https://mirrors.aliyun.com/python-release/windows/python-3.13.12-amd64.exe'
+)
+$pythonInstallerPath = Join-Path $env:TEMP 'kimi-shell-python-3.13.12-amd64.exe'
+$pythonInstalled = $false
+$pythonUserExe = Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe'
+
+foreach ($mirrorUrl in $pythonMirrors) {
+  try {
+    if (Test-Path $pythonInstallerPath) { Remove-Item $pythonInstallerPath -Force -ErrorAction SilentlyContinue }
+    Invoke-WebRequest -Uri $mirrorUrl -OutFile $pythonInstallerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
+    $proc = Start-Process -FilePath $pythonInstallerPath -ArgumentList @('/quiet','InstallAllUsers=0','PrependPath=1','Include_pip=1','Include_test=0') -Wait -PassThru
+    if ($null -eq $proc) { throw 'python installer process unavailable' }
+    if ($proc.ExitCode -ne 0) { throw ('python installer exit_code=' + $proc.ExitCode) }
+    if ((Test-Path $pythonUserExe)) {
+      & $pythonUserExe --version
+      if ($LASTEXITCODE -eq 0) {
+        $pythonInstalled = $true
+        break
+      }
+    }
+    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+      & py -3.13 --version
+      if ($LASTEXITCODE -eq 0) {
+        $pythonInstalled = $true
+        break
+      }
+    }
+  } catch {
+    Write-Host ('Python 镜像安装失败，继续尝试下一个源：' + $mirrorUrl)
+  }
+}
+
+if (-not $pythonInstalled) {
+  throw 'Python 3.13 镜像安装失败，请检查网络后重试。'
+}
+"#,
+                    ),
+                    build_install_command_step(
+                        "install_kimi_cli_mirror",
+                        "安装 kimi-cli",
+                        "依次尝试清华和阿里 PyPI 镜像安装 kimi-cli。",
+                        r#"
+$ErrorActionPreference='Stop'
+$pythonUserExe = Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe'
+$pythonSpec = if (Test-Path $pythonUserExe) { $pythonUserExe } else { '3.13' }
+$indexes = @(
+  'https://pypi.tuna.tsinghua.edu.cn/simple/',
+  'https://mirrors.aliyun.com/pypi/simple/'
+)
+$installed = $false
+
+foreach ($index in $indexes) {
+  try {
+    uv tool install kimi-cli --python "$pythonSpec" --upgrade -i $index
+    $installed = $true
+    break
+  } catch {
+    Write-Host ('Kimi CLI 镜像安装失败，继续尝试下一个索引：' + $index)
+  }
+}
+
+if (-not $installed) {
+  throw 'Kimi CLI 镜像安装失败，请检查网络后重试。'
+}
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_kimi_mirror",
+                        "验证 Kimi",
+                        "确认 Python 3.13 与 kimi-cli 都可正常调用。",
+                        r#"
+py -3.13 --version
+kimi -v
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "upgrade_kimi_official",
-                "Upgrade Kimi (official)",
-                "Upgrade kimi-cli from official source only.",
+                "升级 Kimi（官方源）",
+                "通过官方源升级现有 kimi-cli。",
+                "official",
                 false,
-                POWERSHELL_UPGRADE_KIMI_OFFICIAL_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "upgrade_kimi_cli_official",
+                        "升级 kimi-cli",
+                        "使用 Python 3.13 执行升级。",
+                        r#"
+uv tool install kimi-cli --python 3.13 --upgrade
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_upgrade_kimi_official",
+                        "验证版本",
+                        "输出版本号确认升级结果。",
+                        r#"
+kimi -v
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "upgrade_kimi_mirror",
-                "Upgrade Kimi (mirror)",
-                "Upgrade kimi-cli via mirror indexes only.",
+                "升级 Kimi（镜像源）",
+                "通过镜像索引升级现有 kimi-cli。",
+                "mirror",
                 false,
-                POWERSHELL_UPGRADE_KIMI_MIRROR_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "upgrade_kimi_cli_mirror",
+                        "升级 kimi-cli",
+                        "依次尝试清华和阿里 PyPI 镜像升级 kimi-cli。",
+                        r#"
+$ErrorActionPreference='Stop'
+$pythonUserExe = Join-Path $env:LocalAppData 'Programs\Python\Python313\python.exe'
+$pythonSpec = if (Test-Path $pythonUserExe) { $pythonUserExe } else { '3.13' }
+$indexes = @(
+  'https://pypi.tuna.tsinghua.edu.cn/simple/',
+  'https://mirrors.aliyun.com/pypi/simple/'
+)
+$upgraded = $false
+
+foreach ($index in $indexes) {
+  try {
+    uv tool install kimi-cli --python "$pythonSpec" --upgrade -i $index
+    $upgraded = $true
+    break
+  } catch {
+    Write-Host ('Kimi CLI 镜像升级失败，继续尝试下一个索引：' + $index)
+  }
+}
+
+if (-not $upgraded) {
+  throw 'Kimi CLI 镜像升级失败，请检查网络后重试。'
+}
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_upgrade_kimi_mirror",
+                        "验证版本",
+                        "输出版本号确认升级结果。",
+                        r#"
+kimi -v
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "install_nodejs",
-                "Install Node.js",
-                "Install Node.js via winget. Requires elevation.",
+                "安装 Node.js",
+                "通过 winget 安装 Node.js，并确认 `node` 与 `npm` 可用。",
+                "shared",
                 true,
-                POWERSHELL_INSTALL_NODEJS_OFFICIAL_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "install_nodejs_official",
+                        "安装 Node.js",
+                        "通过 winget 安装 Node.js。",
+                        r#"
+winget install OpenJS.NodeJS --accept-source-agreements --accept-package-agreements
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_nodejs",
+                        "验证 node",
+                        "输出 Node.js 版本号。",
+                        r#"
+node -v
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_npm",
+                        "验证 npm",
+                        "输出 npm 版本号。",
+                        r#"
+npm -v
+"#,
+                    ),
+                ],
             ),
             build_install_command_entry(
                 "verify_commands",
-                "Verify commands",
-                "Verify Git, uv, Python 3.13, Kimi, and Node.js in PowerShell.",
+                "验证环境",
+                "按顺序检查 Git、uv、Python 3.13、Kimi 与 Node.js 是否已可用。",
+                "shared",
                 false,
-                POWERSHELL_VERIFY_COMMANDS_LAUNCH,
+                vec![
+                    build_install_command_step(
+                        "verify_git",
+                        "验证 Git",
+                        "输出 Git 版本号。",
+                        r#"
+git --version
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_uv",
+                        "验证 uv",
+                        "输出 uv 版本号。",
+                        r#"
+uv --version
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_python313",
+                        "验证 Python 3.13",
+                        "输出 Python 3.13 版本号。",
+                        r#"
+py -3.13 --version
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_kimi",
+                        "验证 Kimi",
+                        "输出 kimi-cli 版本号。",
+                        r#"
+kimi -v
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_node",
+                        "验证 Node.js",
+                        "输出 Node.js 版本号。",
+                        r#"
+node -v
+"#,
+                    ),
+                    build_install_command_step(
+                        "verify_npm_shared",
+                        "验证 npm",
+                        "输出 npm 版本号。",
+                        r#"
+npm -v
+"#,
+                    ),
+                ],
             ),
         ],
     }
@@ -957,14 +1310,30 @@ fn build_install_command_entry(
     id: &str,
     title: &str,
     description: &str,
+    source: &str,
     requires_elevation: bool,
-    command: &str,
+    steps: Vec<InstallCommandStep>,
 ) -> InstallCommandEntry {
     InstallCommandEntry {
         id: id.to_string(),
         title: title.to_string(),
         description: description.to_string(),
+        source: source.to_string(),
         requires_elevation,
+        steps,
+    }
+}
+
+fn build_install_command_step(
+    id: &str,
+    title: &str,
+    description: &str,
+    command: &str,
+) -> InstallCommandStep {
+    InstallCommandStep {
+        id: id.to_string(),
+        title: title.to_string(),
+        description: description.to_string(),
         command: normalize_install_catalog_command(command),
     }
 }

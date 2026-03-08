@@ -414,7 +414,15 @@ export interface InstallCommandEntry {
   id: string;
   title: string;
   description: string;
+  source: "official" | "mirror" | "shared";
   requiresElevation: boolean;
+  steps: InstallCommandStep[];
+}
+
+export interface InstallCommandStep {
+  id: string;
+  title: string;
+  description: string;
   command: string;
 }
 

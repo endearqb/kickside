@@ -557,12 +557,23 @@ pub struct InstallProbeStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct InstallCommandStep {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallCommandEntry {
     pub id: String,
     pub title: String,
     pub description: String,
+    pub source: String,
     pub requires_elevation: bool,
-    pub command: String,
+    #[serde(default)]
+    pub steps: Vec<InstallCommandStep>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -5,7 +5,7 @@ Kimi Desktop Shell 是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，�
 ## 项目简介
 
 - 应用名称：`Kimi Desktop Shell`
-- 当前版本：`0.0.14`
+- 当前版本：`0.0.15`
 - 目标平台：Windows（当前发布产物为 MSI / NSIS）
 - 核心目标：把 `kimi web` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
 

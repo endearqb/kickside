@@ -1,5 +1,57 @@
 # TODO - 按 docs/需求文档2.md 开发与执行
 
+## 本轮计划（引导配置安装命令弹窗改造）
+
+### 计划清单
+
+- [x] 记录本轮安装命令弹窗改造目标、边界与验收标准
+- [x] 重构安装命令目录数据模型，改为按来源 + 步骤化展示结构
+- [x] 调整 `apps/kimi-shell/src-tauri/src/backend_manager.rs`，输出中文安装命令目录并与内部执行脚本解耦
+- [x] 调整 `apps/kimi-shell/src/features/control-center/InstallCommandsModal.tsx`，实现按当前源过滤、默认折叠、互斥展开与逐步复制
+- [x] 调整 `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx` 与相关类型，向弹窗传递当前安装源
+- [x] 调整 `apps/kimi-shell/src/App.css`，适配手风琴步骤列表与紧凑代码块样式
+- [x] 执行 `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] 执行 `pnpm -C apps/kimi-shell build`
+- [x] 回填本节回顾与验证结果
+
+### 验收标准
+
+- [ ] “查看完整安装命令”弹窗只展示当前 `installSource` 对应条目，加上共享项“安装 Node.js”“验证环境”
+- [ ] 弹窗首次打开默认全部折叠，单次只允许展开一个条目，切换安装源后恢复折叠
+- [ ] 条目标题、说明、步骤标题与复制文案全部为正常中文 UTF-8，无英文残留、无乱码
+- [ ] 展开后每个步骤均支持单独复制命令，顶部“复制全部”只复制当前可见条目步骤，顺序与界面一致
+- [x] 后端目录不再直接暴露内部自动安装用的超长 PowerShell 脚本
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### 回顾（完成后填写）
+
+- 实际变更：
+  - `apps/kimi-shell/src-tauri/src/types.rs` / `apps/kimi-shell/src/app/types.ts`
+    - 将安装命令目录从单一 `command` 改为 `source + steps` 的展示模型，并新增 `InstallCommandStep`。
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - `get_install_command_catalog()` 改为输出中文目录。
+    - 官方源、镜像源和共享项均拆成面向用户的步骤化命令，不再直接暴露内部自动安装用的长脚本。
+    - 删除不再使用的 `POWERSHELL_VERIFY_COMMANDS_LAUNCH` 常量，保持 `cargo check` 无新增 warning。
+  - `apps/kimi-shell/src/features/control-center/InstallCommandsModal.tsx`
+    - 弹窗改为按当前 `installSource` 过滤条目。
+    - 新增本地 `expandedEntryId`，首次打开和切换源时默认折叠，展开行为互斥。
+    - 展开后按“步骤序号 + 中文说明 + 命令块 + 单步复制按钮”展示。
+    - 顶部“复制全部”改为仅复制当前可见条目与步骤，并保留 `#` 中文注释头。
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - 向安装命令弹窗透传当前 `installSource`。
+  - `apps/kimi-shell/src/App.css`
+    - 新增手风琴头部、步骤列表、展开箭头和紧凑命令块样式，并补齐窄屏下的折行布局。
+- 验证结果：
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+  - `pnpm -C apps/kimi-shell build` 通过。
+- 手工建议：
+  - 仍需手工打开全屏控制中心与 workspace 内 modal，两套入口分别确认：
+    - 官方源只显示官方源条目 + 共享项。
+    - 镜像源只显示镜像源条目 + 共享项。
+    - 首次打开默认折叠，展开互斥，切换安装源后恢复折叠。
+    - “复制这一步”和“复制全部”实际粘贴结果与界面顺序一致。
+
 ## 本轮计划（关闭应用读秒窗接入随机 Tips）
 
 ### 计划清单

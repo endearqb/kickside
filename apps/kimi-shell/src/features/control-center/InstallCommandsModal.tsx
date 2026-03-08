@@ -1,26 +1,64 @@
-import { Copy, TerminalSquare, X } from "lucide-react";
-import type { InstallCommandCatalog, InstallCommandEntry } from "@/app/types";
+import { useEffect, useState } from "react";
+import { ChevronRight, Copy, TerminalSquare, X } from "lucide-react";
+import type {
+  InstallCommandCatalog,
+  InstallCommandEntry,
+} from "@/app/types";
 import { Button } from "@/components/ui/button";
 
 type InstallCommandsModalProps = {
   open: boolean;
   busy: boolean;
   catalog: InstallCommandCatalog | null;
+  installSource: "official" | "mirror";
   onClose: () => void;
 };
 
-function buildCatalogCopyText(catalog: InstallCommandCatalog | null) {
-  if (!catalog?.entries.length) {
+function getSourceLabel(source: "official" | "mirror") {
+  return source === "official" ? "官方源" : "镜像源";
+}
+
+function getPowerShellHint(entry: InstallCommandEntry) {
+  return entry.requiresElevation ? "需要管理员 PowerShell" : "普通 PowerShell 即可";
+}
+
+function getVisibleEntries(
+  catalog: InstallCommandCatalog | null,
+  installSource: "official" | "mirror",
+) {
+  return (catalog?.entries ?? []).filter(
+    (entry) => entry.source === installSource || entry.source === "shared",
+  );
+}
+
+function buildCatalogCopyText(
+  entries: InstallCommandEntry[],
+  installSource: "official" | "mirror",
+) {
+  if (!entries.length) {
     return "";
   }
-  return catalog.entries
-    .map(
-      (entry) =>
-        `# ${entry.title}\n# ${entry.description}\n# ${
-          entry.requiresElevation ? "需要管理员权限" : "普通用户权限"
-        }\n${entry.command.trim()}`,
-    )
-    .join("\n\n");
+
+  return [
+    `# 完整安装命令（${getSourceLabel(installSource)}）`,
+    "# 请按界面顺序逐步复制到 PowerShell 执行",
+    "",
+    ...entries.flatMap((entry) => [
+      `# ${entry.title}`,
+      `# ${entry.description}`,
+      `# ${getPowerShellHint(entry)}`,
+      "",
+      ...entry.steps.flatMap((step, index) => [
+        `# ${index + 1}. ${step.title}`,
+        `# ${step.description}`,
+        step.command.trim(),
+        "",
+      ]),
+      "",
+    ]),
+  ]
+    .join("\n")
+    .trim();
 }
 
 async function copyText(value: string) {
@@ -47,36 +85,67 @@ async function copyText(value: string) {
   }
 }
 
-function InstallCommandCard({ entry }: { entry: InstallCommandEntry }) {
-  const handleCopy = async () => {
-    await copyText(entry.command);
-  };
-
+function InstallCommandCard({
+  entry,
+  expanded,
+  onToggle,
+}: {
+  entry: InstallCommandEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <article className="cc-install-command-card">
-      <header className="cc-install-command-head">
+    <article className={`cc-install-command-card ${expanded ? "expanded" : ""}`}>
+      <button
+        type="button"
+        className="cc-install-command-head"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
         <div className="cc-install-command-title">
           <h4>{entry.title}</h4>
           <p>{entry.description}</p>
         </div>
-        <div className="cc-install-command-actions">
-          <span className="cc-install-command-tag">
-            {entry.requiresElevation ? "需要管理员权限" : "普通用户权限"}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            icon={<Copy size={14} />}
-            className="cc-action-btn"
-            onClick={() => {
-              void handleCopy();
-            }}
-          >
-            复制命令
-          </Button>
+        <div className="cc-install-command-summary">
+          <span className="cc-install-command-tag">{getPowerShellHint(entry)}</span>
+          <span className="cc-install-command-count">{entry.steps.length} 步</span>
+          <ChevronRight
+            size={16}
+            className={`cc-install-command-chevron ${expanded ? "expanded" : ""}`}
+            aria-hidden="true"
+          />
         </div>
-      </header>
-      <pre className="cc-install-command-code">{entry.command}</pre>
+      </button>
+
+      {expanded ? (
+        <ol className="cc-install-command-steps">
+          {entry.steps.map((step, index) => (
+            <li key={step.id} className="cc-install-command-step">
+              <div className="cc-install-command-step-head">
+                <div className="cc-install-command-step-title">
+                  <span className="cc-install-command-step-index">{index + 1}</span>
+                  <div>
+                    <h5>{step.title}</h5>
+                    <p>{step.description}</p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  icon={<Copy size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => {
+                    void copyText(step.command);
+                  }}
+                >
+                  复制这一步
+                </Button>
+              </div>
+              <pre className="cc-install-command-code">{step.command}</pre>
+            </li>
+          ))}
+        </ol>
+      ) : null}
     </article>
   );
 }
@@ -85,14 +154,27 @@ export function InstallCommandsModal({
   open,
   busy,
   catalog,
+  installSource,
   onClose,
 }: InstallCommandsModalProps) {
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+
+  const visibleEntries = getVisibleEntries(catalog, installSource);
+  const visibleStepCount = visibleEntries.reduce(
+    (total, entry) => total + entry.steps.length,
+    0,
+  );
+
+  useEffect(() => {
+    setExpandedEntryId(null);
+  }, [installSource, open]);
+
   if (!open) {
     return null;
   }
 
   const handleCopyAll = async () => {
-    await copyText(buildCatalogCopyText(catalog));
+    await copyText(buildCatalogCopyText(visibleEntries, installSource));
   };
 
   return (
@@ -114,7 +196,7 @@ export function InstallCommandsModal({
         <header className="cc-install-commands-modal-header">
           <div className="cc-install-commands-modal-title">
             <h3>完整安装命令</h3>
-            <p>可直接复制到 PowerShell 手动执行，命令内容与当前产品安装脚本保持同源。</p>
+            <p>当前仅展示 {getSourceLabel(installSource)} 对应步骤与共享验证项，请按顺序复制到 PowerShell 执行。</p>
           </div>
           <div className="cc-install-commands-modal-actions">
             <Button
@@ -125,7 +207,7 @@ export function InstallCommandsModal({
               onClick={() => {
                 void handleCopyAll();
               }}
-              disabled={!catalog?.entries.length}
+              disabled={!visibleEntries.length}
             >
               复制全部
             </Button>
@@ -143,9 +225,10 @@ export function InstallCommandsModal({
         <div className="cc-install-commands-modal-meta">
           <p>
             <TerminalSquare size={14} />
-            <span>{catalog?.entries.length ?? 0} 段命令</span>
+            <span>{visibleEntries.length} 个条目</span>
           </p>
-          <p>建议在 PowerShell 中执行，多行脚本请整段粘贴。</p>
+          <p>{visibleStepCount} 个步骤</p>
+          <p>默认折叠，展开后可逐步复制。</p>
         </div>
 
         <div className="cc-install-commands-modal-body">
@@ -154,10 +237,17 @@ export function InstallCommandsModal({
               <div className="spinner" aria-hidden />
               <p>正在加载命令目录…</p>
             </div>
-          ) : catalog?.entries.length ? (
+          ) : visibleEntries.length ? (
             <div className="cc-install-command-list">
-              {catalog.entries.map((entry) => (
-                <InstallCommandCard key={entry.id} entry={entry} />
+              {visibleEntries.map((entry) => (
+                <InstallCommandCard
+                  key={entry.id}
+                  entry={entry}
+                  expanded={expandedEntryId === entry.id}
+                  onToggle={() => {
+                    setExpandedEntryId((current) => (current === entry.id ? null : entry.id));
+                  }}
+                />
               ))}
             </div>
           ) : (

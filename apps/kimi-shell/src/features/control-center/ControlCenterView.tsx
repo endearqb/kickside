@@ -1241,6 +1241,7 @@ export function ControlCenterView({
         open={installCommandsOpen}
         busy={installCommandsBusy}
         catalog={installCommandCatalog}
+        installSource={installSource}
         onClose={onCloseInstallCommands}
       />
     </section>

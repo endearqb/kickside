@@ -1188,14 +1188,23 @@
   overflow: hidden;
 }
 
+.cc-install-command-card.expanded {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--chrome-border));
+}
+
 .cc-install-command-head {
+  width: 100%;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--chrome-border);
+  border: 0;
   background: color-mix(in srgb, var(--surface-muted) 74%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .cc-install-command-title h4 {
@@ -1209,9 +1218,10 @@
   font-size: 12px;
 }
 
-.cc-install-command-actions {
+.cc-install-command-summary {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -1228,15 +1238,87 @@
   background: color-mix(in srgb, var(--surface) 90%, var(--background));
 }
 
+.cc-install-command-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  background: color-mix(in srgb, var(--surface-muted) 68%, transparent);
+}
+
+.cc-install-command-chevron {
+  color: var(--text-secondary);
+  transition: transform 140ms ease;
+}
+
+.cc-install-command-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.cc-install-command-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cc-install-command-step {
+  padding: 12px;
+  border-top: 1px solid var(--chrome-border);
+  display: grid;
+  gap: 10px;
+}
+
+.cc-install-command-step-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cc-install-command-step-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cc-install-command-step-index {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.cc-install-command-step-title h5 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.cc-install-command-step-title p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .cc-install-command-code {
   margin: 0;
-  padding: 12px;
+  padding: 10px 12px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 11px;
   line-height: 1.45;
-  background: color-mix(in srgb, var(--surface) 92%, var(--background));
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--background));
 }
 
 .cc-install-commands-empty {
@@ -2025,8 +2107,14 @@ input:focus {
     flex-direction: column;
   }
 
-  .cc-install-command-actions {
+  .cc-install-command-summary {
+    width: 100%;
     justify-content: flex-start;
+  }
+
+  .cc-install-command-step-head {
+    justify-content: flex-start;
+    flex-direction: column;
   }
 }
 

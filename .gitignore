@@ -30,5 +30,4 @@ apps/kimi-shell/src-tauri/.cargo/
 
 # Local planning / docs (keep local, don't track)
 /docs/
-/tasks/
 

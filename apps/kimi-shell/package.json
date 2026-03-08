@@ -1,7 +1,12 @@
 {
   "name": "appskimi-shell",
   "private": true,
-  "version": "0.0.13",
+  "version": "0.0.14",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/endearqb/kimi-app.git"
+  },
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync_version.mjs",

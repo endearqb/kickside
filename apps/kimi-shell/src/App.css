@@ -101,8 +101,8 @@
 }
 
 .titlebar-identity.is-workspace {
-  width: min(76vw, calc(100% - 320px));
-  max-width: 880px;
+  width: min(82vw, calc(100vw - 280px));
+  max-width: 1040px;
 }
 
 .titlebar-brand .kimi-brand {
@@ -150,7 +150,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 7px;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.2;
@@ -164,10 +164,31 @@
 
 .titlebar-workspace-path {
   min-width: 0;
-  text-align: left;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: hidden;
   white-space: nowrap;
+}
+
+.titlebar-workspace-path-prefix {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  direction: rtl;
+  unicode-bidi: plaintext;
+  opacity: 0.84;
+}
+
+.titlebar-workspace-path-leaf {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .icon-btn.titlebar-path-btn {

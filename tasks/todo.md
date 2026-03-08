@@ -3000,7 +3000,7 @@
 - [x] Bump the app version from `0.0.13` to `0.0.14` and sync release-facing metadata
 - [x] Build fresh installers for `v0.0.14`
 - [x] Write `apps/kimi-shell/docs/release-notes-0.0.14.md`
-- [ ] Commit, tag, push `main`, and create a GitHub Release with the built artifacts
+- [x] Commit, tag, push `main`, and create a GitHub Release with the built artifacts
 
 ### Acceptance Criteria
 
@@ -3009,7 +3009,7 @@
 - [x] `apps/kimi-shell/package.json`, `apps/kimi-shell/src-tauri/Cargo.toml`, and generated Tauri version metadata resolve to `0.0.14`
 - [x] `pnpm -C apps/kimi-shell tauri build` passes
 - [x] Fresh `0.0.14` MSI and NSIS artifacts exist under `apps/kimi-shell/src-tauri/target/release/bundle`
-- [ ] `v0.0.14` is pushed to `origin/main` and published as a GitHub Release
+- [x] `v0.0.14` is pushed to `origin/main` and published as a GitHub Release
 
 ### Review
 
@@ -3024,5 +3024,8 @@
 - Generated artifacts:
   - `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\msi\Kimi Desktop Shell_0.0.14_x64_en-US.msi` (`6795264` bytes, `2026-03-08 12:24:04`)
   - `D:\MyProject\kimi-app\apps\kimi-shell\src-tauri\target\release\bundle\nsis\Kimi Desktop Shell_0.0.14_x64-setup.exe` (`5148649` bytes, `2026-03-08 12:24:13`)
+- `origin/main` includes commit `63996ca` (`release: v0.0.14`).
+- GitHub Release published at `https://github.com/endearqb/kimi-app/releases/tag/v0.0.14`.
+- GitHub repository visibility changed from `private` to `public`.
 - Remaining note:
-- Git commit/tag/push, GitHub Release publication, and repo visibility flip to public are still pending.
+- None.

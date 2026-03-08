@@ -4,28 +4,40 @@
 
 ### 计划清单
 
-- [ ] 记录本轮 `0.0.16` 发布目标、边界与验收标准
-- [ ] 编写 `apps/kimi-shell/docs/release-notes-0.0.16.md`
-- [ ] 核对 `apps/kimi-shell/package.json`、`Cargo.toml`、`tauri.conf.json` 版本号均为 `0.0.16`
-- [ ] 核对 `0.0.16` MSI / NSIS 安装包路径、大小与时间
-- [ ] 提交当前发布内容并创建 `v0.0.16` tag
-- [ ] 推送 `main` 与 `v0.0.16` tag 到 `origin`
-- [ ] 创建 GitHub Release 并上传 `0.0.16` 安装包
-- [ ] 回填本节回顾与验证结果
+- [x] 记录本轮 `0.0.16` 发布目标、边界与验收标准
+- [x] 编写 `apps/kimi-shell/docs/release-notes-0.0.16.md`
+- [x] 核对 `apps/kimi-shell/package.json`、`Cargo.toml`、`tauri.conf.json` 版本号均为 `0.0.16`
+- [x] 核对 `0.0.16` MSI / NSIS 安装包路径、大小与时间
+- [x] 提交当前发布内容并创建 `v0.0.16` tag
+- [x] 推送 `main` 与 `v0.0.16` tag 到 `origin`
+- [x] 创建 GitHub Release 并上传 `0.0.16` 安装包
+- [x] 回填本节回顾与验证结果
 
 ### 验收标准
 
-- [ ] `apps/kimi-shell/docs/release-notes-0.0.16.md` 完成并准确描述本次改动
-- [ ] `apps/kimi-shell/package.json`、`apps/kimi-shell/src-tauri/Cargo.toml`、`apps/kimi-shell/src-tauri/tauri.conf.json` 版本均为 `0.0.16`
-- [ ] `apps/kimi-shell/src-tauri/target/release/bundle` 下存在 `0.0.16` MSI / NSIS 安装包
-- [ ] `origin/main` 包含本次发布提交
-- [ ] GitHub 上存在 `v0.0.16` Release，且包含 MSI / NSIS 两个附件
+- [x] `apps/kimi-shell/docs/release-notes-0.0.16.md` 完成并准确描述本次改动
+- [x] `apps/kimi-shell/package.json`、`apps/kimi-shell/src-tauri/Cargo.toml`、`apps/kimi-shell/src-tauri/tauri.conf.json` 版本均为 `0.0.16`
+- [x] `apps/kimi-shell/src-tauri/target/release/bundle` 下存在 `0.0.16` MSI / NSIS 安装包
+- [x] `origin/main` 包含本次发布提交
+- [x] GitHub 上存在 `v0.0.16` Release，且包含 MSI / NSIS 两个附件
 
 ### 回顾（完成后填写）
 
 - 实际变更：
+  - 新增 `apps/kimi-shell/docs/release-notes-0.0.16.md`，作为本次 GitHub Release 的正文。
+  - 基于当前工作区内容提交发布 commit `release: v0.0.16`，并创建 / 推送 `v0.0.16` tag。
+  - 发布内容包含双窗口启动交接改造及配套设计文档 `apps/kimi-shell/docs/startup-dual-window-handoff.md`。
 - 验证结果：
+  - `apps/kimi-shell/package.json`、`apps/kimi-shell/src-tauri/Cargo.toml`、`apps/kimi-shell/src-tauri/tauri.conf.json` 当前版本均为 `0.0.16`。
+  - 已确认安装包产物：
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.16_x64_en-US.msi`，`6799360` bytes，`2026-03-08 20:36:09`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.16_x64-setup.exe`，`5158416` bytes，`2026-03-08 20:36:17`
+  - 已推送：
+    - commit `40e2205` 到 `origin/main`
+    - tag `v0.0.16` 到 `origin`
+  - GitHub Release：`https://github.com/endearqb/kimi-app/releases/tag/v0.0.16`
 - 手工建议：
+  - 在目标 Windows 机器上分别安装 MSI / NSIS，重点验证双窗口冷启动、失败重试和安装后首次启动体验。
 
 ## 本轮计划（启动双窗口交接改造）
 

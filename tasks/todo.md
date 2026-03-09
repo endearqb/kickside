@@ -13,7 +13,7 @@
 - [x] `README.md` reflects the shipped `0.0.17` app behavior and includes `home.png` and `control_center.png`
 - [x] `README_zh.md` reflects the shipped `0.0.17` app behavior and includes `home.png` and `control_center.png`
 - [x] The README screenshots are referenced with stable repo-relative paths
-- [ ] The documentation commit is pushed to `origin/main`
+- [x] The documentation commit is pushed to `origin/main`
 
 ## Review
 
@@ -28,8 +28,8 @@
 - Verification:
   - Reviewed the markdown diff for both README files.
   - Confirmed the screenshots are referenced with stable repo-relative paths.
-- Remaining note:
-  - Mark the final push item complete after the git commit lands on `origin/main`.
+- Final push:
+  - Commit `9672323` (`docs: refresh bilingual readme`) is now on `origin/main`.
 
 # Current Plan (publish v0.0.17)
 

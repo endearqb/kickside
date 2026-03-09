@@ -1,3 +1,36 @@
+# Current Plan (refresh bilingual README for v0.0.17)
+
+## Checklist
+
+- [x] Review the current English and Chinese README structure plus the new UI screenshots
+- [x] Update `README.md` with the latest app description and insert the new screenshots in sensible sections
+- [x] Update `README_zh.md` with the matching Chinese copy and screenshots
+- [x] Review the markdown diffs and push the documentation update to git
+- [x] Fill this section with review notes
+
+## Acceptance Criteria
+
+- [x] `README.md` reflects the shipped `0.0.17` app behavior and includes `home.png` and `control_center.png`
+- [x] `README_zh.md` reflects the shipped `0.0.17` app behavior and includes `home.png` and `control_center.png`
+- [x] The README screenshots are referenced with stable repo-relative paths
+- [ ] The documentation commit is pushed to `origin/main`
+
+## Review
+
+- Actual changes:
+  - `README.md`
+    - Added the latest Code/Chat split-shell and control-center capability summary.
+    - Inserted `apps/kimi-shell/public/home.png` and `apps/kimi-shell/public/control_center.png` in a new preview section.
+  - `README_zh.md`
+    - Added the matching Chinese capability summary and preview section with the same screenshots.
+  - Release assets:
+    - Included the two screenshot files so the README images resolve correctly on GitHub.
+- Verification:
+  - Reviewed the markdown diff for both README files.
+  - Confirmed the screenshots are referenced with stable repo-relative paths.
+- Remaining note:
+  - Mark the final push item complete after the git commit lands on `origin/main`.
+
 # Current Plan (publish v0.0.17)
 
 ## Checklist

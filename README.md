@@ -15,9 +15,20 @@ startup flow, workspace handoff, diagnostics, and Windows installers into a sing
 
 - Launches and monitors the local Kimi Web backend
 - Shows a prefill/startup surface before handing off to the main workspace
+- Keeps `Kimi Code Web` and `Kimi Chat` side by side, with persistent view switching and split panes
 - Handles workspace bootstrap from normal launch and Windows Explorer open requests
-- Provides diagnostics, logs, and onboarding/install helpers
+- Provides diagnostics, logs, onboarding/install helpers, and a control center for runtime operations
 - Produces Windows installer artifacts in NSIS and MSI formats
+
+## App Preview
+
+Main workspace with the persistent Code/Chat shell:
+
+![Kimi Desktop Shell workspace](apps/kimi-shell/public/home.png)
+
+Control center for runtime status, restart, work directory, and diagnostics entry points:
+
+![Kimi Desktop Shell control center](apps/kimi-shell/public/control_center.png)
 
 ## Local Development
 

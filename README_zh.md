@@ -15,9 +15,20 @@ Kimi App 是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi 
 
 - 拉起并监控本地 Kimi Web 后端
 - 在进入主工作区前展示 prefill 启动页
+- 在同一个壳层中常驻 `Kimi Code Web` 与 `Kimi Chat`，支持无刷新切换和左右分栏
 - 处理普通启动和资源管理器打开请求的工作区接管
-- 提供安装引导、诊断信息和日志入口
+- 提供安装引导、控制中心、诊断信息和日志入口
 - 生成 Windows 的 NSIS / MSI 安装包
+
+## 界面预览
+
+主界面：支持常驻的 Code / Chat 工作区，以及标题栏里的切换与分栏操作。
+
+![Kimi Desktop Shell 主界面](apps/kimi-shell/public/home.png)
+
+控制中心：集中提供运行状态、重启后端、工作目录和诊断入口。
+
+![Kimi Desktop Shell 控制中心](apps/kimi-shell/public/control_center.png)
 
 ## 本地开发
 

@@ -1,10 +1,29 @@
 import type { MouseEvent } from "react";
-import { Copy, FolderOpen, Minus, Monitor, RefreshCcw, Square, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Columns2,
+  Copy,
+  FolderOpen,
+  MessageSquare,
+  Minus,
+  Monitor,
+  RefreshCcw,
+  Square,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KimiCliBrand } from "@/components/kimi-cli-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import type { BackendState, Screen, Theme } from "@/app/types";
+import type {
+  BackendState,
+  Screen,
+  Theme,
+  WorkspaceLayoutMode,
+  WorkspaceSplitOrder,
+  WorkspaceViewKind,
+} from "@/app/types";
 
 type ParsedPath = {
   fullPath: string;
@@ -181,6 +200,9 @@ type ShellTitlebarProps = {
   screen: Screen;
   backendState?: BackendState;
   themeMode: Theme;
+  activeWorkspaceView: WorkspaceViewKind;
+  workspaceLayoutMode: WorkspaceLayoutMode;
+  workspaceSplitOrder: WorkspaceSplitOrder;
   statusText: string;
   shellScreenLabel: string;
   actionBusy: boolean;
@@ -192,6 +214,9 @@ type ShellTitlebarProps = {
   onRetry: () => void;
   onBackToStatus: () => void;
   onOpenFolder: (path: string) => void;
+  onToggleWorkspaceView: () => void;
+  onToggleWorkspaceSplit: () => void;
+  onSwapWorkspaceSplitOrder: () => void;
   onToggleTheme: () => void;
   onStartWindowDrag: () => void;
   onMinimizeWindow: () => void;
@@ -204,6 +229,9 @@ export function ShellTitlebar({
   screen,
   backendState,
   themeMode,
+  activeWorkspaceView,
+  workspaceLayoutMode,
+  workspaceSplitOrder,
   statusText,
   shellScreenLabel,
   actionBusy,
@@ -215,6 +243,9 @@ export function ShellTitlebar({
   onRetry,
   onBackToStatus,
   onOpenFolder,
+  onToggleWorkspaceView,
+  onToggleWorkspaceSplit,
+  onSwapWorkspaceSplitOrder,
   onToggleTheme,
   onStartWindowDrag,
   onMinimizeWindow,
@@ -224,6 +255,18 @@ export function ShellTitlebar({
 }: ShellTitlebarProps) {
   const workspacePathDisplay = formatWorkspacePath(activeSessionWorkDir, effectiveWorkDir);
   const canOpenEffectivePath = workspacePathDisplay.fullPath !== "-";
+  const viewToggleLabel =
+    activeWorkspaceView === "code"
+      ? "Current: Kimi Code Web. Switch to Kimi Chat"
+      : "Current: Kimi Chat. Switch to Kimi Code Web";
+  const splitToggleLabel =
+    workspaceLayoutMode === "split"
+      ? "Return to single-pane view"
+      : "Show code and chat side by side";
+  const swapSplitOrderLabel =
+    workspaceSplitOrder === "code_left"
+      ? "Swap panes: move Kimi Chat to the left"
+      : "Swap panes: move Kimi Code Web to the left";
 
   const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
@@ -265,6 +308,36 @@ export function ShellTitlebar({
             disabled={actionBusy}
             aria-label="Retry backend startup"
             title="Retry backend startup"
+          />
+        ) : null}
+        {screen === "workspace" && workspaceLayoutMode !== "split" ? (
+          <IconButton
+            icon={
+              activeWorkspaceView === "code" ? (
+                <TerminalSquare size={14} />
+              ) : (
+                <MessageSquare size={14} />
+              )
+            }
+            label={viewToggleLabel}
+            onClick={onToggleWorkspaceView}
+            className={`ghost mini titlebar-workspace-toggle ${activeWorkspaceView === "chat" ? "is-chat" : "is-code"}`}
+          />
+        ) : null}
+        {screen === "workspace" && workspaceLayoutMode === "split" ? (
+          <IconButton
+            icon={<ArrowLeftRight size={14} />}
+            label={swapSplitOrderLabel}
+            onClick={onSwapWorkspaceSplitOrder}
+            className="ghost mini titlebar-swap-btn"
+          />
+        ) : null}
+        {screen === "workspace" ? (
+          <IconButton
+            icon={<Columns2 size={14} />}
+            label={splitToggleLabel}
+            onClick={onToggleWorkspaceSplit}
+            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
           />
         ) : null}
         <ThemeToggle

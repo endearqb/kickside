@@ -56,6 +56,9 @@ function App() {
         screen={shell.screen}
         backendState={shell.uiBackendState}
         themeMode={shell.themeMode}
+        activeWorkspaceView={shell.activeWorkspaceView}
+        workspaceLayoutMode={shell.workspaceLayoutMode}
+        workspaceSplitOrder={shell.workspaceSplitOrder}
         statusText={shell.statusText}
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}
@@ -64,11 +67,14 @@ function App() {
         canOpenWorkspace={shell.canOpenWorkspace}
         activeSessionWorkDir={shell.status?.activeSessionWorkDir}
         effectiveWorkDir={shell.status?.effectiveWorkDir}
-        onRetry={shell.handleRetry}
+        onRetry={shell.handleRuntimeOnlyRetry}
         onBackToStatus={shell.backToStatus}
         onOpenFolder={(path) => {
           void shell.handleOpenFolder(path);
         }}
+        onToggleWorkspaceView={shell.handleToggleWorkspaceView}
+        onToggleWorkspaceSplit={shell.handleToggleWorkspaceSplit}
+        onSwapWorkspaceSplitOrder={shell.handleSwapWorkspaceSplitOrder}
         onToggleTheme={shell.handleToggleThemeMode}
         onStartWindowDrag={shell.handleStartWindowDrag}
         onMinimizeWindow={shell.handleMinimizeWindow}
@@ -81,18 +87,30 @@ function App() {
 
       <div className="shell-stage">
         <div
-          className={`workspace-layer ${shell.screen === "workspace" ? "workspace-layer-visible" : "workspace-layer-hidden"}`}
+          className={`workspace-layer ${shell.screen === "workspace" ? "workspace-layer-visible" : "workspace-layer-hidden"} ${shell.isWorkspaceSplit ? "workspace-layer-split" : "workspace-layer-single"}`}
         >
           <WorkspaceView
-            remoteUrl={shell.remoteUrl}
+            activeWorkspaceView={shell.activeWorkspaceView}
+            workspaceLayoutMode={shell.workspaceLayoutMode}
+            workspaceSplitOrder={shell.workspaceSplitOrder}
+            workspaceSplitRatio={shell.workspaceSplitRatio}
+            isSplitDragging={shell.isWorkspaceSplitDragging}
+            codeRemoteUrl={shell.remoteUrl}
+            chatRemoteUrl={shell.chatRemoteUrl}
             workspaceIframeRef={shell.workspaceIframeRef}
-            workspaceEmbedState={shell.workspaceEmbedState}
+            chatIframeRef={shell.chatIframeRef}
+            codePaneState={shell.workspaceEmbedState}
+            chatPaneState={shell.chatEmbedState}
             actionBusy={shell.actionBusy}
-            onRetry={shell.handleRetry}
+            onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
-            onFrameLoad={shell.handleWorkspaceFrameLoad}
-            onFrameError={shell.handleWorkspaceFrameError}
+            onSplitRatioChange={shell.handleWorkspaceSplitRatioChange}
+            onSplitDragStateChange={shell.handleWorkspaceSplitDragStateChange}
+            onCodeFrameLoad={shell.handleWorkspaceFrameLoad}
+            onCodeFrameError={shell.handleWorkspaceFrameError}
+            onChatFrameLoad={shell.handleChatFrameLoad}
+            onChatFrameError={shell.handleChatFrameError}
           />
         </div>
 
@@ -104,7 +122,7 @@ function App() {
               remoteUrl={shell.remoteUrl}
               actionBusy={shell.actionBusy}
               hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
-              onRetry={shell.handleRetry}
+              onRetry={shell.handleRuntimeOnlyRetry}
               onRecoverMainWindowBoot={shell.handleRecoverMainWindowBoot}
               onOpenLogs={shell.handleOpenLogs}
               onQuitAppGracefully={shell.handleQuitAppGracefully}
@@ -155,7 +173,7 @@ function App() {
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
-              onRetry={shell.handleRetry}
+              onRetry={shell.handleRuntimeOnlyRetry}
               onOpenLogs={shell.handleOpenLogs}
               onOpenFolder={shell.handleOpenFolder}
               onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
@@ -238,7 +256,7 @@ function App() {
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
-              onRetry={shell.handleRetry}
+              onRetry={shell.handleRuntimeOnlyRetry}
               onOpenLogs={shell.handleOpenLogs}
               onOpenFolder={shell.handleOpenFolder}
               onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}

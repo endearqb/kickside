@@ -1,17 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
+  clampWorkspaceSplitRatio,
   EXTERNAL_LINK_BRIDGE_SOURCE,
   getInitialThemeMode,
+  getInitialWorkspaceLayoutMode,
+  getInitialWorkspaceSplitOrder,
+  getInitialWorkspaceSplitRatio,
+  getInitialWorkspaceView,
   LEGACY_THEME_MODE_STORAGE_KEY,
   PREFILL_BRIDGE_SOURCE,
   PREFILL_SYNC_SOURCE,
   SESSION_BRIDGE_SOURCE,
   SESSION_SYNC_SOURCE,
   THEME_STORAGE_KEY,
+  WORKSPACE_ACTIVE_VIEW_STORAGE_KEY,
+  WORKSPACE_LAYOUT_MODE_STORAGE_KEY,
+  WORKSPACE_SPLIT_ORDER_STORAGE_KEY,
+  WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
 } from "@/app/theme";
 import type {
   ActionableOnboardingStep,
@@ -37,6 +55,10 @@ import type {
   Theme,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
+  WorkspaceLayoutMode,
+  WorkspacePaneState,
+  WorkspaceSplitOrder,
+  WorkspaceViewKind,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 
@@ -53,6 +75,8 @@ const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
+const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
+const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
@@ -154,8 +178,18 @@ export function useShellController() {
   const [installCommandCatalog, setInstallCommandCatalog] =
     useState<InstallCommandCatalog | null>(null);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+  const [activeWorkspaceView, setActiveWorkspaceView] =
+    useState<WorkspaceViewKind>(() => getInitialWorkspaceView());
+  const [workspaceLayoutMode, setWorkspaceLayoutMode] =
+    useState<WorkspaceLayoutMode>(() => getInitialWorkspaceLayoutMode());
+  const [workspaceSplitOrder, setWorkspaceSplitOrder] =
+    useState<WorkspaceSplitOrder>(() => getInitialWorkspaceSplitOrder());
+  const [workspaceSplitRatio, setWorkspaceSplitRatio] =
+    useState<number>(() => getInitialWorkspaceSplitRatio());
+  const [isWorkspaceSplitDragging, setIsWorkspaceSplitDragging] = useState(false);
   const [workspaceEmbedState, setWorkspaceEmbedState] =
     useState<WorkspaceEmbedState>("idle");
+  const [chatEmbedState, setChatEmbedState] = useState<WorkspacePaneState>("idle");
   const [themeMode, setThemeMode] = useState<Theme>(() => getInitialThemeMode());
   const [activeControlSection, setActiveControlSection] =
     useState<ControlSectionId>("overview");
@@ -180,6 +214,7 @@ export function useShellController() {
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
   const workspaceIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const chatIframeRef = useRef<HTMLIFrameElement | null>(null);
   const pendingPrefillRef = useRef<PrefillChatPayload | null>(null);
   const prefillRetryTimerRef = useRef<number | null>(null);
   const prefillAckTimerRef = useRef<number | null>(null);
@@ -197,6 +232,7 @@ export function useShellController() {
   const shutdownElapsedStartedAtRef = useRef<number>(0);
   const shutdownElapsedTimerRef = useRef<number | null>(null);
   const workspaceRemoteUrlRef = useRef<string | null>(null);
+  const chatRemoteUrlRef = useRef<string | null>(null);
   const hashRoute = parseHashRoute(routeHash);
   const useBootHintWorkspace =
     hashRoute === "loading" &&
@@ -242,6 +278,15 @@ export function useShellController() {
       : workspacePort
         ? `http://127.0.0.1:${workspacePort}`
         : null;
+  const chatRemoteUrl = KIMI_CHAT_REMOTE_URL;
+  const isWorkspaceSplit = workspaceLayoutMode === "split";
+  const chatOrigin = useMemo(() => {
+    try {
+      return new URL(chatRemoteUrl).origin;
+    } catch {
+      return null;
+    }
+  }, [chatRemoteUrl]);
   const workspaceOrigin = useMemo(() => {
     if (!remoteUrl) return null;
     try {
@@ -279,6 +324,50 @@ export function useShellController() {
     root.classList.toggle("dark", themeMode === "dark");
     root.style.colorScheme = themeMode;
   }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_ACTIVE_VIEW_STORAGE_KEY,
+        activeWorkspaceView,
+      );
+    } catch {
+      // Best-effort persistence.
+    }
+  }, [activeWorkspaceView]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_LAYOUT_MODE_STORAGE_KEY,
+        workspaceLayoutMode,
+      );
+    } catch {
+      // Best-effort persistence.
+    }
+  }, [workspaceLayoutMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_SPLIT_ORDER_STORAGE_KEY,
+        workspaceSplitOrder,
+      );
+    } catch {
+      // Best-effort persistence.
+    }
+  }, [workspaceSplitOrder]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
+        String(clampWorkspaceSplitRatio(workspaceSplitRatio)),
+      );
+    } catch {
+      // Best-effort persistence.
+    }
+  }, [workspaceSplitRatio]);
 
   useEffect(() => {
     pendingPrefillRef.current = pendingPrefill;
@@ -350,6 +439,29 @@ export function useShellController() {
     setActiveControlSection("overview");
     setActiveRuntimePanel("paths");
     setControlCenterChrome(nextChrome);
+  }
+
+  function startWorkspacePane(
+    nextUrl: string | null,
+    previousUrl: string | null,
+    setPaneState: Dispatch<SetStateAction<WorkspacePaneState>>,
+    rememberUrl: (url: string | null) => void,
+  ) {
+    if (!nextUrl) {
+      rememberUrl(null);
+      setPaneState("idle");
+      return null;
+    }
+
+    if (previousUrl === nextUrl) {
+      return null;
+    }
+
+    rememberUrl(nextUrl);
+    setPaneState("loading");
+    return window.setTimeout(() => {
+      setPaneState((current) => (current === "ready" ? current : "blocked"));
+    }, WORKSPACE_PANE_TIMEOUT_MS);
   }
 
   const enqueuePrefillPayload = useCallback(
@@ -787,10 +899,6 @@ export function useShellController() {
 
   useEffect(() => {
     const handleWorkspaceBridgeMessage = (event: MessageEvent) => {
-      if (!workspaceOrigin || event.origin !== workspaceOrigin) {
-        return;
-      }
-
       const payload = event.data as
         | (PrefillBridgeAck & {
             source?: string;
@@ -801,6 +909,32 @@ export function useShellController() {
           })
         | null;
       if (!payload || typeof payload.source !== "string") {
+        return;
+      }
+
+      if (payload.source === CHAT_EXTERNAL_LINK_BRIDGE_SOURCE) {
+        if (!chatOrigin || event.origin !== chatOrigin) {
+          return;
+        }
+        const externalUrl = payload.url?.trim();
+        if (!externalUrl) {
+          return;
+        }
+        if (tauriRuntime) {
+          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
+            setActionError(String(error));
+          });
+        } else {
+          try {
+            window.open(externalUrl, "_blank", "noopener,noreferrer");
+          } catch (error) {
+            setActionError(String(error));
+          }
+        }
+        return;
+      }
+
+      if (!workspaceOrigin || event.origin !== workspaceOrigin) {
         return;
       }
 
@@ -893,7 +1027,7 @@ export function useShellController() {
 
     window.addEventListener("message", handleWorkspaceBridgeMessage);
     return () => window.removeEventListener("message", handleWorkspaceBridgeMessage);
-  }, [tauriRuntime, workspaceOrigin]);
+  }, [chatOrigin, tauriRuntime, workspaceOrigin]);
 
   useEffect(() => {
     if (!pendingPrefill) {
@@ -1158,6 +1292,19 @@ export function useShellController() {
     }
   }
 
+  async function handleRuntimeOnlyRetry() {
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      await invoke("restart_backend_runtime_only");
+      await refreshCoreState();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   async function handleRecoverMainWindowBoot() {
     setActionBusy(true);
     setActionError(null);
@@ -1298,7 +1445,7 @@ export function useShellController() {
     setActionError(null);
     try {
       await invoke("save_kimi_path", { path: kimiPathInput.trim() });
-      await invoke("retry_start_backend");
+      await invoke("restart_backend_runtime_only");
       await refreshCoreState();
     } catch (error) {
       setActionError(String(error));
@@ -1327,7 +1474,7 @@ export function useShellController() {
     setActionError(null);
     try {
       await invoke("save_work_dir", { path: workDirInput.trim() });
-      await invoke("retry_start_backend");
+      await invoke("restart_backend_runtime_only");
       await refreshCoreState();
     } catch (error) {
       setActionError(String(error));
@@ -1342,7 +1489,7 @@ export function useShellController() {
     setActionError(null);
     try {
       await invoke("save_work_dir", { path: "" });
-      await invoke("retry_start_backend");
+      await invoke("restart_backend_runtime_only");
       await refreshCoreState();
     } catch (error) {
       setActionError(String(error));
@@ -1635,6 +1782,34 @@ export function useShellController() {
     setThemeMode((current) => (current === "light" ? "dark" : "light"));
   }
 
+  function handleSelectWorkspaceView(view: WorkspaceViewKind) {
+    setActiveWorkspaceView(view);
+  }
+
+  function handleToggleWorkspaceView() {
+    setActiveWorkspaceView((current) => (current === "code" ? "chat" : "code"));
+  }
+
+  function handleToggleWorkspaceSplit() {
+    setWorkspaceLayoutMode((current) =>
+      current === "single" ? "split" : "single",
+    );
+  }
+
+  function handleSwapWorkspaceSplitOrder() {
+    setWorkspaceSplitOrder((current) =>
+      current === "code_left" ? "chat_left" : "code_left",
+    );
+  }
+
+  function handleWorkspaceSplitRatioChange(nextRatio: number) {
+    setWorkspaceSplitRatio(clampWorkspaceSplitRatio(nextRatio));
+  }
+
+  function handleWorkspaceSplitDragStateChange(isDragging: boolean) {
+    setIsWorkspaceSplitDragging(isDragging);
+  }
+
   const { pushThemeToWorkspace } = useWorkspaceThemeBridge({
     screen,
     workspaceEmbedState,
@@ -1645,26 +1820,38 @@ export function useShellController() {
   });
 
   useEffect(() => {
-    if (!remoteUrl) {
-      workspaceRemoteUrlRef.current = null;
-      setWorkspaceEmbedState("idle");
-      return;
-    }
+    const timer = startWorkspacePane(
+      remoteUrl,
+      workspaceRemoteUrlRef.current,
+      setWorkspaceEmbedState,
+      (url) => {
+        workspaceRemoteUrlRef.current = url;
+      },
+    );
 
-    if (workspaceRemoteUrlRef.current === remoteUrl) {
-      return;
-    }
-    workspaceRemoteUrlRef.current = remoteUrl;
-
-    setWorkspaceEmbedState("loading");
-    const timer = window.setTimeout(() => {
-      setWorkspaceEmbedState((current) =>
-        current === "ready" ? current : "blocked",
-      );
-    }, 8_000);
-
-    return () => window.clearTimeout(timer);
+    return () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [remoteUrl]);
+
+  useEffect(() => {
+    const timer = startWorkspacePane(
+      chatRemoteUrl,
+      chatRemoteUrlRef.current,
+      setChatEmbedState,
+      (url) => {
+        chatRemoteUrlRef.current = url;
+      },
+    );
+
+    return () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [chatRemoteUrl]);
 
   void handleInstallDependencies;
   void handleInstallKimi;
@@ -1719,6 +1906,14 @@ export function useShellController() {
     setWorkspaceEmbedState("blocked");
   }
 
+  function handleChatFrameLoad() {
+    setChatEmbedState("ready");
+  }
+
+  function handleChatFrameError() {
+    setChatEmbedState("blocked");
+  }
+
   return {
     status,
     diagnostics,
@@ -1740,6 +1935,9 @@ export function useShellController() {
     isWindowMaximized,
     workspaceEmbedState,
     themeMode,
+    workspaceSplitOrder,
+    workspaceSplitRatio,
+    isWorkspaceSplitDragging,
     activeControlSection,
     setActiveControlSection,
     activeRuntimePanel,
@@ -1776,6 +1974,7 @@ export function useShellController() {
     refreshInstallProbe,
     refreshOnboarding,
     handleRetry,
+    handleRuntimeOnlyRetry,
     handleRecoverMainWindowBoot,
     handleOpenLogs,
     handleQuitAppGracefully,
@@ -1815,7 +2014,21 @@ export function useShellController() {
     handleCloseWindow,
     handleTitlebarDoubleClick,
     handleToggleThemeMode,
+    activeWorkspaceView,
+    workspaceLayoutMode,
+    isWorkspaceSplit,
+    chatRemoteUrl,
+    chatIframeRef,
+    chatEmbedState,
+    handleSelectWorkspaceView,
+    handleToggleWorkspaceView,
+    handleToggleWorkspaceSplit,
+    handleSwapWorkspaceSplitOrder,
+    handleWorkspaceSplitRatioChange,
+    handleWorkspaceSplitDragStateChange,
     handleWorkspaceFrameLoad,
     handleWorkspaceFrameError,
+    handleChatFrameLoad,
+    handleChatFrameError,
   };
 }

@@ -160,6 +160,35 @@ fn retry_start_backend(app: AppHandle) {
 }
 
 #[tauri::command]
+fn restart_backend_runtime_only(app: AppHandle) -> Result<(), String> {
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let effective_work_dir = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+        runtime
+            .effective_work_dir
+            .as_ref()
+            .map(|path| path.display().to_string())
+    };
+    let configured_work_dir = settings.work_dir.clone();
+    let configured_display = configured_work_dir.as_deref().unwrap_or("<default>");
+    let effective_display = effective_work_dir.as_deref().unwrap_or("<none>");
+
+    log_manager::append_line(
+        &app,
+        format!(
+            "runtime-only backend restart requested (source=restart_backend_runtime_only, configured_work_dir={configured_display}, effective_work_dir={effective_display})"
+        ),
+    );
+
+    backend_manager::restart_backend(app);
+    Ok(())
+}
+
+#[tauri::command]
 fn report_loading_rendered(app: AppHandle, start_cycle_id: Option<u64>) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut runtime = state
@@ -697,6 +726,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_status,
             retry_start_backend,
+            restart_backend_runtime_only,
             report_loading_rendered,
             notify_frontend_ready,
             get_startup_monitor_status,

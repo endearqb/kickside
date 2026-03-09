@@ -432,7 +432,15 @@ export interface InstallCommandCatalog {
 
 export type Screen = "loading" | "control_center" | "workspace";
 
-export type WorkspaceEmbedState = "idle" | "loading" | "ready" | "blocked";
+export type WorkspaceViewKind = "code" | "chat";
+
+export type WorkspaceLayoutMode = "single" | "split";
+
+export type WorkspaceSplitOrder = "code_left" | "chat_left";
+
+export type WorkspacePaneState = "idle" | "loading" | "ready" | "blocked";
+
+export type WorkspaceEmbedState = WorkspacePaneState;
 
 export type Theme = "light" | "dark";
 

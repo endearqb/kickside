@@ -1,6 +1,6 @@
 [package]
 name = "appskimi-shell"
-version = "0.0.16"
+version = "0.0.17"
 description = "Kimi Desktop Shell"
 authors = ["kimi-shell"]
 edition = "2021"
@@ -37,6 +37,8 @@ url = "2"
 which = "6"
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = "0.61"
 winreg = "0.52"
 
 [target.'cfg(unix)'.dependencies]

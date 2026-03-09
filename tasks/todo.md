@@ -1,3 +1,452 @@
+# Current Plan (publish v0.0.17)
+
+## Checklist
+
+- [x] Review the current `0.0.17` version metadata, release note draft, and packaged installer artifacts
+- [x] Polish the `v0.0.17` release notes to reflect the final shipped behavior
+- [ ] Commit the `0.0.17` release changes to git
+- [ ] Push the git commit and tag to `origin/main`
+- [ ] Publish the GitHub release for `v0.0.17` with the built installer assets
+- [ ] Fill this section with release verification notes
+
+## Acceptance Criteria
+
+- [x] `apps/kimi-shell/docs/release-notes-0.0.17.md` matches the actual shipped feature/fix set
+- [ ] Git working tree is clean after the release commit
+- [ ] `origin/main` contains the `0.0.17` release commit
+- [ ] Git tag `v0.0.17` exists on `origin`
+- [ ] GitHub release `v0.0.17` is published with both Windows installers attached
+
+## Review
+
+- Release note scope now covers the final shipped `0.0.17` behavior:
+  - dual Code/Chat workspace with split/swap/resize
+  - Chat external-link and native save-as fixes
+  - runtime-only backend restart routing for in-shell restart actions
+
+# Current Plan (main-shell retry routing -> runtime-only backend restart)
+
+## Checklist
+
+- [x] Record the scope for moving main-shell plain "Restart Backend" actions onto the runtime-only restart path
+- [x] Replace the control-center-specific retry handler with a shared runtime-only retry handler in `useShellController`
+- [x] Route titlebar, workspace fallback, loading-view restart, and both control-center retries to the shared runtime-only restart handler
+- [x] Keep `retry_start_backend` reserved for prefill/startup recovery paths
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Shell titlebar retry now uses `restart_backend_runtime_only`
+- [x] Workspace fallback retry now uses `restart_backend_runtime_only`
+- [x] Loading-view "Restart Backend" now uses `restart_backend_runtime_only`
+- [x] Both control-center "重启后端" buttons now use `restart_backend_runtime_only`
+- [x] Startup-failed recovery still uses `recover_main_window_boot`
+- [x] Prefill startup retry still uses `retry_start_backend`
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Renamed the shared runtime-only retry handler to `handleRuntimeOnlyRetry()`.
+    - Kept `handleRetry()` on `retry_start_backend` so the legacy window-preparation path remains available only for startup-recovery flows.
+  - `apps/kimi-shell/src/App.tsx`
+    - Routed titlebar retry, workspace fallback retry, loading-view restart, and both control-center retries to `shell.handleRuntimeOnlyRetry`.
+    - Left `LoadingView`'s `startupFailed` branch on `onRecoverMainWindowBoot`, so main-window recovery still stays on the dedicated window-recovery command.
+- Verification:
+  - `pnpm -C apps/kimi-shell build` passed.
+  - Static routing check confirms:
+    - `App.tsx:70`, `App.tsx:105`, `App.tsx:125`, `App.tsx:176`, and `App.tsx:259` now use `handleRuntimeOnlyRetry`
+    - `PrefillApp.tsx` still uses `retry_start_backend`
+    - `LoadingView.tsx` still routes the startup-failed branch to `onRecoverMainWindowBoot`
+- Remaining note:
+  - Installed-app click-through is still recommended once to confirm titlebar/workspace/loading retries no longer trigger any prefill/main alternation.
+
+# Current Plan (control-center retry -> runtime-only backend restart)
+
+## Checklist
+
+- [x] Record this control-center retry routing change and its acceptance criteria
+- [x] Add a control-center-specific retry handler that uses `restart_backend_runtime_only`
+- [x] Wire only `ControlCenterView` retry buttons to the new handler
+- [x] Keep loading/titlebar/workspace retry buttons on `retry_start_backend`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Control-center “重启后端” now uses the same runtime-only backend restart path as save-work-dir/save-kimi-path
+- [x] Loading view retry still uses `retry_start_backend`
+- [x] Titlebar retry still uses `retry_start_backend`
+- [x] Workspace fallback retry still uses `retry_start_backend`
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Added `handleControlCenterRetry()`, which mirrors the existing busy/error handling but calls `restart_backend_runtime_only`.
+    - Kept `handleRetry()` unchanged on `retry_start_backend`.
+  - `apps/kimi-shell/src/App.tsx`
+    - Switched both `ControlCenterView` instances (`fullscreen` and `modal`) to use `shell.handleControlCenterRetry` for `onRetry`.
+    - Left loading view, titlebar, and workspace retry bindings on `shell.handleRetry`.
+- Verification:
+  - `pnpm -C apps/kimi-shell build` passed.
+  - Static routing check confirms:
+    - `App.tsx:125` and `App.tsx:176` use `handleControlCenterRetry`
+    - `App.tsx:70`, `App.tsx:105`, and `App.tsx:259` still use `handleRetry`
+- Remaining note:
+  - Installed-app click-through is still recommended once to confirm the control-center retry no longer triggers any prefill/main alternation.
+
+# Current Plan (settings save -> runtime-only backend restart)
+
+## Checklist
+
+- [x] Record this split-restart task scope, constraints, and acceptance criteria
+- [x] Add a Rust-side `restart_backend_runtime_only` command that skips window restart preparation
+- [x] Switch settings-save handlers to call the runtime-only backend restart command
+- [x] Keep `retry_start_backend`, Chat download save-as, workspace split, and Chat external-link behavior unchanged
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [ ] Saving the default work directory triggers a backend-only restart without prefill/main alternation
+- [x] Saving the kimi path triggers the runtime-only backend restart path
+- [x] Clearing the work directory triggers the runtime-only backend restart path
+- [x] Logs clearly show the new runtime-only restart entry before `stop_backend_begin`
+- [x] `retry_start_backend` still retains window-preparation behavior for startup recovery
+- [ ] Chat download save-as behavior remains intact
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passes
+- [x] `pnpm -C apps/kimi-shell build` passes
+- [x] `pnpm -C apps/kimi-shell tauri build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - Added `restart_backend_runtime_only`, which logs the current configured/effective work directory and then calls `backend_manager::restart_backend(app)` without touching `prepare_for_backend_restart(...)`.
+    - Registered the new Tauri command while keeping `retry_start_backend` unchanged.
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Switched `handleSavePathAndRetry`, `handleSaveWorkDirAndRestart`, and `handleClearWorkDir` to call `restart_backend_runtime_only`.
+    - Left `handleRetry` on `retry_start_backend` so startup recovery still uses the existing window-preparation path.
+  - Preserved as-is:
+    - Chat download save-as fix in `window_manager.rs`
+    - workspace split/swap/drag and Chat external-link behavior
+    - `recover_main_window_boot(...)`, tray restart, and open-request restart flows
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - Static verification confirms:
+    - `handleRetry` still calls `retry_start_backend`
+    - the three settings-save handlers now call `restart_backend_runtime_only`
+    - `restart_backend_runtime_only` is registered in the Tauri invoke handler and logs `runtime-only backend restart requested (...)`
+- Remaining note:
+  - Real installed-app click-through is still needed to confirm that work-dir save no longer causes prefill/main alternation and that Chat download behavior remains intact after this split.
+
+# Current Plan (work dir restart rollback + evidence capture)
+
+## Checklist
+
+- [x] Record this rollback-only task scope, constraints, and acceptance criteria
+- [x] Revert the async backend restart scheduling changes while keeping `prepare_for_backend_restart(...)`
+- [x] Revert the frontend `restartPending` / delayed busy-clearing logic back to synchronous restart handlers
+- [x] Keep Chat download save-as, workspace split, and Chat external-link behavior unchanged
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Saving the default work directory no longer leaves control-center actions disabled because `actionBusy` is waiting on `restartPending`
+- [x] `retry_start_backend` uses the pre-rollback synchronous restart path again
+- [ ] The previous prefill/main-window alternation behavior is restored
+- [ ] Chat download save-as behavior remains intact
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passes
+- [x] `pnpm -C apps/kimi-shell build` passes
+- [x] `pnpm -C apps/kimi-shell tauri build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/app_state.rs`
+    - Removed the temporary `restart_inflight` runtime flag that was added for async restart dedupe.
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - Restored `restart_backend(app)` as the only restart path.
+    - Removed the async restart worker helpers and reverted Windows child termination back to the original synchronous `taskkill/status + child.wait()` flow.
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - Restored `retry_start_backend` to `prepare_for_backend_restart(...)` followed by direct synchronous `backend_manager::restart_backend(app)`.
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Removed `restartPending` / `triggerBackendRestart(...)`.
+    - Restored `handleRetry`, `handleSavePathAndRetry`, `handleSaveWorkDirAndRestart`, and `handleClearWorkDir` to the original synchronous `actionBusy` flow.
+  - Preserved as-is:
+    - `window_manager.rs` Chat download save-as fix
+    - `Cargo.toml` WebView2 download dependencies
+    - workspace split/swap/drag and Chat external-link behavior
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - New installer outputs were produced at `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.17_x64_en-US.msi` and `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.17_x64-setup.exe`.
+- Remaining note:
+  - I could not perform the real installed-app click-through in this environment, so the remaining acceptance items still need manual verification: prefill/main-window alternation, Chat download runtime behavior after rollback, and the exact stop/start log position if work-dir restart still hangs.
+
+# Current Plan (install hang hotfix: work dir restart + save-as download)
+
+## Checklist
+
+- [x] Record this install-hang hotfix scope, constraints, and acceptance criteria
+- [x] Convert backend restart to async scheduling with in-flight dedupe and bounded Windows termination
+- [x] Update frontend restart-trigger handlers to observe restart progress instead of awaiting a long-running invoke
+- [x] Replace the synchronous main-window download hook with a Windows WebView2 deferral-based save-as flow
+- [x] Update `tasks/lessons.md` with the new anti-deadlock rules from this fix
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [ ] Saving the default work directory no longer freezes the packaged app while the backend restarts
+- [ ] The saved work directory still persists across force-close and relaunch
+- [x] Rapid repeat clicks do not schedule overlapping backend restarts
+- [x] Backend restart can complete even if the old Windows child process is slow to die
+- [ ] Chat downloads still show a native save dialog without freezing the packaged app
+- [ ] Canceling the save dialog cancels the download cleanly
+- [ ] Confirming the save dialog writes the download to the chosen file path with the suggested file name preserved
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passes
+- [x] `pnpm -C apps/kimi-shell build` passes
+- [x] `pnpm -C apps/kimi-shell tauri build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - Added restart in-flight dedupe helpers so user-triggered retries now schedule backend restart work on a background thread instead of blocking the invoke path.
+    - Reworked Windows child termination to use fire-and-forget `taskkill` plus bounded `try_wait()` polling, removing the unbounded `child.wait()` / synchronous `taskkill.status()` hang path.
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - Updated `retry_start_backend` to mark-and-spawn async restart work after the window restart-preparation step.
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Converted restart-triggering actions to fire the restart request quickly, then watch polled backend state plus `startCycleId` to clear busy state only after the new cycle finishes.
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - Removed the synchronous `on_download(...)` + blocking dialog flow.
+    - Added a Windows WebView2 `DownloadStarting` hook that uses deferral plus nonblocking `save_file(...)`, then completes or cancels the download on the main thread without freezing the window.
+  - `apps/kimi-shell/src-tauri/Cargo.toml`
+    - Added Windows WebView2 interop dependencies required for the native download hook.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - New installer outputs were produced at `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.17_x64_en-US.msi` and `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.17_x64-setup.exe`.
+- Remaining note:
+  - The three packaged-runtime acceptance checks above still need manual verification on an installed build: saving the default work directory end-to-end, Chat download cancel, and Chat download save success.
+
+# Current Plan (chat download save dialog)
+
+## Checklist
+
+- [x] Record this download-dialog task scope, constraints, and acceptance criteria
+- [x] Add a main-window download handler that prompts for a save destination before downloads start
+- [x] Keep the implementation Rust-side only, without exposing new frontend dialog capabilities
+- [x] Log completed download outcomes from the main window handler
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Clicking a browser download from the main window prompts for a native save location
+- [x] Canceling the save dialog cancels the download
+- [x] Confirming the save dialog writes the download to the chosen absolute path
+- [x] Suggested file names remain intact when passed into the save dialog
+- [x] `prefill` window behavior is unchanged
+- [x] No new frontend dialog capability is added
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passes
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - Added a Rust-side helper that opens a native save dialog with the suggested download directory and file name, then converts the selected result back to an absolute filesystem path.
+    - Attached `WebviewWindowBuilder::on_download(...)` to the `main` window so browser-style downloads now pause for destination selection before starting.
+    - Added completion logging for download success/failure and the saved path when available.
+  - Capability model:
+    - Kept the implementation fully Rust-side and did not add any new frontend dialog permission or remote capability exposure.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.
+- Remaining note:
+  - Manual runtime verification is still recommended for real Chat downloads to confirm cancel/save behavior against `https://www.kimi.com/` in the embedded WebView.
+
+# Current Plan (workspace split swap + draggable divider + chat external links)
+
+## Checklist
+
+- [x] Record this refinement task scope, acceptance criteria, and affected subsystems
+- [x] Update workspace state to persist split order and draggable split ratio
+- [x] Refine titlebar controls so single-pane shows current-view icon and split mode shows a swap-order button
+- [x] Replace fixed split layout with a draggable divider clamped between `1:2` and `2:1`
+- [x] Add Chat-only external-link bridge via main window all-frames initialization script
+- [x] Update `tasks/lessons.md` with the corrected rule from this conversation
+- [x] Run `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Single-pane `Code` shows a code icon and single-pane `Chat` shows a chat icon
+- [x] Split mode hides the single-pane toggle and shows a swap-order button
+- [x] Swap-order toggles `Code | Chat` and `Chat | Code` without remounting panes
+- [x] Split divider supports smooth drag resizing between `1:2` and `2:1`
+- [x] Split order and ratio persist across restarts
+- [x] Leaving split mode returns to the last single-pane active view
+- [x] `Code` pane prefill / session / theme bridge behavior remains unchanged
+- [x] `Code` pane external-link behavior remains unchanged
+- [x] `Chat` pane opens cross-origin `http/https` links in the system browser while keeping same-origin navigation inside the pane
+- [x] `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passes
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/app/theme.ts` / `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/app/useShellController.ts`
+    - Added persistent split order and split ratio state, drag-state tracking, and storage helpers for restoring split layout preferences across restarts.
+    - Kept `activeWorkspaceView` scoped to single-pane mode so leaving split returns to the prior active pane.
+    - Added a Chat-only external-link message path keyed by a dedicated bridge source, while preserving the existing Code-side message bridge behavior.
+  - `apps/kimi-shell/src/features/window/ShellTitlebar.tsx`
+    - Single-pane toggle now shows the current workspace icon and describes the switch target in the tooltip/aria label.
+    - Split mode now hides the single-pane toggle and shows a swap-order button instead.
+  - `apps/kimi-shell/src/features/workspace/WorkspaceView.tsx` / `apps/kimi-shell/src/App.tsx` / `apps/kimi-shell/src/App.css`
+    - Replaced the fixed split layout with a draggable divider using a three-column grid.
+    - Divider drag updates are clamped between `1:2` and `2:1`, keep both panes mounted, and preserve pane state while swapping order or resizing.
+    - Added hover and dragging affordances for the divider and wiring for persistent split ratio/order.
+  - `apps/kimi-shell/src-tauri/src/window_manager.rs`
+    - Added a main-window all-frames initialization script scoped to `https://www.kimi.com` child frames only.
+    - The script intercepts cross-origin `http/https` anchor clicks and `window.open(...)` calls from Chat, then relays them back to the shell so they open in the system browser.
+  - `tasks/lessons.md`
+    - Recorded the corrected rule that cross-origin iframe interception scope must be locked before implementing, and that Chat-only link handling should remain isolated from Code unless explicitly unified.
+- Verification:
+  - `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed.
+  - `pnpm -C apps/kimi-shell build` passed.
+- Remaining note:
+  - Static validation and builds passed, but manual runtime verification is still recommended for embedded `https://www.kimi.com/` behavior because third-party frame and navigation policies can change independently of this repo.
+
+# Current Plan (bump to v0.0.17 + build + release notes)
+
+## Checklist
+
+- [x] Record this release task scope, version target, and acceptance criteria
+- [x] Bump `apps/kimi-shell/package.json` from `0.0.16` to `0.0.17`
+- [x] Sync the version to `apps/kimi-shell/src-tauri/Cargo.toml` and `apps/kimi-shell/src-tauri/tauri.conf.json`
+- [x] Write `apps/kimi-shell/docs/release-notes-0.0.17.md`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+- [x] Verify the generated installer artifact paths, sizes, and timestamps
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] `apps/kimi-shell/package.json` version is `0.0.17`
+- [x] `apps/kimi-shell/src-tauri/Cargo.toml` version is `0.0.17`
+- [x] `apps/kimi-shell/src-tauri/tauri.conf.json` version is `0.0.17`
+- [x] `apps/kimi-shell/docs/release-notes-0.0.17.md` exists and accurately describes this release
+- [x] `pnpm -C apps/kimi-shell tauri build` passes
+- [x] Fresh MSI / NSIS artifacts exist under `apps/kimi-shell/src-tauri/target/release/bundle`
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/package.json`
+    - Version bumped from `0.0.16` to `0.0.17`.
+  - `apps/kimi-shell/src-tauri/Cargo.toml` / `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - Synced to `0.0.17` through the existing `sync:version` pipeline during build.
+  - `apps/kimi-shell/docs/release-notes-0.0.17.md`
+    - Added release notes covering the new workspace dual-view toggle, split layout, and titlebar controls.
+- Verification:
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - Version checks:
+    - `apps/kimi-shell/package.json` = `0.0.17`
+    - `apps/kimi-shell/src-tauri/Cargo.toml` = `0.0.17`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json` = `0.0.17`
+  - Installer artifacts:
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.17_x64_en-US.msi`，`6803456` bytes，`2026-03-09 09:51:49`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.17_x64-setup.exe`，`5160438` bytes，`2026-03-09 09:52:12`
+- Remaining note:
+  - This round completed version bump, release notes, and installer build; installation/startup hand verification is still recommended before distribution.
+
+# Current Plan (workspace dual-view toggle + split layout)
+
+## Checklist
+
+- [x] Record implementation scope, defaults, and acceptance criteria for the dual-view workspace shell
+- [x] Extend frontend state to support persistent `code/chat` active view, `single/split` layout, and independent pane readiness
+- [x] Add workspace-only titlebar buttons for view toggle and split toggle ahead of theme switch
+- [x] Rework the workspace surface into two always-mounted panes with independent loading / blocked fallback states
+- [x] Update styles for single-pane visibility, split layout, titlebar button states, and narrow-width resilience
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with review notes and verification results
+
+## Acceptance Criteria
+
+- [x] Workspace launches in single-pane mode showing `Kimi Code Web`
+- [x] Toggling between `Kimi Code Web` and `Kimi Chat` in single-pane mode does not remount either iframe
+- [x] Split mode shows fixed `Code | Chat` left-right panes
+- [x] Leaving split mode returns to the most recently active single-pane view
+- [x] Active view and split mode persist across app restarts
+- [x] Existing Code pane session / prefill / theme bridge behavior continues to work
+- [x] Chat pane failure only affects its own pane and offers browser fallback
+- [x] New titlebar buttons appear only on the workspace screen
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/app/types.ts` / `apps/kimi-shell/src/app/theme.ts`
+    - Added `WorkspaceViewKind`, `WorkspaceLayoutMode`, `WorkspacePaneState`, plus storage keys and initial-state helpers for persistent workspace layout/view preferences.
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - Added persistent active view and split layout state, a dedicated `chatIframeRef`, `chatEmbedState`, and a fixed `https://www.kimi.com/` chat URL.
+    - Kept the existing Code pane session / prefill / theme bridge behavior on the local proxy iframe.
+    - Added workspace view toggle and split toggle handlers.
+  - `apps/kimi-shell/src/features/window/ShellTitlebar.tsx`
+    - Added workspace-only icon buttons ahead of the theme switcher for toggling Code/Chat and single/split layout.
+  - `apps/kimi-shell/src/features/workspace/WorkspaceView.tsx` / `apps/kimi-shell/src/App.tsx` / `apps/kimi-shell/src/App.css`
+    - Reworked the workspace surface into two always-mounted panes.
+    - Single-pane mode now hides the inactive pane without unmounting it.
+    - Split mode now renders fixed `Code | Chat` left-right panes with independent loading / blocked overlays and browser fallback for Chat.
+    - Added titlebar state styling and split-layout CSS.
+- Verification:
+  - `pnpm -C apps/kimi-shell build` passed.
+  - `tsc` and `vite build` completed successfully through the existing build pipeline.
+- Remaining note:
+  - Manual runtime verification is still recommended for the embedded `https://www.kimi.com/` pane, because third-party framing policy can change independently of this repo.
+
+# Current Plan (research wrapping kimi.com inside Tauri shell)
+
+## Checklist
+
+- [x] Review relevant project lessons and workflow constraints for this research task
+- [x] Check Tauri official docs for loading remote URLs, external webviews, and remote capability restrictions
+- [x] Check Tauri community discussions for common pitfalls when wrapping third-party websites
+- [x] Summarize whether `https://www.kimi.com/` can be wrapped, plus technical, security, and product risks
+- [x] Fill this section with review notes and source-backed conclusions
+
+## Review
+
+- Actual findings:
+  - Tauri v2 官方能力模型支持把窗口 URL 指向远程地址；官方能力文档也明确支持为远程 origin（如 `https://example.com`）单独授予权限，而不是只能加载本地打包前端。
+  - 社区讨论确认，直接把远程站点作为 Tauri 窗口内容是常见做法；相比 `iframe`，顶层 WebView 更适合承载完整第三方站点。
+  - 官方安全公告明确提到：若把不受信任的外部域名放进 `iframe` 并同时暴露 Tauri IPC，会产生明显安全风险；因此本项目若要封装 `kimi.com`，应优先采用“独立 WebView 窗口 / 独立 WebViewView，默认不给远程页 Tauri 能力”的模式。
+  - 社区还给出了远程页调用 Tauri API 的 capability 写法，但这意味着你要显式把原生能力暴露给第三方页面；对 `kimi.com` 这类你无法控制代码的站点，不建议这样做。
+  - 2026-03-09 对 `https://www.kimi.com/` 做基础 HEAD/GET 检查时，未看到会影响“顶层加载”的显式 `X-Frame-Options`/`frame-ancestors` 信号；不过这不构成产品可分发保证，登录、支付、下载、WebSocket、剪贴板和站点策略变化仍需手测。
+- Conclusion:
+  - 结论是“可以封装，但建议把它当远程网页壳而不是深度集成页面”。最稳妥的方案是：Tauri 只负责窗口、托盘、启动与外壳能力，`kimi.com` 作为远程顶层 WebView 加载，不向它开放敏感 Tauri API。
+  - 如果目标是上架或对外分发，还需要额外确认 `kimi.com`/Moonshot 的服务条款、品牌使用和账号体系是否允许第三方桌面封装；本轮调研重点验证了 Tauri 技术可行性与安全边界，未把第三方法务授权视为已确认事项。
+
 # TODO - 按 docs/需求文档2.md 开发与执行
 
 ## 本轮计划（v0.0.16 发布）

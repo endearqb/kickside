@@ -1,12 +1,23 @@
 use std::{
+    path::PathBuf,
     sync::{Mutex, OnceLock},
     thread,
     time::Duration,
 };
 
 use tauri::{
-    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindowBuilder,
+    webview::PageLoadEvent,
+    AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindow, WebviewWindowBuilder,
 };
+use tauri_plugin_dialog::{DialogExt, FilePath};
+
+#[cfg(windows)]
+use webview2_com::{
+    take_pwstr, DownloadStartingEventHandler, Microsoft::Web::WebView2::Win32::*,
+    StateChangedEventHandler,
+};
+#[cfg(windows)]
+use windows::core::{HSTRING, Interface, PWSTR};
 
 use crate::{
     app_state::AppState,
@@ -29,6 +40,9 @@ const STARTUP_TRACE_LIMIT: usize = 48;
 const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(2);
 const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(3);
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const CHAT_EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-chat-external-link-bridge";
+const CHAT_FRAME_ORIGIN: &str = "https://www.kimi.com";
+const DOWNLOAD_SAVE_DIALOG_TITLE: &str = "Save download";
 
 const PREFILL_WIDTH: f64 = 720.0;
 const PREFILL_HEIGHT: f64 = 520.0;
@@ -38,6 +52,365 @@ const SHELL_WIDTH: f64 = 1200.0;
 const SHELL_HEIGHT: f64 = 820.0;
 const SHELL_MIN_WIDTH: f64 = 900.0;
 const SHELL_MIN_HEIGHT: f64 = 640.0;
+
+fn chat_external_link_bridge_script() -> String {
+    format!(
+        r##"
+(function () {{
+  const BRIDGE_SOURCE = "{bridge_source}";
+  const CHAT_ORIGIN = "{chat_origin}";
+
+  if (window.top === window) {{
+    return;
+  }}
+
+  try {{
+    if (window.location.origin !== CHAT_ORIGIN) {{
+      return;
+    }}
+  }} catch (_) {{
+    return;
+  }}
+
+  function resolveUrl(rawUrl) {{
+    if (!rawUrl) {{
+      return null;
+    }}
+    try {{
+      return new URL(String(rawUrl), window.location.href);
+    }} catch (_) {{
+      return null;
+    }}
+  }}
+
+  function isExternalHttpUrl(parsed) {{
+    if (!parsed) {{
+      return false;
+    }}
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
+      return false;
+    }}
+    return parsed.origin !== CHAT_ORIGIN;
+  }}
+
+  function postExternalUrl(url, reason) {{
+    try {{
+      if (!window.parent || window.parent === window) {{
+        return;
+      }}
+      window.parent.postMessage(
+        {{
+          source: BRIDGE_SOURCE,
+          url: url,
+          reason: reason || "unknown"
+        }},
+        "*"
+      );
+    }} catch (_) {{
+      // ignore
+    }}
+  }}
+
+  document.addEventListener(
+    "click",
+    function(event) {{
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {{
+        return;
+      }}
+
+      const target = event && event.target;
+      if (!(target instanceof Element)) {{
+        return;
+      }}
+
+      const anchor = target.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {{
+        return;
+      }}
+
+      const href = anchor.getAttribute("href") || "";
+      if (!href || href.startsWith("#")) {{
+        return;
+      }}
+
+      const resolved = resolveUrl(href);
+      if (!isExternalHttpUrl(resolved)) {{
+        return;
+      }}
+
+      event.preventDefault();
+      event.stopPropagation();
+      postExternalUrl(resolved.toString(), "anchor_click");
+    }},
+    true
+  );
+
+  try {{
+    const nativeWindowOpen = window.open;
+    if (typeof nativeWindowOpen === "function") {{
+      window.open = function(url, target, features) {{
+        const resolved = resolveUrl(typeof url === "string" ? url : String(url || ""));
+        if (isExternalHttpUrl(resolved)) {{
+          postExternalUrl(resolved.toString(), "window_open");
+          return null;
+        }}
+        return nativeWindowOpen.call(window, url, target, features);
+      }};
+    }}
+  }} catch (_) {{
+    // ignore
+  }}
+}})();
+"##,
+        bridge_source = CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
+        chat_origin = CHAT_FRAME_ORIGIN
+    )
+}
+
+#[cfg(windows)]
+type WebviewEventRegistrationToken = i64;
+
+#[cfg(windows)]
+struct UnsafeSend<T>(T);
+
+#[cfg(windows)]
+unsafe impl<T> Send for UnsafeSend<T> {}
+
+#[cfg(windows)]
+impl<T: Clone> Clone for UnsafeSend<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+#[cfg(windows)]
+impl<T> UnsafeSend<T> {
+    fn take(self) -> T {
+        self.0
+    }
+}
+
+fn selected_file_path(selection: Option<FilePath>) -> Option<PathBuf> {
+    selection.and_then(|value| value.into_path().ok())
+}
+
+#[cfg(windows)]
+fn finalize_windows_download_selection(
+    app: &AppHandle,
+    url: &str,
+    args: ICoreWebView2DownloadStartingEventArgs,
+    deferral: ICoreWebView2Deferral,
+    selected_path: Option<PathBuf>,
+) {
+    match selected_path {
+        Some(path) if path.is_absolute() => {
+            let resolved = HSTRING::from(path.to_string_lossy().to_string());
+            let _ = unsafe { args.SetResultFilePath(&resolved) };
+            let _ = unsafe { args.SetHandled(true) };
+            log_manager::append_line(
+                app,
+                format!("download destination selected: {url} -> {}", path.display()),
+            );
+        }
+        Some(path) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "download rejected because selected path is not absolute: {} ({url})",
+                    path.display()
+                ),
+            );
+            let _ = unsafe { args.SetCancel(true) };
+        }
+        None => {
+            log_manager::append_line(app, format!("download canceled by user: {url}"));
+            let _ = unsafe { args.SetCancel(true) };
+        }
+    }
+
+    let _ = unsafe { deferral.Complete() };
+}
+
+#[cfg(windows)]
+unsafe fn attach_windows_download_save_hook(
+    window: &WebviewWindow,
+    app: &AppHandle,
+) -> Result<(), String> {
+    let app_for_hook = app.clone();
+    window
+        .with_webview(move |platform_webview| {
+            let attach_result: Result<(), String> = (|| {
+                let controller = platform_webview.controller();
+                let webview = controller
+                    .CoreWebView2()
+                    .map_err(|error| format!("failed to resolve CoreWebView2: {error}"))?;
+                let webview4: ICoreWebView2_4 = webview
+                    .cast()
+                    .map_err(|error| format!("failed to cast CoreWebView2_4: {error}"))?;
+                let app_for_download = app_for_hook.clone();
+                let mut token = WebviewEventRegistrationToken::default();
+
+                webview4
+                    .add_DownloadStarting(
+                        &DownloadStartingEventHandler::create(Box::new(move |_, args| {
+                            let Some(args) = args else {
+                                return Ok(());
+                            };
+
+                            let download_operation = args.DownloadOperation()?;
+                            let url = {
+                                let mut uri = PWSTR::null();
+                                download_operation.Uri(&mut uri)?;
+                                take_pwstr(uri)
+                            };
+
+                            let app_for_state = app_for_download.clone();
+                            let url_for_state = url.clone();
+                            let mut state_token = WebviewEventRegistrationToken::default();
+                            download_operation.add_StateChanged(
+                                &StateChangedEventHandler::create(Box::new(
+                                    move |download_operation, _| {
+                                        let Some(download_operation) = download_operation else {
+                                            return Ok(());
+                                        };
+
+                                        let mut state = COREWEBVIEW2_DOWNLOAD_STATE::default();
+                                        download_operation.State(&mut state)?;
+
+                                        if state != COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS {
+                                            let success =
+                                                state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED;
+                                            let saved_path = if success {
+                                                let mut path = PWSTR::null();
+                                                download_operation.ResultFilePath(&mut path)?;
+                                                Some(PathBuf::from(take_pwstr(path)))
+                                            } else {
+                                                None
+                                            };
+                                            let saved_path_display = saved_path
+                                                .as_ref()
+                                                .map(|value| value.display().to_string())
+                                                .unwrap_or_else(|| "<none>".to_string());
+                                            log_manager::append_line(
+                                                &app_for_state,
+                                                format!(
+                                                    "download finished: url={url_for_state}, path={saved_path_display}, success={success}"
+                                                ),
+                                            );
+                                        }
+
+                                        Ok(())
+                                    },
+                                )),
+                                &mut state_token,
+                            )?;
+
+                            let suggested_destination = {
+                                let mut path = PWSTR::null();
+                                args.ResultFilePath(&mut path)?;
+                                PathBuf::from(take_pwstr(path))
+                            };
+                            let default_directory =
+                                suggested_destination.parent().map(PathBuf::from);
+                            let default_file_name = suggested_destination
+                                .file_name()
+                                .map(|value| value.to_string_lossy().trim().to_string())
+                                .filter(|value| !value.is_empty());
+
+                            let deferral = UnsafeSend(args.GetDeferral()?);
+                            let args = UnsafeSend(args);
+                            let app_for_dialog = app_for_download.clone();
+                            let url_for_dialog = url.clone();
+
+                            let mut dialog =
+                                app_for_dialog.dialog().file().set_title(DOWNLOAD_SAVE_DIALOG_TITLE);
+                            if let Some(directory) = default_directory.as_ref() {
+                                dialog = dialog.set_directory(directory);
+                            }
+                            if let Some(file_name) = default_file_name.as_ref() {
+                                dialog = dialog.set_file_name(file_name);
+                            }
+
+                            dialog.save_file(move |selection| {
+                                let selected_path = selected_file_path(selection);
+                                let app_for_main = app_for_dialog.clone();
+                                let app_for_main_callback = app_for_main.clone();
+                                let url_for_main = url_for_dialog.clone();
+                                let args_for_main = UnsafeSend(args.take());
+                                let deferral_for_main = UnsafeSend(deferral.take());
+                                let args_for_fallback = args_for_main.clone();
+                                let deferral_for_fallback = deferral_for_main.clone();
+
+                                let schedule_result = app_for_main.run_on_main_thread(move || {
+                                    finalize_windows_download_selection(
+                                        &app_for_main_callback,
+                                        &url_for_main,
+                                        args_for_main.take(),
+                                        deferral_for_main.take(),
+                                        selected_path,
+                                    );
+                                });
+
+                                if let Err(error) = schedule_result {
+                                    log_manager::append_line(
+                                        &app_for_dialog,
+                                        format!(
+                                            "failed to schedule download save decision on main thread: {error}"
+                                        ),
+                                    );
+                                    finalize_windows_download_selection(
+                                        &app_for_dialog,
+                                        &url_for_dialog,
+                                        args_for_fallback.take(),
+                                        deferral_for_fallback.take(),
+                                        None,
+                                    );
+                                }
+                            });
+
+                            Ok(())
+                        })),
+                        &mut token,
+                    )
+                    .map_err(|error| format!("failed to register DownloadStarting handler: {error}"))?;
+
+                Ok(())
+            })();
+
+            match attach_result {
+                Ok(()) => {
+                    log_manager::append_line(
+                        &app_for_hook,
+                        "main window download save hook installed",
+                    );
+                }
+                Err(error) => {
+                    log_manager::append_line(
+                        &app_for_hook,
+                        format!(
+                            "main window download save hook unavailable; falling back to default download behavior: {error}"
+                        ),
+                    );
+                }
+            }
+        })
+        .map_err(|error| format!("failed to access main platform webview for download hook: {error}"))
+}
+
+#[cfg(not(windows))]
+fn attach_windows_download_save_hook(
+    _window: &WebviewWindow,
+    _app: &AppHandle,
+) -> Result<(), String> {
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavigationStage {
@@ -930,30 +1303,33 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
 
     advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
     let app_for_load = app.clone();
+    let chat_external_link_script = chat_external_link_bridge_script();
     let builder = match WebviewWindowBuilder::from_config(app, &config) {
-        Ok(builder) => builder.on_page_load(move |_window, payload| {
-            let url = payload.url().to_string();
-            if !is_shell_document_url(&url) {
-                return;
-            }
+        Ok(builder) => builder
+            .initialization_script_for_all_frames(chat_external_link_script)
+            .on_page_load(move |_window, payload| {
+                let url = payload.url().to_string();
+                if !is_shell_document_url(&url) {
+                    return;
+                }
 
-            match payload.event() {
-                PageLoadEvent::Started => {
-                    advance_startup_phase(
-                        &app_for_load,
-                        StartupPhase::MainPageLoadStarted,
-                        &format!("main_page_load_started:{url}"),
-                    );
+                match payload.event() {
+                    PageLoadEvent::Started => {
+                        advance_startup_phase(
+                            &app_for_load,
+                            StartupPhase::MainPageLoadStarted,
+                            &format!("main_page_load_started:{url}"),
+                        );
+                    }
+                    PageLoadEvent::Finished => {
+                        advance_startup_phase(
+                            &app_for_load,
+                            StartupPhase::MainPageLoadFinished,
+                            &format!("main_page_load_finished:{url}"),
+                        );
+                    }
                 }
-                PageLoadEvent::Finished => {
-                    advance_startup_phase(
-                        &app_for_load,
-                        StartupPhase::MainPageLoadFinished,
-                        &format!("main_page_load_finished:{url}"),
-                    );
-                }
-            }
-        }),
+            }),
         Err(error) => {
             mark_startup_guard_failed(
                 app,
@@ -982,6 +1358,15 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
             return;
         }
     };
+
+    if let Err(error) = unsafe { attach_windows_download_save_hook(&window, app) } {
+        log_manager::append_line(
+            app,
+            format!(
+                "failed to access main platform webview for download hook; falling back to default download behavior: {error}"
+            ),
+        );
+    }
 
     apply_main_window_geometry(app, &window, source);
     let _ = window.hide();

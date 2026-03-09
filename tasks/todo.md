@@ -1,3 +1,32 @@
+# Current Plan (refresh app README to v0.0.17)
+
+## Checklist
+
+- [x] Review the current `apps/kimi-shell/README.md` content against the shipped `0.0.17` behavior
+- [x] Update the app README version, feature summary, and screenshots
+- [x] Commit the app README refresh and push it to `origin/main`
+- [x] Fill this section with review notes
+
+## Acceptance Criteria
+
+- [x] `apps/kimi-shell/README.md` mentions `0.0.17`
+- [x] The app README reflects the current Code/Chat split shell, control center, and packaged-download behavior
+- [x] The app README includes the two current screenshots with working repo-relative paths
+- [ ] The documentation commit is pushed to `origin/main`
+
+## Review
+
+- Actual changes:
+  - `apps/kimi-shell/README.md`
+    - Updated the app version from `0.0.15` to `0.0.17`.
+    - Added the current workspace/control-center capability summary.
+    - Inserted `public/home.png` and `public/control_center.png`.
+    - Refreshed the FAQ to cover runtime-only backend restart and Chat save-as behavior.
+- Verification:
+  - Reviewed the markdown diff and repo-relative image paths.
+- Remaining note:
+  - Mark the final push item complete after the commit lands on `origin/main`.
+
 # Current Plan (refresh bilingual README for v0.0.17)
 
 ## Checklist

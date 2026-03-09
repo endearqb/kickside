@@ -12,7 +12,7 @@
 - [x] `apps/kimi-shell/README.md` mentions `0.0.17`
 - [x] The app README reflects the current Code/Chat split shell, control center, and packaged-download behavior
 - [x] The app README includes the two current screenshots with working repo-relative paths
-- [ ] The documentation commit is pushed to `origin/main`
+- [x] The documentation commit is pushed to `origin/main`
 
 ## Review
 
@@ -24,8 +24,8 @@
     - Refreshed the FAQ to cover runtime-only backend restart and Chat save-as behavior.
 - Verification:
   - Reviewed the markdown diff and repo-relative image paths.
-- Remaining note:
-  - Mark the final push item complete after the commit lands on `origin/main`.
+- Final push:
+  - Commit `ed5cbbd` (`docs: update app readme for v0.0.17`) is now on `origin/main`.
 
 # Current Plan (refresh bilingual README for v0.0.17)
 

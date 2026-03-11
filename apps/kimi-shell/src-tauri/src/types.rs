@@ -545,16 +545,178 @@ pub struct KimiCliConfigCenterView {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallTaskId {
+    QuickInstallCore,
+    InstallUv,
+    InstallPython313,
+    InstallKimi,
+    UpgradeKimi,
+    InstallGit,
+    InstallNodejs,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallTaskGroup {
+    Core,
+    Optional,
+    Upgrade,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallSource {
+    Official,
+    Mirror,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallSessionStatus {
+    Idle,
+    Starting,
+    Running,
+    Cancelling,
+    Succeeded,
+    Failed,
+    Cancelled,
+    FallbackRequired,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallSessionStage {
+    Idle,
+    Prepare,
+    ExecuteStep,
+    Probe,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallLogStream {
+    Stdout,
+    Stderr,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallTaskStep {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallTaskDefinition {
+    pub id: InstallTaskId,
+    pub title: String,
+    pub description: String,
+    pub group: InstallTaskGroup,
+    pub recommended: bool,
+    pub runs_in_app: bool,
+    pub requires_elevation: bool,
+    pub optional: bool,
+    pub fallback_reason: Option<String>,
+    #[serde(default)]
+    pub official_steps: Vec<InstallTaskStep>,
+    #[serde(default)]
+    pub mirror_steps: Vec<InstallTaskStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallFlowCatalog {
+    #[serde(default)]
+    pub tasks: Vec<InstallTaskDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallProbeStatus {
+    pub winget_ready: bool,
     pub git_ready: bool,
     pub uv_ready: bool,
     pub python313_ready: bool,
     pub kimi_ready: bool,
     pub node_ready: bool,
+    pub core_ready: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallLogChunk {
+    pub task_id: InstallTaskId,
+    pub step_id: Option<String>,
+    pub source: InstallSource,
+    pub stream: InstallLogStream,
+    pub text: String,
+    pub at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSessionSnapshot {
+    pub status: InstallSessionStatus,
+    pub stage: InstallSessionStage,
+    pub task_id: Option<InstallTaskId>,
+    pub source: Option<InstallSource>,
+    pub title: Option<String>,
+    pub current_step_id: Option<String>,
+    pub current_step_title: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub exit_code: Option<i32>,
+    pub message: Option<String>,
+    pub failure_summary: Option<String>,
+    pub last_stdout: Option<String>,
+    pub last_stderr: Option<String>,
+    pub fallback_reason: Option<String>,
+    pub logs_truncated: bool,
+    pub probe: Option<InstallProbeStatus>,
+    #[serde(default)]
+    pub logs: Vec<InstallLogChunk>,
+}
+
+impl Default for InstallSessionSnapshot {
+    fn default() -> Self {
+        Self {
+            status: InstallSessionStatus::Idle,
+            stage: InstallSessionStage::Idle,
+            task_id: None,
+            source: None,
+            title: None,
+            current_step_id: None,
+            current_step_title: None,
+            started_at: None,
+            finished_at: None,
+            exit_code: None,
+            message: None,
+            failure_summary: None,
+            last_stdout: None,
+            last_stderr: None,
+            fallback_reason: None,
+            logs_truncated: false,
+            probe: None,
+            logs: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum InstallSessionEvent {
+    Snapshot { snapshot: InstallSessionSnapshot },
+    Log { chunk: InstallLogChunk },
+}
+
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCommandStep {
@@ -564,6 +726,7 @@ pub struct InstallCommandStep {
     pub command: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCommandEntry {
@@ -576,6 +739,7 @@ pub struct InstallCommandEntry {
     pub steps: Vec<InstallCommandStep>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallCommandCatalog {

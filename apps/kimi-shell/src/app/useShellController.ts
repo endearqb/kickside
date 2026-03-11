@@ -7,10 +7,11 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import {
   CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
   clampWorkspaceSplitRatio,
@@ -38,9 +39,14 @@ import type {
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  InstallFlowCatalog,
   InstallCommandCatalog,
+  InstallLogChunk,
   FrontendReadyAck,
   InstallProbeStatus,
+  InstallSessionEvent,
+  InstallSessionSnapshot,
+  InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   LoginProbeResult,
@@ -173,6 +179,11 @@ export function useShellController() {
   const [installAction, setInstallAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
+  const [installFlowOpen, setInstallFlowOpen] = useState(false);
+  const [installFlowCatalog, setInstallFlowCatalog] =
+    useState<InstallFlowCatalog | null>(null);
+  const [installSessionSnapshot, setInstallSessionSnapshot] =
+    useState<InstallSessionSnapshot>(() => createEmptyInstallSessionSnapshot());
   const [installCommandsOpen, setInstallCommandsOpen] = useState(false);
   const [installCommandsBusy, setInstallCommandsBusy] = useState(false);
   const [installCommandCatalog, setInstallCommandCatalog] =
@@ -239,6 +250,10 @@ export function useShellController() {
     !status &&
     bootHint?.backendState === "running" &&
     Boolean(bootHint.workspaceUrl?.trim());
+  const keepControlCenterForUpgrade =
+    installSessionSnapshot.taskId === "upgrade_kimi" &&
+    installSessionSnapshot.status !== "idle" &&
+    status?.state !== "running";
 
   const screen: Screen = useMemo(() => {
     if (hashRoute === "control-center") return "control_center";
@@ -260,6 +275,10 @@ export function useShellController() {
       return "control_center";
     }
 
+    if (keepControlCenterForUpgrade) {
+      return "control_center";
+    }
+
     if (useBootHintWorkspace) {
       return "workspace";
     }
@@ -269,7 +288,7 @@ export function useShellController() {
     }
 
     return "loading";
-  }, [hashRoute, onboarding, status, useBootHintWorkspace]);
+  }, [hashRoute, keepControlCenterForUpgrade, onboarding, status, useBootHintWorkspace]);
 
   const workspacePort = status?.workspacePort ?? status?.activePort;
   const remoteUrl =
@@ -1089,6 +1108,64 @@ export function useShellController() {
     return data;
   }
 
+  function mergeInstallLogChunk(
+    current: InstallSessionSnapshot,
+    chunk: InstallLogChunk,
+  ): InstallSessionSnapshot {
+    const nextLogs = [...current.logs, chunk];
+    const overflow = Math.max(0, nextLogs.length - 400);
+    return {
+      ...current,
+      logs: overflow > 0 ? nextLogs.slice(overflow) : nextLogs,
+      logsTruncated: current.logsTruncated || overflow > 0,
+    };
+  }
+
+  async function refreshInstallFlowCatalog() {
+    const catalog = await invoke<InstallFlowCatalog>("get_install_flow_catalog");
+    setInstallFlowCatalog(catalog);
+    return catalog;
+  }
+
+  async function refreshInstallSessionSnapshot() {
+    const snapshot = await invoke<InstallSessionSnapshot>("get_install_session_snapshot");
+    setInstallSessionSnapshot(snapshot);
+    if (snapshot.probe) {
+      setInstallProbe(snapshot.probe);
+    }
+    return snapshot;
+  }
+
+  useEffect(() => {
+    if (!tauriRuntime) {
+      return;
+    }
+
+    const channel = new Channel<InstallSessionEvent>();
+    channel.onmessage = (event) => {
+      if (event.event === "snapshot") {
+        setInstallSessionSnapshot(event.snapshot);
+        if (event.snapshot.probe) {
+          setInstallProbe(event.snapshot.probe);
+        }
+        return;
+      }
+
+      setInstallSessionSnapshot((current) => mergeInstallLogChunk(current, event.chunk));
+    };
+
+    void invoke<InstallSessionSnapshot>("register_install_session_channel", { channel })
+      .then((snapshot) => {
+        setInstallSessionSnapshot(snapshot);
+        if (snapshot.probe) {
+          setInstallProbe(snapshot.probe);
+        }
+      })
+      .catch((error) => {
+        setActionError(String(error));
+      });
+  }, [tauriRuntime]);
+
   async function waitForInstallProbe(
     predicate: (probe: InstallProbeStatus) => boolean,
     timeoutMs = INSTALL_PROBE_TIMEOUT_MS,
@@ -1187,14 +1264,15 @@ export function useShellController() {
   }, [onboarding, workDirInput]);
 
   useEffect(() => {
-    if (screen === "workspace") {
+    if (screen === "workspace" || keepControlCenterForUpgrade) {
       return;
     }
     setControlCenterModalOpen(false);
     setConfigCenterOpen(false);
+    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
-  }, [screen]);
+  }, [keepControlCenterForUpgrade, screen]);
 
   useEffect(() => {
     if (!tauriRuntime) {
@@ -1545,6 +1623,82 @@ export function useShellController() {
     setInstallMessage("");
   }
 
+  async function handleStartInstallTask(taskId: InstallTaskId) {
+    setActionError(null);
+    try {
+      const catalog = installFlowCatalog ?? (await refreshInstallFlowCatalog());
+      const task = catalog.tasks.find((item) => item.id === taskId);
+      if (task?.requiresElevation) {
+        const accepted = window.confirm(
+          `${task.title} will open an elevated external PowerShell window. Continue?`,
+        );
+        if (!accepted) {
+          return;
+        }
+      }
+
+      const snapshot = await invoke<InstallSessionSnapshot>("start_install_task", {
+        taskId,
+        source: installSource,
+      });
+      setInstallSessionSnapshot(snapshot);
+      if (snapshot.probe) {
+        setInstallProbe(snapshot.probe);
+      }
+      setInstallFlowOpen(true);
+      await refreshOnboarding();
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handleCancelInstallTask() {
+    setActionError(null);
+    try {
+      const snapshot = await invoke<InstallSessionSnapshot>("cancel_install_task");
+      setInstallSessionSnapshot(snapshot);
+      if (snapshot.probe) {
+        setInstallProbe(snapshot.probe);
+      }
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handleOpenInstallFlow() {
+    setActionError(null);
+    try {
+      await Promise.all([
+        refreshInstallProbe(),
+        refreshInstallFlowCatalog(),
+        refreshInstallSessionSnapshot(),
+      ]);
+      setInstallFlowOpen(true);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  function handleCloseInstallFlow() {
+    setInstallFlowOpen(false);
+  }
+
+  async function handleQuickInstallCore() {
+    await handleStartInstallTask("quick_install_core");
+  }
+
+  async function handleInstallKimiTask() {
+    await handleStartInstallTask("install_kimi");
+  }
+
+  async function handleUpgradeKimiTask() {
+    await handleStartInstallTask("upgrade_kimi");
+  }
+
+  async function handleInstallNodejsTask() {
+    await handleStartInstallTask("install_nodejs");
+  }
+
   async function handleInstallDependencies() {
     setActionError(null);
     try {
@@ -1692,6 +1846,7 @@ export function useShellController() {
   function closeControlCenterModal() {
     setControlCenterModalOpen(false);
     setConfigCenterOpen(false);
+    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }
@@ -1853,8 +2008,17 @@ export function useShellController() {
     };
   }, [chatRemoteUrl]);
 
+  void installBusy;
+  void installCommandsOpen;
+  void installCommandsBusy;
   void handleInstallDependencies;
   void handleInstallKimi;
+  void handleInstallDependenciesExternal;
+  void handleInstallKimiExternal;
+  void handleUpgradeKimi;
+  void handleInstallNodejs;
+  void handleOpenInstallCommands;
+  void handleCloseInstallCommands;
 
   const stepCompletion = useMemo<StepCompletion>(
     () => ({
@@ -1962,11 +2126,17 @@ export function useShellController() {
     configCenterDirty,
     installProbe,
     installSource,
-    installBusy,
+    installBusy:
+      installSessionSnapshot.status === "starting" ||
+      installSessionSnapshot.status === "running" ||
+      installSessionSnapshot.status === "cancelling",
     installAction,
     installMessage,
-    installCommandsOpen,
-    installCommandsBusy,
+    installFlowOpen,
+    installFlowCatalog,
+    installSessionSnapshot,
+    installCommandsOpen: installFlowOpen,
+    installCommandsBusy: false,
     installCommandCatalog,
     refreshCoreState,
     refreshDiagnostics,
@@ -1992,12 +2162,16 @@ export function useShellController() {
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleInstallSourceChange,
-    handleInstallDependencies: handleInstallDependenciesExternal,
-    handleInstallKimi: handleInstallKimiExternal,
-    handleUpgradeKimi,
-    handleInstallNodejs,
-    handleOpenInstallCommands,
-    handleCloseInstallCommands,
+    handleInstallDependencies: handleQuickInstallCore,
+    handleInstallKimi: handleInstallKimiTask,
+    handleUpgradeKimi: handleUpgradeKimiTask,
+    handleInstallNodejs: handleInstallNodejsTask,
+    handleOpenInstallFlow,
+    handleCloseInstallFlow,
+    handleStartInstallTask,
+    handleCancelInstallTask,
+    handleOpenInstallCommands: handleOpenInstallFlow,
+    handleCloseInstallCommands: handleCloseInstallFlow,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,

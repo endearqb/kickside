@@ -6,8 +6,8 @@ use std::{
 };
 
 use tauri::{
-    webview::PageLoadEvent,
-    AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindow, WebviewWindowBuilder,
+    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
@@ -17,7 +17,7 @@ use webview2_com::{
     StateChangedEventHandler,
 };
 #[cfg(windows)]
-use windows::core::{HSTRING, Interface, PWSTR};
+use windows::core::{Interface, HSTRING, PWSTR};
 
 use crate::{
     app_state::AppState,
@@ -708,7 +708,10 @@ pub fn handle_prefill_window_destroyed(app: &AppHandle, source: &str) {
 
     log_manager::append_line(
         app,
-        format!("prefill window destroyed (source={source}, startup_pending={})", state.startup_pending),
+        format!(
+            "prefill window destroyed (source={source}, startup_pending={})",
+            state.startup_pending
+        ),
     );
 }
 
@@ -1016,13 +1019,7 @@ pub fn mark_backend_ready(app: &AppHandle, source: &str) {
 }
 
 pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransition {
-    let (
-        accepted,
-        queued_route,
-        queued_main_events,
-        pending_prefill,
-        snapshot,
-    ) = {
+    let (accepted, queued_route, queued_main_events, pending_prefill, snapshot) = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
             log_manager::append_line(
@@ -1078,7 +1075,12 @@ pub fn mark_frontend_ready(app: &AppHandle, source: &str) -> FrontendReadyTransi
 
     if let Some(payload) = pending_prefill.clone() {
         if !emit_prefill_event(app, &payload, source) {
-            requeue_prefill(app, payload.clone(), source, "emit_failed_after_frontend_ready");
+            requeue_prefill(
+                app,
+                payload.clone(),
+                source,
+                "emit_failed_after_frontend_ready",
+            );
         }
     }
 
@@ -1192,7 +1194,9 @@ pub fn submit_prefill(app: &AppHandle, text: String, source: &str) -> SubmitPref
         let Ok(mut state) = lock else {
             log_manager::append_line(
                 app,
-                format!("navigation state mutex poisoned while submitting prefill (source={source})"),
+                format!(
+                    "navigation state mutex poisoned while submitting prefill (source={source})"
+                ),
             );
             return SubmitPrefillAck {
                 accepted: false,
@@ -1856,11 +1860,7 @@ fn flush_pending_main_events(app: &AppHandle, events: Vec<QueuedMainEvent>, sour
     }
 }
 
-fn apply_prefill_window_geometry(
-    app: &AppHandle,
-    window: &tauri::WebviewWindow,
-    source: &str,
-) {
+fn apply_prefill_window_geometry(app: &AppHandle, window: &tauri::WebviewWindow, source: &str) {
     if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
         PREFILL_MIN_WIDTH,
         PREFILL_MIN_HEIGHT,
@@ -1870,7 +1870,10 @@ fn apply_prefill_window_geometry(
             format!("failed to set prefill min size (source={source}): {error}"),
         );
     }
-    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(PREFILL_WIDTH, PREFILL_HEIGHT))) {
+    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(
+        PREFILL_WIDTH,
+        PREFILL_HEIGHT,
+    ))) {
         log_manager::append_line(
             app,
             format!("failed to set prefill size (source={source}): {error}"),
@@ -1882,11 +1885,7 @@ fn apply_prefill_window_geometry(
     let _ = window.center();
 }
 
-fn apply_main_window_geometry(
-    app: &AppHandle,
-    window: &tauri::WebviewWindow,
-    source: &str,
-) {
+fn apply_main_window_geometry(app: &AppHandle, window: &tauri::WebviewWindow, source: &str) {
     if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
         SHELL_MIN_WIDTH,
         SHELL_MIN_HEIGHT,
@@ -1896,7 +1895,8 @@ fn apply_main_window_geometry(
             format!("failed to set main min size (source={source}): {error}"),
         );
     }
-    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(SHELL_WIDTH, SHELL_HEIGHT))) {
+    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(SHELL_WIDTH, SHELL_HEIGHT)))
+    {
         log_manager::append_line(
             app,
             format!("failed to set main size (source={source}): {error}"),
@@ -2217,7 +2217,10 @@ fn record_startup_trace(app: &AppHandle, event: String) {
     let trace_event = event.clone();
     with_runtime_state(app, move |runtime| {
         runtime.startup_trace.push(trace_event);
-        let overflow = runtime.startup_trace.len().saturating_sub(STARTUP_TRACE_LIMIT);
+        let overflow = runtime
+            .startup_trace
+            .len()
+            .saturating_sub(STARTUP_TRACE_LIMIT);
         if overflow > 0 {
             runtime.startup_trace.drain(0..overflow);
         }
@@ -2328,7 +2331,13 @@ mod tests {
     #[test]
     fn next_prefill_id_monotonically_increments() {
         let mut state = NavigationState::default();
-        assert_eq!(next_prefill_request_id_locked(&mut state), "prefill-0000000001");
-        assert_eq!(next_prefill_request_id_locked(&mut state), "prefill-0000000002");
+        assert_eq!(
+            next_prefill_request_id_locked(&mut state),
+            "prefill-0000000001"
+        );
+        assert_eq!(
+            next_prefill_request_id_locked(&mut state),
+            "prefill-0000000002"
+        );
     }
 }

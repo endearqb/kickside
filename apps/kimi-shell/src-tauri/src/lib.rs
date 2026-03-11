@@ -3,6 +3,7 @@ mod backend_manager;
 mod cli_contract;
 mod command_utils;
 mod context_menu;
+mod install_manager;
 mod kimi_locator;
 mod log_manager;
 mod open_request;
@@ -19,13 +20,14 @@ use std::process::Command;
 use std::thread;
 use std::time::Instant;
 
-use tauri::{AppHandle, Emitter, Manager, RunEvent};
+use tauri::{ipc::Channel, AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
-    InstallCommandCatalog, InstallProbeStatus, KimiCliApiConfigInput, KimiCliApiConfigView,
+    InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
+    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
     KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
     OnboardingStatus, OnboardingStep, ShutdownProgressPayload, StartupMonitorReason,
     StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
@@ -206,10 +208,7 @@ fn report_loading_rendered(app: AppHandle, start_cycle_id: Option<u64>) -> Resul
     }
     drop(runtime);
 
-    window_manager::complete_pending_prefill_handoff(
-        &app,
-        "report_loading_rendered_invoke",
-    );
+    window_manager::complete_pending_prefill_handoff(&app, "report_loading_rendered_invoke");
 
     Ok(())
 }
@@ -393,33 +392,85 @@ fn save_kimi_cli_config_center(
 }
 
 #[tauri::command]
-fn install_kimi_dependencies(source: String) -> Result<String, String> {
-    backend_manager::install_kimi_dependencies(&source)
+fn register_install_session_channel(
+    state: State<install_manager::InstallManager>,
+    channel: Channel<InstallSessionEvent>,
+) -> Result<InstallSessionSnapshot, String> {
+    state.register_channel(channel)
 }
 
 #[tauri::command]
-fn install_kimi_cli(source: String) -> Result<String, String> {
-    backend_manager::install_kimi_cli(&source)
+fn get_install_flow_catalog() -> InstallFlowCatalog {
+    install_manager::build_install_flow_catalog()
 }
 
 #[tauri::command]
-fn upgrade_kimi_cli(source: String) -> Result<String, String> {
-    backend_manager::upgrade_kimi_cli(&source)
+fn get_install_session_snapshot(
+    state: State<install_manager::InstallManager>,
+) -> Result<InstallSessionSnapshot, String> {
+    state.snapshot()
 }
 
 #[tauri::command]
-fn install_nodejs() -> Result<String, String> {
-    backend_manager::install_nodejs()
+fn start_install_task(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+    task_id: InstallTaskId,
+    source: InstallSource,
+) -> Result<InstallSessionSnapshot, String> {
+    state.start_task(&app, task_id, source)
+}
+
+#[tauri::command]
+fn cancel_install_task(
+    state: State<install_manager::InstallManager>,
+) -> Result<InstallSessionSnapshot, String> {
+    state.cancel_task()
+}
+
+#[tauri::command]
+fn install_kimi_dependencies(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+    source: InstallSource,
+) -> Result<String, String> {
+    install_manager::start_compat_task(&app, &state, InstallTaskId::QuickInstallCore, source)
+}
+
+#[tauri::command]
+fn install_kimi_cli(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+    source: InstallSource,
+) -> Result<String, String> {
+    install_manager::start_compat_task(&app, &state, InstallTaskId::InstallKimi, source)
+}
+
+#[tauri::command]
+fn upgrade_kimi_cli(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+    source: InstallSource,
+) -> Result<String, String> {
+    install_manager::start_compat_task(&app, &state, InstallTaskId::UpgradeKimi, source)
+}
+
+#[tauri::command]
+fn install_nodejs(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+) -> Result<String, String> {
+    install_manager::start_compat_task(
+        &app,
+        &state,
+        InstallTaskId::InstallNodejs,
+        InstallSource::Official,
+    )
 }
 
 #[tauri::command]
 fn get_install_probe_status(app: AppHandle) -> InstallProbeStatus {
-    backend_manager::get_install_probe_status(&app)
-}
-
-#[tauri::command]
-fn get_install_command_catalog() -> InstallCommandCatalog {
-    backend_manager::get_install_command_catalog()
+    install_manager::get_install_probe_status(&app)
 }
 
 #[tauri::command]
@@ -691,6 +742,7 @@ pub fn run() {
             let hotkey_owner = shared.hotkey_owner;
             let pid = shared.pid;
             app.manage(shared);
+            app.manage(install_manager::InstallManager::default());
 
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
@@ -745,12 +797,16 @@ pub fn run() {
             save_kimi_cli_api_config,
             load_kimi_cli_config_center,
             save_kimi_cli_config_center,
+            register_install_session_channel,
+            get_install_flow_catalog,
+            get_install_session_snapshot,
+            start_install_task,
+            cancel_install_task,
             install_kimi_dependencies,
             install_kimi_cli,
             upgrade_kimi_cli,
             install_nodejs,
             get_install_probe_status,
-            get_install_command_catalog,
             get_context_menu_status,
             enable_context_menu,
             disable_context_menu,

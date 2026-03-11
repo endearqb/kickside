@@ -729,6 +729,24 @@
   gap: 6px;
 }
 
+.cc-install-open-flow-btn,
+.cc-install-save-path-btn {
+  font-size: 0;
+}
+
+.cc-install-open-flow-btn::after,
+.cc-install-save-path-btn::after {
+  font-size: 12px;
+}
+
+.cc-install-open-flow-btn::after {
+  content: "打开安装与升级";
+}
+
+.cc-install-save-path-btn::after {
+  content: "保存路径并重启";
+}
+
 .cc-source-switch {
   display: inline-flex;
   align-items: center;
@@ -1193,6 +1211,122 @@
   min-height: 0;
   overflow: auto;
   padding: 12px;
+}
+
+.cc-install-flow-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: color-mix(in srgb, #000 40%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.cc-install-flow-modal {
+  width: min(1080px, 100%);
+  max-height: min(86vh, 920px);
+  overflow: auto;
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.cc-install-flow-header,
+.cc-install-console-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cc-install-flow-header h3,
+.cc-install-flow-section h4 {
+  margin: 0;
+}
+
+.cc-install-flow-header p,
+.cc-install-console-head p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.cc-install-flow-header-actions,
+.cc-install-flow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cc-install-flow-source {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cc-install-flow-section {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-install-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cc-install-task-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.cc-install-task-item {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.cc-install-task-item .cc-action-btn {
+  width: 100%;
+}
+
+.cc-install-task-hint {
+  margin: 0;
+  min-height: 16px;
+  font-size: 11px;
+}
+
+.cc-install-error-summary {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #c53b3b 35%, var(--chrome-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #c53b3b 8%, var(--surface));
+  color: color-mix(in srgb, #c53b3b 82%, var(--text-primary));
+}
+
+.cc-install-console {
+  min-height: 220px;
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 88%, #000);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .cc-install-command-list {

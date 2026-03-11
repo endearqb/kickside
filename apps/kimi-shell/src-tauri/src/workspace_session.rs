@@ -102,20 +102,17 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
             return;
         };
 
-        runtime
-            .pending_workspace_bootstrap
-            .take()
-            .or_else(|| {
-                runtime
-                    .effective_work_dir
-                    .clone()
-                    .map(|work_dir| PendingWorkspaceBootstrap {
-                        work_dir,
-                        auto_session: true,
-                        force_create_new: false,
-                        source: "backend_ready_bootstrap".to_string(),
-                    })
-            })
+        runtime.pending_workspace_bootstrap.take().or_else(|| {
+            runtime
+                .effective_work_dir
+                .clone()
+                .map(|work_dir| PendingWorkspaceBootstrap {
+                    work_dir,
+                    auto_session: true,
+                    force_create_new: false,
+                    source: "backend_ready_bootstrap".to_string(),
+                })
+        })
     };
 
     if let Some(request) = bootstrap_target {
@@ -286,10 +283,7 @@ fn spawn_bootstrap_session(
                         "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
                         work_dir.display()
                     );
-                    log_manager::append_line(
-                        &app,
-                        error_message.clone(),
-                    );
+                    log_manager::append_line(&app, error_message.clone());
                     if force_create_new {
                         emit_bootstrap_open_request_error(
                             &app,

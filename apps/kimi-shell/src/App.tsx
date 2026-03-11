@@ -159,6 +159,9 @@ function App() {
               configCenterDirty={shell.configCenterDirty}
               installProbe={shell.installProbe}
               installSource={shell.installSource}
+              installFlowOpen={shell.installFlowOpen}
+              installFlowCatalog={shell.installFlowCatalog}
+              installSessionSnapshot={shell.installSessionSnapshot}
               installBusy={shell.installBusy}
               installAction={shell.installAction}
               installMessage={shell.installMessage}
@@ -195,6 +198,10 @@ function App() {
               onInstallKimi={shell.handleInstallKimi}
               onUpgradeKimi={shell.handleUpgradeKimi}
               onInstallNodejs={shell.handleInstallNodejs}
+              onOpenInstallFlow={shell.handleOpenInstallFlow}
+              onCloseInstallFlow={shell.handleCloseInstallFlow}
+              onStartInstallTask={shell.handleStartInstallTask}
+              onCancelInstallTask={shell.handleCancelInstallTask}
               onOpenInstallCommands={shell.handleOpenInstallCommands}
               onCloseInstallCommands={shell.handleCloseInstallCommands}
               onCompleteOnboarding={shell.handleCompleteOnboarding}
@@ -242,6 +249,9 @@ function App() {
               configCenterDirty={shell.configCenterDirty}
               installProbe={shell.installProbe}
               installSource={shell.installSource}
+              installFlowOpen={shell.installFlowOpen}
+              installFlowCatalog={shell.installFlowCatalog}
+              installSessionSnapshot={shell.installSessionSnapshot}
               installBusy={shell.installBusy}
               installAction={shell.installAction}
               installMessage={shell.installMessage}
@@ -278,6 +288,10 @@ function App() {
               onInstallKimi={shell.handleInstallKimi}
               onUpgradeKimi={shell.handleUpgradeKimi}
               onInstallNodejs={shell.handleInstallNodejs}
+              onOpenInstallFlow={shell.handleOpenInstallFlow}
+              onCloseInstallFlow={shell.handleCloseInstallFlow}
+              onStartInstallTask={shell.handleStartInstallTask}
+              onCancelInstallTask={shell.handleCancelInstallTask}
               onOpenInstallCommands={shell.handleOpenInstallCommands}
               onCloseInstallCommands={shell.handleCloseInstallCommands}
               onCompleteOnboarding={shell.handleCompleteOnboarding}

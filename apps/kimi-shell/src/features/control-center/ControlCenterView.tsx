@@ -23,8 +23,11 @@ import type {
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  InstallFlowCatalog,
   InstallCommandCatalog,
   InstallProbeStatus,
+  InstallSessionSnapshot,
+  InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   OnboardingStatus,
@@ -38,7 +41,7 @@ import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
-import { InstallCommandsModal } from "@/features/control-center/InstallCommandsModal";
+import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir";
@@ -68,6 +71,9 @@ type ControlCenterViewProps = {
   configCenterDirty: boolean;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
+  installFlowOpen: boolean;
+  installFlowCatalog: InstallFlowCatalog | null;
+  installSessionSnapshot: InstallSessionSnapshot;
   installCommandsOpen: boolean;
   installCommandsBusy: boolean;
   installCommandCatalog: InstallCommandCatalog | null;
@@ -104,6 +110,10 @@ type ControlCenterViewProps = {
   onInstallKimi: () => Promise<void>;
   onUpgradeKimi: () => Promise<void>;
   onInstallNodejs: () => Promise<void>;
+  onOpenInstallFlow: () => Promise<void>;
+  onCloseInstallFlow: () => void;
+  onStartInstallTask: (taskId: InstallTaskId) => Promise<void>;
+  onCancelInstallTask: () => Promise<void>;
   onOpenInstallCommands: () => Promise<void>;
   onCloseInstallCommands: () => void;
   onCompleteOnboarding: () => Promise<void>;
@@ -246,6 +256,9 @@ export function ControlCenterView({
   configCenterDirty,
   installProbe,
   installSource,
+  installFlowOpen,
+  installFlowCatalog,
+  installSessionSnapshot,
   installCommandsOpen,
   installCommandsBusy,
   installCommandCatalog,
@@ -282,6 +295,10 @@ export function ControlCenterView({
   onInstallKimi,
   onUpgradeKimi,
   onInstallNodejs,
+  onOpenInstallFlow,
+  onCloseInstallFlow,
+  onStartInstallTask,
+  onCancelInstallTask,
   onOpenInstallCommands,
   onCloseInstallCommands,
   onCompleteOnboarding,
@@ -301,6 +318,12 @@ export function ControlCenterView({
   const completedSteps = ONBOARDING_STEP_ORDER.filter(
     (step) => stepCompletion[step],
   ).length;
+  void installCommandsOpen;
+  void installCommandsBusy;
+  void installCommandCatalog;
+  void onInstallNodejs;
+  void onOpenInstallCommands;
+  void onCloseInstallCommands;
   const installPathDisplay =
     onboarding?.detectedKimiPath?.trim() ?? kimiPathInput.trim();
   const installSummary = onboarding?.kimiInstalled
@@ -308,6 +331,12 @@ export function ControlCenterView({
     : installPathDisplay
       ? `已选择：${installPathDisplay}`
       : "尚未检测到 Kimi CLI，请先安装后点击浏览选择可执行文件路径。";
+  const installEnvironmentSummary = installProbe
+    ? `Core ${installProbe.coreReady ? "ready" : "missing"} | uv ${installProbe.uvReady ? "ready" : "missing"} | Python 3.13 ${installProbe.python313Ready ? "ready" : "missing"} | Kimi ${installProbe.kimiReady ? "ready" : "missing"}`
+    : "No install probe result yet. Click recheck to inspect the local environment.";
+  const recentInstallSummary = installSessionSnapshot.title
+    ? `${installSessionSnapshot.title}: ${installSessionSnapshot.message ?? installSessionSnapshot.status}`
+    : null;
   const effectiveWorkDir = status?.effectiveWorkDir ?? onboarding?.workDir ?? "";
   const canUpgradeKimi = Boolean(
     installProbe?.uvReady && installProbe?.python313Ready && installProbe?.kimiReady,
@@ -399,14 +428,15 @@ export function ControlCenterView({
   const installPrimaryAction = (
     <Button
       type="button"
-      icon={<Check size={15} />}
+      icon={<Plus size={15} />}
       className="cc-action-btn"
-      onClick={() => void onSavePathAndRetry()}
-      disabled={actionBusy || !kimiPathInput.trim()}
+      onClick={() => void onOpenInstallFlow()}
+      disabled={installBusy}
     >
       保存路径并重试
     </Button>
   );
+  void installPrimaryAction;
 
   const installSecondaryAction = (
     <Button
@@ -748,7 +778,17 @@ export function ControlCenterView({
                   collapsible={isNarrowOnboarding}
                   expanded={stepInstallExpanded}
                   onToggle={() => toggleOnboardingStep("install")}
-                  primaryAction={installPrimaryAction}
+                  primaryAction={
+                    <Button
+                      type="button"
+                      icon={<Plus size={15} />}
+                      className="cc-action-btn"
+                      onClick={() => void onOpenInstallFlow()}
+                      disabled={installBusy}
+                    >
+                      打开安装与升级
+                    </Button>
+                  }
                   secondaryActions={installSecondaryAction}
                 />
                 {stepInstallExpanded ? (
@@ -831,14 +871,19 @@ export function ControlCenterView({
                         <Button
                           type="button"
                           variant="outline"
-                          icon={<FileText size={14} />}
-                          className="cc-action-btn"
-                          onClick={() => void onOpenInstallCommands()}
-                          disabled={installCommandsBusy}
+                          icon={<Plus size={14} />}
+                          className="cc-action-btn cc-install-open-flow-btn"
+                          onClick={() => void onOpenInstallFlow()}
+                          disabled={installBusy}
                         >
                           查看完整安装命令
                         </Button>
                       </div>
+                      <p className="hint cc-step-meta">{installEnvironmentSummary}</p>
+                      {recentInstallSummary ? (
+                        <p className="hint cc-step-meta">{recentInstallSummary}</p>
+                      ) : null}
+                      {false ? (
                       <div className="cc-install-action-row">
                         <div className="cc-source-switch" role="group" aria-label="安装源">
                           <button
@@ -862,7 +907,7 @@ export function ControlCenterView({
                           type="button"
                           variant="outline"
                           icon={<Plus size={15} />}
-                          className="cc-action-btn"
+                          className="cc-action-btn cc-install-save-path-btn"
                           onClick={() => void onInstallDependencies()}
                           disabled={installBusy}
                         >
@@ -871,7 +916,7 @@ export function ControlCenterView({
                         <Button
                           type="button"
                           icon={<Check size={15} />}
-                          className="cc-action-btn"
+                          className="cc-action-btn cc-install-save-path-btn"
                           onClick={() => void onInstallKimi()}
                           disabled={installBusy}
                         >
@@ -887,15 +932,15 @@ export function ControlCenterView({
                         >
                           升级 Kimi
                         </Button>
-                      </div>
+                      </div>) : null}
                       <div className="cc-install-secondary-row">
                         <Button
                           type="button"
-                          variant="ghost"
-                          icon={<Plus size={15} />}
-                          className="cc-action-btn"
-                          onClick={() => void onInstallNodejs()}
-                          disabled={installBusy}
+                          variant="outline"
+                          icon={<Check size={15} />}
+                          className="cc-action-btn cc-install-save-path-btn"
+                          onClick={() => void onSavePathAndRetry()}
+                          disabled={actionBusy || !kimiPathInput.trim()}
                         >
                           安装 Node.js
                         </Button>
@@ -1237,12 +1282,20 @@ export function ControlCenterView({
           onOpenConfigDir={onOpenKimiConfigDir}
         />
       ) : null}
-      <InstallCommandsModal
-        open={installCommandsOpen}
-        busy={installCommandsBusy}
-        catalog={installCommandCatalog}
+      <InstallFlowModal
+        open={installFlowOpen}
+        catalog={installFlowCatalog}
+        session={installSessionSnapshot}
+        probe={installProbe}
+        backendState={status?.state ?? null}
         installSource={installSource}
-        onClose={onCloseInstallCommands}
+        onClose={onCloseInstallFlow}
+        onRefreshProbe={onRefreshInstallProbe}
+        onSourceChange={onInstallSourceChange}
+        onStartTask={onStartInstallTask}
+        onCancelTask={onCancelInstallTask}
+        onRestartBackend={onRetry}
+        restartBusy={actionBusy}
       />
     </section>
   );

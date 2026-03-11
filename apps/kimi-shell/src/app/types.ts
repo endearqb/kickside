@@ -403,11 +403,113 @@ export const PROVIDER_TYPE_OPTIONS = [
 ] as const;
 
 export interface InstallProbeStatus {
+  wingetReady: boolean;
   gitReady: boolean;
   uvReady: boolean;
   python313Ready: boolean;
   kimiReady: boolean;
   nodeReady: boolean;
+  coreReady: boolean;
+}
+
+export type InstallTaskId =
+  | "quick_install_core"
+  | "install_uv"
+  | "install_python313"
+  | "install_kimi"
+  | "upgrade_kimi"
+  | "install_git"
+  | "install_nodejs";
+
+export type InstallTaskGroup = "core" | "optional" | "upgrade";
+
+export type InstallSource = "official" | "mirror";
+
+export type InstallSessionStatus =
+  | "idle"
+  | "starting"
+  | "running"
+  | "cancelling"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "fallback_required";
+
+export type InstallSessionStage =
+  | "idle"
+  | "prepare"
+  | "execute_step"
+  | "probe"
+  | "done";
+
+export type InstallLogStream = "stdout" | "stderr" | "system";
+
+export interface InstallTaskStep {
+  id: string;
+  title: string;
+  description: string;
+  command: string;
+}
+
+export interface InstallTaskDefinition {
+  id: InstallTaskId;
+  title: string;
+  description: string;
+  group: InstallTaskGroup;
+  recommended: boolean;
+  runsInApp: boolean;
+  requiresElevation: boolean;
+  optional: boolean;
+  fallbackReason?: string;
+  officialSteps: InstallTaskStep[];
+  mirrorSteps: InstallTaskStep[];
+}
+
+export interface InstallFlowCatalog {
+  tasks: InstallTaskDefinition[];
+}
+
+export interface InstallLogChunk {
+  taskId: InstallTaskId;
+  stepId?: string;
+  source: InstallSource;
+  stream: InstallLogStream;
+  text: string;
+  at: string;
+}
+
+export interface InstallSessionSnapshot {
+  status: InstallSessionStatus;
+  stage: InstallSessionStage;
+  taskId?: InstallTaskId;
+  source?: InstallSource;
+  title?: string;
+  currentStepId?: string;
+  currentStepTitle?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  exitCode?: number;
+  message?: string;
+  failureSummary?: string;
+  lastStdout?: string;
+  lastStderr?: string;
+  fallbackReason?: string;
+  logsTruncated: boolean;
+  probe?: InstallProbeStatus;
+  logs: InstallLogChunk[];
+}
+
+export type InstallSessionEvent =
+  | { event: "snapshot"; snapshot: InstallSessionSnapshot }
+  | { event: "log"; chunk: InstallLogChunk };
+
+export function createEmptyInstallSessionSnapshot(): InstallSessionSnapshot {
+  return {
+    status: "idle",
+    stage: "idle",
+    logsTruncated: false,
+    logs: [],
+  };
 }
 
 export interface InstallCommandEntry {

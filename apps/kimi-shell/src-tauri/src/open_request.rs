@@ -260,13 +260,7 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
     backend_manager::set_session_work_dir(app, Some(directory.clone()))
         .map_err(|error| error.to_string())?;
     workspace_session::clear_active_session_runtime(app, "open_dir_request");
-    workspace_session::queue_workspace_bootstrap(
-        app,
-        &directory,
-        "open_dir_request",
-        false,
-        false,
-    );
+    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request", false, false);
     log_manager::append_line(
         app,
         format!(
@@ -835,7 +829,10 @@ fn open_request_fingerprint(request: &OpenRequest) -> String {
     match request {
         OpenRequest::OpenDir(path) => format!("dir:{}", path_fingerprint(path)),
         OpenRequest::OpenFiles(files) => {
-            let mut normalized = files.iter().map(|path| path_fingerprint(path)).collect::<Vec<_>>();
+            let mut normalized = files
+                .iter()
+                .map(|path| path_fingerprint(path))
+                .collect::<Vec<_>>();
             normalized.sort_unstable();
             format!("files:{}", normalized.join("|"))
         }

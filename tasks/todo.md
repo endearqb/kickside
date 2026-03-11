@@ -3688,6 +3688,42 @@
 - Remaining note:
 - None.
 
+## Current Plan (Kimi 安装弹窗与应用内安装控制台规格文档)
+
+### Checklist
+
+- [x] 审计当前 `apps/kimi-shell` 的安装依赖、安装/升级命令入口与命令展示链路
+- [x] 核对参考项目 `endearqb/execlink` 的公开安装产品形态，提炼可复用的交互组织方式
+- [x] 新增一份安装改造规格文档，明确统一安装弹窗、应用内安装控制台、任务模型与管理员兜底策略
+- [x] 在文档中明确 `Git for Windows` 从 Kimi 基础安装前置改为可选增强项
+- [x] 复核文档内容与现有代码入口是否一致，并补充验收标准与实施建议
+
+### Acceptance Criteria
+
+- [x] 文档明确区分“应用构建/运行依赖”与“Kimi 安装依赖”
+- [x] 文档明确描述当前链路：`ControlCenterView` -> `useShellController` -> Tauri `invoke` -> `backend_manager` 外部 PowerShell
+- [x] 文档明确记录当前外部 PowerShell 拉起失败导致安装不透明的问题
+- [x] 文档定义统一安装弹窗的四个区域、任务列表、控制台输出与管理员兜底策略
+- [x] 文档定义新的任务/会话接口方向，包括 `get_install_flow_catalog`、`start_install_task`、`cancel_install_task`、`get_install_session_snapshot`
+
+### Review
+
+- Actual changes:
+  - 新增 `tasks/Kimi 安装弹窗与应用内安装控制台改造方案.md`
+    - 沉淀当前依赖审计、现有安装执行链路、问题清单与 `execlink` 对齐结论。
+    - 定义统一安装弹窗的信息架构、一键与分步任务模型、应用内安装控制台行为、管理员权限兜底策略。
+    - 明确 `Git for Windows` 改为可选增强项，不再阻塞 Kimi 基础安装。
+    - 给出前后端类型/命令/事件的改造方向，以及验收与实施阶段建议。
+- Verification:
+  - 复核了现有代码入口与文档描述的一致性：
+    - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - `apps/kimi-shell/src/app/useShellController.ts`
+    - `apps/kimi-shell/src-tauri/src/backend_manager.rs`
+    - `apps/kimi-shell/src-tauri/src/types.rs`
+  - 核对了 `https://github.com/endearqb/execlink` README 中“快速安装向导 / 仅执行安装 / 复制安装命令 / 默认终端运行器”相关说明，并将其作为产品形态参考写入文档。
+- Remaining note:
+  - 本次按用户要求仅交付规格文档，不改动运行时代码与安装链路实现。
+
 ## Current Plan (repo about + README_zh)
 
 ### Checklist

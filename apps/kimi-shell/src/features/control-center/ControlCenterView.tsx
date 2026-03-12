@@ -18,6 +18,9 @@ import {
 import type {
   ActionableOnboardingStep,
   AppStatus,
+  BindingRecord,
+  BridgeSettings,
+  BridgeStatus,
   ControlCenterChrome,
   ControlCenterSurface,
   ContextMenuStatus,
@@ -42,6 +45,7 @@ import {
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
 import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
 
@@ -64,6 +68,10 @@ type ControlCenterViewProps = {
   loginProbeBusy: boolean;
   installBusy: boolean;
   installAction: "dependencies" | "kimi" | "upgrade_kimi" | "nodejs" | null;
+  bridgeSettings: BridgeSettings;
+  bridgeStatus: BridgeStatus;
+  bridgeBindings: BindingRecord[];
+  bridgeBusy: boolean;
   kimiPathInput: string;
   workDirInput: string;
   configCenterView: KimiCliConfigCenterView | null;
@@ -88,6 +96,9 @@ type ControlCenterViewProps = {
   onRefreshCoreState: () => Promise<void>;
   onRefreshDiagnostics: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;
+  onRefreshBridgeSettings: () => Promise<BridgeSettings>;
+  onRefreshBridgeStatus: () => Promise<BridgeStatus>;
+  onRefreshBridgeBindings: () => Promise<BindingRecord[]>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
   onClose: () => void;
@@ -105,6 +116,12 @@ type ControlCenterViewProps = {
   onPickWorkDir: () => Promise<void>;
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
+  onBridgeSettingsChange: (next: BridgeSettings) => void;
+  onSaveBridgeSettings: () => Promise<void>;
+  onStartBridge: () => Promise<void>;
+  onStopBridge: () => Promise<void>;
+  onRestartBridge: () => Promise<void>;
+  onClearBridgeBinding: (bindingId: string) => Promise<void>;
   onOpenConfigCenterModal: () => Promise<void>;
   onCloseConfigCenterModal: () => void;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
@@ -254,6 +271,10 @@ export function ControlCenterView({
   loginProbeBusy,
   installBusy,
   installAction,
+  bridgeSettings,
+  bridgeStatus,
+  bridgeBindings,
+  bridgeBusy,
   kimiPathInput,
   workDirInput,
   configCenterView,
@@ -278,6 +299,9 @@ export function ControlCenterView({
   onRefreshCoreState,
   onRefreshDiagnostics,
   onRefreshContextMenuStatus,
+  onRefreshBridgeSettings,
+  onRefreshBridgeStatus,
+  onRefreshBridgeBindings,
   onRefreshInstallProbe,
   onRefreshOnboarding,
   onClose,
@@ -295,6 +319,12 @@ export function ControlCenterView({
   onPickWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
+  onBridgeSettingsChange,
+  onSaveBridgeSettings,
+  onStartBridge,
+  onStopBridge,
+  onRestartBridge,
+  onClearBridgeBinding,
   onOpenConfigCenterModal,
   onCloseConfigCenterModal,
   onConfigCenterDraftChange,
@@ -564,7 +594,13 @@ export function ControlCenterView({
 
   async function handleSelectRuntimePanel(panel: RuntimePanelId) {
     try {
-      if (panel === "paths") {
+      if (panel === "bridge") {
+        await Promise.all([
+          onRefreshBridgeSettings(),
+          onRefreshBridgeStatus(),
+          onRefreshBridgeBindings(),
+        ]);
+      } else if (panel === "paths") {
         await Promise.all([onRefreshDiagnostics(), onRefreshContextMenuStatus()]);
       } else {
         await onRefreshDiagnostics();
@@ -1268,6 +1304,24 @@ export function ControlCenterView({
                   <DiagnosticItem label="Backend Log Path" value={diagnostics?.backendLogPath ?? "-"} />
                   <DiagnosticItem label="Logs Directory" value={diagnostics?.logsDir ?? "-"} />
                 </div>
+              </RuntimePanel>
+
+              <RuntimePanel active={activeRuntimePanel === "bridge"} onOpen={() => { void handleSelectRuntimePanel("bridge"); }} title="Bridge sidecar" description="管理 IM bridge sidecar、配置和 bindings。">
+                <BridgeRuntimePanel
+                  settings={bridgeSettings}
+                  status={bridgeStatus}
+                  bindings={bridgeBindings}
+                  busy={bridgeBusy}
+                  onSettingsChange={onBridgeSettingsChange}
+                  onSave={onSaveBridgeSettings}
+                  onStart={onStartBridge}
+                  onStop={onStopBridge}
+                  onRestart={onRestartBridge}
+                  onRefreshStatus={onRefreshBridgeStatus}
+                  onRefreshBindings={onRefreshBridgeBindings}
+                  onOpenLogs={onOpenLogs}
+                  onClearBinding={onClearBridgeBinding}
+                />
               </RuntimePanel>
 
               <RuntimePanel active={activeRuntimePanel === "logs"} onOpen={() => { void handleSelectRuntimePanel("logs"); }} title="最近日志" description="快速查看应用与后端日志尾部内容。">

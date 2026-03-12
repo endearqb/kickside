@@ -15,6 +15,7 @@ pnpm-debug.log*
 node_modules/
 apps/kimi-shell/node_modules/
 apps/kimi-shell/dist/
+apps/kimi-im-bridge/bin/
 
 # Rust / Tauri build artifacts
 target/
@@ -29,5 +30,8 @@ apps/kimi-shell/src-tauri/.cargo/
 !.env.example
 
 # Local planning / docs (keep local, don't track)
-/docs/
+/docs/*
+!/docs/kimi-im-bridge-prd.md
+!/docs/kimi-im-bridge-design.md
+!/docs/kimi-im-bridge-implementation-plan.md
 

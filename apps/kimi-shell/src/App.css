@@ -2422,6 +2422,121 @@ input:focus {
   }
 }
 
+.bridge-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.bridge-panel-section {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+
+.bridge-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.bridge-panel-header h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.bridge-panel-header p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.bridge-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bridge-switch-card,
+.bridge-port-card,
+.bridge-channel-card,
+.bridge-channel-status-card,
+.bridge-binding-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.bridge-switch-copy,
+.bridge-channel-copy,
+.bridge-binding-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.bridge-switch-copy small,
+.bridge-channel-copy small,
+.bridge-binding-copy small {
+  color: var(--muted-foreground);
+}
+
+.bridge-port-card {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.bridge-port-card span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.bridge-channel-list,
+.bridge-channel-statuses,
+.bridge-binding-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bridge-state-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--chrome-border);
+  text-transform: capitalize;
+}
+
+.bridge-state-running,
+.bridge-state-ready {
+  background: color-mix(in srgb, #2b8a3e 18%, transparent);
+}
+
+.bridge-state-starting,
+.bridge-state-connecting,
+.bridge-state-degraded {
+  background: color-mix(in srgb, #d97706 18%, transparent);
+}
+
+.bridge-state-stopped,
+.bridge-state-crashed,
+.bridge-state-error,
+.bridge-state-stopping {
+  background: color-mix(in srgb, #b42318 14%, transparent);
+}
+
+.bridge-error-text {
+  margin: 0;
+  color: #d92d20;
+  font-size: 13px;
+}
+
 @media (max-width: 900px) {
   .cc-dashboard-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2529,7 +2644,8 @@ input:focus {
   }
 
   .path-row,
-  .diagnostics-grid {
+  .diagnostics-grid,
+  .bridge-settings-grid {
     grid-template-columns: 1fr;
   }
 

@@ -27,11 +27,11 @@ use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
     InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
-    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
+    InstallSettingsView, InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
     KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    OnboardingStatus, OnboardingStep, ShutdownProgressPayload, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
+    OnboardingStatus, OnboardingStep, PowerShellPreflightSummary, ShutdownProgressPayload,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
+    SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -400,8 +400,8 @@ fn register_install_session_channel(
 }
 
 #[tauri::command]
-fn get_install_flow_catalog() -> InstallFlowCatalog {
-    install_manager::build_install_flow_catalog()
+fn get_install_flow_catalog(app: AppHandle) -> InstallFlowCatalog {
+    install_manager::build_install_flow_catalog(&app)
 }
 
 #[tauri::command]
@@ -471,6 +471,24 @@ fn install_nodejs(
 #[tauri::command]
 fn get_install_probe_status(app: AppHandle) -> InstallProbeStatus {
     install_manager::get_install_probe_status(&app)
+}
+
+#[tauri::command]
+fn get_install_settings(app: AppHandle) -> InstallSettingsView {
+    install_manager::get_install_settings(&app)
+}
+
+#[tauri::command]
+fn save_install_settings(
+    app: AppHandle,
+    input: InstallSettingsView,
+) -> Result<InstallSettingsView, String> {
+    install_manager::save_install_settings(&app, input)
+}
+
+#[tauri::command]
+fn get_powershell_preflight() -> PowerShellPreflightSummary {
+    install_manager::get_powershell_preflight()
 }
 
 #[tauri::command]
@@ -807,6 +825,9 @@ pub fn run() {
             upgrade_kimi_cli,
             install_nodejs,
             get_install_probe_status,
+            get_install_settings,
+            save_install_settings,
+            get_powershell_preflight,
             get_context_menu_status,
             enable_context_menu,
             disable_context_menu,

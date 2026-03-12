@@ -64,6 +64,14 @@ export function WorkspaceView({
   onChatFrameError,
 }: WorkspaceViewProps) {
   const splitLayout = workspaceLayoutMode === "split";
+  const codePanePositionClass =
+    workspaceSplitOrder === "code_left"
+      ? "workspace-pane-left"
+      : "workspace-pane-right";
+  const chatPanePositionClass =
+    workspaceSplitOrder === "code_left"
+      ? "workspace-pane-right"
+      : "workspace-pane-left";
   const stageRef = useRef<HTMLElement | null>(null);
   const dividerRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
@@ -76,14 +84,14 @@ export function WorkspaceView({
       : activeWorkspaceView === "code"
         ? "workspace-pane-active"
         : "workspace-pane-inactive"
-  }`;
+  } ${codePanePositionClass}`;
   const chatPaneClassName = `workspace-pane workspace-pane-chat ${
     splitLayout
       ? "workspace-pane-split"
       : activeWorkspaceView === "chat"
         ? "workspace-pane-active"
         : "workspace-pane-inactive"
-  }`;
+  } ${chatPanePositionClass}`;
 
   const leftPaneRatio =
     workspaceSplitOrder === "code_left"
@@ -196,7 +204,7 @@ export function WorkspaceView({
   }, [isSplitDragging, splitLayout]);
 
   const codePane = (
-    <div key="code" className={codePaneClassName}>
+    <div className={codePaneClassName}>
       {codeRemoteUrl ? (
         <div className="workspace-embed">
           <iframe
@@ -261,7 +269,7 @@ export function WorkspaceView({
   );
 
   const chatPane = (
-    <div key="chat" className={chatPaneClassName}>
+    <div className={chatPaneClassName}>
       <div className="workspace-embed">
         <iframe
           ref={chatIframeRef}
@@ -308,7 +316,6 @@ export function WorkspaceView({
 
   const divider = (
     <div
-      key="divider"
       ref={dividerRef}
       className={`workspace-split-divider${isSplitDragging ? " is-dragging" : ""}`}
       role="separator"
@@ -323,11 +330,6 @@ export function WorkspaceView({
     </div>
   );
 
-  const splitChildren =
-    workspaceSplitOrder === "code_left"
-      ? [codePane, divider, chatPane]
-      : [chatPane, divider, codePane];
-
   return (
     <section
       ref={stageRef}
@@ -336,7 +338,9 @@ export function WorkspaceView({
       }${isSplitDragging ? " workspace-stage-dragging" : ""}`}
       style={workspaceStyle}
     >
-      {splitLayout ? splitChildren : [codePane, chatPane]}
+      {codePane}
+      {divider}
+      {chatPane}
     </section>
   );
 }

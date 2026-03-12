@@ -8,6 +8,21 @@
 
 适用环境：Windows PowerShell。
 
+## PowerShell 受限环境说明
+
+- 应用内安装任务会先做 PowerShell 预检，收集：
+  - `Get-ExecutionPolicy -List`
+  - `$ExecutionContext.SessionState.LanguageMode`
+  - 与正式安装同参数的 `powershell.exe -ExecutionPolicy Bypass -File ...` smoke test
+- 如果只是当前会话 `.ps1` 执行受限，应用会先尝试回退到内联命令模式，不会默认修改系统策略。
+- 只有明确识别为 execution policy 拦截时，才建议用户手动执行：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+```
+
+- 如果预检结果显示 `MachinePolicy` / `UserPolicy`、AppLocker、WDAC 或 `ConstrainedLanguage`，通常需要按企业设备策略处理，`Set-ExecutionPolicy` 未必生效。
+
 ## 0. winget（App Installer）前置
 
 ### 0.1 检测
@@ -121,7 +136,7 @@ uv tool install kimi-cli --python 3.13
 ### 2.3 验证与登录
 
 ```powershell
-kimi -v
+kimi --version
 kimi login
 ```
 
@@ -132,6 +147,14 @@ kimi login
 - Python 安装器：清华优先，失败后尝试阿里。
 - PyPI 索引：清华优先，失败后尝试阿里。
 - 每个镜像先做秒级探测，全部失败立即退出。
+
+### 3.0 应用内镜像配置
+
+- 安装弹窗支持两层镜像配置：
+  - 预设：`清华后阿里`、`仅清华`、`仅阿里`
+  - 自定义：分别配置 `Git 发布页`、`uv 发布页`、`Python 安装器`、`PyPI 索引`
+- 自定义镜像仅接受非空 `https://` URL 列表。
+- 应用内“复制任务命令”和实际执行步骤使用同一份镜像配置，不再存在“显示一个地址、实际跑另一个地址”的分叉。
 
 ### 3.1 镜像地址
 
@@ -209,5 +232,5 @@ node -v
 npm -v
 uv --version
 py -3.13 --version
-kimi -v
+kimi --version
 ```

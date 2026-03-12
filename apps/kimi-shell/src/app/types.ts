@@ -425,6 +425,47 @@ export type InstallTaskGroup = "core" | "optional" | "upgrade";
 
 export type InstallSource = "official" | "mirror";
 
+export type InstallMirrorPreset = "mixed" | "tuna" | "aliyun" | "custom";
+
+export interface InstallCustomMirrorConfig {
+  gitReleasePages: string[];
+  uvReleasePages: string[];
+  pythonInstallerUrls: string[];
+  pypiIndexUrls: string[];
+}
+
+export interface InstallSettingsView {
+  preferredSource: InstallSource;
+  mirrorPreset: InstallMirrorPreset;
+  customMirrorConfig: InstallCustomMirrorConfig;
+}
+
+export type PowerShellDiagnosticKind =
+  | "ok"
+  | "execution_policy"
+  | "group_policy"
+  | "applocker_or_wdac"
+  | "constrained_language"
+  | "command_launch"
+  | "unknown";
+
+export interface PowerShellExecutionPolicyItem {
+  scope: string;
+  policy: string;
+}
+
+export interface PowerShellPreflightSummary {
+  kind: PowerShellDiagnosticKind;
+  detail: string;
+  suggestedFix?: string;
+  languageMode?: string;
+  smokeTestOk: boolean;
+  smokeTestExitCode?: number;
+  smokeTestStdout?: string;
+  smokeTestStderr?: string;
+  executionPolicies: PowerShellExecutionPolicyItem[];
+}
+
 export type InstallSessionStatus =
   | "idle"
   | "starting"
@@ -494,6 +535,7 @@ export interface InstallSessionSnapshot {
   lastStdout?: string;
   lastStderr?: string;
   fallbackReason?: string;
+  powershellDiagnostic?: PowerShellPreflightSummary;
   logsTruncated: boolean;
   probe?: InstallProbeStatus;
   logs: InstallLogChunk[];

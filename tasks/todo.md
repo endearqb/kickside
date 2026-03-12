@@ -26,6 +26,126 @@
 
 ## Recent 20 Plans
 
+## Current Plan (compact PowerShell preflight badges in install modal)
+
+### Checklist
+
+- [x] Replace raw PowerShell preflight detail text with compact badge-style summary chips
+- [x] Keep only high-signal preflight fields in the modal, without rendering raw stderr/stdout
+- [x] Run `pnpm -C apps/kimi-shell build`
+
+### Acceptance Criteria
+
+- [x] The install modal no longer renders `detail` / raw preflight log text
+- [x] PowerShell preflight status is shown as compact tags for diagnosis, smoke test, and language mode
+- [x] Suggested fix, when present, is shown as a compact badge-style item instead of a log paragraph
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/features/control-center/InstallFlowModal.tsx`
+    - Replaced the raw PowerShell preflight detail paragraph with compact summary badges.
+    - Added Chinese badge labels for diagnostic kind, smoke-test result, `LanguageMode`, execution-policy scopes, and suggested fix.
+  - `apps/kimi-shell/src/App.css`
+    - Added badge-row and badge-tone styles for the compact preflight summary.
+- Verification:
+  - `pnpm -C apps/kimi-shell build` passed.
+- Remaining note:
+  - This change is presentation-only; the underlying preflight payload and backend diagnostics remain unchanged.
+
+## Current Plan (bump version to v0.0.19, write release notes, build installers)
+
+### Checklist
+
+- [x] Bump `apps/kimi-shell` version from `0.0.18` to `0.0.19`
+- [x] Add `apps/kimi-shell/docs/release-notes-0.0.19.md`
+- [x] Run `pnpm -C apps/kimi-shell tauri build`
+- [x] Confirm fresh `0.0.19` MSI and NSIS artifacts exist
+
+### Acceptance Criteria
+
+- [x] `apps/kimi-shell/package.json` version is `0.0.19`
+- [x] Synced Tauri version files are `0.0.19`
+- [x] Release notes for `v0.0.19` exist and describe this install-flow hardening release
+- [x] Fresh `0.0.19` installer artifacts exist under `apps/kimi-shell/src-tauri/target/release/bundle`
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/package.json`
+    - Bumped the app version from `0.0.18` to `0.0.19`.
+  - `apps/kimi-shell/docs/release-notes-0.0.19.md`
+    - Added release notes covering the Windows install-flow hardening, mirror configuration, and PowerShell preflight improvements.
+  - Version sync during build updated:
+    - `apps/kimi-shell/src-tauri/Cargo.toml`
+    - `apps/kimi-shell/src-tauri/tauri.conf.json`
+    - `apps/kimi-shell/src-tauri/Cargo.lock`
+  - Built fresh Windows installer artifacts for `0.0.19`.
+- Verification:
+  - `pnpm -C apps/kimi-shell tauri build` passed.
+  - Confirmed `apps/kimi-shell/package.json` is `0.0.19`.
+  - Confirmed `apps/kimi-shell/src-tauri/Cargo.toml` is `0.0.19`.
+  - Confirmed `apps/kimi-shell/src-tauri/tauri.conf.json` is `0.0.19`.
+  - Confirmed fresh artifacts exist:
+    - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.19_x64_en-US.msi`
+    - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.19_x64-setup.exe`
+- Remaining note:
+  - The worktree still includes the earlier install-flow hardening changes from this session; this release build was produced on top of those modifications.
+
+## Current Plan (harden Windows install flow: PATH fallback, mirror config, PowerShell preflight)
+
+### Checklist
+
+- [x] Add install-flow settings and task record for mirror source persistence and PowerShell diagnostics
+- [x] Unify Windows command/path probing for Git, Node.js, uv, Python 3.13, and Kimi CLI
+- [x] Harden managed install scripts with resolved-path verification and PowerShell `-File` fallback
+- [x] Add auto re-probe completion for external Git / Node.js install tasks
+- [x] Add mirror preset/custom configuration UI in the install flow and persist it to `settings.json`
+- [x] Update install docs for mirror config and restricted PowerShell environments
+- [x] Run `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager::tests`
+- [x] Run `pnpm -C apps/kimi-shell build`
+
+### Acceptance Criteria
+
+- [x] Git / Node.js installs can be detected without requiring the user to reopen the terminal session
+- [x] `uv` / `kimi` / Python checks use the same Windows candidate-path rules as probe status
+- [x] Install flow shows PowerShell preflight findings instead of generic script-launch failures
+- [x] Execution-policy fixes are suggested only for confirmed execution-policy failures, using `CurrentUser + RemoteSigned`
+- [x] Mirror mode supports preset and custom URL groups persisted in app settings
+- [x] Copied mirror commands and executed mirror commands are generated from the same config
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/types.rs`
+    - Added persisted install-source settings, mirror preset/custom URL groups, and PowerShell preflight data shapes.
+    - Extended install session snapshots with an optional PowerShell diagnostic summary.
+  - `apps/kimi-shell/src-tauri/src/install_manager.rs`
+    - Rebuilt install catalog generation so mirror tasks are generated from saved settings instead of hard-coded URLs.
+    - Unified Windows install probing with explicit candidate paths for Git, Node.js, uv, Python 3.13, and Kimi CLI.
+    - Added PowerShell preflight collection/classification, `CurrentUser + RemoteSigned` suggestion gating, and inline-command retry when `.ps1` execution is blocked.
+    - Added automatic post-launch re-probe completion for external Git / Node.js installs.
+    - Added targeted regression tests covering custom mirrors, path probing helpers, execution-policy classification, and inline retry heuristics.
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - Added Tauri commands to get/save install settings and fetch PowerShell preflight output.
+    - Switched install catalog retrieval to build from the current app settings.
+  - `apps/kimi-shell/src/app/types.ts`, `apps/kimi-shell/src/app/useShellController.ts`
+    - Added frontend types/state for install settings and PowerShell preflight.
+    - Persisted preferred install source, refreshed mirror config from Tauri, and synchronized session diagnostics into UI state.
+  - `apps/kimi-shell/src/features/control-center/InstallFlowModal.tsx`, `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`, `apps/kimi-shell/src/App.tsx`, `apps/kimi-shell/src/App.css`
+    - Added a PowerShell preflight section to the install modal.
+    - Added mirror preset/custom URL editing with save action inside the install modal.
+    - Wired the new state/handlers through the control center and added styling for the new controls.
+  - `apps/kimi-shell/docs/install_kimi.md`
+    - Documented PowerShell-restricted environment behavior, the manual `CurrentUser` execution-policy suggestion, and the new mirror configuration model.
+    - Replaced stale `kimi -v` examples with `kimi --version`.
+- Verification:
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager::tests` passed with 16 tests.
+  - `pnpm -C apps/kimi-shell build` passed.
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` completed.
+- Remaining note:
+  - Manual Windows confirmation is still recommended on a policy-restricted machine to verify both branches: `.ps1` blocked but inline fallback succeeds, and environments where preflight surfaces a suggestion instead of a generic failure.
+
 ## Current Plan (release v0.0.18)
 
 ### Checklist
@@ -661,3 +781,91 @@
 - `pnpm -C apps/kimi-shell build` had already passed on the preceding install-modal/logging changes, and this final patch only touched Rust-side process handling.
 - Remaining note:
 - The remaining confirmation is an in-app Windows click-through to verify the next failed install/upgrade now shows the real stderr text instead of only `Windows PowerShell`.
+
+## Current Plan (fix workspace split/swap refreshing embedded pages)
+
+### Checklist
+
+- [x] Record the workspace split/swap no-refresh task and acceptance criteria
+- [x] Keep workspace iframe mount order fixed in `WorkspaceView`
+- [x] Switch split/swap behavior to CSS positioning instead of child reordering
+- [x] Run `pnpm -C apps/kimi-shell build`
+- [x] Fill this section with verification results
+
+### Acceptance Criteria
+
+- [ ] Clicking split view does not remount or refresh `Kimi Code Web` / `Kimi Chat`
+- [ ] Clicking swap panes only changes visual left/right placement
+- [ ] Single view, split view, and split drag behavior all continue to work
+- [x] `pnpm -C apps/kimi-shell build` passes
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/features/workspace/WorkspaceView.tsx`
+    - Kept the render order fixed as `code pane -> divider -> chat pane` in all modes.
+    - Replaced split/swap child reordering with pane position classes so split and swap only change visual placement.
+  - `apps/kimi-shell/src/App.css`
+    - Added split-grid column rules for left/right pane placement.
+    - Hid the divider in single-pane mode without removing it from the React tree.
+- Verification:
+  - `pnpm -C apps/kimi-shell build` passed.
+  - Static review confirms split/swap no longer changes iframe mount order, so the existing embedded pages stay mounted across single/split/swap transitions.
+- Remaining note:
+  - The three interaction-focused acceptance items still need manual click-through in the desktop app to be fully checked off.
+
+## Current Plan (update v0.0.19 release notes with workspace no-refresh fix)
+
+### Checklist
+
+- [x] Review the existing `v0.0.19` release notes
+- [x] Add the workspace split/swap no-refresh fix to the release notes
+- [x] Record the result in this section
+
+### Acceptance Criteria
+
+- [x] `apps/kimi-shell/docs/release-notes-0.0.19.md` mentions the workspace split/swap no-refresh fix
+- [x] The added wording matches the implemented behavior and does not overstate verification
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/docs/release-notes-0.0.19.md`
+    - Expanded the highlights summary to mention the workspace split/swap no-refresh behavior fix.
+    - Added a dedicated main-change item describing the fixed persistent iframe behavior for split and swap actions.
+- Verification:
+  - Reviewed the existing `v0.0.19` release notes and updated them to reflect the implemented workspace behavior change.
+- Remaining note:
+  - This task only updated release-note documentation; no additional code or build verification was needed.
+
+## Current Plan (fix false failure after Python 3.13 install succeeds)
+
+### Checklist
+
+- [x] Record the Python 3.13 false-failure bug and acceptance criteria
+- [x] Update managed install verification so uv-managed Python 3.13 passes on Windows
+- [x] Add regression coverage for the Python 3.13 verification path
+- [x] Run targeted verification
+- [x] Fill this section with verification results
+
+### Acceptance Criteria
+
+- [x] `install_python313` no longer fails just because `python` is not on the current PATH
+- [x] Verification accepts uv-managed Python 3.13 installs
+- [x] Targeted Rust verification passes
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/install_manager.rs`
+    - Replaced the Python 3.13 install-step verification with a dedicated `Invoke-KimiShellPython313Check` helper instead of assuming `python` resolves after install.
+    - The new helper accepts multiple Windows verification paths: explicit Python 3.13 executable locations, `py -3.13`, `python3.13`, and `uv run --python 3.13 python --version`.
+    - Updated both the official and mirror Python install steps to use the shared helper.
+    - Added regression tests covering the Python install command and the injected PowerShell helper content.
+  - `tasks/lessons.md`
+    - Added the new Windows Python verification lesson so future install flows do not repeat the PATH-only assumption.
+- Verification:
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager::tests` passed (`19` tests).
+  - `pnpm -C apps/kimi-shell build` passed.
+- Remaining note:
+  - A manual Windows click-through of `Install Python 3.13` is still recommended to confirm the exact previously reported false-failure path is gone in the packaged app.

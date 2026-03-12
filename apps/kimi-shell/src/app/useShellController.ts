@@ -41,11 +41,14 @@ import type {
   DiagnosticsInfo,
   InstallFlowCatalog,
   InstallCommandCatalog,
+  InstallCustomMirrorConfig,
   InstallLogChunk,
   FrontendReadyAck,
   InstallProbeStatus,
   InstallSessionEvent,
   InstallSessionSnapshot,
+  InstallSettingsView,
+  InstallSource,
   InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
@@ -58,6 +61,7 @@ import type {
   RuntimePanelId,
   Screen,
   ShellRoutePayload,
+  PowerShellPreflightSummary,
   Theme,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
@@ -86,7 +90,6 @@ const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
-type InstallSource = "official" | "mirror";
 type InstallAction = "dependencies" | "kimi" | "upgrade_kimi" | "nodejs";
 type BootHint = Pick<
   FrontendReadyAck,
@@ -149,6 +152,23 @@ function parseHashRoute(hash: string): string {
   return hash.replace(/^#\/?/, "");
 }
 
+function createDefaultInstallMirrorConfig(): InstallCustomMirrorConfig {
+  return {
+    gitReleasePages: [],
+    uvReleasePages: [],
+    pythonInstallerUrls: [],
+    pypiIndexUrls: [],
+  };
+}
+
+function createDefaultInstallSettingsView(): InstallSettingsView {
+  return {
+    preferredSource: "official",
+    mirrorPreset: "mixed",
+    customMirrorConfig: createDefaultInstallMirrorConfig(),
+  };
+}
+
 export function useShellController() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
@@ -175,6 +195,12 @@ export function useShellController() {
   const [configCenterOpen, setConfigCenterOpen] = useState(false);
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
+  const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
+    () => createDefaultInstallSettingsView(),
+  );
+  const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
+  const [powershellPreflight, setPowershellPreflight] =
+    useState<PowerShellPreflightSummary | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const [installAction, setInstallAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
@@ -1108,6 +1134,31 @@ export function useShellController() {
     return data;
   }
 
+  async function refreshInstallSettings() {
+    const data = await invoke<InstallSettingsView>("get_install_settings");
+    setInstallSettings(data);
+    setInstallSource(data.preferredSource);
+    return data;
+  }
+
+  async function saveCurrentInstallSettings(input: InstallSettingsView) {
+    setInstallSettingsBusy(true);
+    try {
+      const data = await invoke<InstallSettingsView>("save_install_settings", { input });
+      setInstallSettings(data);
+      setInstallSource(data.preferredSource);
+      return data;
+    } finally {
+      setInstallSettingsBusy(false);
+    }
+  }
+
+  async function refreshPowerShellPreflight() {
+    const data = await invoke<PowerShellPreflightSummary>("get_powershell_preflight");
+    setPowershellPreflight(data);
+    return data;
+  }
+
   function mergeInstallLogChunk(
     current: InstallSessionSnapshot,
     chunk: InstallLogChunk,
@@ -1133,6 +1184,9 @@ export function useShellController() {
     if (snapshot.probe) {
       setInstallProbe(snapshot.probe);
     }
+    if (snapshot.powershellDiagnostic) {
+      setPowershellPreflight(snapshot.powershellDiagnostic);
+    }
     return snapshot;
   }
 
@@ -1148,6 +1202,9 @@ export function useShellController() {
         if (event.snapshot.probe) {
           setInstallProbe(event.snapshot.probe);
         }
+        if (event.snapshot.powershellDiagnostic) {
+          setPowershellPreflight(event.snapshot.powershellDiagnostic);
+        }
         return;
       }
 
@@ -1159,6 +1216,9 @@ export function useShellController() {
         setInstallSessionSnapshot(snapshot);
         if (snapshot.probe) {
           setInstallProbe(snapshot.probe);
+        }
+        if (snapshot.powershellDiagnostic) {
+          setPowershellPreflight(snapshot.powershellDiagnostic);
         }
       })
       .catch((error) => {
@@ -1240,6 +1300,8 @@ export function useShellController() {
       void refreshStatus();
     }
     void refreshOnboarding();
+    void refreshInstallSettings();
+    void refreshPowerShellPreflight();
     const timer = window.setInterval(() => {
       void refreshStatus();
     }, POLL_MS);
@@ -1621,6 +1683,27 @@ export function useShellController() {
   function handleInstallSourceChange(source: InstallSource) {
     setInstallSource(source);
     setInstallMessage("");
+    const next = {
+      ...installSettings,
+      preferredSource: source,
+    };
+    setInstallSettings(next);
+    void saveCurrentInstallSettings(next).catch((error) => {
+      setActionError(String(error));
+    });
+  }
+
+  async function handleSaveInstallSettings(input: InstallSettingsView) {
+    setActionError(null);
+    try {
+      const saved = await saveCurrentInstallSettings(input);
+      await refreshInstallFlowCatalog();
+      await refreshPowerShellPreflight();
+      return saved;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
   }
 
   async function handleStartInstallTask(taskId: InstallTaskId) {
@@ -1645,6 +1728,9 @@ export function useShellController() {
       if (snapshot.probe) {
         setInstallProbe(snapshot.probe);
       }
+      if (snapshot.powershellDiagnostic) {
+        setPowershellPreflight(snapshot.powershellDiagnostic);
+      }
       setInstallFlowOpen(true);
       await refreshOnboarding();
     } catch (error) {
@@ -1660,6 +1746,9 @@ export function useShellController() {
       if (snapshot.probe) {
         setInstallProbe(snapshot.probe);
       }
+      if (snapshot.powershellDiagnostic) {
+        setPowershellPreflight(snapshot.powershellDiagnostic);
+      }
     } catch (error) {
       setActionError(String(error));
     }
@@ -1670,8 +1759,10 @@ export function useShellController() {
     try {
       await Promise.all([
         refreshInstallProbe(),
+        refreshInstallSettings(),
         refreshInstallFlowCatalog(),
         refreshInstallSessionSnapshot(),
+        refreshPowerShellPreflight(),
       ]);
       setInstallFlowOpen(true);
     } catch (error) {
@@ -2126,6 +2217,9 @@ export function useShellController() {
     configCenterDirty,
     installProbe,
     installSource,
+    installSettings,
+    installSettingsBusy,
+    powershellPreflight,
     installBusy:
       installSessionSnapshot.status === "starting" ||
       installSessionSnapshot.status === "running" ||
@@ -2142,6 +2236,8 @@ export function useShellController() {
     refreshDiagnostics,
     refreshContextMenuStatus,
     refreshInstallProbe,
+    refreshInstallSettings,
+    refreshPowerShellPreflight,
     refreshOnboarding,
     handleRetry,
     handleRuntimeOnlyRetry,
@@ -2162,6 +2258,7 @@ export function useShellController() {
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleInstallSourceChange,
+    handleSaveInstallSettings,
     handleInstallDependencies: handleQuickInstallCore,
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,

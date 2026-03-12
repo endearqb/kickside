@@ -25,12 +25,14 @@ import type {
   DiagnosticsInfo,
   InstallFlowCatalog,
   InstallCommandCatalog,
+  InstallSettingsView,
   InstallProbeStatus,
   InstallSessionSnapshot,
   InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   OnboardingStatus,
+  PowerShellPreflightSummary,
   RuntimePanelId,
 } from "@/app/types";
 import {
@@ -71,6 +73,9 @@ type ControlCenterViewProps = {
   configCenterDirty: boolean;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
+  installSettings: InstallSettingsView;
+  installSettingsBusy: boolean;
+  powershellPreflight: PowerShellPreflightSummary | null;
   installFlowOpen: boolean;
   installFlowCatalog: InstallFlowCatalog | null;
   installSessionSnapshot: InstallSessionSnapshot;
@@ -106,6 +111,8 @@ type ControlCenterViewProps = {
   onResetConfigCenterDraft: () => void;
   onSaveKimiCliConfigCenter: () => Promise<void>;
   onInstallSourceChange: (source: "official" | "mirror") => void;
+  onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
+  onRefreshPowerShellPreflight: () => Promise<PowerShellPreflightSummary>;
   onInstallDependencies: () => Promise<void>;
   onInstallKimi: () => Promise<void>;
   onUpgradeKimi: () => Promise<void>;
@@ -256,6 +263,9 @@ export function ControlCenterView({
   configCenterDirty,
   installProbe,
   installSource,
+  installSettings,
+  installSettingsBusy,
+  powershellPreflight,
   installFlowOpen,
   installFlowCatalog,
   installSessionSnapshot,
@@ -291,6 +301,8 @@ export function ControlCenterView({
   onResetConfigCenterDraft,
   onSaveKimiCliConfigCenter,
   onInstallSourceChange,
+  onSaveInstallSettings,
+  onRefreshPowerShellPreflight,
   onInstallDependencies,
   onInstallKimi,
   onUpgradeKimi,
@@ -1289,9 +1301,14 @@ export function ControlCenterView({
         probe={installProbe}
         backendState={status?.state ?? null}
         installSource={installSource}
+        installSettings={installSettings}
+        installSettingsBusy={installSettingsBusy}
+        powershellPreflight={powershellPreflight}
         onClose={onCloseInstallFlow}
         onRefreshProbe={onRefreshInstallProbe}
+        onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
         onSourceChange={onInstallSourceChange}
+        onSaveInstallSettings={onSaveInstallSettings}
         onStartTask={onStartInstallTask}
         onCancelTask={onCancelInstallTask}
         onRestartBackend={onRetry}

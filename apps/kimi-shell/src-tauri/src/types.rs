@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -225,6 +225,9 @@ pub struct AppSettings {
     pub auto_restart_on_crash: bool,
     pub onboarding_completed_version: u32,
     pub onboarding_step_acks: OnboardingStepAcks,
+    pub preferred_install_source: InstallSource,
+    pub mirror_preset: InstallMirrorPreset,
+    pub custom_mirror_config: InstallCustomMirrorConfig,
 }
 
 impl Default for AppSettings {
@@ -238,6 +241,9 @@ impl Default for AppSettings {
             auto_restart_on_crash: false,
             onboarding_completed_version: 0,
             onboarding_step_acks: OnboardingStepAcks::default(),
+            preferred_install_source: InstallSource::Official,
+            mirror_preset: InstallMirrorPreset::Mixed,
+            custom_mirror_config: InstallCustomMirrorConfig::default(),
         }
     }
 }
@@ -572,6 +578,78 @@ pub enum InstallSource {
     Mirror,
 }
 
+impl Default for InstallSource {
+    fn default() -> Self {
+        Self::Official
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMirrorPreset {
+    Mixed,
+    Tuna,
+    Aliyun,
+    Custom,
+}
+
+impl Default for InstallMirrorPreset {
+    fn default() -> Self {
+        Self::Mixed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InstallCustomMirrorConfig {
+    pub git_release_pages: Vec<String>,
+    pub uv_release_pages: Vec<String>,
+    pub python_installer_urls: Vec<String>,
+    pub pypi_index_urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallSettingsView {
+    pub preferred_source: InstallSource,
+    pub mirror_preset: InstallMirrorPreset,
+    pub custom_mirror_config: InstallCustomMirrorConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PowerShellDiagnosticKind {
+    Ok,
+    ExecutionPolicy,
+    GroupPolicy,
+    AppLockerOrWdac,
+    ConstrainedLanguage,
+    CommandLaunch,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerShellExecutionPolicyItem {
+    pub scope: String,
+    pub policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerShellPreflightSummary {
+    pub kind: PowerShellDiagnosticKind,
+    pub detail: String,
+    pub suggested_fix: Option<String>,
+    pub language_mode: Option<String>,
+    pub smoke_test_ok: bool,
+    pub smoke_test_exit_code: Option<i32>,
+    pub smoke_test_stdout: Option<String>,
+    pub smoke_test_stderr: Option<String>,
+    #[serde(default)]
+    pub execution_policies: Vec<PowerShellExecutionPolicyItem>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallSessionStatus {
@@ -678,6 +756,7 @@ pub struct InstallSessionSnapshot {
     pub last_stdout: Option<String>,
     pub last_stderr: Option<String>,
     pub fallback_reason: Option<String>,
+    pub powershell_diagnostic: Option<PowerShellPreflightSummary>,
     pub logs_truncated: bool,
     pub probe: Option<InstallProbeStatus>,
     #[serde(default)]
@@ -702,6 +781,7 @@ impl Default for InstallSessionSnapshot {
             last_stdout: None,
             last_stderr: None,
             fallback_reason: None,
+            powershell_diagnostic: None,
             logs_truncated: false,
             probe: None,
             logs: Vec::new(),

@@ -159,6 +159,9 @@ function App() {
               configCenterDirty={shell.configCenterDirty}
               installProbe={shell.installProbe}
               installSource={shell.installSource}
+              installSettings={shell.installSettings}
+              installSettingsBusy={shell.installSettingsBusy}
+              powershellPreflight={shell.powershellPreflight}
               installFlowOpen={shell.installFlowOpen}
               installFlowCatalog={shell.installFlowCatalog}
               installSessionSnapshot={shell.installSessionSnapshot}
@@ -194,6 +197,8 @@ function App() {
               onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
               onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
               onInstallSourceChange={shell.handleInstallSourceChange}
+              onSaveInstallSettings={shell.handleSaveInstallSettings}
+              onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
               onInstallDependencies={shell.handleInstallDependencies}
               onInstallKimi={shell.handleInstallKimi}
               onUpgradeKimi={shell.handleUpgradeKimi}
@@ -249,6 +254,9 @@ function App() {
               configCenterDirty={shell.configCenterDirty}
               installProbe={shell.installProbe}
               installSource={shell.installSource}
+              installSettings={shell.installSettings}
+              installSettingsBusy={shell.installSettingsBusy}
+              powershellPreflight={shell.powershellPreflight}
               installFlowOpen={shell.installFlowOpen}
               installFlowCatalog={shell.installFlowCatalog}
               installSessionSnapshot={shell.installSessionSnapshot}
@@ -284,6 +292,8 @@ function App() {
               onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
               onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
               onInstallSourceChange={shell.handleInstallSourceChange}
+              onSaveInstallSettings={shell.handleSaveInstallSettings}
+              onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
               onInstallDependencies={shell.handleInstallDependencies}
               onInstallKimi={shell.handleInstallKimi}
               onUpgradeKimi={shell.handleUpgradeKimi}

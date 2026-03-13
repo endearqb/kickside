@@ -35,6 +35,9 @@ import {
 import type {
   ActionableOnboardingStep,
   AppStatus,
+  BindingRecord,
+  BridgeSettings,
+  BridgeStatus,
   ControlCenterChrome,
   ContextMenuStatus,
   ControlSectionId,
@@ -169,6 +172,40 @@ function createDefaultInstallSettingsView(): InstallSettingsView {
   };
 }
 
+function createDefaultBridgeSettings(): BridgeSettings {
+  return {
+    enabled: false,
+    autoStart: false,
+    adminPort: 60110,
+    channels: [
+      {
+        platform: "telegram",
+        enabled: false,
+        mode: "polling",
+        accountLabel: "Telegram",
+      },
+      {
+        platform: "feishu",
+        enabled: false,
+        mode: "websocket",
+        accountLabel: "Feishu",
+      },
+    ],
+  };
+}
+
+function createDefaultBridgeStatus(): BridgeStatus {
+  return {
+    state: "stopped",
+    adminPort: 60110,
+    version: undefined,
+    channels: [],
+    pendingApprovals: 0,
+    bindings: 0,
+    lastError: undefined,
+  };
+}
+
 export function useShellController() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
@@ -198,6 +235,14 @@ export function useShellController() {
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
     () => createDefaultInstallSettingsView(),
   );
+  const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
+    () => createDefaultBridgeSettings(),
+  );
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(
+    () => createDefaultBridgeStatus(),
+  );
+  const [bridgeBindings, setBridgeBindings] = useState<BindingRecord[]>([]);
+  const [bridgeBusy, setBridgeBusy] = useState(false);
   const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
   const [powershellPreflight, setPowershellPreflight] =
     useState<PowerShellPreflightSummary | null>(null);
@@ -723,6 +768,45 @@ export function useShellController() {
       setContextMenuStatus(data);
     } catch (error) {
       setActionError(String(error));
+    }
+  }
+
+  async function refreshBridgeSettings() {
+    try {
+      const data = await invoke<BridgeSettings>("get_bridge_settings");
+      setBridgeSettings(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeSettings;
+    }
+  }
+
+  async function refreshBridgeStatus() {
+    try {
+      const data = await invoke<BridgeStatus>("get_bridge_status");
+      setBridgeStatus(data);
+      setActionError(null);
+      return data;
+    } catch (error) {
+      const message = String(error);
+      setBridgeStatus((current) => ({
+        ...current,
+        lastError: message,
+      }));
+      setActionError(message);
+      return bridgeStatus;
+    }
+  }
+
+  async function refreshBridgeBindings() {
+    try {
+      const data = await invoke<BindingRecord[]>("list_bridge_bindings");
+      setBridgeBindings(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeBindings;
     }
   }
 
@@ -1302,6 +1386,8 @@ export function useShellController() {
     void refreshOnboarding();
     void refreshInstallSettings();
     void refreshPowerShellPreflight();
+    void refreshBridgeSettings();
+    void refreshBridgeStatus();
     const timer = window.setInterval(() => {
       void refreshStatus();
     }, POLL_MS);
@@ -1324,6 +1410,51 @@ export function useShellController() {
       setWorkDirInput(onboarding.workDir);
     }
   }, [onboarding, workDirInput]);
+
+  useEffect(() => {
+    const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
+    const bridgePanelVisible =
+      controlCenterVisible &&
+      activeControlSection === "runtime_center" &&
+      activeRuntimePanel === "bridge";
+
+    if (bridgePanelVisible) {
+      void refreshBridgeSettings();
+      void refreshBridgeStatus();
+      void refreshBridgeBindings();
+    }
+  }, [
+    activeControlSection,
+    activeRuntimePanel,
+    controlCenterModalOpen,
+    screen,
+  ]);
+
+  useEffect(() => {
+    const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
+    if (!controlCenterVisible && bridgeStatus.state === "stopped") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void refreshBridgeStatus();
+      if (
+        controlCenterVisible &&
+        activeControlSection === "runtime_center" &&
+        activeRuntimePanel === "bridge"
+      ) {
+        void refreshBridgeBindings();
+      }
+    }, 1500);
+
+    return () => window.clearInterval(timer);
+  }, [
+    activeControlSection,
+    activeRuntimePanel,
+    bridgeStatus.state,
+    controlCenterModalOpen,
+    screen,
+  ]);
 
   useEffect(() => {
     if (screen === "workspace" || keepControlCenterForUpgrade) {
@@ -1635,6 +1766,81 @@ export function useShellController() {
       setActionError(String(error));
     } finally {
       setActionBusy(false);
+    }
+  }
+
+  function handleBridgeSettingsChange(next: BridgeSettings) {
+    setBridgeSettings(next);
+  }
+
+  async function handleSaveBridgeSettings() {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const saved = await invoke<BridgeSettings>("save_bridge_settings", {
+        input: bridgeSettings,
+      });
+      setBridgeSettings(saved);
+      await refreshBridgeStatus();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleStartBridge() {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeStatus>("start_bridge");
+      setBridgeStatus(data);
+      await refreshBridgeBindings();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleStopBridge() {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeStatus>("stop_bridge");
+      setBridgeStatus(data);
+      setBridgeBindings([]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleRestartBridge() {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeStatus>("restart_bridge");
+      setBridgeStatus(data);
+      await refreshBridgeBindings();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleClearBridgeBinding(bindingId: string) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      await invoke("clear_bridge_binding", { bindingId });
+      await Promise.all([refreshBridgeBindings(), refreshBridgeStatus()]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
     }
   }
 
@@ -1953,7 +2159,13 @@ export function useShellController() {
 
   async function openRuntimePanelFromDashboard(panel: RuntimePanelId) {
     try {
-      if (panel === "paths") {
+      if (panel === "bridge") {
+        await Promise.all([
+          refreshBridgeSettings(),
+          refreshBridgeStatus(),
+          refreshBridgeBindings(),
+        ]);
+      } else if (panel === "paths") {
         await Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
       } else {
         await refreshDiagnostics();
@@ -2183,6 +2395,10 @@ export function useShellController() {
     shutdownElapsedMs,
     contextMenuStatus,
     loginProbeResult,
+    bridgeSettings,
+    bridgeStatus,
+    bridgeBindings,
+    bridgeBusy,
     kimiPathInput,
     setKimiPathInput,
     workDirInput,
@@ -2235,6 +2451,9 @@ export function useShellController() {
     refreshCoreState,
     refreshDiagnostics,
     refreshContextMenuStatus,
+    refreshBridgeSettings,
+    refreshBridgeStatus,
+    refreshBridgeBindings,
     refreshInstallProbe,
     refreshInstallSettings,
     refreshPowerShellPreflight,
@@ -2257,6 +2476,12 @@ export function useShellController() {
     handlePickWorkDir,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
+    handleBridgeSettingsChange,
+    handleSaveBridgeSettings,
+    handleStartBridge,
+    handleStopBridge,
+    handleRestartBridge,
+    handleClearBridgeBinding,
     handleInstallSourceChange,
     handleSaveInstallSettings,
     handleInstallDependencies: handleQuickInstallCore,

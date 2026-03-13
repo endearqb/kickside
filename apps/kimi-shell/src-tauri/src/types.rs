@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -12,6 +12,41 @@ pub enum BackendState {
     Crashed,
     Stopping,
     MissingKimi,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgePlatform {
+    Telegram,
+    Feishu,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeChannelMode {
+    Polling,
+    Websocket,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeRuntimeState {
+    Stopped,
+    Starting,
+    Running,
+    Degraded,
+    Stopping,
+    Crashed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeChannelState {
+    Idle,
+    Connecting,
+    Ready,
+    Degraded,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -223,6 +258,12 @@ pub struct AppSettings {
     pub hotkey: String,
     pub start_minimized_to_tray: bool,
     pub auto_restart_on_crash: bool,
+    #[serde(rename = "bridge_enabled")]
+    pub bridge_enabled: bool,
+    #[serde(rename = "bridge_auto_start")]
+    pub bridge_auto_start: bool,
+    #[serde(rename = "bridge_admin_port_override")]
+    pub bridge_admin_port_override: Option<u16>,
     pub onboarding_completed_version: u32,
     pub onboarding_step_acks: OnboardingStepAcks,
     pub preferred_install_source: InstallSource,
@@ -239,6 +280,9 @@ impl Default for AppSettings {
             hotkey: "CmdOrCtrl+Shift+K".to_string(),
             start_minimized_to_tray: false,
             auto_restart_on_crash: false,
+            bridge_enabled: false,
+            bridge_auto_start: false,
+            bridge_admin_port_override: None,
             onboarding_completed_version: 0,
             onboarding_step_acks: OnboardingStepAcks::default(),
             preferred_install_source: InstallSource::Official,
@@ -246,6 +290,89 @@ impl Default for AppSettings {
             custom_mirror_config: InstallCustomMirrorConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeChannelConfig {
+    pub platform: BridgePlatform,
+    pub enabled: bool,
+    pub mode: BridgeChannelMode,
+    pub account_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSettings {
+    pub enabled: bool,
+    pub auto_start: bool,
+    pub admin_port: u16,
+    #[serde(default)]
+    pub channels: Vec<BridgeChannelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeTelegramSecrets {
+    pub bot_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeFeishuSecrets {
+    pub app_id: Option<String>,
+    pub app_secret: Option<String>,
+    pub verification_token: Option<String>,
+    pub encrypt_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeSecrets {
+    pub telegram: BridgeTelegramSecrets,
+    pub feishu: BridgeFeishuSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeChannelStatus {
+    pub platform: BridgePlatform,
+    pub enabled: bool,
+    pub state: BridgeChannelState,
+    pub last_inbound_at: Option<String>,
+    pub last_outbound_at: Option<String>,
+    pub last_offset: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStatus {
+    pub state: BridgeRuntimeState,
+    pub started_at: Option<String>,
+    pub pid: Option<u32>,
+    pub admin_port: u16,
+    pub version: Option<String>,
+    #[serde(default)]
+    pub channels: Vec<BridgeChannelStatus>,
+    pub pending_approvals: usize,
+    pub bindings: usize,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingRecord {
+    pub binding_id: String,
+    pub platform: BridgePlatform,
+    pub account_id: Option<String>,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub kimi_session_id: String,
+    pub work_dir: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_inbound_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

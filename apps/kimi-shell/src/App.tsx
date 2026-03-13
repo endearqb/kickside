@@ -147,6 +147,10 @@ function App() {
               diagnosticsBusy={shell.diagnosticsBusy}
               contextMenuBusy={shell.contextMenuBusy}
               loginProbeBusy={shell.loginProbeBusy}
+              bridgeSettings={shell.bridgeSettings}
+              bridgeStatus={shell.bridgeStatus}
+              bridgeBindings={shell.bridgeBindings}
+              bridgeBusy={shell.bridgeBusy}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
               setActiveControlSection={shell.setActiveControlSection}
@@ -177,6 +181,9 @@ function App() {
               onRefreshCoreState={shell.refreshCoreState}
               onRefreshDiagnostics={shell.refreshDiagnostics}
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
+              onRefreshBridgeSettings={shell.refreshBridgeSettings}
+              onRefreshBridgeStatus={shell.refreshBridgeStatus}
+              onRefreshBridgeBindings={shell.refreshBridgeBindings}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -191,6 +198,12 @@ function App() {
               onPickWorkDir={shell.handlePickWorkDir}
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
+              onBridgeSettingsChange={shell.handleBridgeSettingsChange}
+              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
+              onStartBridge={shell.handleStartBridge}
+              onStopBridge={shell.handleStopBridge}
+              onRestartBridge={shell.handleRestartBridge}
+              onClearBridgeBinding={shell.handleClearBridgeBinding}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
@@ -242,6 +255,10 @@ function App() {
               diagnosticsBusy={shell.diagnosticsBusy}
               contextMenuBusy={shell.contextMenuBusy}
               loginProbeBusy={shell.loginProbeBusy}
+              bridgeSettings={shell.bridgeSettings}
+              bridgeStatus={shell.bridgeStatus}
+              bridgeBindings={shell.bridgeBindings}
+              bridgeBusy={shell.bridgeBusy}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
               setActiveControlSection={shell.setActiveControlSection}
@@ -272,6 +289,9 @@ function App() {
               onRefreshCoreState={shell.refreshCoreState}
               onRefreshDiagnostics={shell.refreshDiagnostics}
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
+              onRefreshBridgeSettings={shell.refreshBridgeSettings}
+              onRefreshBridgeStatus={shell.refreshBridgeStatus}
+              onRefreshBridgeBindings={shell.refreshBridgeBindings}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -286,6 +306,12 @@ function App() {
               onPickWorkDir={shell.handlePickWorkDir}
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
+              onBridgeSettingsChange={shell.handleBridgeSettingsChange}
+              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
+              onStartBridge={shell.handleStartBridge}
+              onStopBridge={shell.handleStopBridge}
+              onRestartBridge={shell.handleRestartBridge}
+              onClearBridgeBinding={shell.handleClearBridgeBinding}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}

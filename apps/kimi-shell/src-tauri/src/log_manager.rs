@@ -30,6 +30,12 @@ pub fn backend_log_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
     Ok(logs_dir.join("backend.log"))
 }
 
+pub fn bridge_log_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    let state = app.state::<AppState>();
+    ensure_logs_dir(app)?;
+    Ok(state.bridge_log_path.clone())
+}
+
 pub fn rotate_backend_log_if_needed(app: &AppHandle) -> anyhow::Result<()> {
     let log_path = backend_log_path(app)?;
     rotate_file_if_needed(&log_path, MAX_LOG_BYTES, MAX_LOG_FILES)

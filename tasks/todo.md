@@ -26,6 +26,91 @@
 
 ## Recent 20 Plans
 
+## Current Plan (Kimi IM Bridge phase 0-1)
+
+### Checklist
+
+- [x] 安装并验证 Go 1.26 工具链可用于本仓库
+- [x] 新增 `apps/kimi-im-bridge` Go sidecar 脚手架、配置解析、日志与基础 admin API
+- [x] 实现 bridge SQLite schema、store 与 binding router
+- [x] 在 `apps/kimi-shell` 中实现 bridge 配置持久化、sidecar 托管与 Tauri commands
+- [x] 在 Control Center 的 `runtime_center` 下新增 bridge panel、状态轮询与 bindings 列表
+- [ ] 运行 Go / Rust / 前端验证命令并完成手工 smoke
+
+### Acceptance Criteria
+
+- [x] `bridge.db` 的 schema、store、binding router 可稳定读写 bindings / offsets / approvals / delivery events / sessions
+- [x] `kimi-shell` 已具备启动、停止、重启空壳 `kimi-im-bridge` 的命令、运行态隔离与 UI 面板，不混入现有 `BackendState`
+- [ ] sidecar 重启后可恢复持久化数据，Control Center 可显示 bridge 状态与 bindings 列表
+
+### Review
+
+- Actual changes:
+  - 新增 `apps/kimi-im-bridge` nested Go module
+    - 落地 CLI 入口、配置/secret 默认文件创建、文件日志、`/healthz` / `/api/v1/status` / `/api/v1/bindings` / `DELETE /api/v1/bindings/{id}` admin API。
+    - 新增 SQLite migration、store、binding router，并覆盖 offsets、approval 去重、delivery 去重、binding 恢复与 reopen 测试。
+  - 扩展 `apps/kimi-shell/src-tauri`
+    - 新增 `bridge_settings_store.rs`、`bridge_http_client.rs`、`bridge_manager.rs`。
+    - `AppState` 增加独立 bridge 运行态、`bridge_settings.json` / `bridge_secrets.json` / `bridge.db` / `logs/bridge.log` 路径和内存态 admin token。
+    - 新增 Tauri commands：`get_bridge_settings`、`save_bridge_settings`、`get_bridge_status`、`start_bridge`、`stop_bridge`、`restart_bridge`、`list_bridge_bindings`、`clear_bridge_binding`。
+    - `settings.json` 镜像 `bridge_enabled`、`bridge_auto_start`、`bridge_admin_port_override`，并在 setup 后异步执行 bridge auto-start。
+  - 扩展 `apps/kimi-shell` 前端
+    - `useShellController` 新增 bridge settings/status/bindings/busy 状态、保存/启停/重启/clear binding handlers，以及 1.5s 轮询。
+    - `runtime_center` 新增 `Bridge sidecar` panel，支持 bridge 配置保存、状态查看、bindings 列表与清理。
+    - `App.css` 增加 bridge panel 所需样式。
+- Verification:
+  - `cmd.exe /c "set PATH=C:\\Users\\Qian\\AppData\\Local\\Programs\\GoPortable\\go1.26.1\\go\\bin;%PATH% && go -C apps\\kimi-im-bridge mod tidy"`
+  - `cmd.exe /c "set PATH=C:\\Users\\Qian\\AppData\\Local\\Programs\\GoPortable\\go1.26.1\\go\\bin;%PATH% && go -C apps\\kimi-im-bridge fmt ./..."`
+  - `cmd.exe /c "set PATH=C:\\Users\\Qian\\AppData\\Local\\Programs\\GoPortable\\go1.26.1\\go\\bin;%PATH% && go -C apps\\kimi-im-bridge test ./..."`
+  - `cmd.exe /c "set PATH=C:\\Users\\Qian\\AppData\\Local\\Programs\\GoPortable\\go1.26.1\\go\\bin;%PATH% && go -C apps\\kimi-im-bridge build -o bin\\kimi-im-bridge.exe ./cmd\\kimi-im-bridge"`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - Control Center 的手工 UI smoke 尚未执行；尝试补跑非 UI sidecar smoke 时被本地命令策略拦截，因此当前验收主要依赖 Go / Rust 单测和前端生产构建。
+
+## Current Plan (Kimi IM Bridge 三文档定稿)
+
+### Checklist
+
+- [x] 完成 GitHub / 社区一手资料复核，补齐 Kimi IM bridge 方案论证依据
+- [x] 撰写 `docs/kimi-im-bridge-prd.md`
+- [x] 撰写 `docs/kimi-im-bridge-design.md`
+- [x] 撰写 `docs/kimi-im-bridge-implementation-plan.md`
+- [x] 校对三份文档的术语、阶段划分、接口命名和引用一致性
+
+### Acceptance Criteria
+
+- [x] 三份文档均为中文 Markdown，且可直接指导后续实现
+- [x] 文档明确采用 `apps/kimi-shell` 控制中心 + `apps/kimi-im-bridge` Go sidecar 的主方案
+- [x] 文档明确 `kimi-agent-sdk` 为主接入层，`kimi acp` 仅作备选比较
+- [x] 文档将 MVP 范围锁定为 `Telegram + 飞书`
+- [x] 每份文档末尾均包含调研依据 / 参考链接
+
+### Review
+
+- Actual changes:
+  - 更新 `.gitignore`
+    - 将 `docs` 目录规则收窄为“默认忽略、白名单放行”，确保本次三份正式文档可进入版本控制，同时不影响其他本地文档保持忽略。
+  - 新增 `docs/kimi-im-bridge-prd.md`
+    - 形成完整 PRD，覆盖背景、问题、目标 / 非目标、MVP 范围、FR/NFR、成功指标、风险与依赖。
+    - 单列调研依据与方案选择，明确 sidecar 架构和 `kimi-agent-sdk` 主接入层结论。
+  - 新增 `docs/kimi-im-bridge-design.md`
+    - 形成完整设计方案，定义总体架构、仓库落位、公开接口、内部消息模型、SQLite schema、渠道边界和安全设计。
+    - 明确 bridge 与现有 `kimi web` / `BackendState` 的职责解耦。
+  - 新增 `docs/kimi-im-bridge-implementation-plan.md`
+    - 形成按阶段拆分的实施计划，覆盖 Phase 0-6、出口条件、验证命令、测试矩阵和风险缓解。
+- Verification:
+  - `Get-ChildItem docs\\kimi-im-bridge-*.md | Select-Object Name,Length`
+    - 确认三份文档已创建。
+  - `Select-String -Path docs\\kimi-im-bridge-*.md -Pattern 'kimi-agent-sdk|kimi acp|Telegram + 飞书|channel_bindings|channel_offsets|approval_requests|delivery_events|BindingKey|BridgeSettings|BridgeStatus|Phase 0|Phase 1|Phase 2|Phase 3|Phase 4|Phase 5|Phase 6'`
+    - 校对关键术语、表名、阶段名和主方案表述一致。
+  - `Get-Content docs\\kimi-im-bridge-prd.md -TotalCount 80`
+  - `Get-Content docs\\kimi-im-bridge-design.md -TotalCount 80`
+  - `Get-Content docs\\kimi-im-bridge-implementation-plan.md -TotalCount 80`
+    - 人工抽查文档开头结构、交叉引用和中文内容完整性。
+- Remaining note:
+  - 本次交付为文档定稿，不包含 `apps/kimi-im-bridge` 或 `apps/kimi-shell` 的实际代码实现。
+
 ## Current Plan (compact PowerShell preflight badges in install modal)
 
 ### Checklist

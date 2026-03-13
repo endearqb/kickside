@@ -6,6 +6,25 @@ export type BackendState =
   | "stopping"
   | "missing_kimi";
 
+export type BridgePlatform = "telegram" | "feishu";
+
+export type BridgeChannelMode = "polling" | "websocket";
+
+export type BridgeRuntimeState =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "degraded"
+  | "stopping"
+  | "crashed";
+
+export type BridgeChannelState =
+  | "idle"
+  | "connecting"
+  | "ready"
+  | "degraded"
+  | "error";
+
 export type WebviewRuntimeKind = "evergreen" | "fixed" | "unknown";
 
 export type MainCreateMode = "auto" | "manual";
@@ -97,6 +116,55 @@ export interface AppStatus {
   startupMonitorDetail?: string;
   logsDir: string;
   hotkey: string;
+}
+
+export interface BridgeChannelConfig {
+  platform: BridgePlatform;
+  enabled: boolean;
+  mode: BridgeChannelMode;
+  accountLabel: string;
+}
+
+export interface BridgeSettings {
+  enabled: boolean;
+  autoStart: boolean;
+  adminPort: number;
+  channels: BridgeChannelConfig[];
+}
+
+export interface BridgeChannelStatus {
+  platform: BridgePlatform;
+  enabled: boolean;
+  state: BridgeChannelState;
+  lastInboundAt?: string;
+  lastOutboundAt?: string;
+  lastOffset?: string;
+  lastError?: string;
+}
+
+export interface BridgeStatus {
+  state: BridgeRuntimeState;
+  startedAt?: string;
+  pid?: number;
+  adminPort: number;
+  version?: string;
+  channels: BridgeChannelStatus[];
+  pendingApprovals: number;
+  bindings: number;
+  lastError?: string;
+}
+
+export interface BindingRecord {
+  bindingId: string;
+  platform: BridgePlatform;
+  accountId?: string;
+  chatId: string;
+  threadId?: string;
+  kimiSessionId: string;
+  workDir?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastInboundMessageId?: string;
 }
 
 export interface FrontendReadyAck {
@@ -593,7 +661,7 @@ export type ControlSectionId =
   | "onboarding"
   | "runtime_center";
 
-export type RuntimePanelId = "core" | "paths" | "logs";
+export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 
 export type ControlCenterSurface = "fullscreen" | "modal";
 

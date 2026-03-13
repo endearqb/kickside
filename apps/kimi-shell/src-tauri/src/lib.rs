@@ -1,5 +1,8 @@
 mod app_state;
 mod backend_manager;
+mod bridge_http_client;
+mod bridge_manager;
+mod bridge_settings_store;
 mod cli_contract;
 mod command_utils;
 mod context_menu;
@@ -25,13 +28,14 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
-    InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
-    InstallSettingsView, InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
-    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    OnboardingStatus, OnboardingStep, PowerShellPreflightSummary, ShutdownProgressPayload,
-    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
-    SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
+    AppSettings, AppStatus, BackendState, BindingRecord, BridgeSettings, BridgeStatus,
+    ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
+    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
+    KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+    LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
+    PowerShellPreflightSummary, ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -346,6 +350,75 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
     settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
     backend_manager::set_session_work_dir(&app, None).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
+    bridge_settings_store::load_or_default(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
+    let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
+    {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| "bridge runtime mutex is poisoned".to_string())?;
+        if !matches!(
+            runtime.state,
+            crate::types::BridgeRuntimeState::Running
+                | crate::types::BridgeRuntimeState::Starting
+                | crate::types::BridgeRuntimeState::Degraded
+        ) {
+            runtime.admin_port = saved.admin_port;
+            runtime.channels = saved
+                .channels
+                .iter()
+                .map(|channel| crate::types::BridgeChannelStatus {
+                    platform: channel.platform,
+                    enabled: channel.enabled,
+                    state: crate::types::BridgeChannelState::Idle,
+                    last_inbound_at: None,
+                    last_outbound_at: None,
+                    last_offset: None,
+                    last_error: None,
+                })
+                .collect();
+        }
+    }
+    Ok(saved)
+}
+
+#[tauri::command]
+fn get_bridge_status(app: AppHandle) -> Result<BridgeStatus, String> {
+    bridge_manager::get_bridge_status(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    bridge_manager::start_bridge(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    bridge_manager::stop_bridge(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_bridge_bindings(app: AppHandle) -> Result<Vec<BindingRecord>, String> {
+    bridge_manager::list_bridge_bindings(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_bridge_binding(app: AppHandle, binding_id: String) -> Result<(), String> {
+    bridge_manager::clear_bridge_binding(&app, &binding_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -762,6 +835,13 @@ pub fn run() {
             app.manage(shared);
             app.manage(install_manager::InstallManager::default());
 
+            if let Err(error) = bridge_settings_store::ensure_bridge_files(app.handle()) {
+                log_manager::append_line(
+                    app.handle(),
+                    format!("failed to initialize bridge settings files: {error:#}"),
+                );
+            }
+
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
                 shortcut_manager::register_default_hotkey(app.handle())?;
@@ -791,6 +871,31 @@ pub fn run() {
             window_manager::enter_local_boot(app.handle(), "setup_bootstrap");
             backend_manager::start_backend(app.handle().clone());
 
+            {
+                let app_handle = app.handle().clone();
+                thread::spawn(move || {
+                    let settings = match bridge_settings_store::load_or_default(&app_handle) {
+                        Ok(settings) => settings,
+                        Err(error) => {
+                            log_manager::append_line(
+                                &app_handle,
+                                format!("failed to load bridge settings for auto start: {error:#}"),
+                            );
+                            return;
+                        }
+                    };
+
+                    if settings.enabled && settings.auto_start {
+                        if let Err(error) = bridge_manager::start_bridge(&app_handle) {
+                            log_manager::append_line(
+                                &app_handle,
+                                format!("bridge auto start failed: {error:#}"),
+                            );
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -806,6 +911,14 @@ pub fn run() {
             quit_app_gracefully,
             save_kimi_path,
             save_work_dir,
+            get_bridge_settings,
+            save_bridge_settings,
+            get_bridge_status,
+            start_bridge,
+            stop_bridge,
+            restart_bridge,
+            list_bridge_bindings,
+            clear_bridge_binding,
             get_diagnostics,
             open_logs_folder,
             open_external_url,
@@ -892,10 +1005,16 @@ pub fn run() {
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
             }
+            if should_attempt_stop_bridge(app_handle) {
+                let _ = bridge_manager::stop_bridge(app_handle);
+            }
         }
         RunEvent::Exit => {
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
+            }
+            if should_attempt_stop_bridge(app_handle) {
+                let _ = bridge_manager::stop_bridge(app_handle);
             }
         }
         _ => {}
@@ -1503,6 +1622,16 @@ fn should_attempt_stop_backend(app: &AppHandle) -> bool {
     };
 
     !matches!(runtime.state, BackendState::Stopped)
+}
+
+fn should_attempt_stop_bridge(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let lock = state.bridge_runtime.lock();
+    let Ok(runtime) = lock else {
+        return true;
+    };
+
+    !matches!(runtime.state, crate::types::BridgeRuntimeState::Stopped)
 }
 
 fn auto_repair_context_menu(app: &AppHandle) {

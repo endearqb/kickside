@@ -17,7 +17,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 1
+const userVersion = 3
 
 type Store struct {
 	db *sql.DB
@@ -58,8 +58,22 @@ func (s *Store) initialize() error {
 			return fmt.Errorf("failed to apply pragma %q: %w", pragma, err)
 		}
 	}
-	if _, err := s.db.Exec(migrations.InitialSchema()); err != nil {
-		return fmt.Errorf("failed to apply initial schema: %w", err)
+
+	currentVersion, err := s.UserVersion(context.Background())
+	if err != nil {
+		return err
+	}
+	ordered, err := migrations.Ordered()
+	if err != nil {
+		return err
+	}
+	for _, migration := range ordered {
+		if migration.Version <= currentVersion {
+			continue
+		}
+		if _, err := s.db.Exec(migration.SQL); err != nil {
+			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
+		}
 	}
 	return nil
 }
@@ -89,8 +103,9 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 		_, err := s.db.ExecContext(
 			ctx,
 			`INSERT INTO bridge_channels (
-				channel_id, platform, enabled, account_id, state, last_offset, last_error, last_heartbeat_at, created_at, updated_at
-			) VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?)
+				channel_id, platform, enabled, account_id, state, last_offset, last_error, last_heartbeat_at,
+				last_inbound_at, last_outbound_at, created_at, updated_at
+			) VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)
 			ON CONFLICT(channel_id) DO UPDATE SET
 				enabled=excluded.enabled,
 				state=excluded.state,
@@ -112,7 +127,7 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT platform, enabled, state, last_heartbeat_at, NULL, last_offset, last_error
+		`SELECT platform, enabled, state, ifnull(last_inbound_at, ''), ifnull(last_outbound_at, ''), ifnull(last_offset, ''), ifnull(last_error, '')
 		 FROM bridge_channels
 		 ORDER BY platform`,
 	)
@@ -143,6 +158,81 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 		return nil, fmt.Errorf("failed to iterate channel statuses: %w", err)
 	}
 	return statuses, nil
+}
+
+func (s *Store) UpdateChannelState(ctx context.Context, platform string, state domain.ChannelRuntimeState, lastError string) error {
+	now := nowRFC3339()
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE bridge_channels
+		 SET state = ?, last_error = ?, updated_at = ?
+		 WHERE channel_id = ?`,
+		state,
+		nullIfEmpty(lastError),
+		now,
+		platform,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update channel state for %s: %w", platform, err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateChannelOffset(ctx context.Context, platform string, offsetValue string) error {
+	if err := s.UpsertOffset(ctx, platform, offsetKindForPlatform(platform), offsetValue); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE bridge_channels
+		 SET last_offset = ?, updated_at = ?
+		 WHERE channel_id = ?`,
+		nullIfEmpty(offsetValue),
+		nowRFC3339(),
+		platform,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update channel status offset for %s: %w", platform, err)
+	}
+	return nil
+}
+
+func (s *Store) TouchChannelInbound(ctx context.Context, platform string, at string) error {
+	if at == "" {
+		at = nowRFC3339()
+	}
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE bridge_channels
+		 SET last_inbound_at = ?, updated_at = ?
+		 WHERE channel_id = ?`,
+		at,
+		nowRFC3339(),
+		platform,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to touch inbound channel activity for %s: %w", platform, err)
+	}
+	return nil
+}
+
+func (s *Store) TouchChannelOutbound(ctx context.Context, platform string, at string) error {
+	if at == "" {
+		at = nowRFC3339()
+	}
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE bridge_channels
+		 SET last_outbound_at = ?, updated_at = ?
+		 WHERE channel_id = ?`,
+		at,
+		nowRFC3339(),
+		platform,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to touch outbound channel activity for %s: %w", platform, err)
+	}
+	return nil
 }
 
 func (s *Store) UpsertOffset(ctx context.Context, channelID string, offsetKind string, offsetValue string) error {
@@ -402,11 +492,13 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO approval_requests (
-			approval_id, kimi_session_id, platform, chat_id, thread_id, request_kind, prompt, status,
+			approval_id, kimi_session_id, turn_id, step_id, platform, chat_id, thread_id, request_kind, prompt, status,
 			request_payload_json, resolution_payload_json, dedupe_key, created_at, updated_at, resolved_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ticket.ApprovalID,
 		ticket.KimiSessionID,
+		nullIfEmpty(ticket.TurnID),
+		nullIfEmpty(ticket.StepID),
 		ticket.Platform,
 		ticket.ChatID,
 		nullIfEmpty(ticket.ThreadID),
@@ -422,6 +514,117 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create approval ticket %s: %w", ticket.ApprovalID, err)
+	}
+	return nil
+}
+
+func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
+	query := `SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+	          prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
+	          ifnull(resolution_payload_json, ''), dedupe_key, created_at, updated_at, ifnull(resolved_at, '')
+	   FROM approval_requests`
+	args := []any{}
+	if status != "" {
+		query += ` WHERE status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY created_at DESC, approval_id DESC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list approvals: %w", err)
+	}
+	defer rows.Close()
+
+	items := []domain.ApprovalTicket{}
+	for rows.Next() {
+		var ticket domain.ApprovalTicket
+		if err := rows.Scan(
+			&ticket.ApprovalID,
+			&ticket.KimiSessionID,
+			&ticket.TurnID,
+			&ticket.StepID,
+			&ticket.RequestKind,
+			&ticket.Prompt,
+			&ticket.Platform,
+			&ticket.ChatID,
+			&ticket.ThreadID,
+			&ticket.Status,
+			&ticket.RequestPayloadJSON,
+			&ticket.ResolutionPayloadJSON,
+			&ticket.DedupeKey,
+			&ticket.CreatedAt,
+			&ticket.UpdatedAt,
+			&ticket.ResolvedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan approval ticket: %w", err)
+		}
+		items = append(items, ticket)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate approvals: %w", err)
+	}
+	return items, nil
+}
+
+func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain.ApprovalTicket, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+		        prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
+		        ifnull(resolution_payload_json, ''), dedupe_key, created_at, updated_at, ifnull(resolved_at, '')
+		 FROM approval_requests
+		 WHERE approval_id = ?`,
+		approvalID,
+	)
+
+	var ticket domain.ApprovalTicket
+	if err := row.Scan(
+		&ticket.ApprovalID,
+		&ticket.KimiSessionID,
+		&ticket.TurnID,
+		&ticket.StepID,
+		&ticket.RequestKind,
+		&ticket.Prompt,
+		&ticket.Platform,
+		&ticket.ChatID,
+		&ticket.ThreadID,
+		&ticket.Status,
+		&ticket.RequestPayloadJSON,
+		&ticket.ResolutionPayloadJSON,
+		&ticket.DedupeKey,
+		&ticket.CreatedAt,
+		&ticket.UpdatedAt,
+		&ticket.ResolvedAt,
+	); errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get approval %s: %w", approvalID, err)
+	}
+	return &ticket, nil
+}
+
+func (s *Store) ResolveApproval(ctx context.Context, approvalID string, status string, resolutionPayloadJSON string) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE approval_requests
+		 SET status = ?, resolution_payload_json = ?, updated_at = ?, resolved_at = ?
+		 WHERE approval_id = ?`,
+		status,
+		nullIfEmpty(resolutionPayloadJSON),
+		nowRFC3339(),
+		nowRFC3339(),
+		approvalID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to resolve approval %s: %w", approvalID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect resolve approval rows affected for %s: %w", approvalID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("approval %s not found", approvalID)
 	}
 	return nil
 }
@@ -476,6 +679,62 @@ func (s *Store) RecordDeliveryEventIfAbsent(ctx context.Context, event domain.De
 		return false, fmt.Errorf("failed to insert delivery event %s: %w", event.EventID, err)
 	}
 	return true, nil
+}
+
+func (s *Store) GetDeliveryEventByKey(ctx context.Context, deliveryKey string) (*domain.DeliveryEvent, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT event_id, platform, chat_id, ifnull(thread_id, ''), direction, delivery_key,
+		        ifnull(source_message_id, ''), payload_json, status, ifnull(error_message, ''), created_at, updated_at
+		 FROM delivery_events
+		 WHERE delivery_key = ?`,
+		deliveryKey,
+	)
+
+	var event domain.DeliveryEvent
+	if err := row.Scan(
+		&event.EventID,
+		&event.Platform,
+		&event.ChatID,
+		&event.ThreadID,
+		&event.Direction,
+		&event.DeliveryKey,
+		&event.SourceMessageID,
+		&event.PayloadJSON,
+		&event.Status,
+		&event.ErrorMessage,
+		&event.CreatedAt,
+		&event.UpdatedAt,
+	); errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get delivery event by key %s: %w", deliveryKey, err)
+	}
+	return &event, nil
+}
+
+func (s *Store) UpdateDeliveryEventStatus(ctx context.Context, deliveryKey string, status string, errorMessage string) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE delivery_events
+		 SET status = ?, error_message = ?, updated_at = ?
+		 WHERE delivery_key = ?`,
+		status,
+		nullIfEmpty(errorMessage),
+		nowRFC3339(),
+		deliveryKey,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update delivery event %s: %w", deliveryKey, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect delivery event rows affected for %s: %w", deliveryKey, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("delivery event %s not found", deliveryKey)
+	}
+	return nil
 }
 
 func (s *Store) CountBindings(ctx context.Context) (int, error) {
@@ -540,6 +799,17 @@ func isUniqueConstraint(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
+}
+
+func offsetKindForPlatform(platform string) string {
+	switch strings.TrimSpace(strings.ToLower(platform)) {
+	case "feishu":
+		return "feishu_checkpoint"
+	case "telegram":
+		fallthrough
+	default:
+		return "telegram_update"
+	}
 }
 
 func ExpectedUserVersion() int {

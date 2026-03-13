@@ -5,15 +5,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
 type fakeService struct {
-	status   domain.BridgeStatus
-	bindings []domain.BindingRecord
-	cleared  []string
+	status          domain.BridgeStatus
+	bindings        []domain.BindingRecord
+	approvals       []domain.ApprovalTicket
+	debugResponse   runtime.PromptResponse
+	cleared         []string
+	resolved        []string
+	requestStopCall int
 }
 
 func (f *fakeService) Status(context.Context) (domain.BridgeStatus, error) {
@@ -26,6 +32,24 @@ func (f *fakeService) ListBindings(context.Context) ([]domain.BindingRecord, err
 
 func (f *fakeService) ClearBinding(_ context.Context, bindingID string) error {
 	f.cleared = append(f.cleared, bindingID)
+	return nil
+}
+
+func (f *fakeService) ListApprovals(_ context.Context, _ string) ([]domain.ApprovalTicket, error) {
+	return f.approvals, nil
+}
+
+func (f *fakeService) ResolveApproval(_ context.Context, approvalID string, _ string, _ string) error {
+	f.resolved = append(f.resolved, approvalID)
+	return nil
+}
+
+func (f *fakeService) DebugPrompt(_ context.Context, _ runtime.PromptRequest) (runtime.PromptResponse, error) {
+	return f.debugResponse, nil
+}
+
+func (f *fakeService) RequestStop() error {
+	f.requestStopCall++
 	return nil
 }
 
@@ -149,5 +173,110 @@ func TestDeleteBindingEndpoint(t *testing.T) {
 	}
 	if len(fake.cleared) != 1 || fake.cleared[0] != "binding-1" {
 		t.Fatalf("expected binding-1 to be cleared, got %+v", fake.cleared)
+	}
+}
+
+func TestApprovalsAndRuntimeStopEndpoints(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeService{
+		approvals: []domain.ApprovalTicket{
+			{
+				ApprovalID:    "approval-1",
+				KimiSessionID: "session-1",
+				TurnID:        "turn-1",
+				StepID:        "step-1",
+				RequestKind:   "tool",
+				Prompt:        "approve?",
+				Platform:      "telegram",
+				ChatID:        "chat-1",
+				Status:        "pending",
+				DedupeKey:     "dedupe-1",
+			},
+		},
+	}
+	server := httptest.NewServer(NewHandler(fake, "token-1"))
+	defer server.Close()
+
+	listRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/approvals?status=pending", nil)
+	listRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	listResponse, err := http.DefaultClient.Do(listRequest)
+	if err != nil {
+		t.Fatalf("approvals request returned error: %v", err)
+	}
+	defer listResponse.Body.Close()
+	if listResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected approvals 200, got %d", listResponse.StatusCode)
+	}
+
+	resolveRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/approvals/approval-1/resolve", strings.NewReader(`{"status":"approved"}`))
+	resolveRequest.Header.Set("Content-Type", "application/json")
+	resolveRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	resolveResponse, err := http.DefaultClient.Do(resolveRequest)
+	if err != nil {
+		t.Fatalf("resolve request returned error: %v", err)
+	}
+	defer resolveResponse.Body.Close()
+	if resolveResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected resolve 200, got %d", resolveResponse.StatusCode)
+	}
+	if len(fake.resolved) != 1 || fake.resolved[0] != "approval-1" {
+		t.Fatalf("expected approval-1 to be resolved, got %+v", fake.resolved)
+	}
+
+	stopRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/runtime/stop", nil)
+	stopRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	stopResponse, err := http.DefaultClient.Do(stopRequest)
+	if err != nil {
+		t.Fatalf("stop request returned error: %v", err)
+	}
+	defer stopResponse.Body.Close()
+	if stopResponse.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected stop 202, got %d", stopResponse.StatusCode)
+	}
+	if fake.requestStopCall == 0 {
+		t.Fatalf("expected RequestStop to be called")
+	}
+}
+
+func TestDebugPromptEndpoint(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeService{
+		debugResponse: runtime.PromptResponse{
+			KimiSessionID: "session-1",
+			TurnID:        "turn-1",
+			Events: []runtime.PromptEvent{
+				{Type: runtime.EventTypeTurnStarted},
+				{Type: runtime.EventTypeContentDelta, StepIndex: 1, Text: "hello"},
+				{Type: runtime.EventTypeTurnCompleted, Status: "finished"},
+			},
+			Result: runtime.PromptResult{Status: "finished"},
+		},
+	}
+	server := httptest.NewServer(NewHandler(fake, "token-1"))
+	defer server.Close()
+
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/debug/prompt", strings.NewReader(`{"prompt":"hello"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Bridge-Admin-Token", "token-1")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("debug prompt request returned error: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected debug prompt 200, got %d", response.StatusCode)
+	}
+
+	var payload runtime.PromptResponse
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode debug prompt response: %v", err)
+	}
+	if payload.KimiSessionID != "session-1" {
+		t.Fatalf("expected session-1, got %s", payload.KimiSessionID)
+	}
+	if len(payload.Events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(payload.Events))
 	}
 }

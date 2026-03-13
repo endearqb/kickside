@@ -427,14 +427,21 @@ type OutboundMessage = {
 7. 结果更新 `approval_requests.status`
 8. 若平台回调失败，Control Center 提供手动处理入口
 
+补充约束：
+
+- 仅进程内仍持有 live responder 的 approval 可以被 `resume(...)`
+- sidecar 重启后，不尝试把历史 pending approval 重新挂接到真实 SDK responder
+- 遗留 `pending approval` 在启动恢复时转为 `failed`，并写入明确失败原因，要求用户重新发起 prompt
+
 ### 10.3 重启恢复流程
 
 1. sidecar 启动时读取 `bridge.db`
 2. 恢复 `channel_offsets`
 3. 恢复 `channel_bindings`
-4. 恢复 `approval_requests` 中的 pending 项
-5. 渠道 adapter 以最近 offset 继续接收
-6. 对于未完成 turn，不恢复中间流式状态；仅恢复下次 prompt 仍可命中的 session 关系
+4. 扫描 `approval_requests` 中的 `pending` 项
+5. 对无 live responder 的遗留 approval 直接转为 `failed`
+6. 渠道 adapter 以最近 offset 继续接收
+7. 对于未完成 turn，不恢复中间流式状态；仅恢复下次 prompt 仍可命中的 session 关系
 
 ## 11. Kimi Runtime Adapter 设计
 
@@ -467,6 +474,7 @@ Go SDK 已明确提供：
 - 默认一个 `BindingKey` 对应一个 Kimi session
 - shell 中允许手动把多个 binding 指向同一 `kimiSessionId`
 - 不允许多个活动 turn 并发写入同一 session；同一 session 按队列串行处理
+- sidecar 重启后只恢复 `kimiSessionId -> 下次 prompt` 的映射，不恢复中断中的 turn 流与 approval responder
 
 ## 12. Delivery Layer 设计
 
@@ -568,6 +576,8 @@ Delivery layer 负责把 runtime 输出变成平台可发送的消息。
 | --- | --- | --- |
 | `approval_id` | TEXT PK | 审批 ID |
 | `kimi_session_id` | TEXT | 会话 ID |
+| `turn_id` | TEXT NULL | 触发审批的 turn ID |
+| `step_id` | TEXT NULL | 触发审批的 step ID |
 | `platform` | TEXT | 平台 |
 | `chat_id` | TEXT | 会话 |
 | `thread_id` | TEXT NULL | 线程 |

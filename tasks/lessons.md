@@ -41,3 +41,5 @@
 - On Windows, if the app backend can hold the CLI binary being upgraded, stop that backend inside the upgrade task before running `uv tool upgrade`; otherwise `os error 32` file-lock failures are expected.
 - For in-app CLI verification steps, use the command syntax the installed tool actually supports. In this workspace, `kimi --version` works while `kimi -v` and `kimi version` fail.
 - If an install/upgrade flow intentionally stops the backend, do not let shell screen resolution fall back to the generic loading page and close the modal stack. Keep users in Control Center until they can inspect the result or restart the backend.
+- For Windows sidecar lifecycle management, do not treat `taskkill` as the primary stop path once the sidecar owns queues or approvals. Always provide a cooperative loopback/admin shutdown first, and use force-kill only as a bounded fallback.
+- When a persisted approval is expected to be resumable later, store the runtime correlation identifiers at creation time. For the IM bridge, `approval_requests` must keep `turn_id` and `step_id`, not just user-facing metadata.

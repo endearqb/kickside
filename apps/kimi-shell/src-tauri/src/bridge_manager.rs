@@ -151,18 +151,34 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
 
 pub fn stop_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     let settings = bridge_settings_store::load_or_default(app)?;
-    let child = {
+    let (runtime_state, admin_port, admin_token, child) = {
         let state = app.state::<AppState>();
         let mut runtime = state
             .bridge_runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        let previous_state = runtime.state;
         runtime.state = BridgeRuntimeState::Stopping;
-        runtime.child.take()
+        (
+            previous_state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+            runtime.child.take(),
+        )
     };
 
     if let Some(mut child) = child {
-        let reason = terminate_child(&mut child, BRIDGE_STOP_TIMEOUT)?;
+        let client = if matches!(
+            runtime_state,
+            BridgeRuntimeState::Starting
+                | BridgeRuntimeState::Running
+                | BridgeRuntimeState::Degraded
+        ) {
+            BridgeHttpClient::for_local_admin_port(admin_port, admin_token).ok()
+        } else {
+            None
+        };
+        let reason = stop_child_process(&mut child, client.as_ref(), BRIDGE_STOP_TIMEOUT)?;
         log_manager::append_line(app, format!("bridge stop finished ({reason})"));
     }
 
@@ -593,6 +609,27 @@ fn terminate_child(child: &mut Child, timeout: Duration) -> anyhow::Result<&'sta
     let _ = wait_for_child_exit(child, Duration::from_secs(1));
     let _ = child.wait();
     Ok("force_kill")
+}
+
+fn stop_child_process(
+    child: &mut Child,
+    client: Option<&BridgeHttpClient>,
+    timeout: Duration,
+) -> anyhow::Result<&'static str> {
+    if let Some(client) = client {
+        match client.stop_runtime() {
+            Ok(()) => {
+                if wait_for_child_exit(child, timeout)? {
+                    return Ok("cooperative_exit");
+                }
+            }
+            Err(error) => {
+                let _ = error;
+            }
+        }
+    }
+
+    terminate_child(child, timeout)
 }
 
 fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> anyhow::Result<bool> {

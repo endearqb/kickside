@@ -8,12 +8,17 @@ import (
 	"strings"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
 type Service interface {
 	Status(context.Context) (domain.BridgeStatus, error)
 	ListBindings(context.Context) ([]domain.BindingRecord, error)
 	ClearBinding(context.Context, string) error
+	ListApprovals(context.Context, string) ([]domain.ApprovalTicket, error)
+	ResolveApproval(context.Context, string, string, string) error
+	DebugPrompt(context.Context, runtime.PromptRequest) (runtime.PromptResponse, error)
+	RequestStop() error
 }
 
 func NewHandler(service Service, adminToken string) http.Handler {
@@ -74,7 +79,98 @@ func NewHandler(service Service, adminToken string) http.Handler {
 		}
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("/api/v1/approvals", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		items, err := service.ListApprovals(request.Context(), request.URL.Query().Get("status"))
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"items": items})
+	})
+	mux.HandleFunc("/api/v1/approvals/", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		approvalID, action, ok := parseNestedAction(request.URL.Path, "/api/v1/approvals/")
+		if !ok || action != "resolve" {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_approval_path"})
+			return
+		}
+		var payload struct {
+			Status                string `json:"status"`
+			ResolutionPayloadJSON string `json:"resolutionPayloadJson,omitempty"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		if payload.Status == "" {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing_status"})
+			return
+		}
+		if err := service.ResolveApproval(request.Context(), approvalID, payload.Status, payload.ResolutionPayloadJSON); err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("/api/v1/runtime/stop", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		writeJSON(writer, http.StatusAccepted, map[string]string{"status": "stopping"})
+		go func() {
+			_ = service.RequestStop()
+		}()
+	})
+	mux.HandleFunc("/api/v1/debug/prompt", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		var payload runtime.PromptRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		response, err := service.DebugPrompt(request.Context(), payload)
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusOK, response)
+	})
 	return mux
+}
+
+func parseNestedAction(path string, prefix string) (string, string, bool) {
+	trimmed := strings.TrimPrefix(path, prefix)
+	if trimmed == "" || strings.Contains(trimmed, "//") {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func authorize(writer http.ResponseWriter, request *http.Request, expectedToken string) bool {

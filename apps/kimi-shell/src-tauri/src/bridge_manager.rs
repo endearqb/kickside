@@ -15,8 +15,10 @@ use crate::{
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
     log_manager,
     types::{
-        BindingRecord, BridgeChannelState, BridgeChannelStatus, BridgeRuntimeState, BridgeSettings,
-        BridgeStatus,
+        BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
+        BridgeChannelStatus, BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue,
+        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSettings, BridgeStatus,
+        BridgeTelegramSecretsMaskView,
     },
 };
 
@@ -251,6 +253,103 @@ pub fn clear_bridge_binding(app: &AppHandle, binding_id: &str) -> anyhow::Result
     let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
     client.clear_binding(binding_id)?;
     Ok(())
+}
+
+pub fn list_bridge_approvals(
+    app: &AppHandle,
+    status: Option<&str>,
+) -> anyhow::Result<Vec<BridgeApprovalRecord>> {
+    refresh_child_state(app)?;
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Ok(Vec::new());
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    client.list_approvals(status)
+}
+
+pub fn resolve_bridge_approval(
+    app: &AppHandle,
+    input: &BridgeApprovalResolveInput,
+) -> anyhow::Result<()> {
+    refresh_child_state(app)?;
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Err(anyhow::anyhow!("bridge is not running"));
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    client.resolve_approval(input)?;
+    Ok(())
+}
+
+pub fn get_bridge_log_tail(
+    app: &AppHandle,
+    max_lines: Option<usize>,
+) -> anyhow::Result<Vec<String>> {
+    let path = log_manager::bridge_log_path(app)?;
+    let limit = max_lines.unwrap_or(80).clamp(1, 400);
+    Ok(log_manager::read_log_tail(&path, limit))
+}
+
+pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSecretsMaskView> {
+    let secrets = bridge_settings_store::load_secrets_or_default(app)?;
+    Ok(BridgeSecretsMaskView {
+        telegram: BridgeTelegramSecretsMaskView {
+            bot_token: mask_optional_secret(Some(
+                secrets.telegram.bot_token.as_deref().unwrap_or_default(),
+            )),
+        },
+        feishu: BridgeFeishuSecretsMaskView {
+            app_id: mask_optional_secret(Some(
+                secrets.feishu.app_id.as_deref().unwrap_or_default(),
+            )),
+            app_secret: mask_optional_secret(Some(
+                secrets.feishu.app_secret.as_deref().unwrap_or_default(),
+            )),
+            verification_token: mask_optional_secret(Some(
+                secrets
+                    .feishu
+                    .verification_token
+                    .as_deref()
+                    .unwrap_or_default(),
+            )),
+            encrypt_key: mask_optional_secret(Some(
+                secrets.feishu.encrypt_key.as_deref().unwrap_or_default(),
+            )),
+        },
+    })
 }
 
 fn build_bridge_command(
@@ -660,6 +759,32 @@ fn now_epoch_string() -> String {
         .to_string()
 }
 
+fn mask_optional_secret(value: Option<&str>) -> BridgeMaskedSecretValue {
+    let trimmed = value.unwrap_or_default().trim();
+    if trimmed.is_empty() {
+        return BridgeMaskedSecretValue {
+            configured: false,
+            masked_value: None,
+        };
+    }
+
+    BridgeMaskedSecretValue {
+        configured: true,
+        masked_value: Some(mask_secret_value(trimmed)),
+    }
+}
+
+fn mask_secret_value(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() < 6 {
+        return "***".to_string();
+    }
+
+    let prefix: String = chars.iter().take(3).collect();
+    let suffix: String = chars[chars.len().saturating_sub(2)..].iter().collect();
+    format!("{prefix}***{suffix}")
+}
+
 #[cfg(unix)]
 fn soft_terminate(pid: u32) {
     use nix::{sys::signal, unistd::Pid};
@@ -795,6 +920,24 @@ mod tests {
         finish_stop_transition(&mut runtime);
         assert_eq!(runtime.state, BridgeRuntimeState::Stopped);
         assert_eq!(runtime.pid, None);
+    }
+
+    #[test]
+    fn mask_secret_value_hides_short_and_long_tokens() {
+        assert_eq!(mask_secret_value("short"), "***");
+        assert_eq!(mask_secret_value("abcdef"), "abc***ef");
+        assert_eq!(mask_secret_value("telegram-secret-token"), "tel***en");
+    }
+
+    #[test]
+    fn mask_optional_secret_tracks_configured_flag() {
+        let empty = mask_optional_secret(Some("   "));
+        assert!(!empty.configured);
+        assert!(empty.masked_value.is_none());
+
+        let masked = mask_optional_secret(Some("secret-token"));
+        assert!(masked.configured);
+        assert_eq!(masked.masked_value.as_deref(), Some("sec***en"));
     }
 
     #[test]

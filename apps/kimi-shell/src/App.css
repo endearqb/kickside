@@ -2500,9 +2500,22 @@ input:focus {
 
 .bridge-channel-list,
 .bridge-channel-statuses,
-.bridge-binding-list {
+.bridge-binding-list,
+.bridge-approval-list,
+.bridge-secret-list,
+.bridge-error-list {
   display: grid;
   gap: 10px;
+}
+
+.bridge-panel-subsection {
+  display: grid;
+  gap: 8px;
+}
+
+.bridge-panel-subheader h5 {
+  margin: 0;
+  font-size: 12px;
 }
 
 .bridge-state-chip {
@@ -2535,6 +2548,71 @@ input:focus {
   margin: 0;
   color: #d92d20;
   font-size: 13px;
+}
+
+.bridge-error-card,
+.bridge-secret-row,
+.bridge-approval-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.bridge-error-card {
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bridge-approval-copy,
+.bridge-secret-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.bridge-approval-copy p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bridge-approval-copy small,
+.bridge-secret-copy small {
+  color: var(--muted-foreground);
+}
+
+.bridge-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bridge-secret-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--chrome-border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bridge-secret-chip.configured {
+  background: color-mix(in srgb, #2b8a3e 16%, transparent);
+}
+
+.bridge-secret-chip.empty {
+  background: color-mix(in srgb, #b42318 12%, transparent);
+}
+
+.bridge-log-tail {
+  margin-bottom: 0;
+  max-height: 280px;
 }
 
 @media (max-width: 900px) {
@@ -2647,6 +2725,16 @@ input:focus {
   .diagnostics-grid,
   .bridge-settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .bridge-approval-card,
+  .bridge-secret-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bridge-approval-actions {
+    justify-content: flex-start;
   }
 
   .cc-step-inline-row,

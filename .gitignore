@@ -20,6 +20,7 @@ apps/kimi-im-bridge/bin/
 # Rust / Tauri build artifacts
 target/
 apps/kimi-shell/src-tauri/target/
+apps/kimi-shell/src-tauri/binaries/*.exe
 
 # Tauri local temp artifacts
 apps/kimi-shell/src-tauri/.cargo/

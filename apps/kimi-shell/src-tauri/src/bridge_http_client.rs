@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::Context;
 use reqwest::blocking::Client;
 
-use crate::types::{BindingRecord, BridgeStatus};
+use crate::types::{BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeStatus};
 
 const ADMIN_TOKEN_HEADER: &str = "X-Bridge-Admin-Token";
 
@@ -18,6 +18,12 @@ pub struct BridgeHttpClient {
 #[serde(rename_all = "camelCase")]
 struct BindingListResponse {
     items: Vec<BindingRecord>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalListResponse {
+    items: Vec<BridgeApprovalRecord>,
 }
 
 impl BridgeHttpClient {
@@ -86,6 +92,37 @@ impl BridgeHttpClient {
         .context("failed to clear bridge binding")?
         .error_for_status()
         .context("bridge clear binding returned error status")?;
+        Ok(())
+    }
+
+    pub fn list_approvals(
+        &self,
+        status: Option<&str>,
+    ) -> anyhow::Result<Vec<BridgeApprovalRecord>> {
+        let mut request = self.request(reqwest::Method::GET, "/api/v1/approvals")?;
+        if let Some(status) = status.filter(|value| !value.trim().is_empty()) {
+            request = request.query(&[("status", status)]);
+        }
+        let payload = request
+            .send()
+            .context("failed to request bridge approvals")?
+            .error_for_status()
+            .context("bridge approvals returned error status")?
+            .json::<ApprovalListResponse>()
+            .context("failed to decode bridge approvals payload")?;
+        Ok(payload.items)
+    }
+
+    pub fn resolve_approval(&self, input: &BridgeApprovalResolveInput) -> anyhow::Result<()> {
+        self.request(
+            reqwest::Method::POST,
+            &format!("/api/v1/approvals/{}/resolve", input.approval_id),
+        )?
+        .json(input)
+        .send()
+        .context("failed to resolve bridge approval")?
+        .error_for_status()
+        .context("bridge resolve approval returned error status")?;
         Ok(())
     }
 
@@ -181,5 +218,81 @@ mod tests {
             receiver.recv().expect("method should be captured"),
             "POST".to_string()
         );
+    }
+
+    #[test]
+    fn list_approvals_uses_status_query_and_decodes_payload() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            sender
+                .send(request.url().to_string())
+                .expect("url should be forwarded");
+            let response = Response::from_string(
+                r#"{"items":[{"approvalId":"approval-1","kimiSessionId":"session-1","requestKind":"confirm","prompt":"Ship it?","platform":"telegram","chatId":"chat-1","status":"pending","requestPayloadJson":"{}","dedupeKey":"dedupe-1","createdAt":"2026-03-13T10:00:00Z","updatedAt":"2026-03-13T10:00:00Z"}]}"#,
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        let approvals = client
+            .list_approvals(Some("pending"))
+            .expect("approvals should decode");
+
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(approvals[0].approval_id, "approval-1");
+        assert_eq!(
+            receiver.recv().expect("url should be captured"),
+            "/api/v1/approvals?status=pending".to_string()
+        );
+    }
+
+    #[test]
+    fn resolve_approval_posts_json_payload() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut request = server.recv().expect("request should arrive");
+            let mut body = String::new();
+            request
+                .as_reader()
+                .read_to_string(&mut body)
+                .expect("request body should be readable");
+            sender
+                .send((
+                    request.method().as_str().to_string(),
+                    request.url().to_string(),
+                    body,
+                ))
+                .expect("payload should be forwarded");
+            let response = Response::empty(200);
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        client
+            .resolve_approval(&BridgeApprovalResolveInput {
+                approval_id: "approval-1".to_string(),
+                status: "approved".to_string(),
+                resolution_payload_json: Some(r#"{"decision":"yes"}"#.to_string()),
+            })
+            .expect("resolve_approval should succeed");
+
+        let (method, url, body) = receiver.recv().expect("payload should be captured");
+        assert_eq!(method, "POST");
+        assert_eq!(url, "/api/v1/approvals/approval-1/resolve");
+        assert!(body.contains(r#""status":"approved""#));
+        assert!(body.contains(r#""resolutionPayloadJson":"{\"decision\":\"yes\"}""#));
     }
 }

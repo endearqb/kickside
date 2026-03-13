@@ -167,6 +167,52 @@ export interface BindingRecord {
   lastInboundMessageId?: string;
 }
 
+export interface BridgeApprovalRecord {
+  approvalId: string;
+  kimiSessionId: string;
+  turnId?: string;
+  stepId?: string;
+  requestKind: string;
+  prompt: string;
+  platform: BridgePlatform;
+  chatId: string;
+  threadId?: string;
+  status: string;
+  requestPayloadJson: string;
+  resolutionPayloadJson?: string;
+  dedupeKey: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
+export interface BridgeApprovalResolveInput {
+  approvalId: string;
+  status: string;
+  resolutionPayloadJson?: string;
+}
+
+export interface BridgeMaskedSecretValue {
+  configured: boolean;
+  maskedValue?: string;
+}
+
+export interface BridgeTelegramSecretsMaskView {
+  botToken: BridgeMaskedSecretValue;
+}
+
+export interface BridgeFeishuSecretsMaskView {
+  appId: BridgeMaskedSecretValue;
+  appSecret: BridgeMaskedSecretValue;
+  verificationToken: BridgeMaskedSecretValue;
+  encryptKey: BridgeMaskedSecretValue;
+}
+
+export interface BridgeSecretsMaskView {
+  telegram: BridgeTelegramSecretsMaskView;
+  feishu: BridgeFeishuSecretsMaskView;
+}
+
 export interface FrontendReadyAck {
   accepted: boolean;
   backendState: BackendState;

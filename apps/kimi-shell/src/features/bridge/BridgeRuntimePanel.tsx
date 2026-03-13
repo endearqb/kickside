@@ -1,14 +1,19 @@
 import {
+  Check,
   FolderOpen,
   Play,
   RefreshCcw,
   RefreshCw,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
 import type {
   BindingRecord,
+  BridgeApprovalRecord,
+  BridgeApprovalResolveInput,
   BridgePlatform,
+  BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
 } from "@/app/types";
@@ -19,6 +24,10 @@ type BridgeRuntimePanelProps = {
   settings: BridgeSettings;
   status: BridgeStatus;
   bindings: BindingRecord[];
+  approvals: BridgeApprovalRecord[];
+  logTail: string[];
+  recentErrors: string[];
+  secretsMask: BridgeSecretsMaskView;
   busy: boolean;
   onSettingsChange: (next: BridgeSettings) => void;
   onSave: () => Promise<void>;
@@ -27,8 +36,15 @@ type BridgeRuntimePanelProps = {
   onRestart: () => Promise<void>;
   onRefreshStatus: () => Promise<BridgeStatus>;
   onRefreshBindings: () => Promise<BindingRecord[]>;
+  onRefreshApprovals: () => Promise<BridgeApprovalRecord[]>;
+  onRefreshLogTail: () => Promise<string[]>;
+  onRefreshSecretsMask: () => Promise<BridgeSecretsMaskView>;
   onOpenLogs: () => Promise<void>;
   onClearBinding: (bindingId: string) => Promise<void>;
+  onResolveApproval: (
+    approvalId: string,
+    status: BridgeApprovalResolveInput["status"],
+  ) => Promise<void>;
 };
 
 function updateChannelEnabled(
@@ -53,10 +69,41 @@ function platformLabel(platform: BridgePlatform): string {
   return platform === "telegram" ? "Telegram" : "Feishu";
 }
 
+function formatTimestamp(value?: string): string {
+  if (!value) {
+    return "-";
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return value;
+  }
+  return new Date(timestamp).toLocaleString("zh-CN", {
+    hour12: false,
+  });
+}
+
+function renderSecretRow(label: string, value: BridgeSecretsMaskView["telegram"]["botToken"]) {
+  return (
+    <div key={label} className="bridge-secret-row">
+      <div className="bridge-secret-copy">
+        <strong>{label}</strong>
+        <small>{value.configured ? value.maskedValue ?? "***" : "未配置"}</small>
+      </div>
+      <span className={`bridge-secret-chip ${value.configured ? "configured" : "empty"}`}>
+        {value.configured ? "Configured" : "Missing"}
+      </span>
+    </div>
+  );
+}
+
 export function BridgeRuntimePanel({
   settings,
   status,
   bindings,
+  approvals,
+  logTail,
+  recentErrors,
+  secretsMask,
   busy,
   onSettingsChange,
   onSave,
@@ -65,8 +112,12 @@ export function BridgeRuntimePanel({
   onRestart,
   onRefreshStatus,
   onRefreshBindings,
+  onRefreshApprovals,
+  onRefreshLogTail,
+  onRefreshSecretsMask,
   onOpenLogs,
   onClearBinding,
+  onResolveApproval,
 }: BridgeRuntimePanelProps) {
   const isRunning =
     status.state === "running" ||
@@ -284,6 +335,22 @@ export function BridgeRuntimePanel({
             <p className="hint">bridge 未运行时不会返回实时 channel 状态。</p>
           )}
         </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>最近错误摘要</h5>
+          </div>
+          {recentErrors.length > 0 ? (
+            <div className="bridge-error-list">
+              {recentErrors.map((entry) => (
+                <div key={entry} className="bridge-error-card">
+                  {entry}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="hint">最近没有采集到 bridge 错误摘要。</p>
+          )}
+        </div>
       </div>
 
       <div className="bridge-panel-section">
@@ -326,6 +393,121 @@ export function BridgeRuntimePanel({
         ) : (
           <p className="hint">暂无 bindings。bridge 停止时列表会显示为空。</p>
         )}
+      </div>
+
+      <div className="bridge-panel-section">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>Pending Approvals</h4>
+            <p>默认展示 pending approval，并支持从控制中心直接处理。</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<RefreshCcw size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onRefreshApprovals()}
+            disabled={busy}
+          >
+            刷新审批
+          </Button>
+        </div>
+        {approvals.length > 0 ? (
+          <div className="bridge-approval-list">
+            {approvals.map((approval) => (
+              <div key={approval.approvalId} className="bridge-approval-card">
+                <div className="bridge-approval-copy">
+                  <strong>{approval.approvalId}</strong>
+                  <span>
+                    {platformLabel(approval.platform)} / {approval.kimiSessionId}
+                  </span>
+                  <small>
+                    {approval.requestKind} | {approval.chatId}
+                    {approval.threadId ? ` / ${approval.threadId}` : ""}
+                  </small>
+                  <p>{approval.prompt}</p>
+                  <small>created {formatTimestamp(approval.createdAt)}</small>
+                </div>
+                <div className="bridge-approval-actions">
+                  <Button
+                    type="button"
+                    icon={<Check size={14} />}
+                    className="cc-action-btn"
+                    onClick={() => void onResolveApproval(approval.approvalId, "approved")}
+                    disabled={busy}
+                  >
+                    Approve
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<X size={14} />}
+                    className="cc-action-btn"
+                    onClick={() => void onResolveApproval(approval.approvalId, "rejected")}
+                    disabled={busy}
+                  >
+                    Reject
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">当前没有 pending approvals。</p>
+        )}
+      </div>
+
+      <div className="bridge-panel-section">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>Logs & Secrets</h4>
+            <p>查看 `bridge.log` 尾部内容与当前 token 掩码状态。</p>
+          </div>
+          <div className="cc-actions">
+            <Button
+              type="button"
+              icon={<RefreshCw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onRefreshLogTail()}
+              disabled={busy}
+            >
+              刷新日志
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<RefreshCcw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onRefreshSecretsMask()}
+              disabled={busy}
+            >
+              刷新掩码
+            </Button>
+          </div>
+        </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>Bridge Log Tail</h5>
+          </div>
+          <pre className="log-tail bridge-log-tail">
+            {logTail.length > 0 ? logTail.join("\n") : "暂无 bridge.log 内容。"}
+          </pre>
+        </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>Secrets Mask View</h5>
+          </div>
+          <div className="bridge-secret-list">
+            {renderSecretRow("Telegram botToken", secretsMask.telegram.botToken)}
+            {renderSecretRow("Feishu appId", secretsMask.feishu.appId)}
+            {renderSecretRow("Feishu appSecret", secretsMask.feishu.appSecret)}
+            {renderSecretRow(
+              "Feishu verificationToken",
+              secretsMask.feishu.verificationToken,
+            )}
+            {renderSecretRow("Feishu encryptKey", secretsMask.feishu.encryptKey)}
+          </div>
+        </div>
       </div>
     </div>
   );

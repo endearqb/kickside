@@ -28,7 +28,8 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, BindingRecord, BridgeSettings, BridgeStatus,
+    AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
+    BridgeApprovalResolveInput, BridgeSecretsMaskView, BridgeSettings, BridgeStatus,
     ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
     InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
     KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
@@ -422,6 +423,33 @@ fn clear_bridge_binding(app: AppHandle, binding_id: String) -> Result<(), String
 }
 
 #[tauri::command]
+fn list_bridge_approvals(
+    app: AppHandle,
+    status: Option<String>,
+) -> Result<Vec<BridgeApprovalRecord>, String> {
+    bridge_manager::list_bridge_approvals(&app, status.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn resolve_bridge_approval(
+    app: AppHandle,
+    input: BridgeApprovalResolveInput,
+) -> Result<(), String> {
+    bridge_manager::resolve_bridge_approval(&app, &input).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_bridge_log_tail(app: AppHandle, max_lines: Option<usize>) -> Result<Vec<String>, String> {
+    bridge_manager::get_bridge_log_tail(&app, max_lines).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_bridge_secrets_mask_view(app: AppHandle) -> Result<BridgeSecretsMaskView, String> {
+    bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn open_logs_folder(app: AppHandle) -> Result<(), String> {
     backend_manager::open_logs_folder(&app)
 }
@@ -721,9 +749,9 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         startup_trace,
         app_log_path: app_log_path.to_string_lossy().to_string(),
         backend_log_path: backend_log_path.to_string_lossy().to_string(),
-        app_log_tail: read_log_tail(&app_log_path, 60),
-        backend_log_tail: read_log_tail(&backend_log_path, 60),
-        log_tail: read_log_tail(&backend_log_path, 80),
+        app_log_tail: log_manager::read_log_tail(&app_log_path, 60),
+        backend_log_tail: log_manager::read_log_tail(&backend_log_path, 60),
+        log_tail: log_manager::read_log_tail(&backend_log_path, 80),
         logs_dir: logs_dir.to_string_lossy().to_string(),
     })
 }
@@ -919,6 +947,10 @@ pub fn run() {
             restart_bridge,
             list_bridge_bindings,
             clear_bridge_binding,
+            list_bridge_approvals,
+            resolve_bridge_approval,
+            get_bridge_log_tail,
+            get_bridge_secrets_mask_view,
             get_diagnostics,
             open_logs_folder,
             open_external_url,
@@ -1449,16 +1481,6 @@ fn query_kimi_version(kimi_path: &str) -> Result<String, String> {
         "`{} --version` failed ({}): {}",
         kimi_path, output.status, detail
     ))
-}
-
-fn read_log_tail(path: &std::path::Path, max_lines: usize) -> Vec<String> {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-
-    let lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
-    let start = lines.len().saturating_sub(max_lines);
-    lines[start..].to_vec()
 }
 
 fn diff_millis(start_ms: Option<u64>, end_ms: Option<u64>) -> Option<u64> {

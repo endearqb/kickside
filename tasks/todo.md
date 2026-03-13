@@ -1,5 +1,34 @@
 ﻿# Todo
 
+## Current Plan (Kimi IM Bridge progress review doc)
+
+### Checklist
+
+- [x] 基于当前 review 结论整理一份独立的 bridge 开发进度文档
+- [x] 在 `docs/` 下新增长期维护的 progress review 文档，覆盖每个 phase 的完成/未完成清单
+- [x] 做一次自检，确认文档结论与当前仓库事实和验证结果一致
+
+### Acceptance Criteria
+
+- [x] 新文档独立于实施计划，不直接改写 `docs/kimi-im-bridge-implementation-plan.md`
+- [x] 文档包含总体结论、阶段总览表、Phase 0-6 分节、证据与下一步优先级
+- [x] Phase 5 与 Phase 6 的关键缺口被明确点名
+
+### Review
+
+- Actual changes:
+  - 新增 `docs/kimi-im-bridge-progress-review.md`，以独立文档沉淀当前 bridge 开发进度 review，不改写原实施计划正文。
+  - 文档包含总体结论、Phase 0-6 阶段总览表，以及每个 phase 的“目标摘要 / 已完成 / 未完成 / 证据 / 判定”结构。
+  - 明确点名了当前 Phase 5 缺口：`list_bridge_approvals`、`resolve_bridge_approval`、approvals UI、`bridge.log` tail、最近错误摘要闭环、token 掩码显示、sidecar 打包分发。
+  - 明确点名了当前 Phase 6 缺口：稳定化未系统完成、runbook/发布/故障排查文档缺失、安装版 smoke 与统一手工测试闸门未执行。
+- Verification:
+  - 检查 `docs/kimi-im-bridge-progress-review.md` 已包含阶段总览表、Phase 0-6 分节、`### 已完成` / `### 未完成` / `### 判定`
+  - 确认文档中已明确包含 `list_bridge_approvals`、`resolve_bridge_approval`、`bridge.log` tail、runbook、打包分发、统一手工测试闸门等关键词
+  - `if (Test-Path docs/kimi-im-bridge-manual-test-runbook.md) { 'RUNBOOK_PRESENT' } else { 'RUNBOOK_MISSING' }` 返回 `RUNBOOK_MISSING`
+  - 检查 `apps/kimi-shell/src-tauri/tauri.conf.json` 未发现 sidecar 打包分发相关配置
+- Remaining note:
+  - 当前只新增独立 review 文档，没有回填 `docs/kimi-im-bridge-implementation-plan.md` 的正文进度注释。
+
 ## Current Plan (Kimi IM Bridge phase 4 Feishu adapter)
 
 ### Checklist
@@ -106,6 +135,39 @@
 - Detailed historical checklists, acceptance criteria, and review notes remain in `tasks/history/todo_backup_0312.md`.
 
 ## Recent 20 Plans
+
+## Current Plan (Merge IM bridge branches)
+
+### Checklist
+
+- [x] 核对非 `main` 分支集合与当前工作树状态，确认合并源为 `codex/kimi-im-bridge-phase01` 和 `codex/phase4-feishu-adapter`
+- [x] 保护当前未提交改动，避免分支切换污染或丢失
+- [x] 基于 `main` 创建统一目标分支 `codex/kimi-im-bridge`
+- [x] 合并两个源分支并处理冲突
+- [x] 验证合并结果并记录回顾
+
+### Acceptance Criteria
+
+- [x] 统一分支 `codex/kimi-im-bridge` 同时包含两个非 `main` 分支的提交
+- [x] 当前工作树原有未提交改动已恢复，不被本次分支操作覆盖
+- [x] `tasks/todo.md` 留下本次执行与结果记录
+
+### Review
+
+- Actual changes:
+  - 远端分支集合已核对，两个非 `main` 分支分别为 `codex/kimi-im-bridge-phase01` 与 `codex/phase4-feishu-adapter`。
+  - 先将用户未提交改动暂存到 `stash@{0}`，再基于 `main` 创建统一分支 `codex/kimi-im-bridge`。
+  - 新分支依次合并了 `origin/codex/kimi-im-bridge-phase01` 和 `origin/codex/phase4-feishu-adapter`，均由 `ort` 策略自动完成，无代码冲突。
+  - 已恢复暂存中的未跟踪文档；`tasks/todo.md` 冲突已手工整合，保留 phase 2 记录并补充本次合并回顾。保留 `stash@{0}` 作为回退备份。
+- Verification:
+  - `git ls-remote --heads origin`
+  - `git merge --no-ff origin/codex/kimi-im-bridge-phase01`
+  - `git merge --no-ff origin/codex/phase4-feishu-adapter`
+  - `git branch --contains origin/codex/kimi-im-bridge-phase01`
+  - `git branch --contains origin/codex/phase4-feishu-adapter`
+  - `git log --oneline --decorate -5`
+- Remaining note:
+  - 仓库分支创建遵循当前环境约束，统一分支实际创建为 `codex/kimi-im-bridge`；未创建无前缀的 `kimi-im-bridge`。
 
 ## Current Plan (Kimi IM Bridge phase 2 foundation)
 
@@ -1161,3 +1223,26 @@
 - `pnpm -C apps/kimi-shell build`
 - Remaining note:
 - phase 3 只完成了 sidecar Telegram adapter，本轮没有扩 Control Center approvals / log tail UI，也没有开始飞书 adapter；下一步入口是 phase 4。
+## Current Plan (Kimi IM Bridge phase 5 shell control center)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md`、必要文档与打包脚本中记录本轮 Phase 5 范围、验证口径与 deferred manual validation
+- [x] 扩展 Rust/Tauri bridge 命令层：approvals list/resolve、bridge log tail、secrets mask view
+- [x] 扩展前端 Bridge 控制面：approvals、日志与最近错误、token 掩码展示
+- [x] 打通 sidecar 打包分发并完成 Go / Rust / 前端 / Tauri 验证
+
+### Acceptance Criteria
+
+- [x] shell 暴露 `list_bridge_approvals`、`resolve_bridge_approval`、`get_bridge_log_tail`、`get_bridge_secrets_mask_view`，且不会返回明文 secret
+- [x] Bridge 面板可查看 pending approvals、执行 approve/reject、查看 `bridge.log` tail 与最近错误摘要
+- [x] `pnpm -C apps/kimi-shell tauri build` 会先产出 `src-tauri/binaries/kimi-im-bridge.exe` 并把 sidecar 带入安装包
+- [x] `go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell tauri build` 通过
+
+### Review
+
+- 实现了 shell 侧 approvals/list resolve、bridge log tail、secrets mask view 命令与对应类型，并补齐掩码与日志 tail 单测
+- 扩展了 Bridge 控制面，增加 pending approvals、最近错误摘要、`bridge.log` tail 与 secrets 掩码展示，并按 Bridge 面板激活状态刷新 approvals 和日志
+- 新增 sidecar 构建脚本与 Tauri 打包资源配置，`tauri build` 前会生成 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`
+- 补建了 `docs/kimi-im-bridge-manual-test-runbook.md`，记录 Phase 5 的 4 条 deferred manual validation
+- 已验证 `go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell build:bridge-sidecar`、`pnpm -C apps/kimi-shell tauri build`

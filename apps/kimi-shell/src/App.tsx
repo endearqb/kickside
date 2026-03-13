@@ -150,6 +150,10 @@ function App() {
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
               bridgeBindings={shell.bridgeBindings}
+              bridgeApprovals={shell.bridgeApprovals}
+              bridgeLogTail={shell.bridgeLogTail}
+              bridgeRecentErrors={shell.bridgeRecentErrors}
+              bridgeSecretsMask={shell.bridgeSecretsMask}
               bridgeBusy={shell.bridgeBusy}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
@@ -184,6 +188,9 @@ function App() {
               onRefreshBridgeSettings={shell.refreshBridgeSettings}
               onRefreshBridgeStatus={shell.refreshBridgeStatus}
               onRefreshBridgeBindings={shell.refreshBridgeBindings}
+              onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
+              onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
+              onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -204,6 +211,7 @@ function App() {
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
+              onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
@@ -258,6 +266,10 @@ function App() {
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
               bridgeBindings={shell.bridgeBindings}
+              bridgeApprovals={shell.bridgeApprovals}
+              bridgeLogTail={shell.bridgeLogTail}
+              bridgeRecentErrors={shell.bridgeRecentErrors}
+              bridgeSecretsMask={shell.bridgeSecretsMask}
               bridgeBusy={shell.bridgeBusy}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
@@ -292,6 +304,9 @@ function App() {
               onRefreshBridgeSettings={shell.refreshBridgeSettings}
               onRefreshBridgeStatus={shell.refreshBridgeStatus}
               onRefreshBridgeBindings={shell.refreshBridgeBindings}
+              onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
+              onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
+              onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -312,6 +327,7 @@ function App() {
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
+              onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}

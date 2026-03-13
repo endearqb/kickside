@@ -375,6 +375,65 @@ pub struct BindingRecord {
     pub last_inbound_message_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeApprovalRecord {
+    pub approval_id: String,
+    pub kimi_session_id: String,
+    pub turn_id: Option<String>,
+    pub step_id: Option<String>,
+    pub request_kind: String,
+    pub prompt: String,
+    pub platform: BridgePlatform,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub status: String,
+    pub request_payload_json: String,
+    pub resolution_payload_json: Option<String>,
+    pub dedupe_key: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeApprovalResolveInput {
+    pub approval_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_payload_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMaskedSecretValue {
+    pub configured: bool,
+    pub masked_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTelegramSecretsMaskView {
+    pub bot_token: BridgeMaskedSecretValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeFeishuSecretsMaskView {
+    pub app_id: BridgeMaskedSecretValue,
+    pub app_secret: BridgeMaskedSecretValue,
+    pub verification_token: BridgeMaskedSecretValue,
+    pub encrypt_key: BridgeMaskedSecretValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSecretsMaskView {
+    pub telegram: BridgeTelegramSecretsMaskView,
+    pub feishu: BridgeFeishuSecretsMaskView,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct OnboardingStepAcks {

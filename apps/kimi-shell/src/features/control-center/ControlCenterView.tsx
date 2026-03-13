@@ -19,6 +19,8 @@ import type {
   ActionableOnboardingStep,
   AppStatus,
   BindingRecord,
+  BridgeApprovalRecord,
+  BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
   ControlCenterChrome,
@@ -71,6 +73,10 @@ type ControlCenterViewProps = {
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
   bridgeBindings: BindingRecord[];
+  bridgeApprovals: BridgeApprovalRecord[];
+  bridgeLogTail: string[];
+  bridgeRecentErrors: string[];
+  bridgeSecretsMask: BridgeSecretsMaskView;
   bridgeBusy: boolean;
   kimiPathInput: string;
   workDirInput: string;
@@ -99,6 +105,9 @@ type ControlCenterViewProps = {
   onRefreshBridgeSettings: () => Promise<BridgeSettings>;
   onRefreshBridgeStatus: () => Promise<BridgeStatus>;
   onRefreshBridgeBindings: () => Promise<BindingRecord[]>;
+  onRefreshBridgeApprovals: () => Promise<BridgeApprovalRecord[]>;
+  onRefreshBridgeLogTail: () => Promise<string[]>;
+  onRefreshBridgeSecretsMask: () => Promise<BridgeSecretsMaskView>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
   onClose: () => void;
@@ -122,6 +131,7 @@ type ControlCenterViewProps = {
   onStopBridge: () => Promise<void>;
   onRestartBridge: () => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
+  onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onOpenConfigCenterModal: () => Promise<void>;
   onCloseConfigCenterModal: () => void;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
@@ -274,6 +284,10 @@ export function ControlCenterView({
   bridgeSettings,
   bridgeStatus,
   bridgeBindings,
+  bridgeApprovals,
+  bridgeLogTail,
+  bridgeRecentErrors,
+  bridgeSecretsMask,
   bridgeBusy,
   kimiPathInput,
   workDirInput,
@@ -302,6 +316,9 @@ export function ControlCenterView({
   onRefreshBridgeSettings,
   onRefreshBridgeStatus,
   onRefreshBridgeBindings,
+  onRefreshBridgeApprovals,
+  onRefreshBridgeLogTail,
+  onRefreshBridgeSecretsMask,
   onRefreshInstallProbe,
   onRefreshOnboarding,
   onClose,
@@ -325,6 +342,7 @@ export function ControlCenterView({
   onStopBridge,
   onRestartBridge,
   onClearBridgeBinding,
+  onResolveBridgeApproval,
   onOpenConfigCenterModal,
   onCloseConfigCenterModal,
   onConfigCenterDraftChange,
@@ -599,6 +617,9 @@ export function ControlCenterView({
           onRefreshBridgeSettings(),
           onRefreshBridgeStatus(),
           onRefreshBridgeBindings(),
+          onRefreshBridgeApprovals(),
+          onRefreshBridgeLogTail(),
+          onRefreshBridgeSecretsMask(),
         ]);
       } else if (panel === "paths") {
         await Promise.all([onRefreshDiagnostics(), onRefreshContextMenuStatus()]);
@@ -1311,6 +1332,10 @@ export function ControlCenterView({
                   settings={bridgeSettings}
                   status={bridgeStatus}
                   bindings={bridgeBindings}
+                  approvals={bridgeApprovals}
+                  logTail={bridgeLogTail}
+                  recentErrors={bridgeRecentErrors}
+                  secretsMask={bridgeSecretsMask}
                   busy={bridgeBusy}
                   onSettingsChange={onBridgeSettingsChange}
                   onSave={onSaveBridgeSettings}
@@ -1319,8 +1344,12 @@ export function ControlCenterView({
                   onRestart={onRestartBridge}
                   onRefreshStatus={onRefreshBridgeStatus}
                   onRefreshBindings={onRefreshBridgeBindings}
+                  onRefreshApprovals={onRefreshBridgeApprovals}
+                  onRefreshLogTail={onRefreshBridgeLogTail}
+                  onRefreshSecretsMask={onRefreshBridgeSecretsMask}
                   onOpenLogs={onOpenLogs}
                   onClearBinding={onClearBridgeBinding}
+                  onResolveApproval={onResolveBridgeApproval}
                 />
               </RuntimePanel>
 

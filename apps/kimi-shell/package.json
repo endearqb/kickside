@@ -12,6 +12,7 @@
     "sync:version": "node scripts/sync_version.mjs",
     "dev": "pnpm sync:version && vite",
     "build": "pnpm sync:version && tsc && vite build",
+    "build:bridge-sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build_bridge_sidecar.ps1",
     "preview": "vite preview",
     "tauri": "pnpm sync:version && tauri",
     "tauri:build:webview:evergreen": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant evergreen",

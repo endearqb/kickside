@@ -36,6 +36,9 @@ import type {
   ActionableOnboardingStep,
   AppStatus,
   BindingRecord,
+  BridgeApprovalRecord,
+  BridgeApprovalResolveInput,
+  BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
   ControlCenterChrome,
@@ -206,6 +209,30 @@ function createDefaultBridgeStatus(): BridgeStatus {
   };
 }
 
+function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
+  return {
+    telegram: {
+      botToken: {
+        configured: false,
+      },
+    },
+    feishu: {
+      appId: {
+        configured: false,
+      },
+      appSecret: {
+        configured: false,
+      },
+      verificationToken: {
+        configured: false,
+      },
+      encryptKey: {
+        configured: false,
+      },
+    },
+  };
+}
+
 export function useShellController() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
@@ -242,6 +269,11 @@ export function useShellController() {
     () => createDefaultBridgeStatus(),
   );
   const [bridgeBindings, setBridgeBindings] = useState<BindingRecord[]>([]);
+  const [bridgeApprovals, setBridgeApprovals] = useState<BridgeApprovalRecord[]>([]);
+  const [bridgeLogTail, setBridgeLogTail] = useState<string[]>([]);
+  const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
+    () => createDefaultBridgeSecretsMaskView(),
+  );
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
   const [powershellPreflight, setPowershellPreflight] =
@@ -807,6 +839,43 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       return bridgeBindings;
+    }
+  }
+
+  async function refreshBridgeApprovals(status = "pending") {
+    try {
+      const data = await invoke<BridgeApprovalRecord[]>("list_bridge_approvals", {
+        status,
+      });
+      setBridgeApprovals(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeApprovals;
+    }
+  }
+
+  async function refreshBridgeLogTail(maxLines = 80) {
+    try {
+      const data = await invoke<string[]>("get_bridge_log_tail", {
+        maxLines,
+      });
+      setBridgeLogTail(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeLogTail;
+    }
+  }
+
+  async function refreshBridgeSecretsMask() {
+    try {
+      const data = await invoke<BridgeSecretsMaskView>("get_bridge_secrets_mask_view");
+      setBridgeSecretsMask(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeSecretsMask;
     }
   }
 
@@ -1422,6 +1491,9 @@ export function useShellController() {
       void refreshBridgeSettings();
       void refreshBridgeStatus();
       void refreshBridgeBindings();
+      void refreshBridgeApprovals();
+      void refreshBridgeLogTail();
+      void refreshBridgeSecretsMask();
     }
   }, [
     activeControlSection,
@@ -1444,6 +1516,8 @@ export function useShellController() {
         activeRuntimePanel === "bridge"
       ) {
         void refreshBridgeBindings();
+        void refreshBridgeApprovals();
+        void refreshBridgeLogTail();
       }
     }, 1500);
 
@@ -1795,7 +1869,12 @@ export function useShellController() {
     try {
       const data = await invoke<BridgeStatus>("start_bridge");
       setBridgeStatus(data);
-      await refreshBridgeBindings();
+      await Promise.all([
+        refreshBridgeBindings(),
+        refreshBridgeApprovals(),
+        refreshBridgeLogTail(),
+        refreshBridgeSecretsMask(),
+      ]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1810,6 +1889,7 @@ export function useShellController() {
       const data = await invoke<BridgeStatus>("stop_bridge");
       setBridgeStatus(data);
       setBridgeBindings([]);
+      setBridgeApprovals([]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1823,7 +1903,12 @@ export function useShellController() {
     try {
       const data = await invoke<BridgeStatus>("restart_bridge");
       setBridgeStatus(data);
-      await refreshBridgeBindings();
+      await Promise.all([
+        refreshBridgeBindings(),
+        refreshBridgeApprovals(),
+        refreshBridgeLogTail(),
+        refreshBridgeSecretsMask(),
+      ]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -1837,6 +1922,31 @@ export function useShellController() {
     try {
       await invoke("clear_bridge_binding", { bindingId });
       await Promise.all([refreshBridgeBindings(), refreshBridgeStatus()]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleResolveBridgeApproval(
+    approvalId: string,
+    status: BridgeApprovalResolveInput["status"],
+  ) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      await invoke("resolve_bridge_approval", {
+        input: {
+          approvalId,
+          status,
+        } satisfies BridgeApprovalResolveInput,
+      });
+      await Promise.all([
+        refreshBridgeApprovals(),
+        refreshBridgeStatus(),
+        refreshBridgeLogTail(),
+      ]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2164,6 +2274,9 @@ export function useShellController() {
           refreshBridgeSettings(),
           refreshBridgeStatus(),
           refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
         ]);
       } else if (panel === "paths") {
         await Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
@@ -2342,6 +2455,37 @@ export function useShellController() {
     [configCenterDraft, configCenterSnapshot],
   );
 
+  const bridgeRecentErrors = useMemo(() => {
+    const items: string[] = [];
+    const seen = new Set<string>();
+    const push = (value: string | null | undefined) => {
+      const trimmed = value?.trim();
+      if (!trimmed || seen.has(trimmed) || items.length >= 5) {
+        return;
+      }
+      seen.add(trimmed);
+      items.push(trimmed);
+    };
+
+    push(bridgeStatus.lastError);
+    for (const channel of bridgeStatus.channels) {
+      if (channel.lastError) {
+        push(`[${channel.platform}] ${channel.lastError}`);
+      }
+    }
+    for (const line of [...bridgeLogTail].reverse()) {
+      if (!/\b(ERROR|WARN|FATAL)\b/i.test(line)) {
+        continue;
+      }
+      push(line);
+      if (items.length >= 5) {
+        break;
+      }
+    }
+
+    return items;
+  }, [bridgeLogTail, bridgeStatus.channels, bridgeStatus.lastError]);
+
   const uiBackendState =
     status?.state ?? (useBootHintWorkspace ? bootHint?.backendState : undefined);
   const canOpenWorkspace =
@@ -2398,6 +2542,10 @@ export function useShellController() {
     bridgeSettings,
     bridgeStatus,
     bridgeBindings,
+    bridgeApprovals,
+    bridgeLogTail,
+    bridgeRecentErrors,
+    bridgeSecretsMask,
     bridgeBusy,
     kimiPathInput,
     setKimiPathInput,
@@ -2454,6 +2602,9 @@ export function useShellController() {
     refreshBridgeSettings,
     refreshBridgeStatus,
     refreshBridgeBindings,
+    refreshBridgeApprovals,
+    refreshBridgeLogTail,
+    refreshBridgeSecretsMask,
     refreshInstallProbe,
     refreshInstallSettings,
     refreshPowerShellPreflight,
@@ -2482,6 +2633,7 @@ export function useShellController() {
     handleStopBridge,
     handleRestartBridge,
     handleClearBridgeBinding,
+    handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
     handleInstallDependencies: handleQuickInstallCore,

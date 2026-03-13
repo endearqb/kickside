@@ -1,7 +1,7 @@
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -68,6 +68,16 @@ pub fn append_line(app: &AppHandle, line: impl AsRef<str>) {
     let _ = writeln!(file, "[{}][{}] {}", timestamp, instance_id, line.as_ref());
 }
 
+pub fn read_log_tail(path: &Path, max_lines: usize) -> Vec<String> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+
+    let lines: Vec<String> = content.lines().map(|line| line.to_string()).collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].to_vec()
+}
+
 fn rotate_file_if_needed(path: &PathBuf, max_bytes: u64, max_files: usize) -> anyhow::Result<()> {
     let Ok(metadata) = fs::metadata(path) else {
         return Ok(());
@@ -112,4 +122,67 @@ fn rotate_file_if_needed(path: &PathBuf, max_bytes: u64, max_files: usize) -> an
 
 fn rotated_path(path: &PathBuf, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.{}", path.display(), index))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let epoch = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let path = std::env::temp_dir()
+                .join(format!("kimi-shell-log-manager-{label}-{epoch}-{unique}"));
+            fs::create_dir_all(&path).expect("temp dir should be created");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn read_log_tail_returns_empty_when_file_missing() {
+        let temp = TempDirGuard::new("missing");
+        let lines = read_log_tail(&temp.path.join("missing.log"), 10);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn read_log_tail_returns_all_lines_when_under_limit() {
+        let temp = TempDirGuard::new("short");
+        let path = temp.path.join("bridge.log");
+        fs::write(&path, "one\ntwo\nthree\n").expect("log file should be written");
+
+        let lines = read_log_tail(&path, 5);
+
+        assert_eq!(lines, vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn read_log_tail_trims_to_requested_limit() {
+        let temp = TempDirGuard::new("trim");
+        let path = temp.path.join("bridge.log");
+        fs::write(&path, "1\n2\n3\n4\n5\n").expect("log file should be written");
+
+        let lines = read_log_tail(&path, 2);
+
+        assert_eq!(lines, vec!["4", "5"]);
+    }
 }

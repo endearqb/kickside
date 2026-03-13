@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
@@ -56,7 +57,7 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 		return true, nil
 	}
 	if err := s.store.TouchChannelInbound(ctx, platformID, ""); err != nil {
-		return false, withCode("channel_activity_failed", err)
+		return false, reliability.Wrap("unknown", err)
 	}
 
 	approvalID, status, ok := decodeApprovalCallbackData(query.Data)
@@ -66,7 +67,7 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 
 	ticket, err := s.store.GetApprovalByID(ctx, approvalID)
 	if err != nil {
-		return false, withCode("approval_lookup_failed", err)
+		return false, reliability.Wrap("unknown", err)
 	}
 	if ticket == nil {
 		return true, s.answerCallback(ctx, query.ID, "approval not found")
@@ -86,11 +87,11 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 		"actorName":       strings.TrimSpace(actorDisplayName(query.From)),
 	})
 	if err != nil {
-		return false, withCode("approval_payload_failed", err)
+		return false, reliability.Wrap("payload_invalid", err)
 	}
 
 	if err := s.runtime.ResolveApproval(ctx, approvalID, status, payloadJSON); err != nil {
-		return false, withCode("approval_resolve_failed", err)
+		return false, reliability.Wrap("unknown", err)
 	}
 	if err := s.answerCallback(ctx, query.ID, callbackAckText(status)); err != nil {
 		return false, err
@@ -104,14 +105,16 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 }
 
 func (s *Service) answerCallback(ctx context.Context, callbackID string, text string) error {
-	if err := s.botAPI.AnswerCallbackQuery(ctx, answerCallbackQueryRequest{
-		CallbackQueryID: callbackID,
-		Text:            text,
+	if err := s.executeOutbound(ctx, "answer_callback", func(ctx context.Context) error {
+		return s.botAPI.AnswerCallbackQuery(ctx, answerCallbackQueryRequest{
+			CallbackQueryID: callbackID,
+			Text:            text,
+		})
 	}); err != nil {
-		return withCode("callback_answer_failed", err)
+		return err
 	}
 	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
-		return withCode("channel_activity_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	return nil
 }

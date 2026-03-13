@@ -205,8 +205,33 @@ function createDefaultBridgeStatus(): BridgeStatus {
     channels: [],
     pendingApprovals: 0,
     bindings: 0,
+    lastErrorCode: undefined,
     lastError: undefined,
   };
+}
+
+function formatBridgeErrorEntry(
+  errorCode: string | null | undefined,
+  message: string | null | undefined,
+  prefix?: string,
+): string | null {
+  const trimmedMessage = message?.trim();
+  const trimmedCode = errorCode?.trim();
+  if (!trimmedMessage && !trimmedCode) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (prefix) {
+    parts.push(prefix);
+  }
+  if (trimmedCode) {
+    parts.push(`[${trimmedCode}]`);
+  }
+  if (trimmedMessage) {
+    parts.push(trimmedMessage);
+  }
+  return parts.join(" ").trim();
 }
 
 function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
@@ -2467,11 +2492,15 @@ export function useShellController() {
       items.push(trimmed);
     };
 
-    push(bridgeStatus.lastError);
+    push(formatBridgeErrorEntry(bridgeStatus.lastErrorCode, bridgeStatus.lastError));
     for (const channel of bridgeStatus.channels) {
-      if (channel.lastError) {
-        push(`[${channel.platform}] ${channel.lastError}`);
-      }
+      push(
+        formatBridgeErrorEntry(
+          channel.lastErrorCode,
+          channel.lastError,
+          `[${channel.platform}]`,
+        ),
+      );
     }
     for (const line of [...bridgeLogTail].reverse()) {
       if (!/\b(ERROR|WARN|FATAL)\b/i.test(line)) {
@@ -2484,7 +2513,12 @@ export function useShellController() {
     }
 
     return items;
-  }, [bridgeLogTail, bridgeStatus.channels, bridgeStatus.lastError]);
+  }, [
+    bridgeLogTail,
+    bridgeStatus.channels,
+    bridgeStatus.lastError,
+    bridgeStatus.lastErrorCode,
+  ]);
 
   const uiBackendState =
     status?.state ?? (useBootHintWorkspace ? bootHint?.backendState : undefined);

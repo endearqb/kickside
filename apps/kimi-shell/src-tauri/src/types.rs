@@ -342,6 +342,7 @@ pub struct BridgeChannelStatus {
     pub last_inbound_at: Option<String>,
     pub last_outbound_at: Option<String>,
     pub last_offset: Option<String>,
+    pub last_error_code: Option<String>,
     pub last_error: Option<String>,
 }
 
@@ -357,6 +358,7 @@ pub struct BridgeStatus {
     pub channels: Vec<BridgeChannelStatus>,
     pub pending_approvals: usize,
     pub bindings: usize,
+    pub last_error_code: Option<String>,
     pub last_error: Option<String>,
 }
 

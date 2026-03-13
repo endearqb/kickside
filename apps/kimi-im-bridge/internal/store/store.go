@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -140,6 +141,7 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 	for rows.Next() {
 		var status domain.ChannelStatus
 		var enabled int
+		var rawError string
 		if err := rows.Scan(
 			&status.Platform,
 			&enabled,
@@ -147,11 +149,12 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 			&status.LastInboundAt,
 			&status.LastOutboundAt,
 			&status.LastOffset,
-			&status.LastError,
+			&rawError,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan channel status: %w", err)
 		}
 		status.Enabled = enabled == 1
+		status.LastErrorCode, status.LastError = decodeChannelError(rawError)
 		statuses = append(statuses, status)
 	}
 	if err := rows.Err(); err != nil {
@@ -160,7 +163,13 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 	return statuses, nil
 }
 
-func (s *Store) UpdateChannelState(ctx context.Context, platform string, state domain.ChannelRuntimeState, lastError string) error {
+func (s *Store) UpdateChannelState(
+	ctx context.Context,
+	platform string,
+	state domain.ChannelRuntimeState,
+	lastErrorCode string,
+	lastError string,
+) error {
 	now := nowRFC3339()
 	_, err := s.db.ExecContext(
 		ctx,
@@ -168,7 +177,7 @@ func (s *Store) UpdateChannelState(ctx context.Context, platform string, state d
 		 SET state = ?, last_error = ?, updated_at = ?
 		 WHERE channel_id = ?`,
 		state,
-		nullIfEmpty(lastError),
+		nullIfEmpty(encodeChannelError(lastErrorCode, lastError)),
 		now,
 		platform,
 	)
@@ -810,6 +819,44 @@ func offsetKindForPlatform(platform string) string {
 	default:
 		return "telegram_update"
 	}
+}
+
+type channelErrorPayload struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func encodeChannelError(code string, message string) string {
+	code = strings.TrimSpace(code)
+	message = strings.TrimSpace(message)
+	if code == "" && message == "" {
+		return ""
+	}
+	payload := channelErrorPayload{
+		Code:    code,
+		Message: message,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		if message != "" {
+			return message
+		}
+		return code
+	}
+	return string(encoded)
+}
+
+func decodeChannelError(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+
+	var payload channelErrorPayload
+	if strings.HasPrefix(raw, "{") && json.Unmarshal([]byte(raw), &payload) == nil {
+		return strings.TrimSpace(payload.Code), strings.TrimSpace(payload.Message)
+	}
+	return raw, raw
 }
 
 func ExpectedUserVersion() int {

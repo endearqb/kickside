@@ -272,7 +272,7 @@ func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
-	if err := store.UpdateChannelState(ctx, "telegram", domain.ChannelStateReady, ""); err != nil {
+	if err := store.UpdateChannelState(ctx, "telegram", domain.ChannelStateReady, "", ""); err != nil {
 		t.Fatalf("UpdateChannelState returned error: %v", err)
 	}
 	if err := store.UpdateChannelOffset(ctx, "telegram", "100"); err != nil {
@@ -301,6 +301,9 @@ func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	}
 	if telegramStatus.LastInboundAt == "" || telegramStatus.LastOutboundAt == "" || telegramStatus.LastOffset != "100" {
 		t.Fatalf("expected channel activity fields to be populated, got %+v", *telegramStatus)
+	}
+	if telegramStatus.LastErrorCode != "" || telegramStatus.LastError != "" {
+		t.Fatalf("expected empty channel error fields, got %+v", *telegramStatus)
 	}
 
 	if err := store.CreateApprovalTicket(ctx, domain.ApprovalTicket{
@@ -351,5 +354,46 @@ func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	}
 	if event == nil || event.Status != "failed" || event.ErrorMessage != "boom" {
 		t.Fatalf("expected delivery event lookup to reflect updated status, got %+v", event)
+	}
+}
+
+func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SyncConfiguredChannels(ctx, []config.ChannelConfig{{
+		Platform: "telegram",
+		Enabled:  true,
+	}}); err != nil {
+		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
+	}
+	if err := store.UpdateChannelState(
+		ctx,
+		"telegram",
+		domain.ChannelStateError,
+		"invalid_credentials",
+		"telegram getMe failed (401): Unauthorized",
+	); err != nil {
+		t.Fatalf("UpdateChannelState returned error: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected one channel status, got %+v", statuses)
+	}
+	if statuses[0].LastErrorCode != "invalid_credentials" {
+		t.Fatalf("expected invalid_credentials code, got %+v", statuses[0])
+	}
+	if statuses[0].LastError != "telegram getMe failed (401): Unauthorized" {
+		t.Fatalf("expected persisted message, got %+v", statuses[0])
 	}
 }

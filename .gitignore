@@ -35,4 +35,8 @@ apps/kimi-shell/src-tauri/.cargo/
 !/docs/kimi-im-bridge-prd.md
 !/docs/kimi-im-bridge-design.md
 !/docs/kimi-im-bridge-implementation-plan.md
+!/docs/kimi-im-bridge-manual-test-runbook.md
+!/docs/kimi-im-bridge-progress-review.md
+!/docs/kimi-im-bridge-release-checklist.md
+!/docs/kimi-im-bridge-troubleshooting.md
 

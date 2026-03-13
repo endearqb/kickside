@@ -12,6 +12,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
@@ -404,8 +405,8 @@ func TestServiceStartInvalidTokenMarksChannelError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChannelStatuses returned error: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastError != "invalid_bot_token" {
-		t.Fatalf("expected telegram channel to be error/invalid_bot_token, got %+v", statuses)
+	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastErrorCode != "invalid_credentials" {
+		t.Fatalf("expected telegram channel to be error/invalid_credentials, got %+v", statuses)
 	}
 }
 
@@ -423,8 +424,116 @@ func TestServiceStartWebhookConfiguredMarksChannelError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChannelStatuses returned error: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastError != "webhook_configured" {
-		t.Fatalf("expected telegram channel to be error/webhook_configured, got %+v", statuses)
+	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastErrorCode != "permission_denied" {
+		t.Fatalf("expected telegram channel to be error/permission_denied, got %+v", statuses)
+	}
+}
+
+func TestServiceSendReplyRetriesRateLimitedFailure(t *testing.T) {
+	t.Parallel()
+
+	service, _, botAPI, _ := newTestService(t, Config{BotToken: "token"})
+	now := time.Unix(0, 0)
+	sleeps := []time.Duration{}
+	service.delivery = reliability.NewExecutor(reliability.ExecutorOptions{
+		Platform: "telegram",
+		Now: func() time.Time {
+			return now
+		},
+		Sleep: func(_ context.Context, delay time.Duration) bool {
+			sleeps = append(sleeps, delay)
+			now = now.Add(delay)
+			return true
+		},
+	})
+
+	attempts := 0
+	botAPI.sendMessageFunc = func(_ context.Context, _ sendMessageRequest) (*message, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, &APIError{
+				Method:            "sendMessage",
+				ErrorCode:         429,
+				Description:       "Too Many Requests: retry after 2",
+				RetryAfterSeconds: 2,
+			}
+		}
+		return &message{MessageID: 9001}, nil
+	}
+
+	err := service.sendReply(context.Background(), &message{
+		MessageID:      11,
+		Date:           1_700_000_000,
+		Text:           "hello",
+		Chat:           chat{ID: 321, Type: "private"},
+		From:           &user{ID: 1, Username: "alice"},
+		Entities:       nil,
+		ReplyToMessage: nil,
+	}, domain.SessionBinding{
+		Key:           domain.BindingKey{Platform: "telegram", ChatID: "321"},
+		KimiSessionID: "session-1",
+	}, "reply")
+	if err != nil {
+		t.Fatalf("sendReply returned error: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 send attempts, got %d", attempts)
+	}
+	if len(sleeps) == 0 || sleeps[0] != 2*time.Second {
+		t.Fatalf("expected retry_after sleep of 2s, got %+v", sleeps)
+	}
+}
+
+func TestServiceSendReplyAppliesSequentialMinInterval(t *testing.T) {
+	t.Parallel()
+
+	service, _, _, _ := newTestService(t, Config{BotToken: "token"})
+	now := time.Unix(0, 0)
+	sleeps := []time.Duration{}
+	service.delivery = reliability.NewExecutor(reliability.ExecutorOptions{
+		Platform: "telegram",
+		Now: func() time.Time {
+			return now
+		},
+		Sleep: func(_ context.Context, delay time.Duration) bool {
+			sleeps = append(sleeps, delay)
+			now = now.Add(delay)
+			return true
+		},
+	})
+
+	first := &message{MessageID: 21, Date: 1_700_000_001, Text: "a", Chat: chat{ID: 100, Type: "private"}, From: &user{ID: 1}}
+	second := &message{MessageID: 22, Date: 1_700_000_002, Text: "b", Chat: chat{ID: 100, Type: "private"}, From: &user{ID: 1}}
+	binding := domain.SessionBinding{
+		Key:           domain.BindingKey{Platform: "telegram", ChatID: "100"},
+		KimiSessionID: "session-1",
+	}
+
+	if err := service.sendReply(context.Background(), first, binding, "first"); err != nil {
+		t.Fatalf("first sendReply returned error: %v", err)
+	}
+	if err := service.sendReply(context.Background(), second, binding, "second"); err != nil {
+		t.Fatalf("second sendReply returned error: %v", err)
+	}
+	if len(sleeps) == 0 || sleeps[0] != 100*time.Millisecond {
+		t.Fatalf("expected min interval sleep of 100ms, got %+v", sleeps)
+	}
+}
+
+func TestServiceEditTextClassifiesPermanentPermissionFailure(t *testing.T) {
+	t.Parallel()
+
+	service, _, botAPI, _ := newTestService(t, Config{BotToken: "token"})
+	botAPI.editMessageFunc = func(context.Context, editMessageTextRequest) error {
+		return &APIError{Method: "editMessageText", ErrorCode: 403, Description: "Forbidden"}
+	}
+
+	err := service.editTextWithFallback(context.Background(), 123, 456, "updated")
+	if err == nil {
+		t.Fatal("expected editTextWithFallback to fail")
+	}
+	if reliability.CodeOf(err, "") != "permission_denied" {
+		t.Fatalf("expected permission_denied code, got %q", reliability.CodeOf(err, ""))
 	}
 }
 

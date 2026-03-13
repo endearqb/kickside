@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 )
 
 func (s *Service) sendReply(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, text string) error {
@@ -35,7 +36,7 @@ func (s *Service) sendReply(ctx context.Context, source *MessageEvent, binding d
 func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRequest, deliveryKey string, sourceMessageID string) error {
 	existing, err := s.store.GetDeliveryEventByKey(ctx, deliveryKey)
 	if err != nil {
-		return withCode("delivery_lookup_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	if existing != nil && existing.Status == "sent" {
 		return nil
@@ -48,7 +49,7 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 		"content":          request.Content,
 	})
 	if err != nil {
-		return withCode("delivery_record_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 
 	if existing == nil {
@@ -64,49 +65,62 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 			Status:          "pending",
 		})
 		if err != nil {
-			return withCode("delivery_record_failed", err)
+			return reliability.Wrap("unknown", err)
 		}
 	}
 
 	if _, err := s.replyRichTextWithFallback(ctx, request); err != nil {
 		statusErr := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "failed", err.Error())
 		if statusErr != nil {
-			return withCode("message_send_failed", errors.Join(err, statusErr))
+			return reliability.Wrap("delivery_failed", errors.Join(err, statusErr))
 		}
-		return withCode("message_send_failed", err)
+		return err
 	}
 
 	if err := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "sent", ""); err != nil {
-		return withCode("delivery_record_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
-		return withCode("channel_activity_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	return nil
 }
 
 func (s *Service) replyRichTextWithFallback(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
-	postContent, postErr := buildPostMessageContent(request.Content)
-	if postErr == nil {
-		reply := request
-		reply.MessageType = "post"
-		reply.Content = postContent
-		if result, err := s.gateway.ReplyMessage(ctx, reply); err == nil {
-			return result, nil
+	var result *SendMessageResult
+	err := s.executeOutbound(ctx, "reply_message", func(ctx context.Context) error {
+		postContent, postErr := buildPostMessageContent(request.Content)
+		if postErr == nil {
+			reply := request
+			reply.MessageType = "post"
+			reply.Content = postContent
+			replyResult, err := s.gateway.ReplyMessage(ctx, reply)
+			if err == nil {
+				result = replyResult
+				return nil
+			}
 		}
-	}
 
-	textContent, err := buildTextMessageContent(request.Content)
-	if err != nil {
-		if postErr != nil {
-			return nil, errors.Join(postErr, err)
+		textContent, err := buildTextMessageContent(request.Content)
+		if err != nil {
+			if postErr != nil {
+				return errors.Join(postErr, err)
+			}
+			return err
 		}
+		reply := request
+		reply.MessageType = "text"
+		reply.Content = textContent
+		replyResult, err := s.gateway.ReplyMessage(ctx, reply)
+		if err == nil {
+			result = replyResult
+		}
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
-	reply := request
-	reply.MessageType = "text"
-	reply.Content = textContent
-	return s.gateway.ReplyMessage(ctx, reply)
+	return result, nil
 }
 
 func buildTextMessageContent(text string) (string, error) {
@@ -160,4 +174,18 @@ func marshalJSON(value any) (string, error) {
 		return "", fmt.Errorf("marshal json payload: %w", err)
 	}
 	return string(raw), nil
+}
+
+func (s *Service) executeOutbound(
+	ctx context.Context,
+	operation string,
+	run func(context.Context) error,
+) error {
+	if s.delivery == nil {
+		s.delivery = reliability.NewExecutor(reliability.ExecutorOptions{
+			Platform: platformID,
+			Logger:   s.logger,
+		})
+	}
+	return s.delivery.Execute(ctx, operation, run, classifyFeishuError)
 }

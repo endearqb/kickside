@@ -115,6 +115,7 @@ type ChannelStatus struct {
 	LastInboundAt  string              `json:"lastInboundAt,omitempty"`
 	LastOutboundAt string              `json:"lastOutboundAt,omitempty"`
 	LastOffset     string              `json:"lastOffset,omitempty"`
+	LastErrorCode  string              `json:"lastErrorCode,omitempty"`
 	LastError      string              `json:"lastError,omitempty"`
 }
 
@@ -127,6 +128,7 @@ type BridgeStatus struct {
 	Channels         []ChannelStatus    `json:"channels"`
 	PendingApprovals int                `json:"pendingApprovals"`
 	Bindings         int                `json:"bindings"`
+	LastErrorCode    string             `json:"lastErrorCode,omitempty"`
 	LastError        string             `json:"lastError,omitempty"`
 }
 

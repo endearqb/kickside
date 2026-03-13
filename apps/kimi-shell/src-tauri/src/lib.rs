@@ -384,6 +384,7 @@ fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeS
                     last_inbound_at: None,
                     last_outbound_at: None,
                     last_offset: None,
+                    last_error_code: None,
                     last_error: None,
                 })
                 .collect();

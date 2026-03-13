@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
@@ -17,7 +18,7 @@ const (
 func (s *Service) sendApprovalMessage(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, event runtime.PromptEvent) error {
 	content, err := buildApprovalCardContent(event.ApprovalID, source.ChatID, primaryID(source.ThreadID, source.RootID), event.RequestKind, event.Prompt)
 	if err != nil {
-		return withCode("card_callback_failed", err)
+		return reliability.Wrap("payload_invalid", err)
 	}
 	return s.sendRecordedMessage(ctx, SendMessageRequest{
 		ReplyToMessageID: source.MessageID,
@@ -30,7 +31,7 @@ func (s *Service) sendApprovalMessage(ctx context.Context, source *MessageEvent,
 
 func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
 	if err := s.store.TouchChannelInbound(ctx, platformID, ""); err != nil {
-		return nil, withCode("channel_activity_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 
 	value, ok := decodeActionValue(event.ActionValue)
@@ -40,7 +41,7 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 
 	ticket, err := s.store.GetApprovalByID(ctx, value.ApprovalID)
 	if err != nil {
-		return nil, withCode("approval_lookup_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	if ticket == nil {
 		return &CardActionResult{Toast: "approval not found"}, nil
@@ -63,23 +64,23 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 		"resolutionBy": platformID,
 	})
 	if err != nil {
-		return nil, withCode("approval_payload_failed", err)
+		return nil, reliability.Wrap("payload_invalid", err)
 	}
 
 	if err := s.runtime.ResolveApproval(ctx, value.ApprovalID, value.Decision, payloadJSON); err != nil {
-		return nil, withCode("approval_resolve_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 
 	card, err := buildResolvedApprovalCard(value.Decision, ticket.Prompt)
 	if err != nil {
 		fallbackErr := s.sendResolutionFallback(ctx, event, ticket, value.Decision)
 		if fallbackErr != nil {
-			return nil, withCode("card_callback_failed", fallbackErr)
+			return nil, fallbackErr
 		}
 		return &CardActionResult{Toast: callbackAckText(value.Decision)}, nil
 	}
 	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
-		return nil, withCode("channel_activity_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	return &CardActionResult{
 		Toast:       callbackAckText(value.Decision),

@@ -25,7 +25,7 @@ type RuntimeExecutor interface {
 
 type ChannelStore interface {
 	GetOffset(context.Context, string, string) (string, bool, error)
-	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string) error
+	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
 	UpdateChannelOffset(context.Context, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error

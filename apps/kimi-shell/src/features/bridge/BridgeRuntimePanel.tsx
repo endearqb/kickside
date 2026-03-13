@@ -96,6 +96,17 @@ function renderSecretRow(label: string, value: BridgeSecretsMaskView["telegram"]
   );
 }
 
+function formatErrorLine(errorCode?: string, message?: string): string {
+  const parts: string[] = [];
+  if (errorCode) {
+    parts.push(`[${errorCode}]`);
+  }
+  if (message) {
+    parts.push(message);
+  }
+  return parts.join(" ").trim();
+}
+
 export function BridgeRuntimePanel({
   settings,
   status,
@@ -316,8 +327,10 @@ export function BridgeRuntimePanel({
             <strong>{status.startedAt ?? "-"}</strong>
           </div>
         </div>
-        {status.lastError ? (
-          <p className="bridge-error-text">{status.lastError}</p>
+        {status.lastError || status.lastErrorCode ? (
+          <p className="bridge-error-text">
+            {formatErrorLine(status.lastErrorCode, status.lastError)}
+          </p>
         ) : null}
         <div className="bridge-channel-statuses">
           {status.channels.length > 0 ? (
@@ -327,7 +340,9 @@ export function BridgeRuntimePanel({
                 <span>{channel.state}</span>
                 <small>
                   offset: {channel.lastOffset ?? "-"}
-                  {channel.lastError ? ` | error: ${channel.lastError}` : ""}
+                  {channel.lastError || channel.lastErrorCode
+                    ? ` | error: ${formatErrorLine(channel.lastErrorCode, channel.lastError)}`
+                    : ""}
                 </small>
               </div>
             ))

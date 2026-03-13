@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 )
 
 const telegramMessageMaxRunes = 4096
@@ -49,7 +50,7 @@ func (s *Service) sendReply(ctx context.Context, source *message, binding domain
 func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequest, deliveryKey string, sourceMessageID string) error {
 	existing, err := s.store.GetDeliveryEventByKey(ctx, deliveryKey)
 	if err != nil {
-		return withCode("delivery_lookup_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	if existing != nil && existing.Status == "sent" {
 		return nil
@@ -62,7 +63,7 @@ func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequ
 		"text":             request.Text,
 	})
 	if err != nil {
-		return withCode("delivery_record_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 
 	if existing == nil {
@@ -78,7 +79,7 @@ func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequ
 			Status:          "pending",
 		})
 		if err != nil {
-			return withCode("delivery_record_failed", err)
+			return reliability.Wrap("unknown", err)
 		}
 	}
 
@@ -86,73 +87,99 @@ func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequ
 	if err != nil {
 		statusErr := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "failed", err.Error())
 		if statusErr != nil {
-			return withCode("send_message_failed", errors.Join(err, statusErr))
+			return reliability.Wrap("delivery_failed", errors.Join(err, statusErr))
 		}
-		return withCode("send_message_failed", err)
+		return err
 	}
 
 	if err := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "sent", ""); err != nil {
-		return withCode("delivery_record_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
-		return withCode("channel_activity_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	return nil
 }
 
 func (s *Service) sendTextWithFallback(ctx context.Context, request outboundTextRequest) (*message, error) {
-	htmlRequest := sendMessageRequest{
-		ChatID:           request.ChatID,
-		MessageThreadID:  request.ThreadID,
-		ReplyToMessageID: request.ReplyToMessageID,
-		Text:             html.EscapeString(request.Text),
-		ParseMode:        "HTML",
-		ReplyMarkup:      request.ReplyMarkup,
-	}
-	sent, err := s.botAPI.SendMessage(ctx, htmlRequest)
-	if err == nil {
-		return sent, nil
-	}
+	var sent *message
+	err := s.executeOutbound(ctx, "send_message", func(ctx context.Context) error {
+		htmlRequest := sendMessageRequest{
+			ChatID:           request.ChatID,
+			MessageThreadID:  request.ThreadID,
+			ReplyToMessageID: request.ReplyToMessageID,
+			Text:             html.EscapeString(request.Text),
+			ParseMode:        "HTML",
+			ReplyMarkup:      request.ReplyMarkup,
+		}
+		result, err := s.botAPI.SendMessage(ctx, htmlRequest)
+		if err == nil {
+			sent = result
+			return nil
+		}
 
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.IsParseModeError() {
-		fallbackRequest := htmlRequest
-		fallbackRequest.Text = request.Text
-		fallbackRequest.ParseMode = ""
-		return s.botAPI.SendMessage(ctx, fallbackRequest)
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.IsParseModeError() {
+			fallbackRequest := htmlRequest
+			fallbackRequest.Text = request.Text
+			fallbackRequest.ParseMode = ""
+			result, err = s.botAPI.SendMessage(ctx, fallbackRequest)
+			if err == nil {
+				sent = result
+			}
+			return err
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	return sent, nil
 }
 
 func (s *Service) editTextWithFallback(ctx context.Context, chatID int64, messageID int64, text string) error {
-	htmlRequest := editMessageTextRequest{
-		ChatID:    chatID,
-		MessageID: messageID,
-		Text:      html.EscapeString(text),
-		ParseMode: "HTML",
-	}
-	err := s.botAPI.EditMessageText(ctx, htmlRequest)
-	if err == nil {
-		if touchErr := s.store.TouchChannelOutbound(ctx, platformID, ""); touchErr != nil {
-			return withCode("channel_activity_failed", touchErr)
+	err := s.executeOutbound(ctx, "edit_message", func(ctx context.Context) error {
+		htmlRequest := editMessageTextRequest{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Text:      html.EscapeString(text),
+			ParseMode: "HTML",
 		}
-		return nil
-	}
+		err := s.botAPI.EditMessageText(ctx, htmlRequest)
+		if err == nil {
+			return nil
+		}
 
-	var apiErr *APIError
-	if errors.As(err, &apiErr) && apiErr.IsParseModeError() {
-		fallbackRequest := htmlRequest
-		fallbackRequest.Text = text
-		fallbackRequest.ParseMode = ""
-		err = s.botAPI.EditMessageText(ctx, fallbackRequest)
-	}
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.IsParseModeError() {
+			fallbackRequest := htmlRequest
+			fallbackRequest.Text = text
+			fallbackRequest.ParseMode = ""
+			return s.botAPI.EditMessageText(ctx, fallbackRequest)
+		}
+		return err
+	})
 	if err != nil {
-		return withCode("edit_message_failed", err)
+		return err
 	}
 	if touchErr := s.store.TouchChannelOutbound(ctx, platformID, ""); touchErr != nil {
-		return withCode("channel_activity_failed", touchErr)
+		return reliability.Wrap("unknown", touchErr)
 	}
 	return nil
+}
+
+func (s *Service) executeOutbound(
+	ctx context.Context,
+	operation string,
+	run func(context.Context) error,
+) error {
+	if s.delivery == nil {
+		s.delivery = reliability.NewExecutor(reliability.ExecutorOptions{
+			Platform: platformID,
+			Logger:   s.logger,
+		})
+	}
+	return s.delivery.Execute(ctx, operation, run, classifyTelegramError)
 }
 
 func splitTextChunks(text string, maxRunes int) []string {

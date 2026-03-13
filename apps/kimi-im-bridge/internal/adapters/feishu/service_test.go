@@ -12,6 +12,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
@@ -297,7 +298,7 @@ func TestServiceStartInvalidCredentialsMarksChannelError(t *testing.T) {
 		AppID:     "cli_a",
 		AppSecret: "secret",
 	})
-	gateway.probeErr = withCode("invalid_app_credentials", fmt.Errorf("bad creds"))
+	gateway.probeErr = &APIError{Operation: "probe_credentials", Message: "bad credentials"}
 
 	if err := service.Start(context.Background()); err == nil {
 		t.Fatalf("expected Start to fail for invalid credentials")
@@ -307,8 +308,85 @@ func TestServiceStartInvalidCredentialsMarksChannelError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChannelStatuses returned error: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastError != "invalid_app_credentials" {
+	if len(statuses) != 1 || statuses[0].State != domain.ChannelStateError || statuses[0].LastErrorCode != "invalid_credentials" {
 		t.Fatalf("expected feishu channel to be error/invalid_app_credentials, got %+v", statuses)
+	}
+}
+
+func TestServiceReplyRetriesRateLimitedFailure(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	now := time.Unix(0, 0)
+	sleeps := []time.Duration{}
+	service.delivery = reliability.NewExecutor(reliability.ExecutorOptions{
+		Platform: "feishu",
+		Now: func() time.Time {
+			return now
+		},
+		Sleep: func(_ context.Context, delay time.Duration) bool {
+			sleeps = append(sleeps, delay)
+			now = now.Add(delay)
+			return true
+		},
+	})
+
+	attempts := 0
+	gateway.replyFunc = func(_ context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+		attempts++
+		if attempts <= 2 {
+			return nil, &APIError{Operation: "reply_message", Message: "frequency limit exceeded"}
+		}
+		return &SendMessageResult{MessageID: "reply-ok"}, nil
+	}
+
+	_, err := service.replyRichTextWithFallback(context.Background(), SendMessageRequest{
+		ReplyToMessageID: "msg-1",
+		ChatID:           "chat-1",
+		MessageType:      "post",
+		Content:          "hello",
+		UUID:             "uuid-1",
+	})
+	if err != nil {
+		t.Fatalf("replyRichTextWithFallback returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 gateway reply calls across retry, got %d", attempts)
+	}
+	if len(sleeps) == 0 || sleeps[0] != time.Second {
+		t.Fatalf("expected default retry sleep of 1s, got %+v", sleeps)
+	}
+}
+
+func TestServiceReplyClassifiesPermissionFailureWithoutRetry(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	gateway.replyFunc = func(_ context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+		return nil, &APIError{Operation: "reply_message", Message: "permission denied"}
+	}
+
+	_, err := service.replyRichTextWithFallback(context.Background(), SendMessageRequest{
+		ReplyToMessageID: "msg-2",
+		ChatID:           "chat-1",
+		MessageType:      "post",
+		Content:          "hello",
+		UUID:             "uuid-2",
+	})
+	if err == nil {
+		t.Fatal("expected replyRichTextWithFallback to fail")
+	}
+	if reliability.CodeOf(err, "") != "permission_denied" {
+		t.Fatalf("expected permission_denied code, got %q", reliability.CodeOf(err, ""))
+	}
+	if len(gateway.replyCalls) != 2 {
+		t.Fatalf("expected only a single post->text fallback attempt, got %d calls", len(gateway.replyCalls))
 	}
 }
 

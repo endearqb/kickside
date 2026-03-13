@@ -43,6 +43,7 @@ type Service struct {
 	mu            sync.RWMutex
 	state         domain.BridgeRuntimeState
 	startedAt     string
+	lastErrorCode string
 	lastError     string
 	server        *http.Server
 	listener      net.Listener
@@ -119,7 +120,11 @@ func (s *Service) Start() error {
 	address := fmt.Sprintf("127.0.0.1:%d", s.options.AdminPort)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		s.setState(domain.BridgeStateCrashed, fmt.Sprintf("failed to listen on %s: %v", address, err))
+		s.setState(
+			domain.BridgeStateCrashed,
+			"platform_unavailable",
+			fmt.Sprintf("failed to listen on %s: %v", address, err),
+		)
 		return err
 	}
 
@@ -133,6 +138,7 @@ func (s *Service) Start() error {
 	s.listener = listener
 	s.server = server
 	s.startedAt = time.Now().UTC().Format(time.RFC3339)
+	s.lastErrorCode = ""
 	s.lastError = ""
 	s.state = domain.BridgeStateRunning
 	s.mu.Unlock()
@@ -141,7 +147,7 @@ func (s *Service) Start() error {
 	go func() {
 		if serveErr := server.Serve(listener); serveErr != nil && serveErr != http.ErrServerClosed {
 			s.logger.Printf("bridge admin server failed: %v", serveErr)
-			s.setState(domain.BridgeStateCrashed, serveErr.Error())
+			s.setState(domain.BridgeStateCrashed, "platform_unavailable", serveErr.Error())
 		}
 	}()
 
@@ -170,14 +176,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 		select {
 		case <-adapter.Done():
 		case <-ctx.Done():
-			s.setState(domain.BridgeStateDegraded, ctx.Err().Error())
+			s.setState(domain.BridgeStateDegraded, "transient_network", ctx.Err().Error())
 			return ctx.Err()
 		}
 	}
 
 	if server != nil {
 		if err := server.Shutdown(ctx); err != nil {
-			s.setState(domain.BridgeStateDegraded, err.Error())
+			s.setState(domain.BridgeStateDegraded, "transient_network", err.Error())
 			return err
 		}
 	}
@@ -213,6 +219,7 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 	s.mu.RLock()
 	state := s.state
 	startedAt := s.startedAt
+	lastErrorCode := s.lastErrorCode
 	lastError := s.lastError
 	s.mu.RUnlock()
 
@@ -233,7 +240,8 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 		if state == domain.BridgeStateRunning && (channel.State == domain.ChannelStateError || channel.State == domain.ChannelStateDegraded) {
 			state = domain.BridgeStateDegraded
 			if lastError == "" && channel.LastError != "" {
-				lastError = fmt.Sprintf("%s:%s", channel.Platform, channel.LastError)
+				lastErrorCode = channel.LastErrorCode
+				lastError = fmt.Sprintf("%s: %s", channel.Platform, channel.LastError)
 			}
 		}
 	}
@@ -247,6 +255,7 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 		Channels:         channels,
 		PendingApprovals: pendingApprovals,
 		Bindings:         bindings,
+		LastErrorCode:    lastErrorCode,
 		LastError:        lastError,
 	}, nil
 }
@@ -298,10 +307,11 @@ func (s *Service) StopRequested() <-chan struct{} {
 	return s.stopCh
 }
 
-func (s *Service) setState(state domain.BridgeRuntimeState, lastError string) {
+func (s *Service) setState(state domain.BridgeRuntimeState, lastErrorCode string, lastError string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = state
+	s.lastErrorCode = lastErrorCode
 	s.lastError = lastError
 }
 
@@ -372,7 +382,13 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 			Logger:        s.logger,
 		}), nil
 	default:
-		if err := s.store.UpdateChannelState(context.Background(), channel.Platform, domain.ChannelStateError, "adapter_not_supported"); err != nil {
+		if err := s.store.UpdateChannelState(
+			context.Background(),
+			channel.Platform,
+			domain.ChannelStateError,
+			"unknown",
+			fmt.Sprintf("unsupported adapter platform %q", channel.Platform),
+		); err != nil {
 			return nil, err
 		}
 		return nil, fmt.Errorf("unsupported adapter platform %q", channel.Platform)

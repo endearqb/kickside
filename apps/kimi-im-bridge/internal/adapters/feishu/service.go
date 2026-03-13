@@ -2,7 +2,6 @@ package feishu
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -11,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
@@ -21,6 +21,7 @@ type Service struct {
 	runtime  RuntimeExecutor
 	store    ChannelStore
 	logger   Logger
+	delivery *reliability.Executor
 
 	mu                sync.RWMutex
 	started           bool
@@ -43,7 +44,11 @@ func NewService(options Options) *Service {
 		runtime:  options.Runtime,
 		store:    options.Store,
 		logger:   options.Logger,
-		done:     closedDone(),
+		delivery: reliability.NewExecutor(reliability.ExecutorOptions{
+			Platform: platformID,
+			Logger:   options.Logger,
+		}),
+		done: closedDone(),
 	}
 }
 
@@ -59,13 +64,13 @@ func (s *Service) Done() <-chan struct{} {
 
 func (s *Service) Start(ctx context.Context) error {
 	if strings.TrimSpace(s.config.AppID) == "" || strings.TrimSpace(s.config.AppSecret) == "" {
-		return s.failStart(ctx, "missing_app_credentials", fmt.Errorf("feishu appId/appSecret are required"))
+		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("feishu appId/appSecret are required"))
 	}
 	if s.gateway == nil {
-		return s.failStart(ctx, "missing_app_credentials", fmt.Errorf("feishu gateway is not configured"))
+		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("feishu gateway is not configured"))
 	}
 	if s.bindings == nil || s.runtime == nil || s.store == nil {
-		return s.failStart(ctx, "adapter_dependencies_missing", fmt.Errorf("feishu adapter dependencies are incomplete"))
+		return s.failStart(ctx, "unknown", fmt.Errorf("feishu adapter dependencies are incomplete"))
 	}
 
 	s.mu.Lock()
@@ -77,16 +82,20 @@ func (s *Service) Start(ctx context.Context) error {
 	s.done = make(chan struct{})
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 	if err := s.gateway.ProbeCredentials(ctx); err != nil {
-		return s.failAfterStart(ctx, classifiedCode(err, "long_connection_failed"), err)
+		code := classifyFeishuError(err).Code
+		if code == "" {
+			code = "unknown"
+		}
+		return s.failAfterStart(ctx, code, err)
 	}
 
 	checkpoint, err := s.loadCheckpoint(ctx)
 	if err != nil {
-		return s.failAfterStart(ctx, "checkpoint_restore_failed", err)
+		return s.failAfterStart(ctx, "unknown", err)
 	}
 	s.setCheckpoint(checkpoint)
 
@@ -121,14 +130,29 @@ func (s *Service) runLoop(ctx context.Context, done chan struct{}) {
 			return
 		}
 
-		code := classifiedCode(err, "long_connection_failed")
+		classification := classifyFeishuError(err)
+		code := classification.Code
+		if code == "" {
+			code = "unknown"
+		}
 		state := domain.ChannelStateDegraded
-		if code == "invalid_app_credentials" {
+		if code == "invalid_credentials" {
 			state = domain.ChannelStateError
 		}
-		s.logf("feishu event loop failed: %v", err)
-		_ = s.store.UpdateChannelState(context.Background(), platformID, state, code)
-		if state == domain.ChannelStateError || !sleepContext(ctx, backoff) {
+		backoffNext := backoff
+		if !classification.Retryable {
+			backoffNext = 0
+		}
+		s.logf(
+			"channel event=failure platform=%s operation=long_connection errorCode=%s attempt=1 retryable=%t nextBackoffMs=%d err=%q",
+			platformID,
+			code,
+			classification.Retryable,
+			backoffNext.Milliseconds(),
+			err.Error(),
+		)
+		_ = s.store.UpdateChannelState(context.Background(), platformID, state, code, err.Error())
+		if state == domain.ChannelStateError || !reliability.SleepContext(ctx, backoff) {
 			return
 		}
 		backoff = nextBackoff(backoff)
@@ -136,7 +160,7 @@ func (s *Service) runLoop(ctx context.Context, done chan struct{}) {
 }
 
 func (s *Service) OnReady(ctx context.Context) {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "")
+	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", "")
 }
 
 func (s *Service) OnMessage(ctx context.Context, event *MessageEvent) error {
@@ -174,7 +198,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return true, nil
 	}
 	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
-		return false, withCode("channel_activity_failed", err)
+		return false, reliability.Wrap("unknown", err)
 	}
 
 	binding, err := s.resolveOrCreateBinding(ctx, key)
@@ -206,7 +230,10 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return false, err
 	}
 	if response.Result.Error != "" {
-		return false, withCode("runtime_turn_failed", fmt.Errorf("feishu runtime turn failed: %s", response.Result.Error))
+		return false, reliability.Wrap(
+			"delivery_failed",
+			fmt.Errorf("feishu runtime turn failed: %s", response.Result.Error),
+		)
 	}
 
 	finalText := strings.TrimSpace(content.String())
@@ -222,7 +249,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
 	binding, err := s.bindings.ResolveBinding(ctx, key)
 	if err != nil {
-		return nil, withCode("binding_resolve_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	if binding != nil {
 		if binding.WorkDir == "" {
@@ -233,7 +260,7 @@ func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.Binding
 
 	created, err := s.bindings.CreateBinding(ctx, key, uuid.NewString(), strings.TrimSpace(s.config.DefaultWorkDir), "auto")
 	if err != nil {
-		return nil, withCode("binding_create_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	return created, nil
 }
@@ -255,7 +282,7 @@ func (s *Service) advanceCheckpoint(ctx context.Context, eventID string) error {
 		return nil
 	}
 	if err := s.store.UpdateChannelOffset(ctx, platformID, eventID); err != nil {
-		return withCode("checkpoint_update_failed", err)
+		return reliability.Wrap("unknown", err)
 	}
 	s.setCheckpoint(eventID)
 	return nil
@@ -280,14 +307,24 @@ func shouldSkipCheckpoint(checkpoint string, eventID string) bool {
 }
 
 func (s *Service) failStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code)
-	s.logf("feishu adapter start failed: %v", err)
+	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	s.logf(
+		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
+		platformID,
+		code,
+		err.Error(),
+	)
 	return err
 }
 
 func (s *Service) failAfterStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code)
-	s.logf("feishu adapter start failed: %v", err)
+	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	s.logf(
+		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
+		platformID,
+		code,
+		err.Error(),
+	)
 	return s.abortStart(err)
 }
 
@@ -323,49 +360,4 @@ func nextBackoff(current time.Duration) time.Duration {
 	default:
 		return 5 * time.Second
 	}
-}
-
-func sleepContext(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-type codedError struct {
-	code string
-	err  error
-}
-
-func (e *codedError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func (e *codedError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-func withCode(code string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &codedError{code: code, err: err}
-}
-
-func classifiedCode(err error, fallback string) string {
-	var coded *codedError
-	if errors.As(err, &coded) && strings.TrimSpace(coded.code) != "" {
-		return coded.code
-	}
-	return fallback
 }

@@ -6,16 +6,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const defaultBaseURL = "https://api.telegram.org"
 
+var retryAfterPattern = regexp.MustCompile(`retry after (\d+)`)
+
 type APIError struct {
-	Method      string
-	ErrorCode   int
-	Description string
+	Method            string
+	ErrorCode         int
+	Description       string
+	RetryAfterSeconds int
 }
 
 func (e *APIError) Error() string {
@@ -29,12 +33,40 @@ func (e *APIError) IsInvalidToken() bool {
 	return e != nil && e.ErrorCode == http.StatusUnauthorized
 }
 
+func (e *APIError) IsPermissionError() bool {
+	return e != nil && e.ErrorCode == http.StatusForbidden
+}
+
 func (e *APIError) IsParseModeError() bool {
 	if e == nil {
 		return false
 	}
 	description := strings.ToLower(e.Description)
 	return e.ErrorCode == http.StatusBadRequest && (strings.Contains(description, "parse entities") || strings.Contains(description, "can't parse"))
+}
+
+func (e *APIError) IsRateLimited() bool {
+	return e != nil && e.ErrorCode == http.StatusTooManyRequests
+}
+
+func (e *APIError) IsServerError() bool {
+	return e != nil && e.ErrorCode >= http.StatusInternalServerError
+}
+
+func (e *APIError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	if e.RetryAfterSeconds > 0 {
+		return time.Duration(e.RetryAfterSeconds) * time.Second
+	}
+	match := retryAfterPattern.FindStringSubmatch(strings.ToLower(e.Description))
+	if len(match) == 2 {
+		if seconds, err := time.ParseDuration(match[1] + "s"); err == nil {
+			return seconds
+		}
+	}
+	return 0
 }
 
 type Client struct {
@@ -137,9 +169,10 @@ func (c *Client) call(ctx context.Context, method string, requestBody any, targe
 	}
 	if !envelope.OK {
 		return &APIError{
-			Method:      method,
-			ErrorCode:   envelope.ErrorCode,
-			Description: envelope.Description,
+			Method:            method,
+			ErrorCode:         envelope.ErrorCode,
+			Description:       envelope.Description,
+			RetryAfterSeconds: retryAfterValue(envelope.Parameters),
 		}
 	}
 	if target == nil {
@@ -152,4 +185,11 @@ func (c *Client) call(ctx context.Context, method string, requestBody any, targe
 		return fmt.Errorf("decode telegram %s result: %w", method, err)
 	}
 	return nil
+}
+
+func retryAfterValue(parameters *apiResponseParameters) int {
+	if parameters == nil {
+		return 0
+	}
+	return parameters.RetryAfter
 }

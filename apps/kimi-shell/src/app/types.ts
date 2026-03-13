@@ -139,6 +139,7 @@ export interface BridgeChannelStatus {
   lastInboundAt?: string;
   lastOutboundAt?: string;
   lastOffset?: string;
+  lastErrorCode?: string;
   lastError?: string;
 }
 
@@ -151,6 +152,7 @@ export interface BridgeStatus {
   channels: BridgeChannelStatus[];
   pendingApprovals: number;
   bindings: number;
+  lastErrorCode?: string;
   lastError?: string;
 }
 

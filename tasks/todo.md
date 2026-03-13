@@ -1,5 +1,52 @@
 ﻿# Todo
 
+## Current Plan (Kimi IM Bridge phase 6 stabilization and release)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md` 中记录本轮 Phase 6 的实现范围、验证口径与环境阻塞
+- [x] 为 Telegram / Feishu 补共享 outbound delivery 稳定化：串行发送门控、限速、retry、错误分类与日志字段
+- [x] 扩展 Go / Rust / TS bridge status 类型，补 `lastErrorCode` 并让 Bridge 面板可展示分类码
+- [x] 补齐稳定化回归测试、bridge 故障排查文档、发布清单文档与统一手工闸门 runbook
+- [x] 完成 Go / Rust / 前端 / Tauri 验证，并尽可能收集本机可执行的安装版与 sidecar smoke 证据
+
+### Acceptance Criteria
+
+- [x] Telegram / Feishu outbound API 调用经过统一的最小 100ms 串行门控，并对可重试错误执行最多 5 次退避重试
+- [x] `BridgeStatus` / `BridgeChannelStatus` 暴露 `lastErrorCode`，shell 与前端类型同步，Bridge 面板可看到错误分类信息
+- [x] sender / recovery / idempotency 回归测试补齐并通过，且不引入数据库 migration
+- [x] 新增 bridge 故障排查文档与发布清单文档；`docs/kimi-im-bridge-manual-test-runbook.md` 升级为统一手工闸门模板
+- [x] `go test ./...`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell tauri build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-im-bridge/internal/reliability/executor.go`
+    - 新增共享 outbound 执行器，统一串行发送门控、100ms 最小间隔、最多 5 次退避重试、`retry_after` 裁剪和结构化日志字段。
+  - `apps/kimi-im-bridge/internal/adapters/telegram/*` 与 `apps/kimi-im-bridge/internal/adapters/feishu/*`
+    - 两个平台的 sender / approval / startup error 路径统一接入共享稳定化逻辑，并把错误分类标准化为 `rate_limited`、`transient_network`、`platform_unavailable`、`invalid_credentials`、`permission_denied`、`payload_invalid`、`delivery_failed`、`unknown`。
+  - `apps/kimi-im-bridge/internal/domain/domain.go`、`apps/kimi-im-bridge/internal/store/store.go`、`apps/kimi-im-bridge/internal/app/app.go`
+    - 为 bridge / channel status 补 `lastErrorCode`，且不引入新的数据库 migration；channel 错误码与消息通过现有 `last_error` 存储位承载。
+  - `apps/kimi-shell/src-tauri/src/types.rs`、`apps/kimi-shell/src-tauri/src/app_state.rs`、`apps/kimi-shell/src-tauri/src/bridge_manager.rs`、`apps/kimi-shell/src/app/types.ts`、`apps/kimi-shell/src/app/useShellController.ts`、`apps/kimi-shell/src/features/bridge/BridgeRuntimePanel.tsx`
+    - Rust / TS 类型和 Bridge 面板同步暴露 `lastErrorCode`，最近错误摘要与 channel 错误展示改为带分类码。
+  - `docs/kimi-im-bridge-manual-test-runbook.md`
+    - 升级为 Phase 2-6 统一手工闸门文档，按“目标 / 前置条件 / 配置账号 / 步骤 / 期望结果 / 证据 / 实际结果 / 问题编号”固定结构记录，并如实标注当前工作站的环境阻塞。
+  - `docs/kimi-im-bridge-troubleshooting.md`
+    - 新增排障文档，固定记录日志位置、settings/secrets/db 路径、常见 `lastErrorCode` 含义、快速排查顺序和 release 资源检查方法。
+  - `docs/kimi-im-bridge-release-checklist.md`
+    - 新增版本无关的 bridge 发布清单，约束构建命令、sidecar 资源检查、自动化验证和统一手工闸门证据来源。
+  - `docs/kimi-im-bridge-progress-review.md`
+    - 更新阶段结论：Phase 5 已完成，Phase 6 的仓库实现已完成，但最终 release 闭环仍等待统一手工闸门。
+- Verification:
+  - `go test ./...` in `apps/kimi-im-bridge`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+  - `pnpm -C apps/kimi-shell tauri build`
+  - `Select-String -Path apps/kimi-shell/src-tauri/target/release/wix/x64/main.wxs -Pattern "kimi-im-bridge|binaries"`
+  - `Select-String -Path apps/kimi-shell/src-tauri/target/release/nsis/x64/installer.nsi -Pattern "kimi-im-bridge|binaries"`
+- Remaining note:
+  - 当前工作站的 `%APPDATA%\com.kimi.shell\bridge_secrets.json` 中 Telegram / 飞书凭证均为空，且 `%LOCALAPPDATA%\Programs` 下不存在已安装的 `Kimi Desktop Shell` 目录。因此 runbook 中真实 Telegram / 飞书 / 安装版点击验证仍为 `Blocked` 或 `Partial`，Phase 6 的“仓库实现”已完成，但“发布闭环”仍等待统一手工闸门补跑。
+
 ## Current Plan (Kimi IM Bridge progress review doc)
 
 ### Checklist

@@ -22,6 +22,8 @@ import (
 	callback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
+
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 )
 
 type ClientOptions struct {
@@ -39,6 +41,27 @@ type Client struct {
 	domain     string
 	logger     Logger
 	api        *lark.Client
+}
+
+type APIError struct {
+	Operation  string
+	Code       int
+	Message    string
+	HTTPStatus int
+}
+
+func (e *APIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	switch {
+	case e.Code != 0:
+		return fmt.Sprintf("feishu %s failed: code=%d msg=%s", e.Operation, e.Code, e.Message)
+	case e.HTTPStatus != 0:
+		return fmt.Sprintf("feishu %s failed: http=%d msg=%s", e.Operation, e.HTTPStatus, e.Message)
+	default:
+		return fmt.Sprintf("feishu %s failed: %s", e.Operation, e.Message)
+	}
 }
 
 func NewClient(appID string, appSecret string, options ClientOptions) *Client {
@@ -75,9 +98,16 @@ func (c *Client) ProbeCredentials(ctx context.Context) error {
 	}
 	if resp == nil || !resp.Success() {
 		if resp == nil {
-			return withCode("invalid_app_credentials", fmt.Errorf("feishu credential probe returned empty response"))
+			return &APIError{
+				Operation: "probe_credentials",
+				Message:   "empty response",
+			}
 		}
-		return withCode("invalid_app_credentials", fmt.Errorf("feishu credential probe failed: code=%d msg=%s", resp.Code, resp.Msg))
+		return &APIError{
+			Operation: "probe_credentials",
+			Code:      int(resp.Code),
+			Message:   resp.Msg,
+		}
 	}
 	return nil
 }
@@ -99,9 +129,16 @@ func (c *Client) ReplyMessage(ctx context.Context, request SendMessageRequest) (
 	}
 	if resp == nil || !resp.Success() {
 		if resp == nil {
-			return nil, fmt.Errorf("feishu reply returned empty response")
+			return nil, &APIError{
+				Operation: "reply_message",
+				Message:   "empty response",
+			}
 		}
-		return nil, fmt.Errorf("feishu reply failed: code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, &APIError{
+			Operation: "reply_message",
+			Code:      int(resp.Code),
+			Message:   resp.Msg,
+		}
 	}
 	return &SendMessageResult{
 		MessageID: stringValue(resp.Data.MessageId),
@@ -113,12 +150,12 @@ func (c *Client) ReplyMessage(ctx context.Context, request SendMessageRequest) (
 func (c *Client) Run(ctx context.Context, handler EventHandler) error {
 	endpoint, err := c.fetchEndpoint(ctx)
 	if err != nil {
-		return withCode("long_connection_failed", err)
+		return reliability.Wrap("platform_unavailable", err)
 	}
 
 	conn, serviceID, pingInterval, err := c.connect(ctx, endpoint)
 	if err != nil {
-		return withCode("long_connection_failed", err)
+		return reliability.Wrap(classifyFeishuError(err).Code, err)
 	}
 	defer conn.Close()
 
@@ -141,7 +178,7 @@ func (c *Client) Run(ctx context.Context, handler EventHandler) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return withCode("long_connection_failed", err)
+			return reliability.Wrap(classifyFeishuError(err).Code, err)
 		}
 		if messageType != socket.BinaryMessage {
 			continue
@@ -149,7 +186,7 @@ func (c *Client) Run(ctx context.Context, handler EventHandler) error {
 
 		frame := &larkws.Frame{}
 		if err := frame.Unmarshal(payload); err != nil {
-			return withCode("long_connection_failed", err)
+			return reliability.Wrap("platform_unavailable", err)
 		}
 
 		switch larkws.FrameType(frame.Method) {
@@ -313,7 +350,7 @@ func (c *Client) handleDataFrame(
 	if err == nil && responseData != nil {
 		response.Data, err = json.Marshal(responseData)
 		if err != nil {
-			return withCode("card_callback_failed", err)
+			return reliability.Wrap("payload_invalid", err)
 		}
 	}
 
@@ -329,7 +366,7 @@ func (c *Client) handleDataFrame(
 	writeErr := conn.WriteMessage(socket.BinaryMessage, payloadBytes)
 	writeMu.Unlock()
 	if writeErr != nil {
-		return withCode("long_connection_failed", writeErr)
+		return reliability.Wrap(classifyFeishuError(writeErr).Code, writeErr)
 	}
 	if err != nil {
 		return err

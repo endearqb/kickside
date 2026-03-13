@@ -57,6 +57,7 @@ pub fn get_bridge_status(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
             }
             Err(error) => {
                 if let Ok(mut runtime) = app.state::<AppState>().bridge_runtime.lock() {
+                    runtime.last_error_code = Some("unknown".to_string());
                     runtime.last_error = Some(error.to_string());
                     if runtime.state == BridgeRuntimeState::Running {
                         runtime.state = BridgeRuntimeState::Degraded;
@@ -522,6 +523,7 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         channels,
         pending_approvals: runtime.pending_approvals,
         bindings: runtime.bindings,
+        last_error_code: runtime.last_error_code.clone(),
         last_error: runtime.last_error.clone(),
     })
 }
@@ -546,6 +548,7 @@ fn merge_channels(
                     last_inbound_at: None,
                     last_outbound_at: None,
                     last_offset: None,
+                    last_error_code: None,
                     last_error: None,
                 })
         })
@@ -566,6 +569,7 @@ fn settings_channels(
             last_inbound_at: None,
             last_outbound_at: None,
             last_offset: None,
+            last_error_code: None,
             last_error: None,
         })
         .collect()
@@ -617,6 +621,7 @@ fn refresh_child_state(app: &AppHandle) -> anyhow::Result<()> {
         finish_stop_transition(&mut runtime);
     } else if let Some(message) = exit_message {
         runtime.state = BridgeRuntimeState::Crashed;
+        runtime.last_error_code = Some("platform_unavailable".to_string());
         runtime.last_error = Some(message);
     }
 
@@ -632,6 +637,7 @@ fn record_failure(app: &AppHandle, message: &str) -> anyhow::Result<()> {
     runtime.state = BridgeRuntimeState::Crashed;
     runtime.child = None;
     runtime.pid = None;
+    runtime.last_error_code = Some("platform_unavailable".to_string());
     runtime.last_error = Some(message.to_string());
     Ok(())
 }
@@ -644,6 +650,7 @@ fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> 
             .lock()
             .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
         runtime.state = BridgeRuntimeState::Crashed;
+        runtime.last_error_code = Some("platform_unavailable".to_string());
         runtime.last_error = Some(message.clone());
         runtime.pid = None;
         runtime.child.take()
@@ -673,6 +680,7 @@ fn begin_start_transition(
     runtime.binary_path = Some(binary_path);
     runtime.started_at = Some(now_epoch_string());
     runtime.version = None;
+    runtime.last_error_code = None;
     runtime.last_error = None;
     runtime.bindings = 0;
     runtime.pending_approvals = 0;
@@ -684,6 +692,7 @@ fn apply_status_transition(runtime: &mut BridgeProcessState, status: &BridgeStat
     runtime.pid = status.pid;
     runtime.started_at = status.started_at.clone();
     runtime.version = status.version.clone();
+    runtime.last_error_code = status.last_error_code.clone();
     runtime.last_error = status.last_error.clone();
     runtime.channels = status.channels.clone();
     runtime.bindings = status.bindings;
@@ -889,6 +898,7 @@ mod tests {
         begin_start_transition(&mut runtime, 60_110, PathBuf::from("bridge.exe"), 4242);
         assert_eq!(runtime.state, BridgeRuntimeState::Starting);
         assert_eq!(runtime.pid, Some(4242));
+        assert!(runtime.last_error_code.is_none());
         assert!(runtime.last_error.is_none());
 
         let status = BridgeStatus {
@@ -904,10 +914,12 @@ mod tests {
                 last_inbound_at: None,
                 last_outbound_at: None,
                 last_offset: None,
+                last_error_code: None,
                 last_error: None,
             }],
             pending_approvals: 1,
             bindings: 2,
+            last_error_code: None,
             last_error: None,
         };
         apply_status_transition(&mut runtime, &status);

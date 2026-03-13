@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
@@ -33,7 +33,7 @@ type RuntimeExecutor interface {
 
 type ChannelStore interface {
 	GetOffset(context.Context, string, string) (string, bool, error)
-	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string) error
+	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
 	UpdateChannelOffset(context.Context, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
@@ -77,6 +77,7 @@ type Service struct {
 	runtime  RuntimeExecutor
 	store    ChannelStore
 	logger   Logger
+	delivery *reliability.Executor
 
 	mu          sync.RWMutex
 	started     bool
@@ -98,7 +99,11 @@ func NewService(options Options) *Service {
 		runtime:  options.Runtime,
 		store:    options.Store,
 		logger:   options.Logger,
-		done:     closedDone(),
+		delivery: reliability.NewExecutor(reliability.ExecutorOptions{
+			Platform: platformID,
+			Logger:   options.Logger,
+		}),
+		done: closedDone(),
 	}
 }
 
@@ -114,13 +119,13 @@ func (s *Service) Done() <-chan struct{} {
 
 func (s *Service) Start(ctx context.Context) error {
 	if strings.TrimSpace(s.config.BotToken) == "" {
-		return s.failStart(ctx, "missing_bot_token", fmt.Errorf("telegram bot token is required"))
+		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("telegram bot token is required"))
 	}
 	if s.botAPI == nil {
-		return s.failStart(ctx, "missing_bot_token", fmt.Errorf("telegram bot api client is not configured"))
+		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("telegram bot api client is not configured"))
 	}
 	if s.bindings == nil || s.runtime == nil || s.store == nil {
-		return s.failStart(ctx, "adapter_dependencies_missing", fmt.Errorf("telegram adapter dependencies are incomplete"))
+		return s.failStart(ctx, "unknown", fmt.Errorf("telegram adapter dependencies are incomplete"))
 	}
 
 	s.mu.Lock()
@@ -132,31 +137,30 @@ func (s *Service) Start(ctx context.Context) error {
 	s.done = make(chan struct{})
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 
 	me, err := s.botAPI.GetMe(ctx)
 	if err != nil {
-		code := "telegram_connect_failed"
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.IsInvalidToken() {
-			code = "invalid_bot_token"
-		}
-		return s.failAfterStart(ctx, code, err)
+		return s.failAfterStart(ctx, classifyTelegramError(err).Code, err)
 	}
 
 	webhook, err := s.botAPI.GetWebhookInfo(ctx)
 	if err != nil {
-		return s.failAfterStart(ctx, "webhook_check_failed", err)
+		return s.failAfterStart(ctx, classifyTelegramError(err).Code, err)
 	}
 	if webhook != nil && strings.TrimSpace(webhook.URL) != "" {
-		return s.failAfterStart(ctx, "webhook_configured", fmt.Errorf("telegram webhook is configured: %s", webhook.URL))
+		return s.failAfterStart(
+			ctx,
+			"permission_denied",
+			fmt.Errorf("telegram webhook is configured: %s", webhook.URL),
+		)
 	}
 
 	offset, err := s.loadOffset(ctx)
 	if err != nil {
-		return s.failAfterStart(ctx, "offset_restore_failed", err)
+		return s.failAfterStart(ctx, "unknown", err)
 	}
 
 	s.mu.Lock()
@@ -165,7 +169,7 @@ func (s *Service) Start(ctx context.Context) error {
 	done := s.done
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 
@@ -215,16 +219,29 @@ func (s *Service) pollLoop(ctx context.Context, offset int64, done chan struct{}
 			if ctx.Err() != nil {
 				return
 			}
-			code := "polling_failed"
+			classification := classifyTelegramError(err)
+			code := classification.Code
+			if code == "" {
+				code = "unknown"
+			}
 			state := domain.ChannelStateDegraded
-			var apiErr *APIError
-			if errors.As(err, &apiErr) && apiErr.IsInvalidToken() {
-				code = "invalid_bot_token"
+			if code == "invalid_credentials" {
 				state = domain.ChannelStateError
 			}
-			s.logf("telegram polling failed: %v", err)
-			_ = s.store.UpdateChannelState(context.Background(), platformID, state, code)
-			if state == domain.ChannelStateError || !sleepContext(ctx, backoff) {
+			backoffNext := backoff
+			if !classification.Retryable {
+				backoffNext = 0
+			}
+			s.logf(
+				"channel event=failure platform=%s operation=polling errorCode=%s attempt=1 retryable=%t nextBackoffMs=%d err=%q",
+				platformID,
+				code,
+				classification.Retryable,
+				backoffNext.Milliseconds(),
+				err.Error(),
+			)
+			_ = s.store.UpdateChannelState(context.Background(), platformID, state, code, err.Error())
+			if state == domain.ChannelStateError || !reliability.SleepContext(ctx, backoff) {
 				return
 			}
 			backoff = nextBackoff(backoff)
@@ -232,14 +249,26 @@ func (s *Service) pollLoop(ctx context.Context, offset int64, done chan struct{}
 		}
 
 		backoff = time.Second
-		_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "")
+		_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", "")
 
 		nextOffset, err := s.handleUpdates(ctx, updates, currentOffset)
 		if err != nil {
-			code := classifiedCode(err, "update_processing_failed")
-			s.logf("telegram update processing failed: %v", err)
-			_ = s.store.UpdateChannelState(context.Background(), platformID, domain.ChannelStateDegraded, code)
-			if !sleepContext(ctx, backoff) {
+			code := reliability.CodeOf(err, "update_processing_failed")
+			s.logf(
+				"channel event=failure platform=%s operation=update_processing errorCode=%s attempt=1 retryable=false nextBackoffMs=%d err=%q",
+				platformID,
+				code,
+				backoff.Milliseconds(),
+				err.Error(),
+			)
+			_ = s.store.UpdateChannelState(
+				context.Background(),
+				platformID,
+				domain.ChannelStateDegraded,
+				code,
+				err.Error(),
+			)
+			if !reliability.SleepContext(ctx, backoff) {
 				return
 			}
 			backoff = nextBackoff(backoff)
@@ -261,7 +290,10 @@ func (s *Service) handleUpdates(ctx context.Context, updates []update, currentOf
 		}
 		candidate := item.UpdateID + 1
 		if err := s.store.UpdateChannelOffset(ctx, platformID, strconv.FormatInt(candidate, 10)); err != nil {
-			return nextOffset, withCode("offset_update_failed", fmt.Errorf("persist telegram offset %d: %w", candidate, err))
+			return nextOffset, reliability.Wrap(
+				"unknown",
+				fmt.Errorf("persist telegram offset %d: %w", candidate, err),
+			)
 		}
 		nextOffset = candidate
 	}
@@ -290,7 +322,7 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 		return true, nil
 	}
 	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
-		return false, withCode("channel_activity_failed", err)
+		return false, reliability.Wrap("unknown", err)
 	}
 
 	binding, err := s.resolveOrCreateBinding(ctx, *key)
@@ -322,7 +354,10 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 		return false, err
 	}
 	if response.Result.Error != "" {
-		return false, withCode("runtime_turn_failed", fmt.Errorf("telegram runtime turn failed: %s", response.Result.Error))
+		return false, reliability.Wrap(
+			"delivery_failed",
+			fmt.Errorf("telegram runtime turn failed: %s", response.Result.Error),
+		)
 	}
 
 	finalText := strings.TrimSpace(content.String())
@@ -338,7 +373,7 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
 	binding, err := s.bindings.ResolveBinding(ctx, key)
 	if err != nil {
-		return nil, withCode("binding_resolve_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	if binding != nil {
 		if binding.WorkDir == "" {
@@ -349,20 +384,30 @@ func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.Binding
 
 	created, err := s.bindings.CreateBinding(ctx, key, uuid.NewString(), strings.TrimSpace(s.config.DefaultWorkDir), "auto")
 	if err != nil {
-		return nil, withCode("binding_create_failed", err)
+		return nil, reliability.Wrap("unknown", err)
 	}
 	return created, nil
 }
 
 func (s *Service) failStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code)
-	s.logf("telegram adapter start failed: %v", err)
+	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	s.logf(
+		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
+		platformID,
+		code,
+		err.Error(),
+	)
 	return err
 }
 
 func (s *Service) failAfterStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code)
-	s.logf("telegram adapter start failed: %v", err)
+	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	s.logf(
+		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
+		platformID,
+		code,
+		err.Error(),
+	)
 	return s.abortStart(err)
 }
 
@@ -398,49 +443,4 @@ func nextBackoff(current time.Duration) time.Duration {
 	default:
 		return 5 * time.Second
 	}
-}
-
-func sleepContext(ctx context.Context, delay time.Duration) bool {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
-type codedError struct {
-	code string
-	err  error
-}
-
-func (e *codedError) Error() string {
-	if e == nil || e.err == nil {
-		return ""
-	}
-	return e.err.Error()
-}
-
-func (e *codedError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-func withCode(code string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return &codedError{code: code, err: err}
-}
-
-func classifiedCode(err error, fallback string) string {
-	var coded *codedError
-	if errors.As(err, &coded) && strings.TrimSpace(coded.code) != "" {
-		return coded.code
-	}
-	return fallback
 }

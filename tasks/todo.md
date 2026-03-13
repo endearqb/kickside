@@ -1,5 +1,86 @@
 ﻿# Todo
 
+## Current Plan (Kimi IM Bridge phase 4 Feishu adapter)
+
+### Checklist
+
+- [x] 接入飞书 phase 4 基线：在 `tasks/todo.md`、runbook 与实施计划中记录本轮范围、验证口径与 deferred manual validation
+- [x] 新增 `internal/adapters/feishu`：官方 SDK client、可取消长连接、message mapper、reply sender、interactive approval
+- [x] 将 Feishu adapter 接入 `app.Service` 生命周期与 channel 状态汇总
+- [x] 运行 Go / Rust / 前端验证并补全本轮 review
+
+### Acceptance Criteria
+
+- [x] enabled 且 `appId/appSecret` 可用时，Feishu channel 可进入 `connecting -> ready`，并通过持久化 `feishu_checkpoint` 抑制重连后的首个重复事件
+- [x] 私聊文本、群聊显式召唤与线程消息可正确路由到 binding / runtime；多轮继续复用同一 `kimiSessionId`
+- [x] approval 可通过 interactive card action 回写统一 resolve，并在成功后更新原卡片或回退 plain text 状态消息
+- [x] invalid credentials、长连接异常、发送失败会让 Feishu channel 进入 `error/degraded`，但 sidecar 仍继续运行
+- [x] `go test ./internal/adapters/feishu/...`、`go test ./...`、`go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-im-bridge/internal/adapters/feishu`
+    - 新增 Feishu adapter，覆盖 credentials 探测、可取消长连接、checkpoint 去重、私聊/群聊/线程消息映射、文本回发与 interactive approval。
+    - 通过官方 `larksuite/oapi-sdk-go` 提供 API client、事件分发与协议结构；长连接层增加了受 `context` 控制的托管包装，避免 sidecar 停机时留下不可控 goroutine。
+    - 支持富文本 `post` 回发、plain text fallback、长消息分片，以及基于 `delivery_events` 的幂等发送。
+    - 支持 approval card action 的上下文校验、统一 resolve，以及更新原卡片或回退 plain text 状态消息。
+  - `apps/kimi-im-bridge/internal/app`
+    - `buildAdapter("feishu")` 改为真正实例化 Feishu adapter，并从 secrets 注入 `appId/appSecret`。
+    - enabled 的 Feishu channel 现在会被 sidecar 生命周期统一托管，并把 `ready/degraded/error` 状态汇总回 bridge 总状态。
+  - `docs/kimi-im-bridge-implementation-plan.md`
+    - 为 phase 4 的 deferred manual validation 增补 `invalid credentials` 与 `reconnect redelivery dedupe` 两项统一手工测试入口。
+  - `docs/kimi-im-bridge-manual-test-runbook.md`
+    - 新增 `P4-05 Invalid Credentials Startup Failure` 与 `P4-06 Reconnect Redelivery Dedupe`，明确最终统一手工测试所需的前置条件、步骤、期望结果与证据采集要求。
+- Verification:
+  - `& 'C:\Program Files\Go\bin\go.exe' test ./internal/adapters/feishu/...` in `apps/kimi-im-bridge` with `GOPROXY=https://goproxy.cn,direct`
+  - `& 'C:\Program Files\Go\bin\go.exe' test ./...` in `apps/kimi-im-bridge` with `GOPROXY=https://goproxy.cn,direct`
+  - `& 'C:\Program Files\Go\bin\go.exe' build ./cmd/kimi-im-bridge` in `apps/kimi-im-bridge` with `GOPROXY=https://goproxy.cn,direct`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - 这一轮仍未执行任何飞书手工联调；`invalid credentials`、重连首个重复事件去重、interactive card 真机点击与群聊显式召唤行为，已全部沉淀到 runbook，留待最终 `Unified Manual Test Gate` 统一执行。
+
+## Current Plan (Kimi IM Bridge phase 2 runtime prompt loop)
+
+### Checklist
+
+- [x] 结合 phase 2 文档收敛本轮最小闭环：统一 runtime 事件流、debug prompt、approval/resume
+- [x] 实现 `internal/runtime` 的 prompt request/response types、SDK driver 与 turn runner
+- [x] 在 sidecar admin API 中新增 `POST /api/v1/debug/prompt` 并接入 `app.Service`
+- [x] 运行 Go / Rust / 前端验证并补充本轮 review
+
+### Acceptance Criteria
+
+- [x] sidecar 可通过 debug prompt 入口驱动一次真实或可替换的 runtime prompt，并返回统一事件流
+- [x] 同一 `kimiSessionId` 的 prompt 继续由 runtime registry 串行化
+- [x] approval request 会入库为 pending ticket，调用现有 resolve API 后可继续完成 turn
+- [x] `go test ./...`、`go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-im-bridge/internal/runtime`
+    - 新增 `PromptRequest / PromptResponse / PromptEvent` 统一类型，明确 phase 2 的 runtime 输出面。
+    - 新增 `Driver` / `PromptStream` 抽象、`SDKDriver` 和 `TurnRunner`，把 Kimi Go SDK 的 step/message 流转换为统一事件流，并继续复用已有 `SessionRegistry` / `ApprovalCoordinator`。
+    - `TurnRunner` 会为 debug prompt 自动生成或复用 `kimiSessionId`，在 approval 到来时持久化 `turnId` / `stepId`，并在 turn 结束后回写 `bridge_sessions`。
+    - 新增 `turn_runner_test.go`，覆盖 pending approval 入库、resolve 后 resume、turn complete 和 session 持久化路径。
+  - `apps/kimi-im-bridge/internal/app` 与 `internal/admin`
+    - `app.Service` 注入 `TurnRunner`，新增 `DebugPrompt`。
+    - admin API 新增 `POST /api/v1/debug/prompt`，可直接触发本地 runtime prompt 调试。
+    - `server_test.go` 补充 debug prompt endpoint 覆盖。
+  - `apps/kimi-im-bridge/go.mod`
+    - 接入官方 `github.com/MoonshotAI/kimi-agent-sdk/go` 依赖，用于 phase 2 runtime adapter 实装。
+- Verification:
+  - `C:\Program Files\Go\bin\go.exe test ./internal/runtime/... ./internal/admin/...` in `apps/kimi-im-bridge`
+  - `C:\Program Files\Go\bin\go.exe test ./...` in `apps/kimi-im-bridge`
+  - `C:\Program Files\Go\bin\go.exe build ./cmd/kimi-im-bridge` in `apps/kimi-im-bridge`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+  - `kimi --version` -> `kimi, version 1.21.0`
+- Remaining note:
+  - 本机已确认存在 `kimi` CLI，但当前 shell 中 `KIMI_API_KEY` 环境变量未设置，因此这一轮没有执行真实模型 prompt 的手工 smoke；当前验收覆盖的是 SDK 接线、approval/resume 单测、Go 全量测试、Rust 单测和前端构建。
+
 ## Archive Note
 
 - Full pre-trim history copied to `tasks/history/todo_backup_0312.md`.
@@ -25,6 +106,41 @@
 - Detailed historical checklists, acceptance criteria, and review notes remain in `tasks/history/todo_backup_0312.md`.
 
 ## Recent 20 Plans
+
+## Current Plan (Kimi IM Bridge phase 2 foundation)
+
+### Checklist
+
+- [x] 修复 sidecar 协作式停机链路，避免 Windows stop/restart 直接 `taskkill`
+- [x] 为 approval 持久化补齐 phase 2 所需的 runtime 标识与查询/处理接口
+- [x] 新增 phase 2 runtime 基础骨架与 admin API 扩展
+- [x] 运行 Go / Rust / 前端相关验证并补充本轮 review
+
+### Acceptance Criteria
+
+- [x] `stop_bridge` 优先通过 loopback admin API 协作式关闭 sidecar，超时后才回退强杀
+- [x] `approval_requests` 能持久化 `turn_id` / `step_id` 并支持 list/resolve 基础查询接口
+- [x] sidecar 暴露 phase 2 需要的 approvals / runtime stop admin API，且测试覆盖关键路径
+- [x] `go test ./...` 与 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-im-bridge`
+    - 新增 `internal/runtime` 基础骨架，包含 `SessionRegistry` 串行执行器与 `ApprovalCoordinator`，为 phase 2 runtime/approval 闭环提供可测试基础。
+    - `approval_requests` schema 从 v1 升级到 v2，新增 `turn_id` / `step_id`，并补齐 migration runner、approval list/resolve store API 与迁移回归测试。
+    - admin API 新增 `GET /api/v1/approvals`、`POST /api/v1/approvals/{id}/resolve`、`POST /api/v1/runtime/stop`。
+    - sidecar 主进程新增 stop channel，允许 admin stop 触发 `main` 走正常 shutdown 流程退出。
+  - `apps/kimi-shell/src-tauri`
+    - `BridgeHttpClient` 新增 `stop_runtime()`。
+    - `stop_bridge` 优先请求 sidecar 协作式关闭，等待子进程退出，只有超时或请求失败时才回退 `taskkill`/强制终止。
+- Verification:
+  - `C:\Program Files\Go\bin\go.exe test ./...` in `apps/kimi-im-bridge`
+  - `C:\Program Files\Go\bin\go.exe build ./cmd/kimi-im-bridge` in `apps/kimi-im-bridge`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - approval 持久化已具备 `turn_id` / `step_id` 与 admin resolve 基础接口，但“跨进程重启后对真实 SDK pending request 重新挂接 responder”仍属于后续 phase 2 runtime adapter 的下一步工作。
 
 ## Current Plan (Kimi IM Bridge phase 0-1)
 
@@ -954,3 +1070,94 @@
   - `pnpm -C apps/kimi-shell build` passed.
 - Remaining note:
   - A manual Windows click-through of `Install Python 3.13` is still recommended to confirm the exact previously reported false-failure path is gone in the packaged app.
+## Current Plan (Kimi IM Bridge phases 2-6 continuation)
+
+### Checklist
+
+- [x] 统一任务与文档编排：实施计划、设计文档、manual test runbook 与 deferred manual validation
+- [x] 完成 phase 2 收尾：runtime 服务化、session 复用入口与 orphan approval 重启失败回收
+- [x] 运行本轮自动化验证并确认“开发继续、手工测试后置”的流程可执行
+- [x] 记录本轮 review、自动化验证结果与后续 phase 3-6 入口
+
+### Acceptance Criteria
+
+- [x] `docs/kimi-im-bridge-implementation-plan.md` 为每个 phase 增加 `Deferred Manual Validation`，并新增 `Unified Manual Test Gate`
+- [x] `docs/kimi-im-bridge-design.md` 明确“进程内 approval 可 resume、跨 sidecar 重启 pending approval 转为 failed”的最终语义
+- [x] 新增 `docs/kimi-im-bridge-manual-test-runbook.md`，固定记录目标、前置条件、配置、步骤、期望、证据、实际结果、问题编号
+- [x] runtime 启动后会把历史 orphan `pending approval` 标记为 `failed`，并写入明确失败原因
+- [x] `go test ./...`、`go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+- `docs/kimi-im-bridge-implementation-plan.md`
+  - 为 Phase 2-6 全部补充 `Deferred Manual Validation` 小节，并新增 `Unified Manual Test Gate`，把中途零散联调统一后置到最终测试闸门。
+- `docs/kimi-im-bridge-design.md`
+  - 明确 approval 最终语义：仅进程内 live responder 可 resume，跨 sidecar 重启的历史 pending approval 会在启动恢复时转为 `failed`。
+  - 更新 `approval_requests` 设计，补齐 `turn_id` / `step_id` 字段。
+- `docs/kimi-im-bridge-manual-test-runbook.md`
+  - 新增统一手工测试 runbook，覆盖 Phase 2-6 的目标、前置条件、配置、步骤、期望结果与证据要求。
+- `apps/kimi-im-bridge/internal/runtime`
+  - 将 driver 拆成 `OpenSession + DriverSession`，给 runtime 提供长生命周期 session 入口。
+  - `SessionRegistry` 新增 live session 管理与关闭逻辑，同一 `kimiSessionId` 继续串行，配置变化时自动重建 session。
+  - 新增 `runtime.Service`，统一承接 prompt、binding prompt、approval resolve 与 pending approval reconciliation。
+  - `ApprovalCoordinator` 新增 `ReconcilePending`，在 sidecar 启动时把 orphan `pending approval` 统一标记为 `failed`。
+- `apps/kimi-im-bridge/internal/app`
+  - `app.Service` 改为注入 `runtime.Service`，并在启动初始化时执行 orphan approval 回收。
+  - 新增 `app_test.go`，验证重启后 pending approval 会自动落到 `failed`。
+- `apps/kimi-im-bridge/internal/runtime/*_test.go`
+  - 补充 session 复用 / 配置变化重建 / orphan approval reconciliation 覆盖。
+- Verification:
+- `& 'C:\Program Files\Go\bin\go.exe' test ./internal/runtime/... ./internal/app/...` in `apps/kimi-im-bridge`
+- `& 'C:\Program Files\Go\bin\go.exe' test ./internal/admin/... ./internal/store/...` in `apps/kimi-im-bridge`
+- `& 'C:\Program Files\Go\bin\go.exe' test ./...` in `apps/kimi-im-bridge`
+- `& 'C:\Program Files\Go\bin\go.exe' build ./cmd/kimi-im-bridge` in `apps/kimi-im-bridge`
+- `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- `pnpm -C apps/kimi-shell build`
+- Remaining note:
+- 这轮把 phase 2 的 runtime 底座和统一手工测试文档化收口了，但 Telegram / 飞书 adapter 与 Control Center approvals / log tail UI 还未开始实现，下一步将从 phase 3 的 Telegram adapter 切入。
+
+## Current Plan (Kimi IM Bridge phase 3 Telegram adapter)
+
+### Checklist
+
+- [x] 补 runtime 事件驱动执行接口，并让 debug prompt 复用同一执行底座
+- [x] 扩展 store/channel status：bridge_channels v3 migration、channel 状态与 approval/delivery 读取接口
+- [x] 实现 Telegram adapter：startup 校验、long polling、message mapping、binding/runtime、reply、approval callback
+- [x] 补 phase 3 自动化测试与 runbook 用例，并完成 Go / Rust / 前端验证
+
+### Acceptance Criteria
+
+- [x] runtime 可在 turn 进行中把 `approval_requested` 事件同步抛给 adapter，而不是等待整轮结束
+- [x] Telegram enabled 且 bot token 有效时，可从 persisted offset 恢复 long polling，并把私聊 / 显式召唤群聊文本转成 runtime prompt
+- [x] Telegram approval inline button 可校验 approval 归属、回写 resolve，并更新原消息状态
+- [x] webhook 已配置、invalid token、missing bot token 会让 Telegram channel 进入 `error`，但 sidecar 仍可继续运行
+- [x] `go test ./internal/adapters/telegram/...`、`go test ./...`、`go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+- `apps/kimi-im-bridge/internal/runtime`
+  - `TurnRunner` 新增 `ExecuteBindingPrompt` 事件驱动入口，`RunPrompt` / `RunBindingPrompt` 改为复用同一底座。
+  - approval ticket 持久化时携带 binding 维度的 `platform/chatId/threadId`，Telegram adapter 可以在 turn 进行中立即消费 `approval_requested`。
+- `apps/kimi-im-bridge/internal/store`
+  - 新增 v3 migration，为 `bridge_channels` 补 `last_inbound_at` / `last_outbound_at`。
+  - `ListChannelStatuses()` 改为返回真实的 inbound / outbound / offset 字段。
+  - 新增 `UpdateChannelState`、`UpdateChannelOffset`、`TouchChannelInbound`、`TouchChannelOutbound`、`GetApprovalByID`、`GetDeliveryEventByKey`、`UpdateDeliveryEventStatus` 等 phase 3 所需接口。
+- `apps/kimi-im-bridge/internal/adapters/telegram`
+  - 新增 Telegram long polling adapter，覆盖 `getMe` / `getWebhookInfo` / `getUpdates` 启动链路。
+  - 支持私聊文本、群聊显式召唤、forum topic `threadId` 映射、offset 恢复与状态回写。
+  - 支持最终文本回复的 HTML->plain fallback、4096 分片、`delivery_events` 幂等去重。
+  - 支持 inline approval buttons、callback data 校验、统一 resolve、原消息状态编辑。
+- `apps/kimi-im-bridge/internal/app`
+  - sidecar `Start()` / `Shutdown()` 开始托管 enabled adapters，并把 channel 级 `error/degraded` 汇总到 bridge 总状态。
+- `docs/kimi-im-bridge-manual-test-runbook.md`
+  - 补充 Telegram 的 deferred manual validation，用例扩展到 `webhook configured` 和 `invalid token`。
+- Verification:
+- `& 'C:\Program Files\Go\bin\go.exe' test ./internal/adapters/telegram/...` in `apps/kimi-im-bridge`
+- `& 'C:\Program Files\Go\bin\go.exe' test ./...` in `apps/kimi-im-bridge`
+- `& 'C:\Program Files\Go\bin\go.exe' build ./cmd/kimi-im-bridge` in `apps/kimi-im-bridge`
+- `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+- `pnpm -C apps/kimi-shell build`
+- Remaining note:
+- phase 3 只完成了 sidecar Telegram adapter，本轮没有扩 Control Center approvals / log tail UI，也没有开始飞书 adapter；下一步入口是 phase 4。

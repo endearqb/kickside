@@ -89,6 +89,15 @@ impl BridgeHttpClient {
         Ok(())
     }
 
+    pub fn stop_runtime(&self) -> anyhow::Result<()> {
+        self.request(reqwest::Method::POST, "/api/v1/runtime/stop")?
+            .send()
+            .context("failed to request bridge runtime stop")?
+            .error_for_status()
+            .context("bridge runtime stop returned error status")?;
+        Ok(())
+    }
+
     fn request(
         &self,
         method: reqwest::Method,
@@ -144,6 +153,33 @@ mod tests {
                 .expect("header should be captured")
                 .as_deref(),
             Some("bridge-token")
+        );
+    }
+
+    #[test]
+    fn stop_runtime_uses_post_method() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            sender
+                .send(request.method().as_str().to_string())
+                .expect("method should be forwarded");
+            let response = Response::empty(202);
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        client
+            .stop_runtime()
+            .expect("stop_runtime should accept 202 response");
+
+        assert_eq!(
+            receiver.recv().expect("method should be captured"),
+            "POST".to_string()
         );
     }
 }

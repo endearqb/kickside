@@ -40,6 +40,7 @@
 ### 3.2 文档交付物
 
 - 本计划文档
+- `docs/kimi-im-bridge-manual-test-runbook.md`
 - 最终用户配置说明
 - 发布说明 / 回归清单
 
@@ -190,6 +191,13 @@ go test ./...
 5. 实现 approval 闭环：
    - pending ticket 入库
    - resolve 后 resume
+6. 补齐启动恢复语义：
+   - 启动时扫描 `approval_requests.status = pending`
+   - 对没有 live responder 的遗留项直接标记为 `failed`
+   - `resolution_payload_json` 写入 `runtime_restarted_before_resume`
+7. 收敛 runtime 服务入口：
+   - 统一由 runtime service 接收 `Binding + PromptRequest`
+   - debug prompt、Telegram、飞书共用同一 prompt 执行与 approval 处理层
 
 ### 6.3 入口条件
 
@@ -209,11 +217,14 @@ go test ./internal/runtime/...
 go test ./...
 ```
 
-### 6.6 手工验证
+### 6.6 Deferred Manual Validation
+
+本阶段开发完成后暂不立即执行手工联调；以下用例统一沉淀到 runbook，并在最终统一测试闸门中一次性执行：
 
 1. 本机启动 sidecar
 2. 用伪造的 binding 直接触发 prompt
 3. 验证文本流、错误处理和 approval 路径
+4. sidecar 重启后检查历史 pending approval 已被转为 `failed`
 
 ## 7. Phase 3：Telegram Adapter
 
@@ -259,12 +270,16 @@ go test ./internal/adapters/telegram/...
 go test ./...
 ```
 
-### 7.6 手工联调
+### 7.6 Deferred Manual Validation
+
+本阶段开发完成后暂不立即执行 Telegram 联调；以下用例统一沉淀到 runbook，并在最终统一测试闸门中一次性执行：
 
 1. Telegram 私聊首次发消息
 2. 连续发送第二条消息
 3. 触发一次 approval
 4. 重启 sidecar 后再次发消息，确认未重复消费历史消息
+5. 启动前人为配置 webhook，确认 channel 进入 `error` 且 webhook 不被自动删除
+6. 使用无效 bot token 启动，确认 channel 进入 `error` 且不进入 polling
 
 ## 8. Phase 4：飞书 Adapter
 
@@ -307,12 +322,16 @@ go test ./internal/adapters/feishu/...
 go test ./...
 ```
 
-### 8.6 手工联调
+### 8.6 Deferred Manual Validation
+
+本阶段开发完成后暂不立即执行飞书联调；以下用例统一沉淀到 runbook，并在最终统一测试闸门中一次性执行：
 
 1. 飞书私聊触发新会话
 2. 飞书群聊触发同群多轮
 3. 飞书线程绑定已有 session
 4. 触发 approval 并从飞书完成处理
+5. 使用无效 appId / appSecret 启动，确认 channel 进入 `error`
+6. 长连接重连后遇到首个重复投递事件，确认通过 `feishu_checkpoint` 去重
 
 ## 9. Phase 5：Control Center 集成与打包
 
@@ -367,6 +386,15 @@ pnpm -C apps/kimi-shell build
 pnpm -C apps/kimi-shell tauri build
 ```
 
+### 9.6 Deferred Manual Validation
+
+本阶段开发完成后暂不立即执行控制中心与安装版手工验证；以下用例统一沉淀到 runbook，并在最终统一测试闸门中一次性执行：
+
+1. 控制中心查看 pending approvals
+2. 控制中心手动 resolve approval
+3. 查看 `bridge.log` tail 与最近错误
+4. 安装版启动、停止、重启 sidecar
+
 ## 10. Phase 6：稳定化与发布
 
 ### 10.1 目标
@@ -403,6 +431,14 @@ go test ./...
 pnpm -C apps/kimi-shell build
 pnpm -C apps/kimi-shell tauri build
 ```
+
+### 10.6 Deferred Manual Validation
+
+本阶段开发完成后执行统一手工回归，但在此之前只维护 runbook，不提前拆散执行。至少覆盖：
+
+1. Windows 协作式 stop/restart 对运行中 turn 的影响
+2. 打包安装版的配置、日志、停止、重启
+3. Telegram / 飞书双渠道恢复、审批、幂等与错误定位
 
 ## 11. 测试矩阵
 
@@ -463,7 +499,24 @@ pnpm -C apps/kimi-shell tauri build
 4. 安装版可分发并托管 sidecar。
 5. 关键失败场景均可定位。
 
-## 15. 调研依据 / 参考链接
+## 15. Unified Manual Test Gate
+
+统一手工测试只在 Phase 2-6 代码开发完成后执行，不在阶段中途插入零散联调。执行入口与记录规范如下：
+
+1. 所有手工用例统一登记在 `docs/kimi-im-bridge-manual-test-runbook.md`
+2. 每条用例都必须记录：
+   - 目标
+   - 前置条件
+   - 配置 / 账号
+   - 操作步骤
+   - 期望结果
+   - 需保存的证据
+   - 实际结果
+   - 问题编号
+3. 阶段开发过程中只补充用例，不填写“实际结果”
+4. 只有当自动化验证稳定通过后，才进入统一手工测试闸门
+
+## 16. 调研依据 / 参考链接
 
 - [项目中文 README](../README_zh.md)
 - [Kimi Desktop Shell README](../apps/kimi-shell/README.md)

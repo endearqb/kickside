@@ -149,6 +149,9 @@ function App() {
               loginProbeBusy={shell.loginProbeBusy}
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
+              bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
+              bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
+              bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
               bridgeLogTail={shell.bridgeLogTail}
@@ -206,6 +209,8 @@ function App() {
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
+              onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
+              onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
               onSaveBridgeSettings={shell.handleSaveBridgeSettings}
               onStartBridge={shell.handleStartBridge}
               onStopBridge={shell.handleStopBridge}
@@ -265,6 +270,9 @@ function App() {
               loginProbeBusy={shell.loginProbeBusy}
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
+              bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
+              bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
+              bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
               bridgeLogTail={shell.bridgeLogTail}
@@ -322,6 +330,8 @@ function App() {
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
+              onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
+              onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
               onSaveBridgeSettings={shell.handleSaveBridgeSettings}
               onStartBridge={shell.handleStartBridge}
               onStopBridge={shell.handleStopBridge}

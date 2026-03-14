@@ -7,8 +7,8 @@ use crate::{
     app_state::AppState,
     settings_store,
     types::{
-        AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgePlatform, BridgeSecrets,
-        BridgeSettings, CURRENT_SETTINGS_SCHEMA_VERSION,
+        AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgeOnboardingConfigInput,
+        BridgePlatform, BridgeSecrets, BridgeSettings, CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -29,6 +29,20 @@ pub fn save(app: &AppHandle, input: &BridgeSettings) -> anyhow::Result<BridgeSet
 pub fn load_secrets_or_default(app: &AppHandle) -> anyhow::Result<BridgeSecrets> {
     let state = app.state::<AppState>();
     load_secrets_at(&state.bridge_secrets_path)
+}
+
+pub fn save_onboarding_config(
+    app: &AppHandle,
+    input: &BridgeOnboardingConfigInput,
+) -> anyhow::Result<BridgeSettings> {
+    let state = app.state::<AppState>();
+    let (_, settings, _) = save_onboarding_files(
+        &state.settings_path,
+        &state.bridge_settings_path,
+        &state.bridge_secrets_path,
+        input,
+    )?;
+    Ok(settings)
 }
 
 pub fn ensure_bridge_files(app: &AppHandle) -> anyhow::Result<()> {
@@ -74,6 +88,33 @@ fn save_files(
     Ok((app_settings, bridge_settings))
 }
 
+fn save_onboarding_files(
+    app_settings_path: &Path,
+    bridge_settings_path: &Path,
+    bridge_secrets_path: &Path,
+    input: &BridgeOnboardingConfigInput,
+) -> anyhow::Result<(AppSettings, BridgeSettings, BridgeSecrets)> {
+    let mut app_settings = load_app_settings_at(app_settings_path)?;
+    let existing_settings = if bridge_settings_path.exists() {
+        read_json::<BridgeSettings>(bridge_settings_path)?
+    } else {
+        default_bridge_settings(&app_settings)
+    };
+    let mut bridge_settings = normalize_bridge_settings(existing_settings);
+    let mut bridge_secrets = load_secrets_at(bridge_secrets_path)?;
+
+    apply_onboarding_input(&mut bridge_settings, &mut bridge_secrets, input)?;
+
+    write_json(bridge_secrets_path, &bridge_secrets)?;
+    write_json(bridge_settings_path, &bridge_settings)?;
+
+    if sync_bridge_mirror(&bridge_settings, &mut app_settings) {
+        save_app_settings_at(app_settings_path, &app_settings)?;
+    }
+
+    Ok((app_settings, bridge_settings, bridge_secrets))
+}
+
 fn load_app_settings_at(path: &Path) -> anyhow::Result<AppSettings> {
     if path.exists() {
         let mut settings = read_json::<AppSettings>(path)?;
@@ -103,6 +144,52 @@ fn load_secrets_at(path: &Path) -> anyhow::Result<BridgeSecrets> {
     let secrets = BridgeSecrets::default();
     write_json(path, &secrets)?;
     Ok(secrets)
+}
+
+fn trim_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn apply_onboarding_input(
+    bridge_settings: &mut BridgeSettings,
+    bridge_secrets: &mut BridgeSecrets,
+    input: &BridgeOnboardingConfigInput,
+) -> anyhow::Result<()> {
+    if let Some(value) = trim_optional_string(input.feishu.app_id.clone()) {
+        bridge_secrets.feishu.app_id = Some(value);
+    }
+    if let Some(value) = trim_optional_string(input.feishu.app_secret.clone()) {
+        bridge_secrets.feishu.app_secret = Some(value);
+    }
+    if let Some(value) = trim_optional_string(input.feishu.verification_token.clone()) {
+        bridge_secrets.feishu.verification_token = Some(value);
+    }
+    if let Some(value) = trim_optional_string(input.feishu.encrypt_key.clone()) {
+        bridge_secrets.feishu.encrypt_key = Some(value);
+    }
+
+    if input.feishu_enabled
+        && (bridge_secrets.feishu.app_id.is_none() || bridge_secrets.feishu.app_secret.is_none())
+    {
+        anyhow::bail!("feishu appId and appSecret are required before enabling Feishu bridge")
+    }
+
+    bridge_settings.enabled = input.enabled || input.feishu_enabled;
+    for channel in &mut bridge_settings.channels {
+        if channel.platform == BridgePlatform::Feishu {
+            channel.enabled = input.feishu_enabled;
+        }
+    }
+
+    *bridge_settings = normalize_bridge_settings(bridge_settings.clone());
+    Ok(())
 }
 
 fn read_json<T>(path: &Path) -> anyhow::Result<T>
@@ -317,5 +404,143 @@ mod tests {
 
         assert_eq!(secrets, BridgeSecrets::default());
         assert!(secrets_path.exists());
+    }
+
+    #[test]
+    fn save_onboarding_config_enables_feishu_and_persists_secrets() {
+        let temp = TempDirGuard::new("onboarding-save");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        let input = BridgeOnboardingConfigInput {
+            enabled: false,
+            feishu_enabled: true,
+            feishu: crate::types::BridgeOnboardingFeishuInput {
+                app_id: Some(" cli-app-id ".to_string()),
+                app_secret: Some(" cli-app-secret ".to_string()),
+                verification_token: Some("verify-token".to_string()),
+                encrypt_key: Some("encrypt-key".to_string()),
+            },
+        };
+
+        let (_, bridge_settings, bridge_secrets) = save_onboarding_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            &input,
+        )
+        .expect("save onboarding config");
+
+        assert!(bridge_settings.enabled);
+        assert_eq!(bridge_settings.channels.len(), 2);
+        assert!(
+            bridge_settings
+                .channels
+                .iter()
+                .find(|channel| channel.platform == BridgePlatform::Feishu)
+                .expect("feishu channel")
+                .enabled
+        );
+        assert_eq!(bridge_secrets.feishu.app_id.as_deref(), Some("cli-app-id"));
+        assert_eq!(
+            bridge_secrets.feishu.app_secret.as_deref(),
+            Some("cli-app-secret")
+        );
+        assert_eq!(
+            bridge_secrets.feishu.verification_token.as_deref(),
+            Some("verify-token")
+        );
+        assert_eq!(
+            bridge_secrets.feishu.encrypt_key.as_deref(),
+            Some("encrypt-key")
+        );
+    }
+
+    #[test]
+    fn save_onboarding_config_keeps_existing_secrets_when_inputs_are_blank() {
+        let temp = TempDirGuard::new("onboarding-preserve");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                telegram: Default::default(),
+                feishu: crate::types::BridgeFeishuSecrets {
+                    app_id: Some("existing-app-id".to_string()),
+                    app_secret: Some("existing-app-secret".to_string()),
+                    verification_token: Some("existing-token".to_string()),
+                    encrypt_key: None,
+                },
+            },
+        )
+        .expect("seed secrets");
+
+        let input = BridgeOnboardingConfigInput {
+            enabled: true,
+            feishu_enabled: true,
+            feishu: Default::default(),
+        };
+
+        let (_, bridge_settings, bridge_secrets) = save_onboarding_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            &input,
+        )
+        .expect("save onboarding config");
+
+        assert!(bridge_settings.enabled);
+        assert!(
+            bridge_settings
+                .channels
+                .iter()
+                .find(|channel| channel.platform == BridgePlatform::Feishu)
+                .expect("feishu channel")
+                .enabled
+        );
+        assert_eq!(
+            bridge_secrets.feishu.app_id.as_deref(),
+            Some("existing-app-id")
+        );
+        assert_eq!(
+            bridge_secrets.feishu.app_secret.as_deref(),
+            Some("existing-app-secret")
+        );
+        assert_eq!(
+            bridge_secrets.feishu.verification_token.as_deref(),
+            Some("existing-token")
+        );
+    }
+
+    #[test]
+    fn save_onboarding_config_rejects_enabling_feishu_without_effective_credentials() {
+        let temp = TempDirGuard::new("onboarding-invalid");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        let input = BridgeOnboardingConfigInput {
+            enabled: false,
+            feishu_enabled: true,
+            feishu: Default::default(),
+        };
+
+        let error = save_onboarding_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            &input,
+        )
+        .expect_err("missing feishu credentials should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("feishu appId and appSecret are required"),
+            "unexpected error: {error:#}"
+        );
     }
 }

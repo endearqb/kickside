@@ -10,6 +10,7 @@
   "type": "module",
   "scripts": {
     "sync:version": "node scripts/sync_version.mjs",
+    "version:bump:patch": "node scripts/bump_patch_version.mjs",
     "dev": "pnpm sync:version && vite",
     "build": "pnpm sync:version && tsc && vite build",
     "build:bridge-sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build_bridge_sidecar.ps1",

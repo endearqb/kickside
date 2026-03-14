@@ -215,6 +215,25 @@ export interface BridgeSecretsMaskView {
   feishu: BridgeFeishuSecretsMaskView;
 }
 
+export interface BridgeOnboardingFeishuInput {
+  appId?: string;
+  appSecret?: string;
+  verificationToken?: string;
+  encryptKey?: string;
+}
+
+export interface BridgeOnboardingConfigInput {
+  enabled: boolean;
+  feishuEnabled: boolean;
+  feishu: BridgeOnboardingFeishuInput;
+}
+
+export interface BridgeOnboardingValidation {
+  canSave: boolean;
+  canStart: boolean;
+  message?: string;
+}
+
 export interface FrontendReadyAck {
   accepted: boolean;
   backendState: BackendState;

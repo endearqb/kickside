@@ -37,6 +37,8 @@ import type {
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
+  BridgeOnboardingConfigInput,
+  BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
   BridgeSecretsMaskView,
   BridgeSettings,
@@ -258,6 +260,75 @@ function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
   };
 }
 
+function getBridgeChannelEnabled(
+  settings: BridgeSettings,
+  platform: "telegram" | "feishu",
+): boolean {
+  return settings.channels.find((channel) => channel.platform === platform)?.enabled ?? false;
+}
+
+function createDefaultBridgeOnboardingConfigInput(
+  settings: BridgeSettings = createDefaultBridgeSettings(),
+): BridgeOnboardingConfigInput {
+  return {
+    enabled: settings.enabled,
+    feishuEnabled: getBridgeChannelEnabled(settings, "feishu"),
+    feishu: {
+      appId: "",
+      appSecret: "",
+      verificationToken: "",
+      encryptKey: "",
+    },
+  };
+}
+
+function hasBridgeDraftSecretValue(value?: string): boolean {
+  return Boolean(value?.trim());
+}
+
+function createBridgeOnboardingValidation(
+  draft: BridgeOnboardingConfigInput,
+  secretsMask: BridgeSecretsMaskView,
+  dirty: boolean,
+): BridgeOnboardingValidation {
+  const effectiveAppId =
+    hasBridgeDraftSecretValue(draft.feishu.appId) || secretsMask.feishu.appId.configured;
+  const effectiveAppSecret =
+    hasBridgeDraftSecretValue(draft.feishu.appSecret) ||
+    secretsMask.feishu.appSecret.configured;
+  const wantsEnabled = draft.enabled || draft.feishuEnabled;
+
+  if (draft.feishuEnabled && (!effectiveAppId || !effectiveAppSecret)) {
+    return {
+      canSave: false,
+      canStart: false,
+      message: "启用 Feishu 前需要提供 appId 和 appSecret，或保留已有已配置值。",
+    };
+  }
+
+  if (!wantsEnabled) {
+    return {
+      canSave: true,
+      canStart: false,
+      message: "这是可选配置；保存并启用 IM Bridge 后，才能从这里直接启动 bridge。",
+    };
+  }
+
+  if (dirty) {
+    return {
+      canSave: true,
+      canStart: false,
+      message: "存在未保存的 IM Bridge 配置，请先点击“保存并启用”再启动 bridge。",
+    };
+  }
+
+  return {
+    canSave: true,
+    canStart: true,
+    message: "配置已就绪；可以直接从这里启动 bridge 并观察 Feishu 连接状态。",
+  };
+}
+
 export function useShellController() {
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
@@ -299,6 +370,10 @@ export function useShellController() {
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
   );
+  const [bridgeOnboardingDraft, setBridgeOnboardingDraft] =
+    useState<BridgeOnboardingConfigInput>(() =>
+      createDefaultBridgeOnboardingConfigInput(),
+    );
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
   const [powershellPreflight, setPowershellPreflight] =
@@ -349,6 +424,8 @@ export function useShellController() {
   const [shellBootPending, setShellBootPending] = useState(
     () => parseHashRoute(window.location.hash) === "loading",
   );
+  const [pendingWorkspaceEntryAfterOnboarding, setPendingWorkspaceEntryAfterOnboarding] =
+    useState(false);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
@@ -588,6 +665,39 @@ export function useShellController() {
     setControlCenterChrome(nextChrome);
   }
 
+  function isWorkspaceReady(nextStatus: AppStatus | null | undefined) {
+    return nextStatus?.state === "running" && typeof nextStatus.activePort === "number";
+  }
+
+  function isOnboardingDismissed(nextOnboarding: OnboardingStatus | null | undefined) {
+    return nextOnboarding != null && !nextOnboarding.shouldShowOnboarding;
+  }
+
+  function navigateToWorkspaceAfterOnboarding() {
+    setPendingWorkspaceEntryAfterOnboarding(false);
+    if (controlCenterModalOpen) {
+      setConfigCenterOpen(false);
+      setInstallFlowOpen(false);
+      setInstallCommandsOpen(false);
+      resetControlCenterNavigation("dashboard");
+      setControlCenterModalOpen(false);
+      return;
+    }
+    resetControlCenterNavigation();
+    window.location.hash = "";
+    setRouteHash(window.location.hash);
+  }
+
+  function parkOnControlCenterOverviewAwaitingWorkspace() {
+    setPendingWorkspaceEntryAfterOnboarding(true);
+    setActiveControlSection("overview");
+    setActiveRuntimePanel("paths");
+    setControlCenterChrome(controlCenterModalOpen ? "dashboard" : "full");
+    if (!controlCenterModalOpen) {
+      applyRouteHash("/control-center");
+    }
+  }
+
   function startWorkspacePane(
     nextUrl: string | null,
     previousUrl: string | null,
@@ -788,8 +898,10 @@ export function useShellController() {
         clearShutdownElapsedTimer(true);
       }
       setActionError(null);
+      return data;
     } catch (error) {
       setActionError(String(error));
+      return null;
     } finally {
       setShellBootPending(false);
       setIsLoading(false);
@@ -801,8 +913,10 @@ export function useShellController() {
       const data = await invoke<OnboardingStatus>("get_onboarding_status");
       setOnboarding(data);
       setActionError(null);
+      return data;
     } catch (error) {
       setActionError(String(error));
+      return null;
     }
   }
 
@@ -905,7 +1019,7 @@ export function useShellController() {
   }
 
   async function refreshCoreState() {
-    await Promise.all([refreshStatus(), refreshOnboarding()]);
+    return Promise.all([refreshStatus(), refreshOnboarding()]);
   }
 
   useEffect(() => {
@@ -1505,20 +1619,56 @@ export function useShellController() {
     }
   }, [onboarding, workDirInput]);
 
+  const bridgeOnboardingDirty = useMemo(() => {
+    return (
+      bridgeOnboardingDraft.enabled !== bridgeSettings.enabled ||
+      bridgeOnboardingDraft.feishuEnabled !==
+        getBridgeChannelEnabled(bridgeSettings, "feishu") ||
+      hasBridgeDraftSecretValue(bridgeOnboardingDraft.feishu.appId) ||
+      hasBridgeDraftSecretValue(bridgeOnboardingDraft.feishu.appSecret) ||
+      hasBridgeDraftSecretValue(bridgeOnboardingDraft.feishu.verificationToken) ||
+      hasBridgeDraftSecretValue(bridgeOnboardingDraft.feishu.encryptKey)
+    );
+  }, [bridgeOnboardingDraft, bridgeSettings]);
+
+  const bridgeOnboardingValidation = useMemo(
+    () =>
+      createBridgeOnboardingValidation(
+        bridgeOnboardingDraft,
+        bridgeSecretsMask,
+        bridgeOnboardingDirty,
+      ),
+    [bridgeOnboardingDirty, bridgeOnboardingDraft, bridgeSecretsMask],
+  );
+
+  useEffect(() => {
+    if (bridgeOnboardingDirty) {
+      return;
+    }
+    setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(bridgeSettings));
+  }, [bridgeOnboardingDirty, bridgeSettings]);
+
   useEffect(() => {
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
+    const bridgeControlsVisible =
+      controlCenterVisible &&
+      (activeControlSection === "onboarding" ||
+        (activeControlSection === "runtime_center" &&
+          activeRuntimePanel === "bridge"));
     const bridgePanelVisible =
       controlCenterVisible &&
       activeControlSection === "runtime_center" &&
       activeRuntimePanel === "bridge";
 
-    if (bridgePanelVisible) {
+    if (bridgeControlsVisible) {
       void refreshBridgeSettings();
       void refreshBridgeStatus();
+      void refreshBridgeSecretsMask();
+    }
+    if (bridgePanelVisible) {
       void refreshBridgeBindings();
       void refreshBridgeApprovals();
       void refreshBridgeLogTail();
-      void refreshBridgeSecretsMask();
     }
   }, [
     activeControlSection,
@@ -1635,6 +1785,16 @@ export function useShellController() {
       return;
     }
   }, [routeHash, screen]);
+
+  useEffect(() => {
+    if (!pendingWorkspaceEntryAfterOnboarding) {
+      return;
+    }
+    if (!isWorkspaceReady(status) || !isOnboardingDismissed(onboarding)) {
+      return;
+    }
+    navigateToWorkspaceAfterOnboarding();
+  }, [controlCenterModalOpen, onboarding, pendingWorkspaceEntryAfterOnboarding, status]);
 
   useEffect(() => {
     if (!status) return;
@@ -1870,6 +2030,39 @@ export function useShellController() {
 
   function handleBridgeSettingsChange(next: BridgeSettings) {
     setBridgeSettings(next);
+  }
+
+  function handleBridgeOnboardingDraftChange(next: BridgeOnboardingConfigInput) {
+    setBridgeOnboardingDraft(next);
+  }
+
+  async function handleSaveBridgeOnboarding() {
+    if (!bridgeOnboardingValidation.canSave) {
+      setActionError(
+        bridgeOnboardingValidation.message ?? "当前 IM Bridge 配置不完整，无法保存。",
+      );
+      return;
+    }
+
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const input: BridgeOnboardingConfigInput = {
+        ...bridgeOnboardingDraft,
+        enabled: true,
+        feishuEnabled: true,
+      };
+      const saved = await invoke<BridgeSettings>("save_bridge_onboarding_config", {
+        input,
+      });
+      setBridgeSettings(saved);
+      setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(saved));
+      await Promise.all([refreshBridgeStatus(), refreshBridgeSecretsMask()]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
   }
 
   async function handleSaveBridgeSettings() {
@@ -2250,9 +2443,12 @@ export function useShellController() {
     setActionError(null);
     try {
       await invoke("complete_onboarding");
-      window.location.hash = "/loading";
-      setRouteHash(window.location.hash);
-      await refreshCoreState();
+      const [nextStatus, nextOnboarding] = await refreshCoreState();
+      if (isWorkspaceReady(nextStatus) && isOnboardingDismissed(nextOnboarding)) {
+        navigateToWorkspaceAfterOnboarding();
+      } else {
+        parkOnControlCenterOverviewAwaitingWorkspace();
+      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2265,9 +2461,12 @@ export function useShellController() {
     setActionError(null);
     try {
       await invoke("skip_onboarding");
-      window.location.hash = "/loading";
-      setRouteHash(window.location.hash);
-      await refreshCoreState();
+      const [nextStatus, nextOnboarding] = await refreshCoreState();
+      if (isWorkspaceReady(nextStatus) && isOnboardingDismissed(nextOnboarding)) {
+        navigateToWorkspaceAfterOnboarding();
+      } else {
+        parkOnControlCenterOverviewAwaitingWorkspace();
+      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2580,6 +2779,9 @@ export function useShellController() {
     bridgeLogTail,
     bridgeRecentErrors,
     bridgeSecretsMask,
+    bridgeOnboardingDraft,
+    bridgeOnboardingDirty,
+    bridgeOnboardingValidation,
     bridgeBusy,
     kimiPathInput,
     setKimiPathInput,
@@ -2630,7 +2832,9 @@ export function useShellController() {
     installCommandsOpen: installFlowOpen,
     installCommandsBusy: false,
     installCommandCatalog,
-    refreshCoreState,
+    refreshCoreState: async () => {
+      await refreshCoreState();
+    },
     refreshDiagnostics,
     refreshContextMenuStatus,
     refreshBridgeSettings,
@@ -2642,7 +2846,9 @@ export function useShellController() {
     refreshInstallProbe,
     refreshInstallSettings,
     refreshPowerShellPreflight,
-    refreshOnboarding,
+    refreshOnboarding: async () => {
+      await refreshOnboarding();
+    },
     handleRetry,
     handleRuntimeOnlyRetry,
     handleRecoverMainWindowBoot,
@@ -2662,6 +2868,8 @@ export function useShellController() {
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleBridgeSettingsChange,
+    handleBridgeOnboardingDraftChange,
+    handleSaveBridgeOnboarding,
     handleSaveBridgeSettings,
     handleStartBridge,
     handleStopBridge,

@@ -1,5 +1,45 @@
 ﻿# Todo
 
+## Current Plan (Bridge onboarding Feishu quick setup)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md` 记录本轮引导页 IM Bridge / 飞书配置范围、验证口径与非目标
+- [x] 扩展 Rust/Tauri bridge 配置接口：支持引导页原子保存 Feishu secrets + settings
+- [x] 扩展前端 controller：新增 onboarding 专用 bridge draft、校验和保存链路
+- [x] 在引导配置页新增 `IM Bridge（可选）` 卡片，并复用现有 bridge 生命周期控制
+- [x] 完成 Rust 单测与前端构建验证，并记录结果
+
+### Acceptance Criteria
+
+- [x] 引导配置页可填写 Feishu `appId`、`appSecret`、`verificationToken`、`encryptKey`，且不回显明文 secret
+- [x] 点击“保存并启用”会同时更新 `bridge_settings.json` 和 `bridge_secrets.json`，并开启 `bridge.enabled` 与 `feishu.enabled`
+- [x] 引导配置页可直接执行 `Start` / `Stop` / `Restart`，且按钮状态与 bridge 运行态一致
+- [x] `feishuEnabled=true` 且保存后仍缺有效 `appId/appSecret` 时，会阻止保存和启动
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src-tauri/src/types.rs`
+    - 新增 `BridgeOnboardingConfigInput` 与 `BridgeOnboardingFeishuInput`，用于引导页的桥接配置写入命令。
+  - `apps/kimi-shell/src-tauri/src/bridge_settings_store.rs`
+    - 新增引导页保存链路，支持一次性更新 bridge settings 与 Feishu secrets；空字符串保持已有 secret，不回传明文；当启用 Feishu 但缺有效 `appId/appSecret` 时直接拒绝保存。
+  - `apps/kimi-shell/src-tauri/src/lib.rs`
+    - 暴露 `save_bridge_onboarding_config` Tauri 命令，并在保存后复用既有 idle bridge runtime 同步逻辑，不新增第二套生命周期实现。
+  - `apps/kimi-shell/src/app/types.ts` 与 `apps/kimi-shell/src/app/useShellController.ts`
+    - 新增 onboarding 专用 bridge draft、dirty/validation 状态、保存 handler，以及在引导页激活时刷新 `bridgeSettings`、`bridgeStatus`、`bridgeSecretsMask` 的逻辑。
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx` 与 `apps/kimi-shell/src/App.tsx`
+    - 在引导配置区域新增 `5. IM Bridge（可选）` 卡片，支持 Feishu 凭证输入、mask 只读展示，以及直接复用 `Start` / `Stop` / `Restart` / 刷新状态。
+  - `apps/kimi-shell/src/App.css`
+    - 补齐引导页 IM Bridge 卡片的布局、状态网格和响应式样式。
+- Verification:
+  - `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - 当前实现把“保存并启用”固定为开启 `bridge.enabled` 与 `feishu.enabled`，但 bridge 进程仍需用户显式点击 `Start`；这与引导页文案保持一致。
+
 ## Current Plan (Kimi IM Bridge phase 6 stabilization and release)
 
 ### Checklist
@@ -1293,3 +1333,93 @@
 - 新增 sidecar 构建脚本与 Tauri 打包资源配置，`tauri build` 前会生成 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`
 - 补建了 `docs/kimi-im-bridge-manual-test-runbook.md`，记录 Phase 5 的 4 条 deferred manual validation
 - 已验证 `go build ./cmd/kimi-im-bridge`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell build:bridge-sidecar`、`pnpm -C apps/kimi-shell tauri build`
+## Current Plan (Patch version bump script)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md` 记录本轮版本脚本范围、验证口径与非目标
+- [x] 为 `apps/kimi-shell` 新增 patch 递增脚本：运行后将版本号加 `0.0.1`
+- [x] 复用现有版本同步链路，确保 `Cargo.toml` 与 `tauri.conf.json` 跟随更新
+- [x] 增加便捷脚本入口并完成验证
+
+### Acceptance Criteria
+
+- [x] 运行新脚本后，`apps/kimi-shell/package.json` 的 patch 版本会自动加 `1`
+- [x] `apps/kimi-shell/src-tauri/Cargo.toml` 与 `apps/kimi-shell/src-tauri/tauri.conf.json` 会同步到相同版本
+- [x] 提供稳定入口，用户可直接运行而不必手工编辑版本号
+- [x] 至少完成一次无副作用验证，确认脚本逻辑正确
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/scripts/bump_patch_version.mjs`
+    - 新增 patch 递增脚本，读取 `package.json` 当前版本并把 patch 位加 `1`，随后调用既有 `sync_version.mjs` 同步 `Cargo.toml` 与 `tauri.conf.json`。
+    - 支持 `--dry-run`，可先验证下一版本而不改写任何文件；若同步失败，会回滚 `package.json`，避免半更新状态。
+  - `apps/kimi-shell/package.json`
+    - 新增 `version:bump:patch` 入口，用户可直接运行 `pnpm -C apps/kimi-shell version:bump:patch`。
+- Verification:
+  - `pnpm -C apps/kimi-shell version:bump:patch -- --dry-run`
+  - 验证 dry-run 输出 `0.0.19 -> 0.0.20`
+  - 验证 `apps/kimi-shell/package.json`、`apps/kimi-shell/src-tauri/Cargo.toml`、`apps/kimi-shell/src-tauri/tauri.conf.json` 在 dry-run 后仍保持 `0.0.19`
+- Remaining note:
+  - 本轮只实现并验证了脚本本身，没有实际执行真实 bump；如需落盘升级，直接运行 `pnpm -C apps/kimi-shell version:bump:patch`。
+
+## Current Plan (Onboarding sticky footer scroll)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md` 记录本轮引导页底栏滚动范围、验证口径与非目标
+- [x] 调整引导配置页布局，让“完成引导”底栏保持固定在引导页底部
+- [x] 为引导内容区补独立垂直滚动条和底部留白，避免卡片被底栏遮挡
+- [x] 完成前端构建验证并记录结果
+
+### Acceptance Criteria
+
+- [x] 进入控制中心“引导配置”页时，内容区出现独立的垂直滚动行为
+- [x] “完成引导”操作栏在引导页底部保持可见，不随上方卡片滚出视口
+- [x] 最后一张引导卡片和按钮不会被底栏遮挡
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - 为 `cc-main` 在引导配置页激活时增加 `cc-main-onboarding` 状态类，并将引导内容包进 `cc-onboarding-layout` / `cc-onboarding-scroll`，把滚动范围收敛到引导内容区。
+  - `apps/kimi-shell/src/App.css`
+    - 新增引导页专用滚动容器样式，启用稳定的纵向滚动条。
+    - 将 `cc-onboarding-flow-actions` 改为 sticky 底栏，并补背景、阴影和底部留白，避免遮挡最后一张卡片。
+- Verification:
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - 本轮只调整了引导配置页的滚动和底栏布局，没有改动其他控制中心分区的滚动行为。
+## Current Plan (Control center onboarding collapse and exit flow)
+
+### Checklist
+
+- [x] 在 `tasks/todo.md` 记录本轮引导配置页折叠、详情弹窗、滚动和离场跳转的范围与验收口径
+- [x] 重构引导配置页步骤头部：统一默认折叠、动态摘要和“详细配置”入口
+- [x] 为步骤 `2 / 4 / 5` 增加共享详情弹窗，并复用步骤 `1 / 3` 现有弹窗入口
+- [x] 修正引导配置页滚动结构：上方内容独立滚动，底部完成栏固定为独立布局行
+- [x] 修正完成/跳过引导后的离场逻辑，并完成前端构建验证
+
+### Acceptance Criteria
+
+- [x] 打开引导配置页时，5 个步骤默认折叠，只显示标题栏和一行动态摘要
+- [x] 每个步骤标题栏都有“详细配置”按钮；步骤 `1 / 3` 复用现有弹窗，步骤 `2 / 4 / 5` 打开共享详情弹窗
+- [x] 引导配置页上方内容区有稳定的垂直滚动，底部“完成引导 / 暂时跳过”栏固定可见
+- [x] 点击“完成引导”或“暂时跳过”后，backend ready 时直接进入工作区；否则退出引导页并停留在控制中心概览，ready 后自动进入工作区
+- [x] `pnpm -C apps/kimi-shell build` 通过
+
+### Review
+
+- Actual changes:
+  - `apps/kimi-shell/src/features/control-center/ControlCenterView.tsx`
+    - `StepHeader` 扩展为摘要 + 详情入口，5 个引导步骤统一改为默认折叠；步骤 `2 / 4 / 5` 复用共享 `OnboardingDetailModal`，步骤 `1 / 3` 分别复用 `InstallFlowModal` 与 `ConfigCenterModal`。
+  - `apps/kimi-shell/src/App.css`
+    - 引导配置区域改成 `内容滚动区 + 固定底栏` 两行布局，并新增步骤摘要样式与详情弹窗样式，保证底栏不再跟着滚动容器一起移动。
+  - `apps/kimi-shell/src/app/useShellController.ts`
+    - 新增“引导完成后等待进入工作区”的前端锁存逻辑；完成/跳过后会先刷新 `status + onboarding`，ready 时直接进入工作区，否则退回控制中心概览并在 ready 后自动切入工作区。
+- Verification:
+  - `pnpm -C apps/kimi-shell build`
+- Remaining note:
+  - 本轮只改前端结构和路由，不新增后端或 Tauri 接口。

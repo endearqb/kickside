@@ -333,6 +333,23 @@ pub struct BridgeSecrets {
     pub feishu: BridgeFeishuSecrets,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeOnboardingFeishuInput {
+    pub app_id: Option<String>,
+    pub app_secret: Option<String>,
+    pub verification_token: Option<String>,
+    pub encrypt_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeOnboardingConfigInput {
+    pub enabled: bool,
+    pub feishu_enabled: bool,
+    pub feishu: BridgeOnboardingFeishuInput,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeChannelStatus {

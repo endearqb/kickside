@@ -10,9 +10,11 @@ import {
   LayoutDashboard,
   Minus,
   Plus,
+  Play,
   RefreshCcw,
   RefreshCw,
   SlidersHorizontal,
+  Square,
   X,
 } from "lucide-react";
 import type {
@@ -20,6 +22,8 @@ import type {
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
+  BridgeOnboardingConfigInput,
+  BridgeOnboardingValidation,
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
@@ -52,7 +56,8 @@ import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
 import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
-type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir";
+type OnboardingCardId = "install" | "context_menu" | "auth" | "work_dir" | "bridge";
+type OnboardingDetailModalId = "context_menu" | "work_dir" | "bridge";
 
 type ControlCenterViewProps = {
   surface: ControlCenterSurface;
@@ -72,6 +77,9 @@ type ControlCenterViewProps = {
   installAction: "dependencies" | "kimi" | "upgrade_kimi" | "nodejs" | null;
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
+  bridgeOnboardingDraft: BridgeOnboardingConfigInput;
+  bridgeOnboardingDirty: boolean;
+  bridgeOnboardingValidation: BridgeOnboardingValidation;
   bridgeBindings: BindingRecord[];
   bridgeApprovals: BridgeApprovalRecord[];
   bridgeLogTail: string[];
@@ -126,6 +134,8 @@ type ControlCenterViewProps = {
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
   onBridgeSettingsChange: (next: BridgeSettings) => void;
+  onBridgeOnboardingDraftChange: (next: BridgeOnboardingConfigInput) => void;
+  onSaveBridgeOnboarding: () => Promise<void>;
   onSaveBridgeSettings: () => Promise<void>;
   onStartBridge: () => Promise<void>;
   onStopBridge: () => Promise<void>;
@@ -184,18 +194,18 @@ const controlSections: Array<{
 
 function StepHeader({
   title,
+  summary,
   done,
   primaryAction,
-  secondaryActions,
-  collapsible,
+  detailAction,
   expanded,
   onToggle,
 }: {
   title: string;
+  summary: string;
   done: boolean;
-  primaryAction: ReactNode;
-  secondaryActions?: ReactNode;
-  collapsible: boolean;
+  primaryAction?: ReactNode;
+  detailAction?: ReactNode;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -213,28 +223,79 @@ function StepHeader({
 
   return (
     <header className="cc-card-header cc-step-head">
-      {collapsible ? (
-        <button
-          type="button"
-          className="cc-step-title-toggle is-collapsible"
-          onClick={onToggle}
-          aria-expanded={expanded}
-        >
+      <button
+        type="button"
+        className="cc-step-title-toggle is-collapsible"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <div className="cc-step-title-copy">
           {titleLine}
-          <ChevronRight
-            size={14}
-            className={`cc-step-collapse-icon ${expanded ? "expanded" : ""}`}
-            aria-hidden="true"
-          />
-        </button>
-      ) : (
-        <div className="cc-step-title-toggle">{titleLine}</div>
-      )}
+          <p className="cc-step-inline-summary" title={summary}>
+            {summary}
+          </p>
+        </div>
+        <ChevronRight
+          size={14}
+          className={`cc-step-collapse-icon ${expanded ? "expanded" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
       <div className="cc-step-actions">
+        {detailAction}
         {primaryAction}
-        {!collapsible ? secondaryActions : null}
       </div>
     </header>
+  );
+}
+
+function OnboardingDetailModal({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div
+      className="cc-onboarding-detail-modal-overlay"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="cc-onboarding-detail-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="cc-onboarding-detail-modal-header">
+          <div>
+            <h3>{title}</h3>
+            <p>{description}</p>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            icon={<X size={16} />}
+            onClick={onClose}
+            aria-label="关闭详细配置弹窗"
+          />
+        </header>
+        <div className="cc-onboarding-detail-modal-body">{children}</div>
+      </div>
+    </div>
   );
 }
 
@@ -265,6 +326,27 @@ function RuntimePanel({
   );
 }
 
+function getBridgeChannelStatus(status: BridgeStatus, platform: "telegram" | "feishu") {
+  return status.channels.find((channel) => channel.platform === platform);
+}
+
+function renderBridgeOnboardingSecretRow(
+  label: string,
+  value: BridgeSecretsMaskView["telegram"]["botToken"],
+) {
+  return (
+    <div key={label} className="bridge-secret-row">
+      <div className="bridge-secret-copy">
+        <strong>{label}</strong>
+        <small>{value.configured ? value.maskedValue ?? "***" : "未配置"}</small>
+      </div>
+      <span className={`bridge-secret-chip ${value.configured ? "configured" : "empty"}`}>
+        {value.configured ? "Configured" : "Missing"}
+      </span>
+    </div>
+  );
+}
+
 export function ControlCenterView({
   surface,
   chrome,
@@ -283,6 +365,9 @@ export function ControlCenterView({
   installAction,
   bridgeSettings,
   bridgeStatus,
+  bridgeOnboardingDraft,
+  bridgeOnboardingDirty,
+  bridgeOnboardingValidation,
   bridgeBindings,
   bridgeApprovals,
   bridgeLogTail,
@@ -337,6 +422,8 @@ export function ControlCenterView({
   onSaveWorkDirAndRestart,
   onClearWorkDir,
   onBridgeSettingsChange,
+  onBridgeOnboardingDraftChange,
+  onSaveBridgeOnboarding,
   onSaveBridgeSettings,
   onStartBridge,
   onStopBridge,
@@ -367,14 +454,11 @@ export function ControlCenterView({
   installMessage,
 }: ControlCenterViewProps) {
   const [authCardView, setAuthCardView] = useState<"login" | "api">("login");
-  const [isNarrowOnboarding, setIsNarrowOnboarding] = useState(() =>
-    typeof window !== "undefined"
-      ? window.matchMedia("(max-width: 480px)").matches
-      : false,
-  );
   const [installProbeRequested, setInstallProbeRequested] = useState(false);
   const [expandedOnboardingStep, setExpandedOnboardingStep] =
     useState<OnboardingCardId | null>(null);
+  const [onboardingDetailModal, setOnboardingDetailModal] =
+    useState<OnboardingDetailModalId | null>(null);
   const completedSteps = ONBOARDING_STEP_ORDER.filter(
     (step) => stepCompletion[step],
   ).length;
@@ -415,38 +499,91 @@ export function ControlCenterView({
     : onboarding
       ? "不支持"
       : "-";
+  const isOnboardingSection = activeControlSection === "onboarding";
+  const isBridgeRunning =
+    bridgeStatus.state === "running" ||
+    bridgeStatus.state === "starting" ||
+    bridgeStatus.state === "degraded";
+  const feishuChannelStatus = getBridgeChannelStatus(bridgeStatus, "feishu");
+  const bridgeEnabled = bridgeSettings.enabled;
+  const feishuEnabled = bridgeSettings.channels.find(
+    (channel) => channel.platform === "feishu",
+  )?.enabled ?? false;
+  const bridgeOnboardingStartDisabled =
+    bridgeBusy || isBridgeRunning || !bridgeOnboardingValidation.canStart;
+  const bridgeOnboardingSaveDisabled =
+    bridgeBusy || !bridgeOnboardingDirty || !bridgeOnboardingValidation.canSave;
+  const installHeaderSummary = onboarding?.kimiInstalled
+    ? `当前状态：Kimi CLI 已安装${installPathDisplay ? `（${installPathDisplay}）` : ""}；建议按需打开安装与升级查看环境细节。`
+    : `当前状态：Kimi CLI 未就绪；建议打开安装与升级弹窗完成依赖检查和安装。`;
+  const contextMenuHeaderSummary = !runtimeContextMenuSupported
+    ? "当前状态：当前平台不支持资源管理器右键菜单。"
+    : runtimeContextMenuEnabled
+      ? `当前状态：右键菜单已启用${contextMenuStatus?.message ? `；${contextMenuStatus.message}` : ""}`
+      : `当前状态：右键菜单未启用${contextMenuStatus?.message ? `；${contextMenuStatus.message}` : ""}；建议打开详情启用。`;
+  const authHeaderSummary = `当前状态：登录 ${formatLoginState(onboarding?.loginState)}；providers ${configCenterView?.providers.length ?? 0}，models ${configCenterView?.models.length ?? 0}，API 配置${onboarding?.apiConfigAck ? "已确认" : "未确认"}。`;
+  const workDirHeaderSummary = effectiveWorkDir
+    ? `当前状态：工作目录已配置为 ${effectiveWorkDir}；可展开或打开详情调整。`
+    : "当前状态：尚未配置默认工作目录；建议打开详情选择并保存。";
+  const bridgeHeaderSummary = `当前状态：bridge ${bridgeStatus.state}，Feishu ${feishuChannelStatus?.state ?? "idle"}，bridge ${bridgeEnabled ? "已启用" : "未启用"}，Feishu ${feishuEnabled ? "已启用" : "未启用"}。`;
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const media = window.matchMedia("(max-width: 480px)");
-    const syncNarrowState = () => {
-      setIsNarrowOnboarding(media.matches);
-    };
-
-    syncNarrowState();
-
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", syncNarrowState);
-      return () => media.removeEventListener("change", syncNarrowState);
-    }
-
-    media.addListener(syncNarrowState);
-    return () => media.removeListener(syncNarrowState);
-  }, []);
-
-  useEffect(() => {
-    if (isNarrowOnboarding) {
-      setExpandedOnboardingStep(null);
-    }
-  }, [isNarrowOnboarding]);
+  const installDetailAction = (
+    <Button
+      type="button"
+      variant="outline"
+      className="cc-action-btn"
+      onClick={() => void onOpenInstallFlow()}
+      disabled={installBusy}
+    >
+      详细配置
+    </Button>
+  );
+  const contextMenuDetailAction = (
+    <Button
+      type="button"
+      variant="outline"
+      className="cc-action-btn"
+      onClick={() => setOnboardingDetailModal("context_menu")}
+      disabled={contextMenuBusy}
+    >
+      详细配置
+    </Button>
+  );
+  const authDetailAction = (
+    <Button
+      type="button"
+      variant="outline"
+      className="cc-action-btn"
+      onClick={() => void onOpenConfigCenterModal()}
+      disabled={configCenterBusy}
+    >
+      详细配置
+    </Button>
+  );
+  const workDirDetailAction = (
+    <Button
+      type="button"
+      variant="outline"
+      className="cc-action-btn"
+      onClick={() => setOnboardingDetailModal("work_dir")}
+      disabled={actionBusy}
+    >
+      详细配置
+    </Button>
+  );
+  const bridgeDetailAction = (
+    <Button
+      type="button"
+      variant="outline"
+      className="cc-action-btn"
+      onClick={() => setOnboardingDetailModal("bridge")}
+      disabled={bridgeBusy}
+    >
+      详细配置
+    </Button>
+  );
 
   const toggleOnboardingStep = (step: OnboardingCardId) => {
-    if (!isNarrowOnboarding) {
-      return;
-    }
     const willExpand = expandedOnboardingStep !== step;
     setExpandedOnboardingStep((current) => (current === step ? null : step));
     if (step === "install" && willExpand) {
@@ -455,11 +592,12 @@ export function ControlCenterView({
   };
 
   const isStepExpanded = (step: OnboardingCardId) =>
-    !isNarrowOnboarding || expandedOnboardingStep === step;
+    expandedOnboardingStep === step;
   const stepInstallExpanded = isStepExpanded("install");
   const stepContextMenuExpanded = isStepExpanded("context_menu");
   const stepAuthExpanded = isStepExpanded("auth");
   const stepWorkDirExpanded = isStepExpanded("work_dir");
+  const stepBridgeExpanded = isStepExpanded("bridge");
 
   useEffect(() => {
     if (installProbe) {
@@ -652,6 +790,325 @@ export function ControlCenterView({
     await handleSelectRuntimePanel("paths");
   }
 
+  function renderContextMenuStepContent() {
+    return (
+      <div className="cc-step-main">
+        <div className="cc-step-secondary-actions">
+          {contextMenuSecondaryAction}
+          <Button
+            type="button"
+            variant="outline"
+            icon={<RefreshCcw size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onRefreshContextMenuStatus()}
+            disabled={contextMenuBusy}
+          >
+            刷新状态
+          </Button>
+        </div>
+        <div className="diagnostics-grid">
+          <div className="diag-item">
+            <span className="diag-label">Support</span>
+            <strong>{runtimeContextMenuSupported ? "Supported" : "Unsupported"}</strong>
+          </div>
+          <div className="diag-item">
+            <span className="diag-label">Enabled</span>
+            <strong>{runtimeContextMenuEnabled ? "Yes" : "No"}</strong>
+          </div>
+        </div>
+        <p className="hint cc-step-summary">
+          {runtimeContextMenuSupported
+            ? `当前状态：${runtimeContextMenuEnabled ? "已启用" : "未启用"}`
+            : "当前平台不支持该功能。"}
+        </p>
+        {onboarding?.contextMenuMessage ? (
+          <p className="hint cc-step-meta">{onboarding.contextMenuMessage}</p>
+        ) : null}
+        {contextMenuStatus?.message && contextMenuStatus.message !== onboarding?.contextMenuMessage ? (
+          <p className="hint cc-step-meta">{contextMenuStatus.message}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderWorkDirStepContent() {
+    return (
+      <div className="cc-step-main">
+        <div className="cc-step-secondary-actions">
+          {workDirSecondaryAction}
+          <Button
+            type="button"
+            variant="outline"
+            icon={<Check size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onSaveWorkDirAndRestart()}
+            disabled={actionBusy}
+          >
+            保存并重启后端
+          </Button>
+        </div>
+        <div className="cc-workdir-row">
+          <Input
+            id="work-dir-onboarding"
+            value={workDirInput}
+            onChange={(event) => onWorkDirInputChange(event.currentTarget.value)}
+            placeholder="D:\\Projects\\your-repo"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="cc-action-btn cc-inline-btn"
+            onClick={() => void onPickWorkDir()}
+          >
+            浏览
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            icon={<FolderOpen size={14} />}
+            className="cc-inline-icon-btn"
+            onClick={() => void onOpenFolder(effectiveWorkDir.trim())}
+            disabled={!effectiveWorkDir.trim()}
+            aria-label="打开当前生效目录"
+            title="打开当前生效目录"
+          />
+          <p className="hint cc-inline-meta">
+            当前生效目录：
+            <strong>{effectiveWorkDir || "-"}</strong>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  function renderBridgeStepContent() {
+    return (
+      <div className="cc-step-main">
+        <p className="hint cc-step-summary">
+          保存只会更新 `bridge_settings.json` 和 `bridge_secrets.json` 并启用开关；
+          真正建立连接需要你显式点击 `Start`。
+        </p>
+
+        <div className="diagnostics-grid cc-bridge-onboarding-status-grid">
+          <div className="diag-item">
+            <span className="diag-label">Bridge State</span>
+            <strong>{bridgeStatus.state}</strong>
+          </div>
+          <div className="diag-item">
+            <span className="diag-label">Feishu Channel</span>
+            <strong>{feishuChannelStatus?.state ?? "idle"}</strong>
+          </div>
+          <div className="diag-item">
+            <span className="diag-label">Bridge Enabled</span>
+            <strong>{bridgeOnboardingDraft.enabled ? "Yes" : "No"}</strong>
+          </div>
+          <div className="diag-item">
+            <span className="diag-label">Feishu Enabled</span>
+            <strong>{bridgeOnboardingDraft.feishuEnabled ? "Yes" : "No"}</strong>
+          </div>
+        </div>
+
+        <div className="cc-bridge-onboarding-switches">
+          <label className="bridge-switch-card">
+            <span className="bridge-switch-copy">
+              <strong>Enable bridge</strong>
+              <small>保存后写入总开关。</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={bridgeOnboardingDraft.enabled}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  enabled: event.currentTarget.checked,
+                })
+              }
+            />
+          </label>
+
+          <label className="bridge-switch-card">
+            <span className="bridge-switch-copy">
+              <strong>Enable Feishu</strong>
+              <small>启用时需要有效的 appId 和 appSecret。</small>
+            </span>
+            <input
+              type="checkbox"
+              checked={bridgeOnboardingDraft.feishuEnabled}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  feishuEnabled: event.currentTarget.checked,
+                  enabled:
+                    event.currentTarget.checked || bridgeOnboardingDraft.enabled,
+                })
+              }
+            />
+          </label>
+        </div>
+
+        <div className="cc-bridge-onboarding-grid">
+          <label className="cc-bridge-onboarding-field">
+            <span>appId</span>
+            <Input
+              value={bridgeOnboardingDraft.feishu.appId ?? ""}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  feishu: {
+                    ...bridgeOnboardingDraft.feishu,
+                    appId: event.currentTarget.value,
+                  },
+                })
+              }
+              placeholder="cli_a1b2c3d4"
+            />
+          </label>
+          <label className="cc-bridge-onboarding-field">
+            <span>appSecret</span>
+            <Input
+              type="password"
+              value={bridgeOnboardingDraft.feishu.appSecret ?? ""}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  feishu: {
+                    ...bridgeOnboardingDraft.feishu,
+                    appSecret: event.currentTarget.value,
+                  },
+                })
+              }
+              placeholder="请输入飞书 app secret"
+            />
+          </label>
+          <label className="cc-bridge-onboarding-field">
+            <span>verificationToken（可选）</span>
+            <Input
+              value={bridgeOnboardingDraft.feishu.verificationToken ?? ""}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  feishu: {
+                    ...bridgeOnboardingDraft.feishu,
+                    verificationToken: event.currentTarget.value,
+                  },
+                })
+              }
+              placeholder="事件订阅 verification token"
+            />
+          </label>
+          <label className="cc-bridge-onboarding-field">
+            <span>encryptKey（可选）</span>
+            <Input
+              type="password"
+              value={bridgeOnboardingDraft.feishu.encryptKey ?? ""}
+              onChange={(event) =>
+                onBridgeOnboardingDraftChange({
+                  ...bridgeOnboardingDraft,
+                  feishu: {
+                    ...bridgeOnboardingDraft.feishu,
+                    encryptKey: event.currentTarget.value,
+                  },
+                })
+              }
+              placeholder="事件订阅 encrypt key"
+            />
+          </label>
+        </div>
+
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>Secrets Mask View</h5>
+          </div>
+          <div className="bridge-secret-list">
+            {renderBridgeOnboardingSecretRow(
+              "Feishu appId",
+              bridgeSecretsMask.feishu.appId,
+            )}
+            {renderBridgeOnboardingSecretRow(
+              "Feishu appSecret",
+              bridgeSecretsMask.feishu.appSecret,
+            )}
+            {renderBridgeOnboardingSecretRow(
+              "Feishu verificationToken",
+              bridgeSecretsMask.feishu.verificationToken,
+            )}
+            {renderBridgeOnboardingSecretRow(
+              "Feishu encryptKey",
+              bridgeSecretsMask.feishu.encryptKey,
+            )}
+          </div>
+        </div>
+
+        <p
+          className={`hint cc-step-meta cc-bridge-onboarding-message ${
+            bridgeOnboardingValidation.canSave ? "" : "is-error"
+          }`}
+        >
+          {bridgeOnboardingValidation.message ??
+            "保存并启用后，可直接在这里启动 bridge。"}
+        </p>
+
+        <div className="cc-actions">
+          <Button
+            type="button"
+            icon={<Check size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onSaveBridgeOnboarding()}
+            disabled={bridgeOnboardingSaveDisabled}
+          >
+            保存并启用
+          </Button>
+          <Button
+            type="button"
+            icon={<Play size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onStartBridge()}
+            disabled={bridgeOnboardingStartDisabled}
+          >
+            Start
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<Square size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onStopBridge()}
+            disabled={bridgeBusy || !isBridgeRunning}
+          >
+            Stop
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            icon={<RefreshCcw size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onRestartBridge()}
+            disabled={bridgeBusy}
+          >
+            Restart
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<RefreshCw size={15} />}
+            className="cc-action-btn"
+            onClick={() => {
+              void Promise.all([
+                onRefreshBridgeSettings(),
+                onRefreshBridgeStatus(),
+                onRefreshBridgeSecretsMask(),
+              ]);
+            }}
+            disabled={bridgeBusy}
+          >
+            刷新状态
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <section
       className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""} ${isDashboardOnlyModal ? "control-center-shell-dashboard" : ""}`}
@@ -698,7 +1155,11 @@ export function ControlCenterView({
         </aside>
         ) : null}
 
-        <div className={`cc-main ${isDashboardOnlyModal ? "cc-main-dashboard" : ""}`}>
+        <div
+          className={`cc-main ${isDashboardOnlyModal ? "cc-main-dashboard" : ""} ${
+            isOnboardingSection ? "cc-main-onboarding" : ""
+          }`}
+        >
           {activeControlSection === "overview" && (
             <>
               <section className="cc-card">
@@ -839,14 +1300,16 @@ export function ControlCenterView({
           )}
 
           {activeControlSection === "onboarding" && (
-            <>
+            <div className="cc-onboarding-layout">
+              <div className="cc-onboarding-scroll">
               <section className="cc-card cc-step-card">
                 <StepHeader
                   title="1. 安装 Kimi CLI"
+                  summary={installHeaderSummary}
                   done={stepCompletion.install_kimi}
-                  collapsible={isNarrowOnboarding}
                   expanded={stepInstallExpanded}
                   onToggle={() => toggleOnboardingStep("install")}
+                  detailAction={installDetailAction}
                   primaryAction={
                     <Button
                       type="button"
@@ -858,16 +1321,13 @@ export function ControlCenterView({
                       打开安装与升级
                     </Button>
                   }
-                  secondaryActions={installSecondaryAction}
                 />
                 {stepInstallExpanded ? (
                   <div className="cc-card-body cc-step-body cc-step-body-single">
                     <div className="cc-step-main">
-                      {isNarrowOnboarding ? (
-                        <div className="cc-step-secondary-actions">
-                          {installSecondaryAction}
-                        </div>
-                      ) : null}
+                      <div className="cc-step-secondary-actions">
+                        {installSecondaryAction}
+                      </div>
                       <div className="cc-install-top-row">
                         <p className="hint cc-step-summary cc-inline-path">
                           {installSummary}
@@ -1037,31 +1497,16 @@ export function ControlCenterView({
               <section className="cc-card cc-step-card">
                 <StepHeader
                   title="2. 资源管理器右键菜单"
+                  summary={contextMenuHeaderSummary}
                   done={stepCompletion.context_menu}
-                  collapsible={isNarrowOnboarding}
                   expanded={stepContextMenuExpanded}
                   onToggle={() => toggleOnboardingStep("context_menu")}
+                  detailAction={contextMenuDetailAction}
                   primaryAction={contextMenuPrimaryAction}
-                  secondaryActions={contextMenuSecondaryAction}
                 />
                 {stepContextMenuExpanded ? (
-                  <div className="cc-card-body cc-step-body">
-                    <div className="cc-step-main">
-                      {isNarrowOnboarding ? (
-                        <div className="cc-step-secondary-actions">
-                          {contextMenuSecondaryAction}
-                        </div>
-                      ) : null}
-                      <p className="hint cc-step-summary">
-                        {onboarding?.contextMenuSupported
-                          ? `当前状态：${onboarding.contextMenuEnabled ? "已启用" : "未启用"}`
-                          : "当前平台不支持该功能。"}
-                      </p>
-                      {onboarding?.contextMenuMessage ? (
-                        <p className="hint cc-step-meta">{onboarding.contextMenuMessage}</p>
-                      ) : null}
-                    </div>
-                    <div className="cc-step-side cc-step-side-empty" />
+                  <div className="cc-card-body cc-step-body cc-step-body-single">
+                    <div className="cc-step-main">{renderContextMenuStepContent()}</div>
                   </div>
                 ) : null}
               </section>
@@ -1069,17 +1514,17 @@ export function ControlCenterView({
               <section className="cc-card cc-step-card">
                 <StepHeader
                   title="3. Kimi 登录与 Provider API 配置"
+                  summary={authHeaderSummary}
                   done={stepCompletion.login_kimi && stepCompletion.api_config}
-                  collapsible={isNarrowOnboarding}
                   expanded={stepAuthExpanded}
                   onToggle={() => toggleOnboardingStep("auth")}
+                  detailAction={authDetailAction}
                   primaryAction={authPrimaryAction}
-                  secondaryActions={authSecondaryAction}
                 />
                 {stepAuthExpanded ? (
                   <div className="cc-card-body cc-step-body cc-step-body-single">
                     <div className="cc-step-main">
-                      {isNarrowOnboarding && authSecondaryAction ? (
+                      {authSecondaryAction ? (
                         <div className="cc-step-secondary-actions">
                           {authSecondaryAction}
                         </div>
@@ -1162,57 +1607,48 @@ export function ControlCenterView({
               <section className="cc-card cc-step-card">
                 <StepHeader
                   title="4. 默认工作目录"
+                  summary={workDirHeaderSummary}
                   done={stepCompletion.work_dir}
-                  collapsible={isNarrowOnboarding}
                   expanded={stepWorkDirExpanded}
                   onToggle={() => toggleOnboardingStep("work_dir")}
+                  detailAction={workDirDetailAction}
                   primaryAction={workDirPrimaryAction}
-                  secondaryActions={workDirSecondaryAction}
                 />
                 {stepWorkDirExpanded ? (
                   <div className="cc-card-body cc-step-body cc-step-body-single">
-                    <div className="cc-step-main">
-                      {isNarrowOnboarding ? (
-                        <div className="cc-step-secondary-actions">
-                          {workDirSecondaryAction}
-                        </div>
-                      ) : null}
-                      <div className="cc-workdir-row">
-                        <Input
-                          id="work-dir-onboarding"
-                          value={workDirInput}
-                          onChange={(event) => onWorkDirInputChange(event.currentTarget.value)}
-                          placeholder="D:\\Projects\\your-repo"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="cc-action-btn cc-inline-btn"
-                          onClick={() => void onPickWorkDir()}
-                        >
-                          浏览
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          icon={<FolderOpen size={14} />}
-                          className="cc-inline-icon-btn"
-                          onClick={() => void onOpenFolder(effectiveWorkDir.trim())}
-                          disabled={!effectiveWorkDir.trim()}
-                          aria-label="打开当前生效目录"
-                          title="打开当前生效目录"
-                        />
-                        <p className="hint cc-inline-meta">
-                          当前生效目录：
-                          <strong>{effectiveWorkDir || "-"}</strong>
-                        </p>
-                      </div>
-                    </div>
+                    <div className="cc-step-main">{renderWorkDirStepContent()}</div>
                   </div>
                 ) : null}
               </section>
 
+              <section className="cc-card cc-step-card">
+                <StepHeader
+                  title="5. IM Bridge（可选）"
+                  summary={bridgeHeaderSummary}
+                  done={bridgeEnabled && feishuEnabled}
+                  expanded={stepBridgeExpanded}
+                  onToggle={() => toggleOnboardingStep("bridge")}
+                  detailAction={bridgeDetailAction}
+                  primaryAction={
+                    <Button
+                      type="button"
+                      icon={<Play size={15} />}
+                      className="cc-action-btn"
+                      onClick={() => void onStartBridge()}
+                      disabled={bridgeOnboardingStartDisabled}
+                    >
+                      Start
+                    </Button>
+                  }
+                />
+                {stepBridgeExpanded ? (
+                  <div className="cc-card-body cc-step-body cc-step-body-single">
+                    <div className="cc-step-main">{renderBridgeStepContent()}</div>
+                  </div>
+                ) : null}
+              </section>
+
+              </div>
               <section className="cc-onboarding-flow-actions">
                 <div className="cc-actions">
                   <Button
@@ -1253,6 +1689,9 @@ export function ControlCenterView({
                       void onRefreshOnboarding();
                       void onRefreshDiagnostics();
                       void onRefreshContextMenuStatus();
+                      void onRefreshBridgeSettings();
+                      void onRefreshBridgeStatus();
+                      void onRefreshBridgeSecretsMask();
                     }}
                     disabled={diagnosticsBusy || contextMenuBusy}
                   >
@@ -1260,7 +1699,7 @@ export function ControlCenterView({
                   </Button>
                 </div>
               </section>
-            </>
+            </div>
           )}
 
           {activeControlSection === "runtime_center" && (
@@ -1363,6 +1802,30 @@ export function ControlCenterView({
           )}
         </div>
       </div>
+      <OnboardingDetailModal
+        open={onboardingDetailModal === "context_menu"}
+        title="资源管理器右键菜单"
+        description="查看平台支持状态、启用状态，并直接执行启用、禁用或刷新。"
+        onClose={() => setOnboardingDetailModal(null)}
+      >
+        {renderContextMenuStepContent()}
+      </OnboardingDetailModal>
+      <OnboardingDetailModal
+        open={onboardingDetailModal === "work_dir"}
+        title="默认工作目录"
+        description="查看当前生效目录，并直接浏览、保存重启、清空或打开目录。"
+        onClose={() => setOnboardingDetailModal(null)}
+      >
+        {renderWorkDirStepContent()}
+      </OnboardingDetailModal>
+      <OnboardingDetailModal
+        open={onboardingDetailModal === "bridge"}
+        title="IM Bridge 详细配置"
+        description="查看 bridge 和 Feishu 状态、masked secrets，并直接保存或启动。"
+        onClose={() => setOnboardingDetailModal(null)}
+      >
+        {renderBridgeStepContent()}
+      </OnboardingDetailModal>
       {showSidebar ? (
         <ConfigCenterModal
           open={configCenterOpen}

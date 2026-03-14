@@ -29,14 +29,14 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
-    BridgeApprovalResolveInput, BridgeSecretsMaskView, BridgeSettings, BridgeStatus,
-    ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
-    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
-    KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
-    LoginProbeResult, LoginProbeState, OnboardingStatus, OnboardingStep,
-    PowerShellPreflightSummary, ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
-    CURRENT_ONBOARDING_VERSION,
+    BridgeApprovalResolveInput, BridgeOnboardingConfigInput, BridgeSecretsMaskView, BridgeSettings,
+    BridgeStatus, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog,
+    InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
+    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
+    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
+    OnboardingStatus, OnboardingStep, PowerShellPreflightSummary, ShutdownProgressPayload,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
+    SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -361,35 +361,18 @@ fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
 #[tauri::command]
 fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
     let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
-    {
-        let state = app.state::<AppState>();
-        let mut runtime = state
-            .bridge_runtime
-            .lock()
-            .map_err(|_| "bridge runtime mutex is poisoned".to_string())?;
-        if !matches!(
-            runtime.state,
-            crate::types::BridgeRuntimeState::Running
-                | crate::types::BridgeRuntimeState::Starting
-                | crate::types::BridgeRuntimeState::Degraded
-        ) {
-            runtime.admin_port = saved.admin_port;
-            runtime.channels = saved
-                .channels
-                .iter()
-                .map(|channel| crate::types::BridgeChannelStatus {
-                    platform: channel.platform,
-                    enabled: channel.enabled,
-                    state: crate::types::BridgeChannelState::Idle,
-                    last_inbound_at: None,
-                    last_outbound_at: None,
-                    last_offset: None,
-                    last_error_code: None,
-                    last_error: None,
-                })
-                .collect();
-        }
-    }
+    sync_idle_bridge_runtime(&app, &saved)?;
+    Ok(saved)
+}
+
+#[tauri::command]
+fn save_bridge_onboarding_config(
+    app: AppHandle,
+    input: BridgeOnboardingConfigInput,
+) -> Result<BridgeSettings, String> {
+    let saved = bridge_settings_store::save_onboarding_config(&app, &input)
+        .map_err(|error| error.to_string())?;
+    sync_idle_bridge_runtime(&app, &saved)?;
     Ok(saved)
 }
 
@@ -448,6 +431,37 @@ fn get_bridge_log_tail(app: AppHandle, max_lines: Option<usize>) -> Result<Vec<S
 #[tauri::command]
 fn get_bridge_secrets_mask_view(app: AppHandle) -> Result<BridgeSecretsMaskView, String> {
     bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
+}
+
+fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let mut runtime = state
+        .bridge_runtime
+        .lock()
+        .map_err(|_| "bridge runtime mutex is poisoned".to_string())?;
+    if !matches!(
+        runtime.state,
+        crate::types::BridgeRuntimeState::Running
+            | crate::types::BridgeRuntimeState::Starting
+            | crate::types::BridgeRuntimeState::Degraded
+    ) {
+        runtime.admin_port = saved.admin_port;
+        runtime.channels = saved
+            .channels
+            .iter()
+            .map(|channel| crate::types::BridgeChannelStatus {
+                platform: channel.platform,
+                enabled: channel.enabled,
+                state: crate::types::BridgeChannelState::Idle,
+                last_inbound_at: None,
+                last_outbound_at: None,
+                last_offset: None,
+                last_error_code: None,
+                last_error: None,
+            })
+            .collect();
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -942,6 +956,7 @@ pub fn run() {
             save_work_dir,
             get_bridge_settings,
             save_bridge_settings,
+            save_bridge_onboarding_config,
             get_bridge_status,
             start_bridge,
             stop_bridge,

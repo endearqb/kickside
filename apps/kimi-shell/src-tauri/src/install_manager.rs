@@ -2235,9 +2235,11 @@ mod tests {
 
     #[test]
     fn smoke_script_can_be_reopened_after_write_scope_ends() {
-        let script_path = env::temp_dir().join(format!("kimi-shell-smoke-test-{}.ps1", unique_suffix()));
+        let script_path =
+            env::temp_dir().join(format!("kimi-shell-smoke-test-{}.ps1", unique_suffix()));
         {
-            let mut file = fs::File::create(&script_path).expect("failed to create test smoke file");
+            let mut file =
+                fs::File::create(&script_path).expect("failed to create test smoke file");
             file.write_all(b"Write-Output 'ok'")
                 .expect("failed to write test smoke file");
             file.flush().expect("failed to flush test smoke file");

@@ -335,6 +335,36 @@ func TestOpenMigratesV3DatabaseToLatestSchema(t *testing.T) {
 	}
 }
 
+func TestListChannelStatusesHandlesNullHeartbeatColumn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
+	}
+	if _, err := store.db.ExecContext(
+		ctx,
+		`UPDATE bridge_channels SET last_heartbeat_at = NULL WHERE platform = ?`,
+		"feishu",
+	); err != nil {
+		t.Fatalf("failed to set last_heartbeat_at NULL: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) == 0 {
+		t.Fatalf("expected channel statuses, got none")
+	}
+}
+
 func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	t.Parallel()
 

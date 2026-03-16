@@ -446,11 +446,7 @@ fn resolve_bridge_binary_from_sources(
         ));
     }
 
-    if development_path.exists() {
-        return Ok(development_path);
-    }
-
-    let mut checked = vec![development_path];
+    let mut checked = Vec::new();
     if let Some(resource_dir) = resource_dir {
         let resource_candidates = vec![
             resource_dir.join("binaries").join(binary_name()),
@@ -463,6 +459,10 @@ fn resolve_bridge_binary_from_sources(
             checked.push(candidate);
         }
     }
+    if development_path.exists() {
+        return Ok(development_path);
+    }
+    checked.push(development_path);
 
     let checked_paths = checked
         .iter()
@@ -1010,6 +1010,25 @@ mod tests {
         .expect("binary should resolve");
 
         assert_eq!(resolved, env_path);
+    }
+
+    #[test]
+    fn resolve_binary_prefers_resource_candidate_before_development_binary() {
+        let temp = TempDirGuard::new("binary-resource-priority");
+        let dev_path = temp.path.join("dev").join(binary_name());
+        let resource_dir = temp.path.join("resource");
+        let resource_binary = resource_dir.join("binaries").join(binary_name());
+        fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
+        fs::create_dir_all(resource_binary.parent().expect("resource parent"))
+            .expect("resource parent");
+        fs::write(&dev_path, b"dev").expect("dev binary");
+        fs::write(&resource_binary, b"resource").expect("resource binary");
+
+        let resolved =
+            resolve_bridge_binary_from_sources(None, dev_path, Some(resource_dir.clone()))
+                .expect("binary should resolve");
+
+        assert_eq!(resolved, resource_binary);
     }
 
     #[test]

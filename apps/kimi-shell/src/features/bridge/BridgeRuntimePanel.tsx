@@ -199,23 +199,6 @@ export function BridgeRuntimePanel({
               />
             </label>
 
-            <label className="bridge-switch-card">
-              <span className="bridge-switch-copy">
-                <strong>Auto start</strong>
-                <small>Shell setup 完成后异步启动，不阻塞窗口。</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.autoStart}
-                onChange={(event) =>
-                  onSettingsChange({
-                    ...settings,
-                    autoStart: event.currentTarget.checked,
-                  })
-                }
-              />
-            </label>
-
             <label className="bridge-port-card">
               <span>Admin Port</span>
               <Input

@@ -382,18 +382,30 @@ fn get_bridge_status(app: AppHandle) -> Result<BridgeStatus, String> {
 }
 
 #[tauri::command]
-fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    bridge_manager::start_bridge(&app).map_err(|error| error.to_string())
+async fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge_manager::start_bridge(&app).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join start bridge task: {error}"))?
 }
 
 #[tauri::command]
-fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    bridge_manager::stop_bridge(&app).map_err(|error| error.to_string())
+async fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge_manager::stop_bridge(&app).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join stop bridge task: {error}"))?
 }
 
 #[tauri::command]
-fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
+async fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join restart bridge task: {error}"))?
 }
 
 #[tauri::command]

@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
@@ -68,5 +70,114 @@ func TestNewReconcilesPendingApprovalsFromPreviousRuntime(t *testing.T) {
 	}
 	if failed[0].ResolutionPayloadJSON != `{"reason":"runtime_restarted_before_resume"}` {
 		t.Fatalf("unexpected reconciliation payload: %s", failed[0].ResolutionPayloadJSON)
+	}
+}
+
+func TestStatusFallsBackToConfiguredChannelsWhenStoreSnapshotFails(t *testing.T) {
+	t.Parallel()
+
+	storeHandle, err := store.Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if err := storeHandle.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	service := &Service{
+		options: Options{
+			Version:    "test",
+			AdminPort:  60110,
+			AdminToken: "token-1",
+		},
+		settings: config.BridgeSettings{
+			Channels: []config.ChannelConfig{
+				{Platform: "telegram", Enabled: false},
+				{Platform: "feishu", Enabled: true},
+			},
+		},
+		store:     storeHandle,
+		state:     domain.BridgeStateDegraded,
+		startedAt: "2026-03-17T00:00:00Z",
+	}
+
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+
+	if status.State != domain.BridgeStateDegraded {
+		t.Fatalf("expected degraded bridge state, got %+v", status)
+	}
+	if status.Bindings != 0 || status.PendingApprovals != 0 {
+		t.Fatalf("expected zero counters on snapshot fallback, got %+v", status)
+	}
+	if len(status.Channels) != 2 {
+		t.Fatalf("expected fallback channels, got %+v", status.Channels)
+	}
+	if status.Channels[0].Platform != "telegram" || status.Channels[0].State != domain.ChannelStateIdle {
+		t.Fatalf("expected disabled telegram fallback to idle, got %+v", status.Channels[0])
+	}
+	if status.Channels[1].Platform != "feishu" || status.Channels[1].State != domain.ChannelStateDegraded {
+		t.Fatalf("expected enabled feishu fallback to degraded, got %+v", status.Channels[1])
+	}
+	if status.LastErrorCode != "platform_unavailable" {
+		t.Fatalf("expected platform_unavailable fallback code, got %+v", status)
+	}
+	for _, fragment := range []string{
+		"status snapshot failed: list channel statuses",
+		"status snapshot failed: count bindings",
+		"status snapshot failed: count pending approvals",
+	} {
+		if !strings.Contains(status.LastError, fragment) {
+			t.Fatalf("expected %q in last error, got %q", fragment, status.LastError)
+		}
+	}
+}
+
+func TestStatusPreservesExistingSpecificErrorCodeWhenSnapshotFallbackFails(t *testing.T) {
+	t.Parallel()
+
+	storeHandle, err := store.Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if err := storeHandle.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	service := &Service{
+		options: Options{
+			Version:    "test",
+			AdminPort:  60110,
+			AdminToken: "token-1",
+		},
+		settings: config.BridgeSettings{
+			Channels: []config.ChannelConfig{
+				{Platform: "feishu", Enabled: true},
+			},
+		},
+		store:         storeHandle,
+		state:         domain.BridgeStateRunning,
+		lastErrorCode: "invalid_credentials",
+		lastError:     "feishu: invalid app secret",
+	}
+
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+
+	if status.LastErrorCode != "invalid_credentials" {
+		t.Fatalf("expected specific error code to be preserved, got %+v", status)
+	}
+	if !strings.Contains(status.LastError, "feishu: invalid app secret") {
+		t.Fatalf("expected original error to be preserved, got %q", status.LastError)
+	}
+	if !strings.Contains(status.LastError, "status snapshot failed: list channel statuses") {
+		t.Fatalf("expected snapshot failure context to be appended, got %q", status.LastError)
+	}
+	if len(status.Channels) != 1 || status.Channels[0].State != domain.ChannelStateReady {
+		t.Fatalf("expected running fallback channels to stay ready, got %+v", status.Channels)
 	}
 }

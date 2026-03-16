@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use reqwest::blocking::Client;
 
 use crate::types::{BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeStatus};
@@ -62,11 +62,20 @@ impl BridgeHttpClient {
     }
 
     pub fn get_status(&self) -> anyhow::Result<BridgeStatus> {
-        self.request(reqwest::Method::GET, "/api/v1/status")?
+        let response = self
+            .request(reqwest::Method::GET, "/api/v1/status")?
             .send()
-            .context("failed to request bridge status")?
-            .error_for_status()
-            .context("bridge status returned error status")?
+            .context("failed to request bridge status")?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().unwrap_or_default();
+            let detail = body.trim();
+            if detail.is_empty() {
+                bail!("bridge status returned error status: {status}");
+            }
+            bail!("bridge status returned error status: {status} {detail}");
+        }
+        response
             .json::<BridgeStatus>()
             .context("failed to decode bridge status")
     }

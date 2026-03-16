@@ -752,7 +752,7 @@
 
 .cc-install-top-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 6px;
 }
@@ -763,33 +763,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-}
-
-.cc-install-command-row,
-.cc-install-secondary-row {
-  margin-top: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.cc-install-open-flow-btn,
-.cc-install-save-path-btn {
-  font-size: 0;
-}
-
-.cc-install-open-flow-btn::after,
-.cc-install-save-path-btn::after {
-  font-size: 12px;
-}
-
-.cc-install-open-flow-btn::after {
-  content: "打开安装与升级";
-}
-
-.cc-install-save-path-btn::after {
-  content: "保存路径并重启";
 }
 
 .cc-source-switch {
@@ -870,6 +843,13 @@
 
 .cc-bridge-onboarding-status-grid {
   margin-top: 10px;
+}
+
+.cc-bridge-onboarding-tag-row {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .cc-bridge-onboarding-message.is-error {

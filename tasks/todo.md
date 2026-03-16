@@ -64,3 +64,34 @@
 - Onboarding cards no longer mix accordion expansion with detail dialogs; lightweight actions stay inline, while API and Bridge heavy config are isolated in dedicated modals.
 - Bridge runtime actions are easier to parse after splitting normal operations from danger groups, which also keeps destructive actions away from the primary flow.
 - `pnpm build` 已通过；真实窗口的 fullscreen/workspace 双形态和手动交互 smoke 仍需在桌面端实际点检一次。
+
+---
+
+# Bridge Status / Feishu Diagnostics Todo
+
+## Hard Constraints
+
+- [x] Keep admin API routes and `BridgeStatus` JSON shape backward-compatible.
+- [x] Keep bridge start/stop lifecycle semantics unchanged: process stays alive if only status probing fails.
+- [x] Prefer root-cause visibility over optimistic UI fallback; degraded state must not masquerade as connecting.
+
+## Implementation
+
+- [x] Make `apps/kimi-im-bridge/internal/app/app.go` return best-effort status snapshots even when some store reads fail.
+- [x] Add Go regression tests covering partial status snapshot failures and `/api/v1/status` returning `200`.
+- [x] Update `apps/kimi-shell/src-tauri/src/bridge_manager.rs` degraded fallback mapping so enabled channels resolve to `degraded`, not `connecting`.
+- [x] Add Rust tests covering local degraded status synthesis after status-probe failure.
+- [x] Add explicit Feishu startup-stage diagnostics for credential probe, endpoint fetch, websocket handshake, and long-connection failures.
+- [x] Adjust control-center Bridge copy so it no longer implies that saving credentials confirms Feishu platform connectivity.
+
+## Validation
+
+- [x] Run `go test ./internal/admin ./internal/app ./internal/store`.
+- [x] Run Rust bridge-manager targeted tests.
+- [x] Verify degraded snapshots now surface `lastError*` and do not report Feishu as `connecting` when status probing fails.
+
+## Retrospective
+
+- Sidecar `Status()` now treats channel listings and counters as independent best-effort reads, so `/api/v1/status` no longer collapses to HTTP 500 when SQLite snapshotting is partially unavailable.
+- Shell local fallback now synthesizes degraded channel states from settings whenever runtime probing fails in a degraded/crashed state, which removes the misleading `Bridge Degraded + Feishu Connecting` combination.
+- Feishu startup diagnostics now separate credential probe, endpoint fetch, and websocket handshake failures in `bridge.log`, and the control-center copy no longer implies that saved credentials alone prove platform connectivity.

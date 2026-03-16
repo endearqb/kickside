@@ -182,6 +182,7 @@ fn apply_onboarding_input(
     }
 
     bridge_settings.enabled = input.enabled || input.feishu_enabled;
+    bridge_settings.auto_start = input.auto_start;
     for channel in &mut bridge_settings.channels {
         if channel.platform == BridgePlatform::Feishu {
             channel.enabled = input.feishu_enabled;
@@ -416,6 +417,7 @@ mod tests {
         let input = BridgeOnboardingConfigInput {
             enabled: false,
             feishu_enabled: true,
+            auto_start: true,
             feishu: crate::types::BridgeOnboardingFeishuInput {
                 app_id: Some(" cli-app-id ".to_string()),
                 app_secret: Some(" cli-app-secret ".to_string()),
@@ -433,6 +435,7 @@ mod tests {
         .expect("save onboarding config");
 
         assert!(bridge_settings.enabled);
+        assert!(bridge_settings.auto_start);
         assert_eq!(bridge_settings.channels.len(), 2);
         assert!(
             bridge_settings
@@ -481,6 +484,7 @@ mod tests {
         let input = BridgeOnboardingConfigInput {
             enabled: true,
             feishu_enabled: true,
+            auto_start: false,
             feishu: Default::default(),
         };
 
@@ -525,6 +529,7 @@ mod tests {
         let input = BridgeOnboardingConfigInput {
             enabled: false,
             feishu_enabled: true,
+            auto_start: false,
             feishu: Default::default(),
         };
 

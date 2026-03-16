@@ -347,6 +347,7 @@ pub struct BridgeOnboardingFeishuInput {
 pub struct BridgeOnboardingConfigInput {
     pub enabled: bool,
     pub feishu_enabled: bool,
+    pub auto_start: bool,
     pub feishu: BridgeOnboardingFeishuInput,
 }
 

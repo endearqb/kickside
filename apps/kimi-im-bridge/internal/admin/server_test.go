@@ -154,6 +154,49 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 	}
 }
 
+func TestStatusEndpointReturnsDegradedSnapshotPayload(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeService{
+		status: domain.BridgeStatus{
+			State:     domain.BridgeStateDegraded,
+			AdminPort: 60110,
+			Channels: []domain.ChannelStatus{
+				{
+					Platform:      "feishu",
+					Enabled:       true,
+					State:         domain.ChannelStateDegraded,
+					LastErrorCode: "platform_unavailable",
+					LastError:     "status snapshot failed: list channel statuses: database is closed",
+				},
+			},
+			LastErrorCode: "platform_unavailable",
+			LastError:     "status snapshot failed: list channel statuses: database is closed",
+		},
+	}
+	server := httptest.NewServer(NewHandler(fake, "token-1"))
+	defer server.Close()
+
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/status", nil)
+	request.Header.Set("X-Bridge-Admin-Token", "token-1")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("status request returned error: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected degraded snapshot to still return 200, got %d", response.StatusCode)
+	}
+	var status domain.BridgeStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatalf("failed to decode status response: %v", err)
+	}
+	if status.State != domain.BridgeStateDegraded || len(status.Channels) != 1 {
+		t.Fatalf("unexpected degraded snapshot payload: %+v", status)
+	}
+}
+
 func TestDeleteBindingEndpoint(t *testing.T) {
 	t.Parallel()
 

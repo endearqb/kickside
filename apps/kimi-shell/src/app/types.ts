@@ -225,6 +225,7 @@ export interface BridgeOnboardingFeishuInput {
 export interface BridgeOnboardingConfigInput {
   enabled: boolean;
   feishuEnabled: boolean;
+  autoStart: boolean;
   feishu: BridgeOnboardingFeishuInput;
 }
 

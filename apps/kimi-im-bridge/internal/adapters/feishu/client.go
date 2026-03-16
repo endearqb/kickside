@@ -94,20 +94,25 @@ func (c *Client) ProbeCredentials(ctx context.Context) error {
 		AppSecret: c.appSecret,
 	})
 	if err != nil {
+		c.logStageFailure("credential_probe", err)
 		return err
 	}
 	if resp == nil || !resp.Success() {
 		if resp == nil {
-			return &APIError{
+			err = &APIError{
 				Operation: "probe_credentials",
 				Message:   "empty response",
 			}
+			c.logStageFailure("credential_probe", err)
+			return err
 		}
-		return &APIError{
+		err = &APIError{
 			Operation: "probe_credentials",
 			Code:      int(resp.Code),
 			Message:   resp.Msg,
 		}
+		c.logStageFailure("credential_probe", err)
+		return err
 	}
 	return nil
 }
@@ -206,40 +211,53 @@ func (c *Client) fetchEndpoint(ctx context.Context) (*larkws.Endpoint, error) {
 		"AppSecret": c.appSecret,
 	})
 	if err != nil {
+		c.logStageFailure("endpoint_fetch", err)
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.domain+larkws.GenEndpointUri, bytes.NewBuffer(body))
 	if err != nil {
+		c.logStageFailure("endpoint_fetch", err)
 		return nil, err
 	}
 	req.Header.Set("locale", "zh")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.logStageFailure("endpoint_fetch", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("feishu ws endpoint returned http %d", resp.StatusCode)
+		err = fmt.Errorf("feishu ws endpoint returned http %d", resp.StatusCode)
+		c.logStageFailure("endpoint_fetch", err)
+		return nil, err
 	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logStageFailure("endpoint_fetch", err)
 		return nil, err
 	}
 	var endpointResp larkws.EndpointResp
 	if err := json.Unmarshal(raw, &endpointResp); err != nil {
+		c.logStageFailure("endpoint_fetch", err)
 		return nil, err
 	}
 	switch endpointResp.Code {
 	case larkws.OK:
 	case larkws.SystemBusy, larkws.InternalError:
-		return nil, larkws.NewServerError(endpointResp.Code, endpointResp.Msg)
+		err = larkws.NewServerError(endpointResp.Code, endpointResp.Msg)
+		c.logStageFailure("endpoint_fetch", err)
+		return nil, err
 	default:
-		return nil, larkws.NewClientError(endpointResp.Code, endpointResp.Msg)
+		err = larkws.NewClientError(endpointResp.Code, endpointResp.Msg)
+		c.logStageFailure("endpoint_fetch", err)
+		return nil, err
 	}
 	if endpointResp.Data == nil || strings.TrimSpace(endpointResp.Data.Url) == "" {
-		return nil, fmt.Errorf("feishu ws endpoint is empty")
+		err = fmt.Errorf("feishu ws endpoint is empty")
+		c.logStageFailure("endpoint_fetch", err)
+		return nil, err
 	}
 	return endpointResp.Data, nil
 }
@@ -247,13 +265,17 @@ func (c *Client) fetchEndpoint(ctx context.Context) (*larkws.Endpoint, error) {
 func (c *Client) connect(ctx context.Context, endpoint *larkws.Endpoint) (*socket.Conn, int32, time.Duration, error) {
 	parsed, err := url.Parse(endpoint.Url)
 	if err != nil {
+		c.logStageFailure("websocket_handshake", err)
 		return nil, 0, 0, err
 	}
 	conn, resp, err := c.dialer.DialContext(ctx, endpoint.Url, nil)
 	if err != nil {
 		if resp != nil {
-			return nil, 0, 0, parseHandshakeError(resp)
+			err = parseHandshakeError(resp)
+			c.logStageFailure("websocket_handshake", err)
+			return nil, 0, 0, err
 		}
+		c.logStageFailure("websocket_handshake", err)
 		return nil, 0, 0, err
 	}
 
@@ -263,6 +285,26 @@ func (c *Client) connect(ctx context.Context, endpoint *larkws.Endpoint) (*socke
 		pingInterval = time.Duration(endpoint.ClientConfig.PingInterval) * time.Second
 	}
 	return conn, serviceID, pingInterval, nil
+}
+
+func (c *Client) logStageFailure(stage string, err error) {
+	if c.logger == nil || err == nil {
+		return
+	}
+
+	classification := classifyFeishuError(err)
+	code := classification.Code
+	if code == "" {
+		code = "unknown"
+	}
+	c.logger.Printf(
+		"channel event=failure platform=%s stage=%s errorCode=%s retryable=%t err=%q",
+		platformID,
+		stage,
+		code,
+		classification.Retryable,
+		err.Error(),
+	)
 }
 
 func (c *Client) pingLoop(ctx context.Context, conn *socket.Conn, writeMu *sync.Mutex, serviceID int32, interval time.Duration) {

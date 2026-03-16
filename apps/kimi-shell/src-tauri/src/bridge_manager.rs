@@ -22,7 +22,7 @@ use crate::{
     },
 };
 
-const BRIDGE_START_TIMEOUT: Duration = Duration::from_secs(3);
+const BRIDGE_START_TIMEOUT: Duration = Duration::from_secs(20);
 const BRIDGE_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(120);
 
@@ -57,11 +57,20 @@ pub fn get_bridge_status(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
             }
             Err(error) => {
                 if let Ok(mut runtime) = app.state::<AppState>().bridge_runtime.lock() {
-                    runtime.last_error_code = Some("unknown".to_string());
-                    runtime.last_error = Some(error.to_string());
                     if runtime.state == BridgeRuntimeState::Running {
                         runtime.state = BridgeRuntimeState::Degraded;
                     }
+                    let next_error = format!("bridge status probe failed: {error}");
+                    if runtime
+                        .last_error_code
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .is_none()
+                    {
+                        runtime.last_error_code = Some("platform_unavailable".to_string());
+                    }
+                    runtime.last_error = Some(next_error);
                 }
             }
         }
@@ -132,9 +141,14 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
         cleanup_failed_start(app, error.to_string())?;
         return Err(error);
     }
-    let status = match client.get_status() {
+    let status = match wait_for_bridge_status(app, &client) {
         Ok(status) => status,
         Err(error) => {
+            if let Some(status) =
+                recover_start_after_status_probe_failure(app, &settings, &client, &error)?
+            {
+                return Ok(status);
+            }
             cleanup_failed_start(app, error.to_string())?;
             return Err(error);
         }
@@ -487,6 +501,70 @@ fn wait_for_bridge_ready(app: &AppHandle, client: &BridgeHttpClient) -> anyhow::
     }
 }
 
+fn wait_for_bridge_status(
+    app: &AppHandle,
+    client: &BridgeHttpClient,
+) -> anyhow::Result<BridgeStatus> {
+    let deadline = Instant::now() + BRIDGE_START_TIMEOUT;
+    loop {
+        match client.get_status() {
+            Ok(status) => return Ok(status),
+            Err(error) => {
+                refresh_child_state(app)?;
+                let state = app.state::<AppState>();
+                let runtime = state
+                    .bridge_runtime
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+                if runtime.state == BridgeRuntimeState::Crashed {
+                    return Err(anyhow::anyhow!(runtime.last_error.clone().unwrap_or_else(
+                        || "bridge crashed before status became available".to_string()
+                    )));
+                }
+                drop(runtime);
+
+                if Instant::now() >= deadline {
+                    return Err(anyhow::anyhow!(
+                        "bridge status did not become available within startup timeout: {error}"
+                    ));
+                }
+            }
+        }
+        thread::sleep(BRIDGE_POLL_INTERVAL);
+    }
+}
+
+fn recover_start_after_status_probe_failure(
+    app: &AppHandle,
+    settings: &BridgeSettings,
+    client: &BridgeHttpClient,
+    error: &anyhow::Error,
+) -> anyhow::Result<Option<BridgeStatus>> {
+    refresh_child_state(app)?;
+    {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        if runtime.state == BridgeRuntimeState::Crashed || runtime.child.is_none() {
+            return Ok(None);
+        }
+        if client.healthz().is_err() {
+            return Ok(None);
+        }
+        runtime.state = BridgeRuntimeState::Degraded;
+        runtime.last_error_code = Some("platform_unavailable".to_string());
+        runtime.last_error = Some(format!("bridge status probe failed after startup: {error}"));
+    }
+    log_manager::append_line(
+        app,
+        format!("bridge started but status probe failed; keep process running: {error}"),
+    );
+    let status = build_local_status(app, settings)?;
+    Ok(Some(status))
+}
+
 fn apply_status_snapshot(app: &AppHandle, status: &BridgeStatus) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     let mut runtime = state
@@ -504,11 +582,7 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         .lock()
         .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
 
-    let channels = if runtime.channels.is_empty() {
-        settings_channels(settings, runtime.state)
-    } else {
-        merge_channels(settings, &runtime.channels, runtime.state)
-    };
+    let channels = local_status_channels(settings, &runtime.channels, runtime.state);
 
     Ok(BridgeStatus {
         state: runtime.state,
@@ -526,6 +600,23 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         last_error_code: runtime.last_error_code.clone(),
         last_error: runtime.last_error.clone(),
     })
+}
+
+fn local_status_channels(
+    settings: &BridgeSettings,
+    runtime_channels: &[BridgeChannelStatus],
+    runtime_state: BridgeRuntimeState,
+) -> Vec<BridgeChannelStatus> {
+    if runtime_channels.is_empty() {
+        return settings_channels(settings, runtime_state);
+    }
+
+    match runtime_state {
+        BridgeRuntimeState::Degraded | BridgeRuntimeState::Crashed => {
+            settings_channels(settings, runtime_state)
+        }
+        _ => merge_channels(settings, runtime_channels, runtime_state),
+    }
 }
 
 fn merge_channels(
@@ -808,20 +899,26 @@ fn force_terminate(pid: u32) {
 
 #[cfg(windows)]
 fn soft_terminate(pid: u32) {
-    let _ = Command::new("taskkill")
+    use std::os::windows::process::CommandExt;
+    let mut command = Command::new("taskkill");
+    command
         .args(["/PID", &pid.to_string(), "/T"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .creation_flags(CREATE_NO_WINDOW);
+    let _ = command.status();
 }
 
 #[cfg(windows)]
 fn force_terminate(pid: u32) {
-    let _ = Command::new("taskkill")
+    use std::os::windows::process::CommandExt;
+    let mut command = Command::new("taskkill");
+    command
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .creation_flags(CREATE_NO_WINDOW);
+    let _ = command.status();
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -839,7 +936,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use crate::types::BridgePlatform;
+    use crate::types::{BridgeChannelConfig, BridgeChannelMode, BridgePlatform};
 
     struct TempDirGuard {
         path: PathBuf,
@@ -932,6 +1029,48 @@ mod tests {
         finish_stop_transition(&mut runtime);
         assert_eq!(runtime.state, BridgeRuntimeState::Stopped);
         assert_eq!(runtime.pid, None);
+    }
+
+    #[test]
+    fn local_status_channels_degrade_enabled_channels_when_runtime_is_degraded() {
+        let settings = BridgeSettings {
+            enabled: true,
+            auto_start: false,
+            admin_port: 60_110,
+            channels: vec![
+                BridgeChannelConfig {
+                    platform: BridgePlatform::Telegram,
+                    enabled: false,
+                    mode: BridgeChannelMode::Polling,
+                    account_label: "Telegram".to_string(),
+                },
+                BridgeChannelConfig {
+                    platform: BridgePlatform::Feishu,
+                    enabled: true,
+                    mode: BridgeChannelMode::Websocket,
+                    account_label: "Feishu".to_string(),
+                },
+            ],
+        };
+        let runtime_channels = vec![BridgeChannelStatus {
+            platform: BridgePlatform::Feishu,
+            enabled: true,
+            state: BridgeChannelState::Connecting,
+            last_inbound_at: None,
+            last_outbound_at: None,
+            last_offset: None,
+            last_error_code: None,
+            last_error: None,
+        }];
+
+        let channels =
+            local_status_channels(&settings, &runtime_channels, BridgeRuntimeState::Degraded);
+
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].platform, BridgePlatform::Telegram);
+        assert_eq!(channels[0].state, BridgeChannelState::Idle);
+        assert_eq!(channels[1].platform, BridgePlatform::Feishu);
+        assert_eq!(channels[1].state, BridgeChannelState::Degraded);
     }
 
     #[test]

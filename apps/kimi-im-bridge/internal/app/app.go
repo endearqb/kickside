@@ -248,15 +248,33 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 
 	channels, err := s.store.ListChannelStatuses(ctx)
 	if err != nil {
-		return domain.BridgeStatus{}, err
+		channels = s.fallbackChannelStatuses(state)
+		lastErrorCode, lastError = appendStatusSnapshotIssue(
+			lastErrorCode,
+			lastError,
+			"list channel statuses",
+			err,
+		)
 	}
 	bindings, err := s.store.CountBindings(ctx)
 	if err != nil {
-		return domain.BridgeStatus{}, err
+		bindings = 0
+		lastErrorCode, lastError = appendStatusSnapshotIssue(
+			lastErrorCode,
+			lastError,
+			"count bindings",
+			err,
+		)
 	}
 	pendingApprovals, err := s.store.CountPendingApprovals(ctx)
 	if err != nil {
-		return domain.BridgeStatus{}, err
+		pendingApprovals = 0
+		lastErrorCode, lastError = appendStatusSnapshotIssue(
+			lastErrorCode,
+			lastError,
+			"count pending approvals",
+			err,
+		)
 	}
 
 	for _, channel := range channels {
@@ -281,6 +299,51 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 		LastErrorCode:    lastErrorCode,
 		LastError:        lastError,
 	}, nil
+}
+
+func (s *Service) fallbackChannelStatuses(state domain.BridgeRuntimeState) []domain.ChannelStatus {
+	statuses := make([]domain.ChannelStatus, 0, len(s.settings.Channels))
+	for _, channel := range s.settings.Channels {
+		statuses = append(statuses, domain.ChannelStatus{
+			Platform: channel.Platform,
+			Enabled:  channel.Enabled,
+			State:    fallbackChannelState(channel.Enabled, state),
+		})
+	}
+	return statuses
+}
+
+func fallbackChannelState(enabled bool, state domain.BridgeRuntimeState) domain.ChannelRuntimeState {
+	if !enabled {
+		return domain.ChannelStateIdle
+	}
+
+	switch state {
+	case domain.BridgeStateStarting:
+		return domain.ChannelStateConnecting
+	case domain.BridgeStateRunning:
+		return domain.ChannelStateReady
+	case domain.BridgeStateDegraded, domain.BridgeStateStopping, domain.BridgeStateCrashed:
+		return domain.ChannelStateDegraded
+	default:
+		return domain.ChannelStateIdle
+	}
+}
+
+func appendStatusSnapshotIssue(currentCode string, currentMessage string, stage string, err error) (string, string) {
+	if strings.TrimSpace(currentCode) == "" {
+		currentCode = "platform_unavailable"
+	}
+
+	detail := fmt.Sprintf("status snapshot failed: %s: %v", stage, err)
+	currentMessage = strings.TrimSpace(currentMessage)
+	if currentMessage == "" {
+		return currentCode, detail
+	}
+	if strings.Contains(currentMessage, detail) {
+		return currentCode, currentMessage
+	}
+	return currentCode, fmt.Sprintf("%s; %s", currentMessage, detail)
 }
 
 func (s *Service) ListBindings(ctx context.Context) ([]domain.BindingRecord, error) {

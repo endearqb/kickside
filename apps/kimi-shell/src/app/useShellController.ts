@@ -273,6 +273,7 @@ function createDefaultBridgeOnboardingConfigInput(
   return {
     enabled: settings.enabled,
     feishuEnabled: getBridgeChannelEnabled(settings, "feishu"),
+    autoStart: settings.autoStart,
     feishu: {
       appId: "",
       appSecret: "",
@@ -325,7 +326,8 @@ function createBridgeOnboardingValidation(
   return {
     canSave: true,
     canStart: true,
-    message: "配置已就绪；可以直接从这里启动 bridge 并观察 Feishu 连接状态。",
+    message:
+      "配置已就绪；现在只能说明 sidecar 可以尝试建立飞书长连接，是否被平台识别为已连接仍取决于长连接和应用权限。",
   };
 }
 

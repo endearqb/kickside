@@ -939,7 +939,18 @@ export function ControlCenterView({
     </Button>
   );
 
-  const bridgePrimaryAction = (
+  const bridgePrimaryAction = isBridgeRunning ? (
+    <Button
+      type="button"
+      variant="outline"
+      icon={<Square size={15} />}
+      className="cc-action-btn"
+      onClick={() => void onStopBridge()}
+      disabled={bridgeBusy}
+    >
+      停止 Bridge
+    </Button>
+  ) : (
     <Button
       type="button"
       icon={<Play size={15} />}

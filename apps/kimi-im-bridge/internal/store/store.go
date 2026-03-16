@@ -128,7 +128,7 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT platform, enabled, state, ifnull(last_inbound_at, ''), ifnull(last_outbound_at, ''), ifnull(last_offset, ''), ifnull(last_error, '')
+		`SELECT platform, enabled, state, ifnull(last_heartbeat_at, ''), ifnull(last_inbound_at, ''), ifnull(last_outbound_at, ''), ifnull(last_offset, ''), ifnull(last_error, '')
 		 FROM bridge_channels
 		 ORDER BY platform`,
 	)
@@ -141,11 +141,13 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 	for rows.Next() {
 		var status domain.ChannelStatus
 		var enabled int
+		var heartbeatAt string
 		var rawError string
 		if err := rows.Scan(
 			&status.Platform,
 			&enabled,
 			&status.State,
+			&heartbeatAt,
 			&status.LastInboundAt,
 			&status.LastOutboundAt,
 			&status.LastOffset,
@@ -154,6 +156,7 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 			return nil, fmt.Errorf("failed to scan channel status: %w", err)
 		}
 		status.Enabled = enabled == 1
+		_ = heartbeatAt
 		status.LastErrorCode, status.LastError = decodeChannelError(rawError)
 		statuses = append(statuses, status)
 	}

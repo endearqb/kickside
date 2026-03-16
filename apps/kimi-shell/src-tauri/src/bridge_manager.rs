@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -100,6 +101,28 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
 
     let settings = bridge_settings_store::load_or_default(app)?;
     let binary_path = resolve_bridge_binary_path(app)?;
+    if let Ok(metadata) = fs::metadata(&binary_path) {
+        let modified_secs = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(0);
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge binary resolved: path={}, size_bytes={}, modified_epoch_utc={}",
+                binary_path.display(),
+                metadata.len(),
+                modified_secs
+            ),
+        );
+    } else {
+        log_manager::append_line(
+            app,
+            format!("bridge binary resolved: path={}", binary_path.display()),
+        );
+    }
     let state = app.state::<AppState>();
     let admin_token = {
         let runtime = state

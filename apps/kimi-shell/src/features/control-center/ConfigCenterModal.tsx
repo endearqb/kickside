@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   Eye,
@@ -7,7 +7,6 @@ import {
   RotateCcw,
   Save,
   Trash2,
-  X,
 } from "lucide-react";
 import type {
   ConfigCenterSectionId,
@@ -25,6 +24,7 @@ import type {
 import { PROVIDER_TYPE_OPTIONS } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
 type ConfigCenterModalProps = {
   open: boolean;
@@ -529,95 +529,108 @@ export function ConfigCenterModal({
     }));
   }
 
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        requestClose();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, dirty]);
-
   if (!open) {
     return null;
   }
 
   return (
-    <div
-      className="cc-config-modal-overlay"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          requestClose();
-        }
-      }}
-    >
-      <section
-        className="cc-config-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="配置中心"
-      >
-        <header className="cc-config-modal-header">
-          <div>
-            <h3>Provider API 配置中心</h3>
-            <p>全结构化编辑 `config.toml`，支持 CRUD 与环境变量覆盖检查。</p>
+    <ControlCenterModalShell
+      open={open}
+      title="Provider API 配置中心"
+      description="全结构化编辑 `config.toml`，支持 CRUD 与环境变量覆盖检查。"
+      ariaLabel="配置中心"
+      className="cc-config-modal"
+      bodyClassName="cc-config-modal-scroll"
+      onRequestClose={requestClose}
+      footer={
+        <>
+          <div className="cc-config-footer-meta">
+            <span>校验错误：{blockingErrors.length}</span>
+            <span>告警：{warnings.length}</span>
+            {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            icon={<X size={16} />}
-            onClick={requestClose}
-            aria-label="关闭配置中心"
-          />
-        </header>
+          <div className="cc-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              className="cc-action-btn"
+              onClick={requestClose}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="cc-action-btn"
+              icon={<RotateCcw size={14} />}
+              onClick={onReset}
+              disabled={busy || !dirty}
+            >
+              重置
+            </Button>
+            <Button
+              type="button"
+              className="cc-action-btn"
+              icon={<Save size={14} />}
+              onClick={() => void handleSave()}
+              disabled={busy}
+            >
+              保存并完成
+            </Button>
+          </div>
+          {blockingErrors.length > 0 ? (
+            <ul className="cc-config-error-list">
+              {blockingErrors.slice(0, 8).map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      }
+    >
+      <div className="cc-config-meta">
+        <p>
+          配置文件：
+          <strong>{view?.configPath ?? "~/.kimi/config.toml"}</strong>
+        </p>
+        <p>
+          配置目录：
+          <strong>{view?.configDir ?? "~/.kimi"}</strong>
+        </p>
+        <p>
+          数据目录：
+          <strong>{view?.dataDir ?? "~/.kimi"}</strong>
+          {view?.dataDirEnvSource ? (
+            <span className="cc-meta-tag">来自 {view.dataDirEnvSource}</span>
+          ) : null}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="cc-action-btn"
+          onClick={() => void onOpenConfigDir()}
+        >
+          打开配置目录
+        </Button>
+      </div>
 
-        <div className="cc-config-meta">
-          <p>
-            配置文件：
-            <strong>{view?.configPath ?? "~/.kimi/config.toml"}</strong>
-          </p>
-          <p>
-            配置目录：
-            <strong>{view?.configDir ?? "~/.kimi"}</strong>
-          </p>
-          <p>
-            数据目录：
-            <strong>{view?.dataDir ?? "~/.kimi"}</strong>
-            {view?.dataDirEnvSource ? (
-              <span className="cc-meta-tag">来自 {view.dataDirEnvSource}</span>
-            ) : null}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            className="cc-action-btn"
-            onClick={() => void onOpenConfigDir()}
-          >
-            打开配置目录
-          </Button>
-        </div>
+      <div className="cc-config-modal-body">
+        <aside className="cc-config-nav">
+          {CONFIG_SECTIONS.map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className={`cc-config-nav-btn ${activeSection === section.id ? "active" : ""}`}
+              onClick={() => setActiveSection(section.id)}
+            >
+              <span>{section.label}</span>
+              <small>{section.description}</small>
+            </button>
+          ))}
+        </aside>
 
-        <div className="cc-config-modal-body">
-          <aside className="cc-config-nav">
-            {CONFIG_SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                className={`cc-config-nav-btn ${activeSection === section.id ? "active" : ""}`}
-                onClick={() => setActiveSection(section.id)}
-              >
-                <span>{section.label}</span>
-                <small>{section.description}</small>
-              </button>
-            ))}
-          </aside>
-
-          <div className="cc-config-content">
+        <div className="cc-config-content">
             {activeSection === "overview" && (
               <section className="cc-config-panel">
                 <h4>概览与来源</h4>
@@ -1481,54 +1494,8 @@ export function ConfigCenterModal({
                 </div>
               </section>
             )}
-          </div>
         </div>
-
-        <footer className="cc-config-modal-footer">
-          <div className="cc-config-footer-meta">
-            <span>校验错误：{blockingErrors.length}</span>
-            <span>告警：{warnings.length}</span>
-            {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
-          </div>
-          <div className="cc-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={requestClose}
-              disabled={busy}
-            >
-              取消
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn"
-              icon={<RotateCcw size={14} />}
-              onClick={onReset}
-              disabled={busy || !dirty}
-            >
-              重置
-            </Button>
-            <Button
-              type="button"
-              className="cc-action-btn"
-              icon={<Save size={14} />}
-              onClick={() => void handleSave()}
-              disabled={busy}
-            >
-              保存并完成
-            </Button>
-          </div>
-          {blockingErrors.length > 0 ? (
-            <ul className="cc-config-error-list">
-              {blockingErrors.slice(0, 8).map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          ) : null}
-        </footer>
-      </section>
-    </div>
+      </div>
+    </ControlCenterModalShell>
   );
 }

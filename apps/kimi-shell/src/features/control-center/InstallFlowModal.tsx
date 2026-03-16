@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, RefreshCw, SquareTerminal, X } from "lucide-react";
+import { Copy, RefreshCw, SquareTerminal } from "lucide-react";
 import type {
   BackendState,
   InstallFlowCatalog,
@@ -12,6 +12,7 @@ import type {
   PowerShellPreflightSummary,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
 type InstallFlowModalProps = {
   open: boolean;
@@ -287,48 +288,69 @@ export function InstallFlowModal({
   );
 
   return (
-    <div
-      className="cc-install-flow-modal-overlay"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <section
-        className="cc-install-flow-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Install and upgrade"
-      >
-        <header className="cc-install-flow-header">
-          <div>
-            <h3>安装与升级</h3>
-            <p>基础安装在应用内执行，可选增强项可能会打开外部管理员终端。</p>
+    <ControlCenterModalShell
+      open={open}
+      title="安装与升级"
+      description="基础安装在应用内执行，可选增强项可能会打开外部管理员终端。"
+      ariaLabel="Install and upgrade"
+      className="cc-install-flow-modal"
+      bodyClassName="cc-install-flow-modal-body"
+      headerActions={
+        <Button
+          type="button"
+          variant="outline"
+          icon={<RefreshCw size={14} />}
+          className="cc-action-btn"
+          onClick={() => void onRefreshProbe()}
+        >
+          重新检测
+        </Button>
+      }
+      onRequestClose={onClose}
+      footer={
+        <>
+          <div className="cc-install-footer-meta">
+            <span>{session.title ?? "No active task"}</span>
+            <span>{session.status}</span>
+            <span>{session.stage}</span>
           </div>
-          <div className="cc-install-flow-header-actions">
-            <Button
-              type="button"
-              variant="outline"
-              icon={<RefreshCw size={14} />}
-              className="cc-action-btn"
-              onClick={() => void onRefreshProbe()}
-            >
-              重新检测
-            </Button>
+          <div className="cc-actions">
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
-              icon={<X size={16} />}
+              className="cc-action-btn"
               onClick={onClose}
-              aria-label="Close install flow"
-            />
+              disabled={isBusy}
+            >
+              关闭
+            </Button>
+            {showRestartAction ? (
+              <Button
+                type="button"
+                variant="default"
+                icon={<RefreshCw size={14} />}
+                className="cc-action-btn"
+                onClick={() => void onRestartBackend()}
+                disabled={restartBusy}
+              >
+                重启后端
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<SquareTerminal size={14} />}
+              className="cc-action-btn"
+              onClick={() => void onCancelTask()}
+              disabled={!isBusy}
+            >
+              取消任务
+            </Button>
           </div>
-        </header>
-
-        <div className="cc-install-flow-source" role="group" aria-label="Install source">
+        </>
+      }
+    >
+      <div className="cc-install-flow-source" role="group" aria-label="Install source">
           <button
             type="button"
             className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
@@ -345,9 +367,9 @@ export function InstallFlowModal({
           >
             镜像源
           </button>
-        </div>
+      </div>
 
-        <section className="cc-install-flow-section">
+      <section className="cc-install-flow-section">
           <div className="cc-install-console-head">
             <div>
               <h4>PowerShell 预检</h4>
@@ -391,9 +413,9 @@ export function InstallFlowModal({
               </span>
             ) : null}
           </div>
-        </section>
+      </section>
 
-        <section className="cc-install-flow-section">
+      <section className="cc-install-flow-section">
           <h4>环境状态</h4>
           <div className="cc-install-status-grid">
             <span>winget: {statusLabel(probe?.wingetReady)}</span>
@@ -404,10 +426,10 @@ export function InstallFlowModal({
             <span>Node.js: {statusLabel(probe?.nodeReady)}</span>
             <span>Core Ready: {statusLabel(probe?.coreReady)}</span>
           </div>
-        </section>
+      </section>
 
-        {installSource === "mirror" ? (
-          <section className="cc-install-flow-section">
+      {installSource === "mirror" ? (
+        <section className="cc-install-flow-section">
             <div className="cc-install-console-head">
               <div>
                 <h4>镜像配置</h4>
@@ -490,17 +512,17 @@ export function InstallFlowModal({
             ) : (
               <p className="hint">当前使用内置预设镜像列表；切到“自定义”后可编辑具体 URL。</p>
             )}
-          </section>
-        ) : null}
+        </section>
+      ) : null}
 
-        <section className="cc-install-flow-section">
+      <section className="cc-install-flow-section">
           <h4>基础安装</h4>
           <div className="cc-install-task-list">
             {coreTasks.map((task) => renderTaskButton(task, task.recommended ? "default" : "outline"))}
           </div>
-        </section>
+      </section>
 
-        <section className="cc-install-flow-section">
+      <section className="cc-install-flow-section">
           <h4>升级与可选增强</h4>
           <div className="cc-install-task-list">
             {upgradeTasks.map((task) => renderTaskButton(task, "outline"))}
@@ -509,9 +531,9 @@ export function InstallFlowModal({
           {optionalTasks.length ? (
             <p className="hint">Git / Node.js 为可选增强项，可能需要管理员权限。</p>
           ) : null}
-        </section>
+      </section>
 
-        <section className="cc-install-flow-section">
+      <section className="cc-install-flow-section">
           <div className="cc-install-console-head">
             <div>
               <h4>控制台</h4>
@@ -550,28 +572,6 @@ export function InstallFlowModal({
               >
                 复制日志
               </Button>
-              {showRestartAction ? (
-                <Button
-                  type="button"
-                  variant="default"
-                  icon={<RefreshCw size={14} />}
-                  className="cc-action-btn"
-                  onClick={() => void onRestartBackend()}
-                  disabled={restartBusy}
-                >
-                  重启后端
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                icon={<SquareTerminal size={14} />}
-                className="cc-action-btn"
-                onClick={() => void onCancelTask()}
-                disabled={!isBusy}
-              >
-                取消
-              </Button>
             </div>
           </div>
           {failureSummary ? <p className="hint cc-install-error-summary">{failureSummary}</p> : null}
@@ -580,8 +580,7 @@ export function InstallFlowModal({
             {logsText || session.message || "No logs yet."}
           </pre>
           {session.fallbackReason ? <p className="hint">{session.fallbackReason}</p> : null}
-        </section>
       </section>
-    </div>
+    </ControlCenterModalShell>
   );
 }

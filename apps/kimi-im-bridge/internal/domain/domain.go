@@ -92,6 +92,11 @@ type ApprovalTicket struct {
 	RequestPayloadJSON    string `json:"requestPayloadJson"`
 	ResolutionPayloadJSON string `json:"resolutionPayloadJson,omitempty"`
 	DedupeKey             string `json:"dedupeKey"`
+	ClaimedByActorID      string `json:"claimedByActorId,omitempty"`
+	ClaimedAt             string `json:"claimedAt,omitempty"`
+	PlatformMessageID     string `json:"platformMessageId,omitempty"`
+	ResolutionBy          string `json:"resolutionBy,omitempty"`
+	RequestHash           string `json:"requestHash,omitempty"`
 	CreatedAt             string `json:"createdAt"`
 	UpdatedAt             string `json:"updatedAt"`
 	ResolvedAt            string `json:"resolvedAt,omitempty"`
@@ -133,26 +138,92 @@ type BridgeStatus struct {
 }
 
 type BridgeSession struct {
-	KimiSessionID string `json:"kimiSessionId"`
-	WorkDir       string `json:"workDir,omitempty"`
-	LastTurnID    string `json:"lastTurnId,omitempty"`
-	LastMessageAt string `json:"lastMessageAt,omitempty"`
-	Summary       string `json:"summary,omitempty"`
-	CreatedAt     string `json:"createdAt"`
-	UpdatedAt     string `json:"updatedAt"`
+	KimiSessionID       string `json:"kimiSessionId"`
+	WorkDir             string `json:"workDir,omitempty"`
+	LastTurnID          string `json:"lastTurnId,omitempty"`
+	LastMessageAt       string `json:"lastMessageAt,omitempty"`
+	Summary             string `json:"summary,omitempty"`
+	SessionState        string `json:"sessionState,omitempty"`
+	LeaseOwner          string `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt      string `json:"leaseExpiresAt,omitempty"`
+	AutoApprove         bool   `json:"autoApprove,omitempty"`
+	ProviderName        string `json:"providerName,omitempty"`
+	RuntimeMetadataJSON string `json:"runtimeMetadataJson,omitempty"`
+	CreatedAt           string `json:"createdAt"`
+	UpdatedAt           string `json:"updatedAt"`
 }
 
 type DeliveryEvent struct {
-	EventID         string `json:"eventId"`
-	Platform        string `json:"platform"`
-	ChatID          string `json:"chatId"`
-	ThreadID        string `json:"threadId,omitempty"`
-	Direction       string `json:"direction"`
-	DeliveryKey     string `json:"deliveryKey"`
-	SourceMessageID string `json:"sourceMessageId,omitempty"`
-	PayloadJSON     string `json:"payloadJson"`
-	Status          string `json:"status"`
-	ErrorMessage    string `json:"errorMessage,omitempty"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
+	EventID           string `json:"eventId"`
+	Platform          string `json:"platform"`
+	ChatID            string `json:"chatId"`
+	ThreadID          string `json:"threadId,omitempty"`
+	Direction         string `json:"direction"`
+	DeliveryKey       string `json:"deliveryKey"`
+	SourceMessageID   string `json:"sourceMessageId,omitempty"`
+	TurnID            string `json:"turnId,omitempty"`
+	StepIndex         int    `json:"stepIndex,omitempty"`
+	DeliveryKind      string `json:"deliveryKind,omitempty"`
+	Renderer          string `json:"renderer,omitempty"`
+	AttemptCount      int    `json:"attemptCount,omitempty"`
+	TargetMessageID   string `json:"targetMessageId,omitempty"`
+	RetryAfterAt      string `json:"retryAfterAt,omitempty"`
+	SupersedesEventID string `json:"supersedesEventId,omitempty"`
+	PayloadJSON       string `json:"payloadJson"`
+	Status            string `json:"status"`
+	ErrorMessage      string `json:"errorMessage,omitempty"`
+	CreatedAt         string `json:"createdAt"`
+	UpdatedAt         string `json:"updatedAt"`
+}
+
+type BridgeTurn struct {
+	TurnID           string `json:"turnId"`
+	KimiSessionID    string `json:"kimiSessionId"`
+	BindingID        string `json:"bindingId,omitempty"`
+	Platform         string `json:"platform"`
+	ChatID           string `json:"chatId"`
+	ThreadID         string `json:"threadId,omitempty"`
+	InboundMessageID string `json:"inboundMessageId,omitempty"`
+	PromptText       string `json:"promptText"`
+	Status           string `json:"status"`
+	ProviderName     string `json:"providerName"`
+	StartedAt        string `json:"startedAt"`
+	CompletedAt      string `json:"completedAt,omitempty"`
+	ErrorCode        string `json:"errorCode,omitempty"`
+	ErrorMessage     string `json:"errorMessage,omitempty"`
+	CreatedAt        string `json:"createdAt"`
+	UpdatedAt        string `json:"updatedAt"`
+}
+
+type TurnEventRecord struct {
+	EventID        string  `json:"eventId"`
+	TurnID         string  `json:"turnId"`
+	KimiSessionID  string  `json:"kimiSessionId"`
+	Platform       string  `json:"platform"`
+	ChatID         string  `json:"chatId"`
+	ThreadID       string  `json:"threadId,omitempty"`
+	Kind           string  `json:"kind"`
+	StepIndex      int     `json:"stepIndex,omitempty"`
+	MessageID      string  `json:"messageId,omitempty"`
+	ApprovalID     string  `json:"approvalId,omitempty"`
+	RequestKind    string  `json:"requestKind,omitempty"`
+	TextDelta      string  `json:"textDelta,omitempty"`
+	ThinkingDelta  string  `json:"thinkingDelta,omitempty"`
+	StatusText     string  `json:"statusText,omitempty"`
+	PayloadJSON    string  `json:"payloadJson,omitempty"`
+	ErrorCode      string  `json:"errorCode,omitempty"`
+	ErrorMessage   string  `json:"errorMessage,omitempty"`
+	ContextUsage   float64 `json:"contextUsage,omitempty"`
+	TokenUsageJSON string  `json:"tokenUsageJson,omitempty"`
+	CreatedAt      string  `json:"createdAt"`
+}
+
+type ChannelCheckpoint struct {
+	Platform       string `json:"platform"`
+	CheckpointKind string `json:"checkpointKind"`
+	FetchedValue   string `json:"fetchedValue,omitempty"`
+	CommittedValue string `json:"committedValue,omitempty"`
+	LastSeenAt     string `json:"lastSeenAt,omitempty"`
+	CommittedAt    string `json:"committedAt,omitempty"`
+	UpdatedAt      string `json:"updatedAt"`
 }

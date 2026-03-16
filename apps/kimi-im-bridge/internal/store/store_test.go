@@ -259,6 +259,82 @@ func TestOpenMigratesApprovalRuntimeColumns(t *testing.T) {
 	}
 }
 
+func TestOpenMigratesV3DatabaseToLatestSchema(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "bridge.db")
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	ordered, err := migrations.Ordered()
+	if err != nil {
+		t.Fatalf("Ordered returned error: %v", err)
+	}
+	for _, migration := range ordered {
+		if migration.Version > 3 {
+			break
+		}
+		if _, err := raw.Exec(migration.SQL); err != nil {
+			t.Fatalf("failed to apply migration %s: %v", migration.Name, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("failed to close raw db: %v", err)
+	}
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	version, err := store.UserVersion(ctx)
+	if err != nil {
+		t.Fatalf("UserVersion returned error: %v", err)
+	}
+	if version != ExpectedUserVersion() {
+		t.Fatalf("expected latest user_version %d, got %d", ExpectedUserVersion(), version)
+	}
+
+	if err := store.CreateTurn(ctx, domain.BridgeTurn{
+		TurnID:        "turn-v7",
+		KimiSessionID: "session-v7",
+		Platform:      "telegram",
+		ChatID:        "chat-v7",
+		PromptText:    "ping",
+		Status:        "accepted",
+		ProviderName:  "kimi",
+		StartedAt:     "2026-03-16T00:00:00Z",
+		CreatedAt:     "2026-03-16T00:00:00Z",
+		UpdatedAt:     "2026-03-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateTurn returned error after migration: %v", err)
+	}
+	if err := store.AppendTurnEvent(ctx, domain.TurnEventRecord{
+		EventID:       "event-v7",
+		TurnID:        "turn-v7",
+		KimiSessionID: "session-v7",
+		Platform:      "telegram",
+		ChatID:        "chat-v7",
+		Kind:          "turn.accepted",
+		CreatedAt:     "2026-03-16T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("AppendTurnEvent returned error after migration: %v", err)
+	}
+	if err := store.CommitCheckpoint(ctx, "telegram", "telegram_update", "101", "101"); err != nil {
+		t.Fatalf("CommitCheckpoint returned error after migration: %v", err)
+	}
+	checkpoint, err := store.GetCheckpoint(ctx, "telegram", "telegram_update")
+	if err != nil {
+		t.Fatalf("GetCheckpoint returned error after migration: %v", err)
+	}
+	if checkpoint == nil || checkpoint.CommittedValue != "101" {
+		t.Fatalf("expected checkpoint to be queryable after migration, got %+v", checkpoint)
+	}
+}
+
 func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	t.Parallel()
 

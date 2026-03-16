@@ -9,19 +9,22 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/adapterkit"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
 
 type Service struct {
-	config   Config
-	gateway  Gateway
-	bindings BindingRouter
-	runtime  RuntimeExecutor
-	store    ChannelStore
-	logger   Logger
-	delivery *reliability.Executor
+	config       Config
+	gateway      Gateway
+	bindings     BindingRouter
+	runtime      RuntimeExecutor
+	orchestrator bridgecore.InboundExecutor
+	store        ChannelStore
+	logger       Logger
+	delivery     *reliability.Executor
 
 	mu                sync.RWMutex
 	started           bool
@@ -38,12 +41,13 @@ func NewService(options Options) *Service {
 	}
 
 	return &Service{
-		config:   options.Config,
-		gateway:  gateway,
-		bindings: options.BindingRouter,
-		runtime:  options.Runtime,
-		store:    options.Store,
-		logger:   options.Logger,
+		config:       options.Config,
+		gateway:      gateway,
+		bindings:     options.BindingRouter,
+		runtime:      options.Runtime,
+		orchestrator: options.Orchestrator,
+		store:        options.Store,
+		logger:       options.Logger,
 		delivery: reliability.NewExecutor(reliability.ExecutorOptions{
 			Platform: platformID,
 			Logger:   options.Logger,
@@ -69,7 +73,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.gateway == nil {
 		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("feishu gateway is not configured"))
 	}
-	if s.bindings == nil || s.runtime == nil || s.store == nil {
+	if s.bindings == nil || (s.runtime == nil && s.orchestrator == nil) || s.store == nil {
 		return s.failStart(ctx, "unknown", fmt.Errorf("feishu adapter dependencies are incomplete"))
 	}
 
@@ -204,6 +208,27 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	binding, err := s.resolveOrCreateBinding(ctx, key)
 	if err != nil {
 		return false, err
+	}
+
+	if s.orchestrator != nil {
+		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
+			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
+		}, func(turnEvent bridgecore.TurnEvent) error {
+			if turnEvent.Kind == bridgecore.EventApprovalRequested {
+				return s.sendApprovalMessageBridge(ctx, event, turnEvent)
+			}
+			return nil
+		})
+		if err != nil {
+			return false, err
+		}
+		if strings.TrimSpace(result.ReplyText) == "" {
+			return true, nil
+		}
+		if err := s.sendReply(ctx, event, result.Binding, result.ReplyText); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 
 	prompt := runtime.PromptRequest{

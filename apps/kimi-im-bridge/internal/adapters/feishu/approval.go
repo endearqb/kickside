@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
@@ -16,6 +17,20 @@ const (
 )
 
 func (s *Service) sendApprovalMessage(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, event runtime.PromptEvent) error {
+	content, err := buildApprovalCardContent(event.ApprovalID, source.ChatID, primaryID(source.ThreadID, source.RootID), event.RequestKind, event.Prompt)
+	if err != nil {
+		return reliability.Wrap("payload_invalid", err)
+	}
+	return s.sendRecordedMessage(ctx, SendMessageRequest{
+		ReplyToMessageID: source.MessageID,
+		ChatID:           source.ChatID,
+		MessageType:      "interactive",
+		Content:          content,
+		UUID:             event.ApprovalID,
+	}, fmt.Sprintf("feishu:approval:%s", event.ApprovalID), source.MessageID)
+}
+
+func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *MessageEvent, event bridgecore.TurnEvent) error {
 	content, err := buildApprovalCardContent(event.ApprovalID, source.ChatID, primaryID(source.ThreadID, source.RootID), event.RequestKind, event.Prompt)
 	if err != nil {
 		return reliability.Wrap("payload_invalid", err)
@@ -67,7 +82,11 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 		return nil, reliability.Wrap("payload_invalid", err)
 	}
 
-	if err := s.runtime.ResolveApproval(ctx, value.ApprovalID, value.Decision, payloadJSON); err != nil {
+	if s.orchestrator != nil {
+		if err := s.orchestrator.ResolveApproval(ctx, value.ApprovalID, value.Decision, payloadJSON); err != nil {
+			return nil, reliability.Wrap("unknown", err)
+		}
+	} else if err := s.runtime.ResolveApproval(ctx, value.ApprovalID, value.Decision, payloadJSON); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 

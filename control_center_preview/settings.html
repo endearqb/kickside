@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>设置 - 控制中心</title>
+<style>
+  :root { --bg-color: #f5f6f8; --surface-color: #ffffff; --border-color: #e6e8ec; --accent-color: #2563eb; --text-primary: #111827; --text-secondary: #6b7280; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg-color); color: var(--text-primary); display: flex; height: 100vh; }
+  .sidebar { width: 220px; background: var(--surface-color); border-right: 1px solid var(--border-color); padding: 20px 10px; }
+  .nav-item { padding: 10px 15px; border-radius: 6px; color: var(--text-secondary); margin-bottom: 5px; font-size: 14px; }
+  .nav-item.active { background: #eff6ff; color: var(--accent-color); font-weight: 500; }
+  .main { flex: 1; padding: 30px; overflow-y: auto; }
+  .setting-card { background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-start; }
+  .setting-info h3 { margin: 0 0 5px 0; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .setting-info p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+  .status-badge { display: inline-block; padding: 2px 8px; background: #dcfce7; color: #166534; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .status-badge.warning { background: #fef9c3; color: #854d0e; }
+  .setting-actions { display: flex; gap: 10px; align-items: center; }
+  .btn { height: 30px; padding: 0 15px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: var(--accent-color); color: white; }
+  .btn-outline { background: white; border-color: var(--border-color); color: var(--text-primary); }
+  .input-group { display: flex; gap: 10px; margin-top: 15px; }
+  .input { height: 30px; padding: 0 10px; border: 1px solid var(--border-color); border-radius: 6px; flex: 1; font-size: 13px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="nav-item">概览 Dashboard</div>
+    <div class="nav-item active">系统设置 Settings</div>
+    <div class="nav-item">运行与日志 Runtime</div>
+  </aside>
+  <main class="main">
+    <div style="margin-bottom: 20px;">
+      <h2 style="margin:0 0 5px 0;font-size:20px;">系统设置</h2>
+      <p style="margin:0;color:var(--text-secondary);font-size:14px;">管理 Kimi CLI 的安装、目录、认证及扩展功能。</p>
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-info">
+        <h3>1. Kimi CLI 安装 <span class="status-badge">已安装</span></h3>
+        <p>已检测到可执行文件：~/.kimi/bin/kimi<br>Core ready | Python 3.13 ready</p>
+      </div>
+      <div class="setting-actions">
+        <button class="btn btn-outline">检查更新</button>
+        <button class="btn btn-primary">详细安装设置</button>
+      </div>
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-info">
+        <h3>2. 资源管理器右键菜单 <span class="status-badge">已启用</span></h3>
+        <p>允许在文件夹空白处右键唤起 Kimi Shell。</p>
+      </div>
+      <div class="setting-actions">
+        <button class="btn btn-outline">禁用</button>
+      </div>
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-info" style="flex: 1; margin-right: 20px;">
+        <h3>3. 默认工作目录 <span class="status-badge warning">未配置</span></h3>
+        <p>设定全局默认启动的工作区目录。</p>
+        <div class="input-group">
+          <input type="text" class="input" placeholder="输入或浏览文件夹路径...">
+          <button class="btn btn-outline">浏览</button>
+        </div>
+      </div>
+      <div class="setting-actions" style="margin-top: 35px;">
+        <button class="btn btn-primary">保存并重启后端</button>
+      </div>
+    </div>
+
+    <div class="setting-card">
+      <div class="setting-info">
+        <h3>4. Provider API 配置 <span class="status-badge">已配置</span></h3>
+        <p>Providers: 3, Models: 12. 配置文件：~/.kimi/config.toml</p>
+      </div>
+      <div class="setting-actions">
+        <button class="btn btn-primary">打开配置中心</button>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

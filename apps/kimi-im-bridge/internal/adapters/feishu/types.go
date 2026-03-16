@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 )
@@ -50,6 +51,7 @@ type Options struct {
 	Gateway       Gateway
 	BindingRouter BindingRouter
 	Runtime       RuntimeExecutor
+	Orchestrator  bridgecore.InboundExecutor
 	Store         ChannelStore
 	Logger        Logger
 }

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
@@ -42,6 +43,17 @@ func buildApprovalKeyboard(approvalID string) *inlineKeyboardMarkup {
 }
 
 func (s *Service) sendApprovalMessage(ctx context.Context, source *message, _ domain.SessionBinding, event runtime.PromptEvent) error {
+	text := formatApprovalPrompt(event.RequestKind, event.Prompt)
+	return s.sendRecordedText(ctx, outboundTextRequest{
+		ChatID:           source.Chat.ID,
+		ThreadID:         optionalThreadID(source.MessageThreadID),
+		ReplyToMessageID: optionalMessageID(source.MessageID),
+		Text:             text,
+		ReplyMarkup:      buildApprovalKeyboard(event.ApprovalID),
+	}, fmt.Sprintf("telegram:approval:%s", event.ApprovalID), strconv.FormatInt(source.MessageID, 10))
+}
+
+func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *message, event bridgecore.TurnEvent) error {
 	text := formatApprovalPrompt(event.RequestKind, event.Prompt)
 	return s.sendRecordedText(ctx, outboundTextRequest{
 		ChatID:           source.Chat.ID,
@@ -90,7 +102,11 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 		return false, reliability.Wrap("payload_invalid", err)
 	}
 
-	if err := s.runtime.ResolveApproval(ctx, approvalID, status, payloadJSON); err != nil {
+	if s.orchestrator != nil {
+		if err := s.orchestrator.ResolveApproval(ctx, approvalID, status, payloadJSON); err != nil {
+			return false, reliability.Wrap("unknown", err)
+		}
+	} else if err := s.runtime.ResolveApproval(ctx, approvalID, status, payloadJSON); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
 	if err := s.answerCallback(ctx, query.ID, callbackAckText(status)); err != nil {

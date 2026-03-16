@@ -175,119 +175,135 @@ export function BridgeRuntimePanel({
           </div>
         </div>
 
-        <div className="bridge-settings-grid">
-          <label className="bridge-switch-card">
-            <span className="bridge-switch-copy">
-              <strong>Enable bridge</strong>
-              <small>保存后写入 `bridge_settings.json`。</small>
-            </span>
-            <input
-              type="checkbox"
-              checked={settings.enabled}
-              onChange={(event) =>
-                onSettingsChange({
-                  ...settings,
-                  enabled: event.currentTarget.checked,
-                })
-              }
-            />
-          </label>
+        <div className="bridge-panel-group">
+          <div className="bridge-panel-group-label">
+            <span>常规配置</span>
+            <small>轻量运行配置可直接在卡内完成。</small>
+          </div>
 
-          <label className="bridge-switch-card">
-            <span className="bridge-switch-copy">
-              <strong>Auto start</strong>
-              <small>Shell setup 完成后异步启动，不阻塞窗口。</small>
-            </span>
-            <input
-              type="checkbox"
-              checked={settings.autoStart}
-              onChange={(event) =>
-                onSettingsChange({
-                  ...settings,
-                  autoStart: event.currentTarget.checked,
-                })
-              }
-            />
-          </label>
-
-          <label className="bridge-port-card">
-            <span>Admin Port</span>
-            <Input
-              value={String(settings.adminPort)}
-              onChange={(event) =>
-                onSettingsChange({
-                  ...settings,
-                  adminPort: Number(event.currentTarget.value) || 60110,
-                })
-              }
-              inputMode="numeric"
-            />
-          </label>
-        </div>
-
-        <div className="bridge-channel-list">
-          {settings.channels.map((channel) => (
-            <label key={channel.platform} className="bridge-channel-card">
-              <div className="bridge-channel-copy">
-                <strong>{platformLabel(channel.platform)}</strong>
-                <small>mode: {channel.mode}</small>
-              </div>
+          <div className="bridge-settings-grid">
+            <label className="bridge-switch-card">
+              <span className="bridge-switch-copy">
+                <strong>Enable bridge</strong>
+                <small>保存后写入 `bridge_settings.json`。</small>
+              </span>
               <input
                 type="checkbox"
-                checked={channel.enabled}
+                checked={settings.enabled}
                 onChange={(event) =>
-                  onSettingsChange(
-                    updateChannelEnabled(
-                      settings,
-                      channel.platform,
-                      event.currentTarget.checked,
-                    ),
-                  )
+                  onSettingsChange({
+                    ...settings,
+                    enabled: event.currentTarget.checked,
+                  })
                 }
               />
             </label>
-          ))}
+
+            <label className="bridge-switch-card">
+              <span className="bridge-switch-copy">
+                <strong>Auto start</strong>
+                <small>Shell setup 完成后异步启动，不阻塞窗口。</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={settings.autoStart}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settings,
+                    autoStart: event.currentTarget.checked,
+                  })
+                }
+              />
+            </label>
+
+            <label className="bridge-port-card">
+              <span>Admin Port</span>
+              <Input
+                value={String(settings.adminPort)}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settings,
+                    adminPort: Number(event.currentTarget.value) || 60110,
+                  })
+                }
+                inputMode="numeric"
+              />
+            </label>
+          </div>
+
+          <div className="bridge-channel-list">
+            {settings.channels.map((channel) => (
+              <label key={channel.platform} className="bridge-channel-card">
+                <div className="bridge-channel-copy">
+                  <strong>{platformLabel(channel.platform)}</strong>
+                  <small>mode: {channel.mode}</small>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={channel.enabled}
+                  onChange={(event) =>
+                    onSettingsChange(
+                      updateChannelEnabled(
+                        settings,
+                        channel.platform,
+                        event.currentTarget.checked,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="bridge-action-row">
+            <Button
+              type="button"
+              icon={<RefreshCw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onSave()}
+              disabled={busy}
+            >
+              保存配置
+            </Button>
+            <Button
+              type="button"
+              icon={<Play size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onStart()}
+              disabled={busy || isRunning}
+            >
+              Start
+            </Button>
+          </div>
         </div>
 
-        <div className="cc-actions">
-          <Button
-            type="button"
-            icon={<RefreshCw size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onSave()}
-            disabled={busy}
-          >
-            保存配置
-          </Button>
-          <Button
-            type="button"
-            icon={<Play size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onStart()}
-            disabled={busy || isRunning}
-          >
-            Start
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            icon={<Square size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onStop()}
-            disabled={busy || !isRunning}
-          >
-            Stop
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            icon={<RefreshCcw size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onRestart()}
-            disabled={busy}
-          >
-            Restart
-          </Button>
+        <div className="bridge-danger-group">
+          <div className="bridge-panel-group-label is-danger">
+            <span>危险操作</span>
+            <small>会中断运行中的 bridge 或触发重连。</small>
+          </div>
+          <div className="bridge-action-row">
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<Square size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onStop()}
+              disabled={busy || !isRunning}
+            >
+              Stop
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              icon={<RefreshCcw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onRestart()}
+              disabled={busy}
+            >
+              Restart
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -376,35 +392,48 @@ export function BridgeRuntimePanel({
           </div>
         </div>
         {bindings.length > 0 ? (
-          <div className="bridge-binding-list">
-            {bindings.map((binding) => (
-              <div key={binding.bindingId} className="bridge-binding-card">
-                <div className="bridge-binding-copy">
-                  <strong>{binding.bindingId}</strong>
-                  <span>
-                    {platformLabel(binding.platform)} / {binding.chatId}
-                    {binding.threadId ? ` / ${binding.threadId}` : ""}
-                  </span>
-                  <small>
-                    session {binding.kimiSessionId}
-                    {binding.lastInboundMessageId
-                      ? ` | last inbound ${binding.lastInboundMessageId}`
-                      : ""}
-                  </small>
+          <>
+            <div className="bridge-binding-list">
+              {bindings.map((binding) => (
+                <div key={binding.bindingId} className="bridge-binding-card">
+                  <div className="bridge-binding-copy">
+                    <strong>{binding.bindingId}</strong>
+                    <span>
+                      {platformLabel(binding.platform)} / {binding.chatId}
+                      {binding.threadId ? ` / ${binding.threadId}` : ""}
+                    </span>
+                    <small>
+                      session {binding.kimiSessionId}
+                      {binding.lastInboundMessageId
+                        ? ` | last inbound ${binding.lastInboundMessageId}`
+                        : ""}
+                    </small>
+                  </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon={<Trash2 size={14} />}
-                  className="cc-action-btn"
-                  onClick={() => void onClearBinding(binding.bindingId)}
-                  disabled={busy}
-                >
-                  Clear
-                </Button>
+              ))}
+            </div>
+            <div className="bridge-danger-group">
+              <div className="bridge-panel-group-label is-danger">
+                <span>危险操作</span>
+                <small>清理 binding 会断开当前会话映射。</small>
               </div>
-            ))}
-          </div>
+              <div className="bridge-danger-action-list">
+                {bindings.map((binding) => (
+                  <Button
+                    key={`clear-${binding.bindingId}`}
+                    type="button"
+                    variant="ghost"
+                    icon={<Trash2 size={14} />}
+                    className="cc-action-btn"
+                    onClick={() => void onClearBinding(binding.bindingId)}
+                    disabled={busy}
+                  >
+                    Clear {binding.bindingId}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </>
         ) : (
           <p className="hint">暂无 bindings。bridge 停止时列表会显示为空。</p>
         )}
@@ -428,32 +457,45 @@ export function BridgeRuntimePanel({
           </Button>
         </div>
         {approvals.length > 0 ? (
-          <div className="bridge-approval-list">
-            {approvals.map((approval) => (
-              <div key={approval.approvalId} className="bridge-approval-card">
-                <div className="bridge-approval-copy">
-                  <strong>{approval.approvalId}</strong>
-                  <span>
-                    {platformLabel(approval.platform)} / {approval.kimiSessionId}
-                  </span>
-                  <small>
-                    {approval.requestKind} | {approval.chatId}
-                    {approval.threadId ? ` / ${approval.threadId}` : ""}
-                  </small>
-                  <p>{approval.prompt}</p>
-                  <small>created {formatTimestamp(approval.createdAt)}</small>
+          <>
+            <div className="bridge-approval-list">
+              {approvals.map((approval) => (
+                <div key={approval.approvalId} className="bridge-approval-card">
+                  <div className="bridge-approval-copy">
+                    <strong>{approval.approvalId}</strong>
+                    <span>
+                      {platformLabel(approval.platform)} / {approval.kimiSessionId}
+                    </span>
+                    <small>
+                      {approval.requestKind} | {approval.chatId}
+                      {approval.threadId ? ` / ${approval.threadId}` : ""}
+                    </small>
+                    <p>{approval.prompt}</p>
+                    <small>created {formatTimestamp(approval.createdAt)}</small>
+                  </div>
+                  <div className="bridge-approval-actions">
+                    <Button
+                      type="button"
+                      icon={<Check size={14} />}
+                      className="cc-action-btn"
+                      onClick={() => void onResolveApproval(approval.approvalId, "approved")}
+                      disabled={busy}
+                    >
+                      Approve
+                    </Button>
+                  </div>
                 </div>
-                <div className="bridge-approval-actions">
+              ))}
+            </div>
+            <div className="bridge-danger-group">
+              <div className="bridge-panel-group-label is-danger">
+                <span>危险操作</span>
+                <small>拒绝 approval 会中断当前等待中的用户动作。</small>
+              </div>
+              <div className="bridge-danger-action-list">
+                {approvals.map((approval) => (
                   <Button
-                    type="button"
-                    icon={<Check size={14} />}
-                    className="cc-action-btn"
-                    onClick={() => void onResolveApproval(approval.approvalId, "approved")}
-                    disabled={busy}
-                  >
-                    Approve
-                  </Button>
-                  <Button
+                    key={`reject-${approval.approvalId}`}
                     type="button"
                     variant="ghost"
                     icon={<X size={14} />}
@@ -461,12 +503,12 @@ export function BridgeRuntimePanel({
                     onClick={() => void onResolveApproval(approval.approvalId, "rejected")}
                     disabled={busy}
                   >
-                    Reject
+                    Reject {approval.approvalId}
                   </Button>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          </>
         ) : (
           <p className="hint">当前没有 pending approvals。</p>
         )}

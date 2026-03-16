@@ -10,13 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/adapters/feishu"
-	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/adapters/telegram"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/admin"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/logging"
+	feishuplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/feishu"
+	telegramplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/telegram"
+	kimiprovider "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/providers/kimi"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
@@ -32,13 +34,15 @@ type Options struct {
 }
 
 type Service struct {
-	options    Options
-	settings   config.BridgeSettings
-	secrets    config.BridgeSecrets
-	store      *store.Store
-	logger     *logging.Logger
-	bindings   *binding.Router
-	runtimeSvc *runtime.Service
+	options      Options
+	settings     config.BridgeSettings
+	secrets      config.BridgeSecrets
+	store        *store.Store
+	logger       *logging.Logger
+	bindings     *binding.Router
+	orchestrator *bridgecore.Orchestrator
+	provider     bridgecore.RuntimeProvider
+	runtimeSvc   *runtime.Service
 
 	mu            sync.RWMutex
 	state         domain.BridgeRuntimeState
@@ -88,6 +92,18 @@ func New(options Options) (*Service, error) {
 		state:    domain.BridgeStateStopped,
 		stopCh:   make(chan struct{}),
 	}
+	service.provider = kimiprovider.NewProvider(
+		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{}),
+		storeHandle,
+		storeHandle,
+	)
+	service.orchestrator = bridgecore.NewOrchestrator(
+		service.bindings,
+		service.provider,
+		storeHandle,
+		storeHandle,
+		storeHandle,
+	)
 	service.runtimeSvc = runtime.NewService(
 		runtime.NewSDKDriver(runtime.SDKDriverOptions{}),
 		storeHandle,
@@ -97,7 +113,7 @@ func New(options Options) (*Service, error) {
 		_ = service.Close()
 		return nil, err
 	}
-	reconciled, err := service.runtimeSvc.ReconcilePendingApprovals(context.Background(), "runtime_restarted_before_resume")
+	reconciled, err := service.provider.ReconcilePendingApprovals(context.Background(), "runtime_restarted_before_resume")
 	if err != nil {
 		_ = service.Close()
 		return nil, err
@@ -203,9 +219,16 @@ func (s *Service) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = s.Shutdown(ctx)
+	var errProvider error
+	if s.provider != nil {
+		errProvider = s.provider.Close()
+	}
 	errRuntime := s.runtimeSvc.Close()
 	errStore := s.store.Close()
 	errLogger := s.logger.Close()
+	if errProvider != nil {
+		return errProvider
+	}
 	if errRuntime != nil {
 		return errRuntime
 	}
@@ -277,7 +300,7 @@ func (s *Service) ClearBinding(ctx context.Context, bindingID string) error {
 }
 
 func (s *Service) ResolveApproval(ctx context.Context, approvalID string, status string, resolutionPayloadJSON string) error {
-	if err := s.runtimeSvc.ResolveApproval(ctx, approvalID, status, resolutionPayloadJSON); err != nil {
+	if err := s.provider.ResolveApproval(ctx, approvalID, status, resolutionPayloadJSON); err != nil {
 		return err
 	}
 	s.logger.Printf("approval resolved: %s (%s)", approvalID, status)
@@ -359,25 +382,25 @@ func (s *Service) startAdapters() error {
 func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, error) {
 	switch strings.TrimSpace(strings.ToLower(channel.Platform)) {
 	case "telegram":
-		return telegram.NewService(telegram.Options{
-			Config: telegram.Config{
+		return telegramplatform.NewService(telegramplatform.Options{
+			Config: telegramplatform.Config{
 				BotToken:       secretTelegramBotToken(s.secrets),
 				DefaultWorkDir: s.settings.DefaultWorkDir,
 			},
 			BindingRouter: s.bindings,
-			Runtime:       s.runtimeSvc,
+			Orchestrator:  s.orchestrator,
 			Store:         s.store,
 			Logger:        s.logger,
 		}), nil
 	case "feishu":
-		return feishu.NewService(feishu.Options{
-			Config: feishu.Config{
+		return feishuplatform.NewService(feishuplatform.Options{
+			Config: feishuplatform.Config{
 				AppID:          secretFeishuAppID(s.secrets),
 				AppSecret:      secretFeishuAppSecret(s.secrets),
 				DefaultWorkDir: s.settings.DefaultWorkDir,
 			},
 			BindingRouter: s.bindings,
-			Runtime:       s.runtimeSvc,
+			Orchestrator:  s.orchestrator,
 			Store:         s.store,
 			Logger:        s.logger,
 		}), nil

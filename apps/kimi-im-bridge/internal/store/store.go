@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 3
+const userVersion = 7
 
 type Store struct {
 	db *sql.DB
@@ -292,19 +292,32 @@ func (s *Store) UpsertSession(ctx context.Context, session domain.BridgeSession)
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO bridge_sessions (
-			kimi_session_id, work_dir, last_turn_id, last_message_at, summary, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			kimi_session_id, work_dir, last_turn_id, last_message_at, summary, session_state, lease_owner,
+			lease_expires_at, auto_approve, provider_name, runtime_metadata_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(kimi_session_id) DO UPDATE SET
 			work_dir=excluded.work_dir,
 			last_turn_id=excluded.last_turn_id,
 			last_message_at=excluded.last_message_at,
 			summary=excluded.summary,
+			session_state=excluded.session_state,
+			lease_owner=excluded.lease_owner,
+			lease_expires_at=excluded.lease_expires_at,
+			auto_approve=excluded.auto_approve,
+			provider_name=excluded.provider_name,
+			runtime_metadata_json=excluded.runtime_metadata_json,
 			updated_at=excluded.updated_at`,
 		session.KimiSessionID,
 		nullIfEmpty(session.WorkDir),
 		nullIfEmpty(session.LastTurnID),
 		nullIfEmpty(session.LastMessageAt),
 		nullIfEmpty(session.Summary),
+		nullIfEmpty(session.SessionState),
+		nullIfEmpty(session.LeaseOwner),
+		nullIfEmpty(session.LeaseExpiresAt),
+		boolToInt(session.AutoApprove),
+		nullIfEmpty(session.ProviderName),
+		nullIfEmpty(session.RuntimeMetadataJSON),
 		session.CreatedAt,
 		session.UpdatedAt,
 	)
@@ -502,8 +515,9 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 		ctx,
 		`INSERT INTO approval_requests (
 			approval_id, kimi_session_id, turn_id, step_id, platform, chat_id, thread_id, request_kind, prompt, status,
-			request_payload_json, resolution_payload_json, dedupe_key, created_at, updated_at, resolved_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			request_payload_json, resolution_payload_json, dedupe_key, claimed_by_actor_id, claimed_at,
+			platform_message_id, resolution_by, request_hash, created_at, updated_at, resolved_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ticket.ApprovalID,
 		ticket.KimiSessionID,
 		nullIfEmpty(ticket.TurnID),
@@ -517,6 +531,11 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 		ticket.RequestPayloadJSON,
 		nullIfEmpty(ticket.ResolutionPayloadJSON),
 		ticket.DedupeKey,
+		nullIfEmpty(ticket.ClaimedByActorID),
+		nullIfEmpty(ticket.ClaimedAt),
+		nullIfEmpty(ticket.PlatformMessageID),
+		nullIfEmpty(ticket.ResolutionBy),
+		nullIfEmpty(ticket.RequestHash),
 		ticket.CreatedAt,
 		ticket.UpdatedAt,
 		nullIfEmpty(ticket.ResolvedAt),
@@ -530,7 +549,9 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
 	query := `SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
 	          prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
-	          ifnull(resolution_payload_json, ''), dedupe_key, created_at, updated_at, ifnull(resolved_at, '')
+	          ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
+	          ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
+	          ifnull(request_hash, ''), created_at, updated_at, ifnull(resolved_at, '')
 	   FROM approval_requests`
 	args := []any{}
 	if status != "" {
@@ -562,6 +583,11 @@ func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.Appr
 			&ticket.RequestPayloadJSON,
 			&ticket.ResolutionPayloadJSON,
 			&ticket.DedupeKey,
+			&ticket.ClaimedByActorID,
+			&ticket.ClaimedAt,
+			&ticket.PlatformMessageID,
+			&ticket.ResolutionBy,
+			&ticket.RequestHash,
 			&ticket.CreatedAt,
 			&ticket.UpdatedAt,
 			&ticket.ResolvedAt,
@@ -581,7 +607,9 @@ func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain
 		ctx,
 		`SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
 		        prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
-		        ifnull(resolution_payload_json, ''), dedupe_key, created_at, updated_at, ifnull(resolved_at, '')
+		        ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
+		        ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
+		        ifnull(request_hash, ''), created_at, updated_at, ifnull(resolved_at, '')
 		 FROM approval_requests
 		 WHERE approval_id = ?`,
 		approvalID,
@@ -602,6 +630,11 @@ func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain
 		&ticket.RequestPayloadJSON,
 		&ticket.ResolutionPayloadJSON,
 		&ticket.DedupeKey,
+		&ticket.ClaimedByActorID,
+		&ticket.ClaimedAt,
+		&ticket.PlatformMessageID,
+		&ticket.ResolutionBy,
+		&ticket.RequestHash,
 		&ticket.CreatedAt,
 		&ticket.UpdatedAt,
 		&ticket.ResolvedAt,
@@ -666,8 +699,9 @@ func (s *Store) RecordDeliveryEventIfAbsent(ctx context.Context, event domain.De
 		ctx,
 		`INSERT INTO delivery_events (
 			event_id, platform, chat_id, thread_id, direction, delivery_key, source_message_id,
-			payload_json, status, error_message, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			turn_id, step_index, delivery_kind, renderer, attempt_count, target_message_id, retry_after_at,
+			supersedes_event_id, payload_json, status, error_message, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.EventID,
 		event.Platform,
 		event.ChatID,
@@ -675,6 +709,14 @@ func (s *Store) RecordDeliveryEventIfAbsent(ctx context.Context, event domain.De
 		event.Direction,
 		event.DeliveryKey,
 		nullIfEmpty(event.SourceMessageID),
+		nullIfEmpty(event.TurnID),
+		event.StepIndex,
+		nullIfEmpty(event.DeliveryKind),
+		nullIfEmpty(event.Renderer),
+		event.AttemptCount,
+		nullIfEmpty(event.TargetMessageID),
+		nullIfEmpty(event.RetryAfterAt),
+		nullIfEmpty(event.SupersedesEventID),
 		event.PayloadJSON,
 		event.Status,
 		nullIfEmpty(event.ErrorMessage),
@@ -694,7 +736,9 @@ func (s *Store) GetDeliveryEventByKey(ctx context.Context, deliveryKey string) (
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT event_id, platform, chat_id, ifnull(thread_id, ''), direction, delivery_key,
-		        ifnull(source_message_id, ''), payload_json, status, ifnull(error_message, ''), created_at, updated_at
+		        ifnull(source_message_id, ''), ifnull(turn_id, ''), ifnull(step_index, 0), ifnull(delivery_kind, ''),
+		        ifnull(renderer, ''), ifnull(attempt_count, 0), ifnull(target_message_id, ''), ifnull(retry_after_at, ''),
+		        ifnull(supersedes_event_id, ''), payload_json, status, ifnull(error_message, ''), created_at, updated_at
 		 FROM delivery_events
 		 WHERE delivery_key = ?`,
 		deliveryKey,
@@ -709,6 +753,14 @@ func (s *Store) GetDeliveryEventByKey(ctx context.Context, deliveryKey string) (
 		&event.Direction,
 		&event.DeliveryKey,
 		&event.SourceMessageID,
+		&event.TurnID,
+		&event.StepIndex,
+		&event.DeliveryKind,
+		&event.Renderer,
+		&event.AttemptCount,
+		&event.TargetMessageID,
+		&event.RetryAfterAt,
+		&event.SupersedesEventID,
 		&event.PayloadJSON,
 		&event.Status,
 		&event.ErrorMessage,
@@ -762,6 +814,156 @@ func (s *Store) CountPendingApprovals(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+func (s *Store) CreateTurn(ctx context.Context, turn domain.BridgeTurn) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO bridge_turns (
+			turn_id, kimi_session_id, binding_id, platform, chat_id, thread_id, inbound_message_id,
+			prompt_text, status, provider_name, started_at, completed_at, error_code, error_message,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		turn.TurnID,
+		turn.KimiSessionID,
+		nullIfEmpty(turn.BindingID),
+		turn.Platform,
+		turn.ChatID,
+		nullIfEmpty(turn.ThreadID),
+		nullIfEmpty(turn.InboundMessageID),
+		turn.PromptText,
+		turn.Status,
+		turn.ProviderName,
+		turn.StartedAt,
+		nullIfEmpty(turn.CompletedAt),
+		nullIfEmpty(turn.ErrorCode),
+		nullIfEmpty(turn.ErrorMessage),
+		turn.CreatedAt,
+		turn.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create turn %s: %w", turn.TurnID, err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateTurn(ctx context.Context, turn domain.BridgeTurn) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`UPDATE bridge_turns
+		 SET kimi_session_id = ?, binding_id = ?, platform = ?, chat_id = ?, thread_id = ?, inbound_message_id = ?,
+		     prompt_text = ?, status = ?, provider_name = ?, started_at = ?, completed_at = ?, error_code = ?,
+		     error_message = ?, updated_at = ?
+		 WHERE turn_id = ?`,
+		turn.KimiSessionID,
+		nullIfEmpty(turn.BindingID),
+		turn.Platform,
+		turn.ChatID,
+		nullIfEmpty(turn.ThreadID),
+		nullIfEmpty(turn.InboundMessageID),
+		turn.PromptText,
+		turn.Status,
+		turn.ProviderName,
+		turn.StartedAt,
+		nullIfEmpty(turn.CompletedAt),
+		nullIfEmpty(turn.ErrorCode),
+		nullIfEmpty(turn.ErrorMessage),
+		turn.UpdatedAt,
+		turn.TurnID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update turn %s: %w", turn.TurnID, err)
+	}
+	return nil
+}
+
+func (s *Store) AppendTurnEvent(ctx context.Context, event domain.TurnEventRecord) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO turn_events (
+			event_id, turn_id, kimi_session_id, platform, chat_id, thread_id, kind, step_index, message_id,
+			approval_id, request_kind, text_delta, thinking_delta, status_text, payload_json, error_code,
+			error_message, context_usage, token_usage_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.EventID,
+		event.TurnID,
+		event.KimiSessionID,
+		event.Platform,
+		event.ChatID,
+		nullIfEmpty(event.ThreadID),
+		event.Kind,
+		event.StepIndex,
+		nullIfEmpty(event.MessageID),
+		nullIfEmpty(event.ApprovalID),
+		nullIfEmpty(event.RequestKind),
+		nullIfEmpty(event.TextDelta),
+		nullIfEmpty(event.ThinkingDelta),
+		nullIfEmpty(event.StatusText),
+		nullIfEmpty(event.PayloadJSON),
+		nullIfEmpty(event.ErrorCode),
+		nullIfEmpty(event.ErrorMessage),
+		event.ContextUsage,
+		nullIfEmpty(event.TokenUsageJSON),
+		event.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to append turn event %s: %w", event.EventID, err)
+	}
+	return nil
+}
+
+func (s *Store) GetCheckpoint(ctx context.Context, platform string, checkpointKind string) (*domain.ChannelCheckpoint, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT platform, checkpoint_kind, ifnull(fetched_value, ''), ifnull(committed_value, ''),
+		        ifnull(last_seen_at, ''), ifnull(committed_at, ''), updated_at
+		 FROM channel_checkpoints
+		 WHERE platform = ? AND checkpoint_kind = ?`,
+		platform,
+		checkpointKind,
+	)
+	var checkpoint domain.ChannelCheckpoint
+	if err := row.Scan(
+		&checkpoint.Platform,
+		&checkpoint.CheckpointKind,
+		&checkpoint.FetchedValue,
+		&checkpoint.CommittedValue,
+		&checkpoint.LastSeenAt,
+		&checkpoint.CommittedAt,
+		&checkpoint.UpdatedAt,
+	); errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get checkpoint %s/%s: %w", platform, checkpointKind, err)
+	}
+	return &checkpoint, nil
+}
+
+func (s *Store) CommitCheckpoint(ctx context.Context, platform string, checkpointKind string, fetched string, committed string) error {
+	now := nowRFC3339()
+	_, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO channel_checkpoints (
+			platform, checkpoint_kind, fetched_value, committed_value, last_seen_at, committed_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(platform, checkpoint_kind) DO UPDATE SET
+			fetched_value=excluded.fetched_value,
+			committed_value=excluded.committed_value,
+			last_seen_at=excluded.last_seen_at,
+			committed_at=excluded.committed_at,
+			updated_at=excluded.updated_at`,
+		platform,
+		checkpointKind,
+		nullIfEmpty(fetched),
+		nullIfEmpty(committed),
+		now,
+		nullIfEmpty(committedAt(committed, now)),
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to commit checkpoint %s/%s: %w", platform, checkpointKind, err)
+	}
+	return nil
+}
+
 func scanBinding(scanner interface {
 	Scan(dest ...any) error
 }) (*domain.SessionBinding, error) {
@@ -797,6 +999,13 @@ func nullIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+func committedAt(value string, now string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return now
 }
 
 func nowRFC3339() string {

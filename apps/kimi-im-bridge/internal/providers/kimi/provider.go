@@ -81,6 +81,7 @@ func (p *Provider) RunTurn(
 		Prompt:        normalized.Prompt,
 		WorkDir:       normalized.WorkDir,
 		AutoApprove:   normalized.AutoApprove,
+		Attachments:   append([]domain.PromptAttachment(nil), normalized.Attachments...),
 	}, p.driver.OpenSession, func(ctx context.Context, session DriverSession) error {
 		promptCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -90,6 +91,7 @@ func (p *Provider) RunTurn(
 			Prompt:        normalized.Prompt,
 			WorkDir:       normalized.WorkDir,
 			AutoApprove:   normalized.AutoApprove,
+			Attachments:   append([]domain.PromptAttachment(nil), normalized.Attachments...),
 		})
 		if err != nil {
 			return err
@@ -287,6 +289,9 @@ func (p *Provider) mapDriverEvent(target bridgecore.RuntimeTarget, turnID string
 			InputCacheRead:     event.TokenUsage.InputCacheRead,
 			InputCacheCreation: event.TokenUsage.InputCacheCreation,
 		}
+	case driverEventArtifactReady:
+		mapped.Kind = bridgecore.EventArtifactReady
+		mapped.Artifact = event.Artifact
 	case driverEventApprovalRequested:
 		mapped.Kind = bridgecore.EventApprovalRequested
 		mapped.ApprovalID = event.ApprovalID
@@ -306,6 +311,7 @@ func normalizeRequest(request bridgecore.TurnRequest) (bridgecore.TurnRequest, e
 	request.WorkDir = strings.TrimSpace(request.WorkDir)
 	request.KimiSessionID = strings.TrimSpace(request.KimiSessionID)
 	request.TurnID = strings.TrimSpace(request.TurnID)
+	request.Attachments = append([]domain.PromptAttachment(nil), request.Attachments...)
 	if request.Prompt == "" {
 		return bridgecore.TurnRequest{}, fmt.Errorf("prompt is required")
 	}

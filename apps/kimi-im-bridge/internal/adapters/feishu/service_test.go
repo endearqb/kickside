@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -20,11 +21,17 @@ import (
 type fakeGateway struct {
 	mu sync.Mutex
 
-	probeErr  error
-	runFunc   func(context.Context, EventHandler) error
-	replyFunc func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	probeErr     error
+	runFunc      func(context.Context, EventHandler) error
+	replyFunc    func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	createFunc   func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	uploadImage  func(context.Context, string) (*UploadedResource, error)
+	uploadFile   func(context.Context, string, string) (*UploadedResource, error)
+	downloadImage func(context.Context, string) (*DownloadedResource, error)
+	downloadFile  func(context.Context, string) (*DownloadedResource, error)
 
-	replyCalls []SendMessageRequest
+	replyCalls  []SendMessageRequest
+	createCalls []SendMessageRequest
 }
 
 func (f *fakeGateway) ProbeCredentials(context.Context) error {
@@ -51,6 +58,58 @@ func (f *fakeGateway) ReplyMessage(ctx context.Context, request SendMessageReque
 	return &SendMessageResult{
 		MessageID: fmt.Sprintf("reply-%d", callIndex),
 	}, nil
+}
+
+func (f *fakeGateway) CreateMessage(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+	f.mu.Lock()
+	f.createCalls = append(f.createCalls, request)
+	fn := f.createFunc
+	callIndex := len(f.createCalls)
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, request)
+	}
+	return &SendMessageResult{
+		MessageID: fmt.Sprintf("create-%d", callIndex),
+	}, nil
+}
+
+func (f *fakeGateway) DownloadImage(ctx context.Context, imageKey string) (*DownloadedResource, error) {
+	if f.downloadImage != nil {
+		return f.downloadImage(ctx, imageKey)
+	}
+	return &DownloadedResource{
+		FileName:  "image.png",
+		MimeType:  "image/png",
+		SizeBytes: int64(len("image-bytes")),
+		Content:   []byte("image-bytes"),
+	}, nil
+}
+
+func (f *fakeGateway) DownloadFile(ctx context.Context, fileKey string) (*DownloadedResource, error) {
+	if f.downloadFile != nil {
+		return f.downloadFile(ctx, fileKey)
+	}
+	return &DownloadedResource{
+		FileName:  "file.txt",
+		MimeType:  "text/plain",
+		SizeBytes: int64(len("file-bytes")),
+		Content:   []byte("file-bytes"),
+	}, nil
+}
+
+func (f *fakeGateway) UploadImage(ctx context.Context, localPath string) (*UploadedResource, error) {
+	if f.uploadImage != nil {
+		return f.uploadImage(ctx, localPath)
+	}
+	return &UploadedResource{Key: "image-key"}, nil
+}
+
+func (f *fakeGateway) UploadFile(ctx context.Context, localPath string, fileName string) (*UploadedResource, error) {
+	if f.uploadFile != nil {
+		return f.uploadFile(ctx, localPath, fileName)
+	}
+	return &UploadedResource{Key: "file-key"}, nil
 }
 
 type fakeRuntimeExecutor struct {
@@ -202,13 +261,12 @@ func TestServiceProcessMessageSendFailureDoesNotAdvanceAndDedupesChunks(t *testi
 		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: longText}}},
 	}
 
-	failures := 0
+	allowTailReply := false
 	gateway.replyFunc = func(_ context.Context, request SendMessageRequest) (*SendMessageResult, error) {
-		if strings.Contains(request.Content, "tail") && failures < 2 {
-			failures++
+		if strings.Contains(request.Content, "tail") && !allowTailReply {
 			return nil, fmt.Errorf("temporary reply failure")
 		}
-		return &SendMessageResult{MessageID: fmt.Sprintf("reply-%d", failures)}, nil
+		return &SendMessageResult{MessageID: "reply-ok"}, nil
 	}
 
 	event := &MessageEvent{
@@ -225,13 +283,14 @@ func TestServiceProcessMessageSendFailureDoesNotAdvanceAndDedupesChunks(t *testi
 		t.Fatalf("expected first processMessageEvent to fail without advancing, advance=%v err=%v", advance, err)
 	}
 
+	allowTailReply = true
 	advance, err = service.processMessageEvent(context.Background(), event)
 	if err != nil || !advance {
 		t.Fatalf("expected retry to succeed, advance=%v err=%v", advance, err)
 	}
 
-	if len(gateway.replyCalls) != 4 {
-		t.Fatalf("expected first chunk to be deduped on retry, got %d reply calls", len(gateway.replyCalls))
+	if len(gateway.replyCalls) != 5 {
+		t.Fatalf("expected only the failed chunk to be retried after interactive->post fallback, got %d reply calls", len(gateway.replyCalls))
 	}
 
 	firstChunk, err := storeHandle.GetDeliveryEventByKey(context.Background(), "feishu:chat-10:msg-10:reply:0")
@@ -272,8 +331,8 @@ func TestServiceProcessMessageDoesNotAutoOnboardGroupChats(t *testing.T) {
 	if len(gateway.replyCalls) != 1 {
 		t.Fatalf("expected only one normal reply for group chat, got %d", len(gateway.replyCalls))
 	}
-	if gateway.replyCalls[0].MessageType == "interactive" {
-		t.Fatalf("expected no auto-onboarding card in group, got %+v", gateway.replyCalls[0])
+	if !strings.Contains(gateway.replyCalls[0].Content, "Kimi reply") {
+		t.Fatalf("expected the single group reply to be the model response card, got %+v", gateway.replyCalls[0])
 	}
 }
 
@@ -753,6 +812,12 @@ func newTestService(t *testing.T, cfg Config) (*Service, *store.Store, *fakeGate
 	t.Helper()
 
 	dir := t.TempDir()
+	if strings.TrimSpace(cfg.ReplyRenderer) == "" {
+		cfg.ReplyRenderer = "interactive"
+	}
+	if strings.TrimSpace(cfg.AttachmentsDir) == "" {
+		cfg.AttachmentsDir = filepath.Join(dir, "attachments")
+	}
 	storeHandle, err := store.Open(filepath.Join(dir, "bridge.db"))
 	if err != nil {
 		t.Fatalf("Open returned error: %v", err)
@@ -778,4 +843,80 @@ func newTestService(t *testing.T, cfg Config) (*Service, *store.Store, *fakeGate
 		Logger:        noopLogger{},
 	})
 	return service, storeHandle, gateway, runtimeExec
+}
+
+func TestServiceCachesInboundImageUntilNextPrompt(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, gateway, runtimeExec := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "reply with image context"}}},
+	}
+	gateway.downloadImage = func(_ context.Context, imageKey string) (*DownloadedResource, error) {
+		return &DownloadedResource{
+			FileName:  "diagram.png",
+			MimeType:  "image/png",
+			SizeBytes: int64(len("png-bytes")),
+			Content:   []byte("png-bytes"),
+		}, nil
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-image-1",
+		MessageID:   "msg-image-1",
+		ChatID:      "chat-image-1",
+		ChatType:    "p2p",
+		MessageType: "image",
+		Content:     `{"image_key":"img_123"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("image processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(runtimeExec.execCalls) != 0 {
+		t.Fatalf("expected pure image message to be cached without starting a turn, got %d runtime calls", len(runtimeExec.execCalls))
+	}
+
+	pendingBefore, err := storeHandle.CountPendingInboundAttachments(context.Background(), platformID, "chat-image-1", "")
+	if err != nil {
+		t.Fatalf("CountPendingInboundAttachments returned error: %v", err)
+	}
+	if pendingBefore != 1 {
+		t.Fatalf("expected one pending attachment after image cache, got %d", pendingBefore)
+	}
+
+	advance, err = service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-image-2",
+		MessageID:   "msg-image-2",
+		ChatID:      "chat-image-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"please use the cached image"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("text processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(runtimeExec.execCalls) != 1 {
+		t.Fatalf("expected one runtime call after text prompt, got %d", len(runtimeExec.execCalls))
+	}
+	if len(runtimeExec.execCalls[0].request.Attachments) != 1 {
+		t.Fatalf("expected cached attachment to be forwarded into prompt, got %+v", runtimeExec.execCalls[0].request.Attachments)
+	}
+	attachment := runtimeExec.execCalls[0].request.Attachments[0]
+	if attachment.Kind != domain.AttachmentKindImage || attachment.PlatformKey != "img_123" {
+		t.Fatalf("unexpected attachment payload forwarded to runtime: %+v", attachment)
+	}
+	if _, err := os.Stat(attachment.LocalPath); err != nil {
+		t.Fatalf("expected staged attachment to exist at %q: %v", attachment.LocalPath, err)
+	}
+
+	pendingAfter, err := storeHandle.CountPendingInboundAttachments(context.Background(), platformID, "chat-image-1", "")
+	if err != nil {
+		t.Fatalf("CountPendingInboundAttachments returned error: %v", err)
+	}
+	if pendingAfter != 0 {
+		t.Fatalf("expected cached attachment to be cleared after prompt acceptance, got %d", pendingAfter)
+	}
 }

@@ -14,31 +14,34 @@ import (
 )
 
 func (s *Service) sendReply(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, text string) error {
+	return s.sendReplyBundle(ctx, source, binding, text, nil)
+}
+
+func (s *Service) sendReplyBundle(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, text string, artifacts []domain.RuntimeArtifact) error {
 	if source == nil {
 		return nil
 	}
 
-	requests, err := buildReplyRequests(*source, text, s.config.ReplyCardsEnabled)
+	requests, err := buildReplyRequests(*source, text, strings.TrimSpace(s.config.ReplyRenderer))
 	if err != nil {
 		return reliability.Wrap("payload_invalid", err)
 	}
-	if len(requests) == 0 {
-		return nil
-	}
-
 	for index, request := range requests {
 		if err := s.sendRecordedMessage(ctx, request, fmt.Sprintf("feishu:%s:%s:reply:%d", binding.Key.ChatID, source.MessageID, index), source.MessageID); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.sendArtifacts(ctx, source, artifacts)
 }
 
-func buildReplyRequests(source MessageEvent, text string, replyCardsEnabled bool) ([]SendMessageRequest, error) {
-	if replyCardsEnabled {
+func buildReplyRequests(source MessageEvent, text string, replyRenderer string) ([]SendMessageRequest, error) {
+	if strings.EqualFold(strings.TrimSpace(replyRenderer), "post") {
+		return buildRichTextReplyRequests(source, text), nil
+	}
+	if strings.TrimSpace(replyRenderer) == "" || strings.EqualFold(strings.TrimSpace(replyRenderer), "interactive") {
 		return buildReplyCardRequests(source, text)
 	}
-	return buildRichTextReplyRequests(source, text), nil
+	return nil, fmt.Errorf("unsupported feishu reply renderer %q", replyRenderer)
 }
 
 func buildRichTextReplyRequests(source MessageEvent, text string) []SendMessageRequest {
@@ -83,6 +86,68 @@ func buildReplyCardRequests(source MessageEvent, text string) ([]SendMessageRequ
 	return requests, nil
 }
 
+func (s *Service) sendArtifacts(ctx context.Context, source *MessageEvent, artifacts []domain.RuntimeArtifact) error {
+	if source == nil || len(artifacts) == 0 {
+		return nil
+	}
+	for index, artifact := range artifacts {
+		if err := s.sendArtifact(ctx, source, artifact, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) sendArtifact(ctx context.Context, source *MessageEvent, artifact domain.RuntimeArtifact, index int) error {
+	localPath := strings.TrimSpace(artifact.LocalPath)
+	if localPath == "" {
+		return reliability.Wrap("payload_invalid", fmt.Errorf("artifact localPath is required"))
+	}
+	var (
+		request    SendMessageRequest
+		uploadedKey string
+		err        error
+	)
+	switch artifact.Kind {
+	case domain.AttachmentKindImage:
+		uploaded, uploadErr := s.gateway.UploadImage(ctx, localPath)
+		if uploadErr != nil {
+			return reliability.Wrap(classifyFeishuError(uploadErr).Code, uploadErr)
+		}
+		uploadedKey = uploaded.Key
+		request = SendMessageRequest{
+			ReplyToMessageID: source.MessageID,
+			ChatID:           source.ChatID,
+			MessageType:      "image",
+			UUID:             uuid.NewString(),
+		}
+		request.Content, err = marshalJSON(map[string]string{"image_key": uploadedKey})
+	case domain.AttachmentKindFile:
+		uploaded, uploadErr := s.gateway.UploadFile(ctx, localPath, strings.TrimSpace(artifact.Title))
+		if uploadErr != nil {
+			return reliability.Wrap(classifyFeishuError(uploadErr).Code, uploadErr)
+		}
+		uploadedKey = uploaded.Key
+		request = SendMessageRequest{
+			ReplyToMessageID: source.MessageID,
+			ChatID:           source.ChatID,
+			MessageType:      "file",
+			UUID:             uuid.NewString(),
+		}
+		request.Content, err = marshalJSON(map[string]string{"file_key": uploadedKey})
+	default:
+		return reliability.Wrap("payload_invalid", fmt.Errorf("unsupported artifact kind %q", artifact.Kind))
+	}
+	if err != nil {
+		return reliability.Wrap("payload_invalid", err)
+	}
+	return s.sendRecordedRequest(ctx, request, fmt.Sprintf("feishu:%s:%s:artifact:%d", source.ChatID, source.MessageID, index), source.MessageID, string(artifact.Kind), string(artifact.Kind), map[string]any{
+		"uploadedKey": uploadedKey,
+		"title":       strings.TrimSpace(artifact.Title),
+		"localPath":   localPath,
+	})
+}
+
 func buildReplyCardContent(text string, index int, total int) (string, error) {
 	title := "Kimi reply"
 	if total > 1 {
@@ -92,6 +157,22 @@ func buildReplyCardContent(text string, index int, total int) (string, error) {
 }
 
 func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRequest, deliveryKey string, sourceMessageID string) error {
+	renderer := strings.TrimSpace(request.MessageType)
+	if renderer == "interactive" {
+		renderer = "interactive"
+	}
+	return s.sendRecordedRequest(ctx, request, deliveryKey, sourceMessageID, strings.TrimSpace(request.MessageType), renderer, nil)
+}
+
+func (s *Service) sendRecordedRequest(
+	ctx context.Context,
+	request SendMessageRequest,
+	deliveryKey string,
+	sourceMessageID string,
+	deliveryKind string,
+	renderer string,
+	extra map[string]any,
+) error {
 	existing, err := s.store.GetDeliveryEventByKey(ctx, deliveryKey)
 	if err != nil {
 		return reliability.Wrap("unknown", err)
@@ -100,12 +181,16 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 		return nil
 	}
 
-	payloadJSON, err := marshalJSON(map[string]any{
+	payload := map[string]any{
 		"replyToMessageId": request.ReplyToMessageID,
 		"chatId":           request.ChatID,
 		"messageType":      request.MessageType,
 		"content":          request.Content,
-	})
+	}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	payloadJSON, err := marshalJSON(payload)
 	if err != nil {
 		return reliability.Wrap("unknown", err)
 	}
@@ -119,6 +204,8 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 			Direction:       "outbound",
 			DeliveryKey:     deliveryKey,
 			SourceMessageID: strings.TrimSpace(sourceMessageID),
+			DeliveryKind:    strings.TrimSpace(deliveryKind),
+			Renderer:        strings.TrimSpace(renderer),
 			PayloadJSON:     payloadJSON,
 			Status:          "pending",
 		})
@@ -127,7 +214,8 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 		}
 	}
 
-	if _, err := s.replyRichTextWithFallback(ctx, request); err != nil {
+	result, err := s.replyMessageWithFallback(ctx, request)
+	if err != nil {
 		statusErr := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "failed", err.Error())
 		if statusErr != nil {
 			return reliability.Wrap("delivery_failed", errors.Join(err, statusErr))
@@ -135,7 +223,11 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 		return err
 	}
 
-	if err := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "sent", ""); err != nil {
+	targetMessageID := ""
+	if result != nil {
+		targetMessageID = result.MessageID
+	}
+	if err := s.store.UpdateDeliveryEventSent(ctx, deliveryKey, targetMessageID); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
@@ -144,49 +236,82 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 	return nil
 }
 
-func (s *Service) replyRichTextWithFallback(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+func (s *Service) replyMessageWithFallback(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
 	var result *SendMessageResult
 	err := s.executeOutbound(ctx, "reply_message", func(ctx context.Context) error {
-		if strings.EqualFold(strings.TrimSpace(request.MessageType), "interactive") {
-			replyResult, err := s.gateway.ReplyMessage(ctx, request)
-			if err == nil {
-				result = replyResult
-			}
-			return err
-		}
-
-		postContent, postErr := buildPostMessageContent(request.Content)
-		if postErr == nil {
-			reply := request
-			reply.MessageType = "post"
-			reply.Content = postContent
-			replyResult, err := s.gateway.ReplyMessage(ctx, reply)
-			if err == nil {
+		switch strings.TrimSpace(request.MessageType) {
+		case "interactive":
+			replyResult, replyErr := s.gateway.ReplyMessage(ctx, request)
+			if replyErr == nil {
 				result = replyResult
 				return nil
 			}
-		}
-
-		textContent, err := buildTextMessageContent(request.Content)
-		if err != nil {
-			if postErr != nil {
-				return errors.Join(postErr, err)
+			fallback := request
+			fallback.MessageType = "post"
+			fallback.Content = extractCardMarkdown(request.Content)
+			if fallback.Content == "" {
+				return replyErr
 			}
-			return err
+			return sendPostTextFallback(ctx, s.gateway, &result, fallback)
+		case "image", "file":
+			replyResult, replyErr := s.gateway.ReplyMessage(ctx, request)
+			if replyErr == nil {
+				result = replyResult
+				return nil
+			}
+			createResult, createErr := s.gateway.CreateMessage(ctx, request)
+			if createErr == nil {
+				result = createResult
+				return nil
+			}
+			return errors.Join(replyErr, createErr)
+		default:
+			return sendPostTextFallback(ctx, s.gateway, &result, request)
 		}
-		reply := request
-		reply.MessageType = "text"
-		reply.Content = textContent
-		replyResult, err := s.gateway.ReplyMessage(ctx, reply)
-		if err == nil {
-			result = replyResult
-		}
-		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
+}
+
+func (s *Service) replyRichTextWithFallback(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+	return s.replyMessageWithFallback(ctx, request)
+}
+
+func sendPostTextFallback(ctx context.Context, gateway Gateway, result **SendMessageResult, request SendMessageRequest) error {
+	postContent, postErr := buildPostMessageContent(request.Content)
+	if postErr == nil {
+		reply := request
+		reply.MessageType = "post"
+		reply.Content = postContent
+		replyResult, err := gateway.ReplyMessage(ctx, reply)
+		if err == nil {
+			*result = replyResult
+			return nil
+		}
+		postErr = err
+	}
+
+	textContent, err := buildTextMessageContent(request.Content)
+	if err != nil {
+		if postErr != nil {
+			return errors.Join(postErr, err)
+		}
+		return err
+	}
+	reply := request
+	reply.MessageType = "text"
+	reply.Content = textContent
+	replyResult, err := gateway.ReplyMessage(ctx, reply)
+	if err == nil {
+		*result = replyResult
+		return nil
+	}
+	if postErr != nil {
+		return errors.Join(postErr, err)
+	}
+	return err
 }
 
 func buildTextMessageContent(text string) (string, error) {
@@ -210,6 +335,34 @@ func buildPostMessageContent(text string) (string, error) {
 			"content": rows,
 		},
 	})
+}
+
+func extractCardMarkdown(raw string) string {
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &payload); err != nil {
+		return ""
+	}
+	elements, ok := payload["elements"].([]any)
+	if !ok {
+		return ""
+	}
+	lines := []string{}
+	for _, element := range elements {
+		typed, ok := element.(map[string]any)
+		if !ok {
+			continue
+		}
+		textValue, ok := typed["text"].(map[string]any)
+		if !ok {
+			continue
+		}
+		content, _ := textValue["content"].(string)
+		content = strings.TrimSpace(content)
+		if content != "" {
+			lines = append(lines, content)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n\n"))
 }
 
 func splitTextChunks(text string, maxRunes int) []string {

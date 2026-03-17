@@ -28,6 +28,14 @@ pub enum BridgeChannelMode {
     Websocket,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FeishuReplyRenderer {
+    Post,
+    #[default]
+    Interactive,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeRuntimeState {
@@ -315,7 +323,9 @@ pub struct BridgeSettings {
     pub auto_start: bool,
     pub admin_port: u16,
     #[serde(default)]
-    pub feishu_reply_cards: bool,
+    pub feishu_reply_renderer: FeishuReplyRenderer,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_reply_cards: Option<bool>,
     pub default_work_dir: Option<String>,
     #[serde(default)]
     pub work_dir_presets: Vec<WorkDirPreset>,

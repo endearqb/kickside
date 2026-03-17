@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -150,6 +152,126 @@ func (c *Client) ReplyMessage(ctx context.Context, request SendMessageRequest) (
 		RootID:    stringValue(resp.Data.RootId),
 		ThreadID:  stringValue(resp.Data.ThreadId),
 	}, nil
+}
+
+func (c *Client) CreateMessage(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
+	body := larkim.NewCreateMessageReqBodyBuilder().
+		ReceiveId(strings.TrimSpace(request.ChatID)).
+		MsgType(strings.TrimSpace(request.MessageType)).
+		Content(request.Content)
+	if request.UUID != "" {
+		body = body.Uuid(request.UUID)
+	}
+	req := larkim.NewCreateMessageReqBuilder().
+		ReceiveIdType("chat_id").
+		Body(body.Build()).
+		Build()
+	resp, err := c.api.Im.V1.Message.Create(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || !resp.Success() {
+		if resp == nil {
+			return nil, &APIError{Operation: "create_message", Message: "empty response"}
+		}
+		return nil, &APIError{Operation: "create_message", Code: int(resp.Code), Message: resp.Msg}
+	}
+	return &SendMessageResult{
+		MessageID: stringValue(resp.Data.MessageId),
+		RootID:    stringValue(resp.Data.RootId),
+		ThreadID:  stringValue(resp.Data.ThreadId),
+	}, nil
+}
+
+func (c *Client) DownloadImage(ctx context.Context, imageKey string) (*DownloadedResource, error) {
+	req := larkim.NewGetImageReqBuilder().ImageKey(strings.TrimSpace(imageKey)).Build()
+	resp, err := c.api.Im.V1.Image.Get(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.File == nil {
+		return nil, &APIError{Operation: "download_image", Message: "empty image response"}
+	}
+	raw, err := io.ReadAll(resp.File)
+	if err != nil {
+		return nil, &APIError{Operation: "download_image", Message: err.Error()}
+	}
+	return &DownloadedResource{
+		FileName:  fallbackResourceName(imageKey, ".png"),
+		MimeType:  http.DetectContentType(raw),
+		SizeBytes: int64(len(raw)),
+		Content:   raw,
+	}, nil
+}
+
+func (c *Client) DownloadFile(ctx context.Context, fileKey string) (*DownloadedResource, error) {
+	req := larkim.NewGetFileReqBuilder().FileKey(strings.TrimSpace(fileKey)).Build()
+	resp, err := c.api.Im.V1.File.Get(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.File == nil {
+		return nil, &APIError{Operation: "download_file", Message: "empty file response"}
+	}
+	raw, err := io.ReadAll(resp.File)
+	if err != nil {
+		return nil, &APIError{Operation: "download_file", Message: err.Error()}
+	}
+	return &DownloadedResource{
+		FileName:  fallbackResourceName(fileKey, ".bin"),
+		MimeType:  http.DetectContentType(raw),
+		SizeBytes: int64(len(raw)),
+		Content:   raw,
+	}, nil
+}
+
+func (c *Client) UploadImage(ctx context.Context, localPath string) (*UploadedResource, error) {
+	body, err := larkim.NewCreateImagePathReqBodyBuilder().
+		ImageType("message").
+		ImagePath(strings.TrimSpace(localPath)).
+		Build()
+	if err != nil {
+		return nil, err
+	}
+	req := larkim.NewCreateImageReqBuilder().Body(body).Build()
+	resp, err := c.api.Im.V1.Image.Create(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || !resp.Success() {
+		if resp == nil {
+			return nil, &APIError{Operation: "upload_image", Message: "empty response"}
+		}
+		return nil, &APIError{Operation: "upload_image", Code: int(resp.Code), Message: resp.Msg}
+	}
+	return &UploadedResource{Key: stringValue(resp.Data.ImageKey)}, nil
+}
+
+func (c *Client) UploadFile(ctx context.Context, localPath string, fileName string) (*UploadedResource, error) {
+	name := strings.TrimSpace(fileName)
+	if name == "" {
+		name = filepath.Base(strings.TrimSpace(localPath))
+	}
+	body, err := larkim.NewCreateFilePathReqBodyBuilder().
+		FileType("stream").
+		FileName(name).
+		FilePath(strings.TrimSpace(localPath)).
+		Build()
+	if err != nil {
+		return nil, err
+	}
+	req := larkim.NewCreateFileReqBuilder().Body(body).Build()
+	resp, err := c.api.Im.V1.File.Create(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || !resp.Success() {
+		if resp == nil {
+			return nil, &APIError{Operation: "upload_file", Message: "empty response"}
+		}
+		return nil, &APIError{Operation: "upload_file", Code: int(resp.Code), Message: resp.Msg}
+	}
+	return &UploadedResource{Key: stringValue(resp.Data.FileKey)}, nil
 }
 
 func (c *Client) Run(ctx context.Context, handler EventHandler) error {
@@ -551,6 +673,20 @@ func parseHandshakeError(resp *http.Response) error {
 	default:
 		return larkws.NewServerError(code, message)
 	}
+}
+
+func fallbackResourceName(key string, extension string) string {
+	base := strings.TrimSpace(key)
+	if base == "" {
+		base = "resource"
+	}
+	if strings.ContainsRune(base, os.PathSeparator) {
+		base = filepath.Base(base)
+	}
+	if extension != "" && filepath.Ext(base) == "" {
+		base += extension
+	}
+	return base
 }
 
 func headerInt(value string) int {

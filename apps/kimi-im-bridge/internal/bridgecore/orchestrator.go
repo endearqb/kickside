@@ -64,6 +64,7 @@ func (o *Orchestrator) HandleInbound(
 	}
 
 	var reply strings.Builder
+	artifacts := []domain.RuntimeArtifact{}
 	result, runErr := o.runtime.RunTurn(ctx, RuntimeTarget{
 		Platform: inbound.Platform,
 		ChatID:   inbound.ChatID,
@@ -75,6 +76,7 @@ func (o *Orchestrator) HandleInbound(
 		KimiSessionID: binding.KimiSessionID,
 		AutoApprove:   options.AutoApprove,
 		MetadataJSON:  options.MetadataJSON,
+		Attachments:   append([]domain.PromptAttachment(nil), options.Attachments...),
 	}, func(event TurnEvent) error {
 		event.TurnID = turnID
 		if event.KimiSessionID == "" {
@@ -98,6 +100,9 @@ func (o *Orchestrator) HandleInbound(
 
 		if event.Kind == EventContentDelta && event.TextDelta != "" {
 			reply.WriteString(event.TextDelta)
+		}
+		if event.Kind == EventArtifactReady && event.Artifact != nil {
+			artifacts = append(artifacts, *event.Artifact)
 		}
 		if event.Kind == EventApprovalRequested && o.approvals != nil {
 			if err := o.approvals.CreateApprovalTicket(ctx, domain.ApprovalTicket{
@@ -159,6 +164,8 @@ func (o *Orchestrator) HandleInbound(
 		TurnID:    turnID,
 		SessionID: binding.KimiSessionID,
 		ReplyText: strings.TrimSpace(reply.String()),
+		Artifacts: artifacts,
+		Renderer:  "interactive",
 		Result:    result,
 	}, nil
 }

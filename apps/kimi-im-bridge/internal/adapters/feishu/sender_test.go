@@ -13,9 +13,9 @@ func TestSendReplyUsesInteractiveCardsWhenEnabled(t *testing.T) {
 	t.Parallel()
 
 	service, _, gateway, _ := newTestService(t, Config{
-		AppID:             "cli_a",
-		AppSecret:         "secret",
-		ReplyCardsEnabled: true,
+		AppID:         "cli_a",
+		AppSecret:     "secret",
+		ReplyRenderer: "interactive",
 	})
 
 	err := service.sendReply(context.Background(), &MessageEvent{
@@ -58,13 +58,13 @@ func TestSendReplyUsesInteractiveCardsWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestBuildReplyRequestsKeepsRichTextFallbackWhenDisabled(t *testing.T) {
+func TestBuildReplyRequestsKeepsRichTextFallbackWhenPostRendererSelected(t *testing.T) {
 	t.Parallel()
 
 	requests, err := buildReplyRequests(MessageEvent{
 		MessageID: "msg-2",
 		ChatID:    "chat-2",
-	}, "plain reply", false)
+	}, "plain reply", "post")
 	if err != nil {
 		t.Fatalf("buildReplyRequests returned error: %v", err)
 	}

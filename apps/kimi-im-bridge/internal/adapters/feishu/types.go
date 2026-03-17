@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"time"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
@@ -9,10 +10,12 @@ import (
 )
 
 const (
-	platformID         = "feishu"
-	feishuOffsetKind   = "feishu_checkpoint"
-	feishuTextMaxRunes = 3000
-	feishuCardMaxRunes = 2400
+	platformID                   = "feishu"
+	feishuOffsetKind             = "feishu_checkpoint"
+	feishuTextMaxRunes           = 3000
+	feishuCardMaxRunes           = 2400
+	defaultPendingAttachmentTTL  = 30 * time.Minute
+	maxPendingAttachmentsPerChat = 10
 )
 
 type BindingRouter interface {
@@ -42,6 +45,12 @@ type ChannelStore interface {
 	GetDeliveryEventByKey(context.Context, string) (*domain.DeliveryEvent, error)
 	RecordDeliveryEventIfAbsent(context.Context, domain.DeliveryEvent) (bool, error)
 	UpdateDeliveryEventStatus(context.Context, string, string, string) error
+	UpdateDeliveryEventSent(context.Context, string, string) error
+	StorePendingInboundAttachment(context.Context, domain.PendingInboundAttachment, int) error
+	ListPendingInboundAttachments(context.Context, string, string, string, string, int) ([]domain.PendingInboundAttachment, error)
+	DeletePendingInboundAttachments(context.Context, []string) error
+	ConsumePendingInboundAttachments(context.Context, string, string, string, string, int) ([]domain.PendingInboundAttachment, error)
+	CountPendingInboundAttachments(context.Context, string, string, string) (int, error)
 }
 
 type Logger interface {
@@ -54,11 +63,12 @@ type WorkDirPreset struct {
 }
 
 type Config struct {
-	AppID             string
-	AppSecret         string
-	DefaultWorkDir    string
-	WorkDirPresets    []WorkDirPreset
-	ReplyCardsEnabled bool
+	AppID            string
+	AppSecret        string
+	DefaultWorkDir   string
+	WorkDirPresets   []WorkDirPreset
+	ReplyRenderer    string
+	AttachmentsDir   string
 }
 
 type Options struct {
@@ -123,6 +133,17 @@ type SendMessageResult struct {
 	ThreadID  string
 }
 
+type DownloadedResource struct {
+	FileName  string
+	MimeType  string
+	SizeBytes int64
+	Content   []byte
+}
+
+type UploadedResource struct {
+	Key string
+}
+
 type EventHandler interface {
 	OnReady(context.Context)
 	OnMessage(context.Context, *MessageEvent) error
@@ -132,5 +153,10 @@ type EventHandler interface {
 type Gateway interface {
 	ProbeCredentials(context.Context) error
 	Run(context.Context, EventHandler) error
+	DownloadImage(context.Context, string) (*DownloadedResource, error)
+	DownloadFile(context.Context, string) (*DownloadedResource, error)
+	UploadImage(context.Context, string) (*UploadedResource, error)
+	UploadFile(context.Context, string, string) (*UploadedResource, error)
+	CreateMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
 	ReplyMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
 }

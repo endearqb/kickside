@@ -1193,7 +1193,8 @@ mod tests {
             enabled: true,
             auto_start: false,
             admin_port: 60_110,
-            feishu_reply_cards: false,
+            feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![],
             channels: vec![

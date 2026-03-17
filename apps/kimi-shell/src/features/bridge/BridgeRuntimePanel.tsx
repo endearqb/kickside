@@ -15,6 +15,7 @@ import type {
   BridgeApprovalRecord,
   BridgeApprovalResolveInput,
   BridgePlatform,
+  FeishuReplyRenderer,
   BridgeSecretsMaskView,
   BridgeSessionImportInput,
   BridgeSessionRecord,
@@ -113,6 +114,10 @@ function removeWorkDirPreset(settings: BridgeSettings, index: number): BridgeSet
 
 function platformLabel(platform: BridgePlatform): string {
   return platform === "telegram" ? "Telegram" : "Feishu";
+}
+
+function feishuReplyRendererLabel(renderer: FeishuReplyRenderer): string {
+  return renderer === "interactive" ? "Interactive card" : "Post fallback";
 }
 
 function sourceLabel(source: BridgeSessionRecord["source"]): string {
@@ -290,21 +295,25 @@ export function BridgeRuntimePanel({
               <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
             </label>
 
-            <label className="bridge-switch-card">
-              <span className="bridge-switch-copy">
-                <strong>Feishu reply cards</strong>
-                <small>启用后，普通模型回复会改用 `interactive + lark_md` 卡片发送。</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={settings.feishuReplyCards}
+            <label className="bridge-port-card">
+              <span>Feishu Reply Renderer</span>
+              <select
+                className="ui-input"
+                value={settings.feishuReplyRenderer}
                 onChange={(event) =>
                   onSettingsChange({
                     ...settings,
-                    feishuReplyCards: event.currentTarget.checked,
+                    feishuReplyRenderer: event.currentTarget
+                      .value as FeishuReplyRenderer,
                   })
                 }
-              />
+              >
+                <option value="interactive">
+                  {feishuReplyRendererLabel("interactive")}
+                </option>
+                <option value="post">{feishuReplyRendererLabel("post")}</option>
+              </select>
+              <small>普通模型回复默认建议使用 `interactive + lark_md`；`post` 仅作为兼容回退。</small>
             </label>
           </div>
 

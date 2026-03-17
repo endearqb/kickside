@@ -58,16 +58,36 @@ func TestMapMessageToInbound(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported messages are skipped", func(t *testing.T) {
+	t.Run("image messages are mapped as pending attachments", func(t *testing.T) {
 		t.Parallel()
-		if _, _, ok := mapMessageToInbound(&MessageEvent{
+		inbound, key, ok := mapMessageToInbound(&MessageEvent{
 			MessageID:   "msg-4",
 			ChatID:      "chat-4",
 			ChatType:    "group",
 			MessageType: "image",
 			Content:     `{"image_key":"img"}`,
+		})
+		if !ok {
+			t.Fatalf("expected image event to be accepted for attachment caching")
+		}
+		if key.ChatID != "chat-4" || len(inbound.Attachments) != 1 {
+			t.Fatalf("unexpected image mapping: inbound=%+v key=%+v", inbound, key)
+		}
+		if inbound.Attachments[0].Kind != "image" || inbound.Attachments[0].PlatformKey != "img" {
+			t.Fatalf("unexpected image attachment payload: %+v", inbound.Attachments[0])
+		}
+	})
+
+	t.Run("unsupported messages are skipped", func(t *testing.T) {
+		t.Parallel()
+		if _, _, ok := mapMessageToInbound(&MessageEvent{
+			MessageID:   "msg-5",
+			ChatID:      "chat-5",
+			ChatType:    "group",
+			MessageType: "audio",
+			Content:     `{}`,
 		}); ok {
-			t.Fatalf("expected non-text event to be skipped")
+			t.Fatalf("expected unsupported event to be skipped")
 		}
 	})
 }

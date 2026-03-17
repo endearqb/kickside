@@ -1,10 +1,13 @@
 package runtime
 
+import "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+
 type PromptRequest struct {
 	KimiSessionID string `json:"kimiSessionId,omitempty"`
 	Prompt        string `json:"prompt"`
 	WorkDir       string `json:"workDir,omitempty"`
 	AutoApprove   bool   `json:"autoApprove,omitempty"`
+	Attachments   []domain.PromptAttachment `json:"attachments,omitempty"`
 }
 
 type PromptResponse struct {
@@ -23,6 +26,7 @@ const (
 	EventTypeStepStarted       PromptEventType = "step_started"
 	EventTypeContentDelta      PromptEventType = "content_delta"
 	EventTypeStatusUpdate      PromptEventType = "status_update"
+	EventTypeArtifactReady     PromptEventType = "artifact_ready"
 	EventTypeApprovalRequested PromptEventType = "approval_requested"
 	EventTypeApprovalResolved  PromptEventType = "approval_resolved"
 	EventTypeTurnCompleted     PromptEventType = "turn_completed"
@@ -42,6 +46,7 @@ type PromptEvent struct {
 	RequestPayloadJSON string          `json:"requestPayloadJson,omitempty"`
 	ContextUsage       float64         `json:"contextUsage,omitempty"`
 	TokenUsage         TokenUsage      `json:"tokenUsage,omitempty"`
+	Artifact           *domain.RuntimeArtifact `json:"artifact,omitempty"`
 	Error              string          `json:"error,omitempty"`
 }
 

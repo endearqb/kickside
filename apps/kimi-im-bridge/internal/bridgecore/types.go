@@ -15,6 +15,7 @@ const (
 	EventStepStarted       EventKind = "step.started"
 	EventContentDelta      EventKind = "content.delta"
 	EventStatusUpdated     EventKind = "status.updated"
+	EventArtifactReady     EventKind = "artifact.ready"
 	EventApprovalRequested EventKind = "approval.requested"
 	EventApprovalResolved  EventKind = "approval.resolved"
 	EventTurnCompleted     EventKind = "turn.completed"
@@ -41,6 +42,7 @@ type TurnRequest struct {
 	KimiSessionID string
 	AutoApprove   bool
 	MetadataJSON  string
+	Attachments   []domain.PromptAttachment
 }
 
 type TurnResult struct {
@@ -72,6 +74,7 @@ type TurnEvent struct {
 	TokenUsage         TokenUsage
 	ErrorCode          string
 	Error              string
+	Artifact           *domain.RuntimeArtifact
 	At                 string
 }
 
@@ -81,6 +84,7 @@ type HandleOptions struct {
 	DefaultWorkDir string
 	AutoApprove    bool
 	MetadataJSON   string
+	Attachments    []domain.PromptAttachment
 }
 
 type HandleResult struct {
@@ -88,6 +92,8 @@ type HandleResult struct {
 	TurnID    string
 	SessionID string
 	ReplyText string
+	Artifacts []domain.RuntimeArtifact
+	Renderer  string
 	Result    TurnResult
 }
 

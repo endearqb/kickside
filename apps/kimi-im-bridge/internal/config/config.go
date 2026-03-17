@@ -10,15 +10,21 @@ import (
 
 const DefaultAdminPort = 60110
 
+const (
+	FeishuReplyRendererPost        = "post"
+	FeishuReplyRendererInteractive = "interactive"
+)
+
 type BridgeSettings struct {
-	Enabled          bool            `json:"enabled"`
-	AdminPort        int             `json:"adminPort"`
-	AutoStart        bool            `json:"autoStart"`
-	Channels         []ChannelConfig `json:"channels"`
-	DefaultWorkDir   string          `json:"defaultWorkDir,omitempty"`
-	WorkDirPresets   []WorkDirPreset `json:"workDirPresets"`
-	FeishuReplyCards bool            `json:"feishuReplyCards"`
-	LogLevel         string          `json:"logLevel"`
+	Enabled              bool            `json:"enabled"`
+	AdminPort            int             `json:"adminPort"`
+	AutoStart            bool            `json:"autoStart"`
+	Channels             []ChannelConfig `json:"channels"`
+	DefaultWorkDir       string          `json:"defaultWorkDir,omitempty"`
+	WorkDirPresets       []WorkDirPreset `json:"workDirPresets"`
+	FeishuReplyRenderer  string          `json:"feishuReplyRenderer,omitempty"`
+	FeishuReplyCards     *bool           `json:"feishuReplyCards,omitempty"`
+	LogLevel             string          `json:"logLevel"`
 }
 
 type WorkDirPreset struct {
@@ -66,9 +72,9 @@ func DefaultSettings() BridgeSettings {
 				Mode:         "websocket",
 			},
 		},
-		WorkDirPresets:   []WorkDirPreset{},
-		FeishuReplyCards: false,
-		LogLevel:         "info",
+		WorkDirPresets:      []WorkDirPreset{},
+		FeishuReplyRenderer: FeishuReplyRendererInteractive,
+		LogLevel:            "info",
 	}
 }
 
@@ -100,6 +106,8 @@ func normalizeSettings(settings BridgeSettings) (BridgeSettings, error) {
 	if settings.LogLevel == "" {
 		settings.LogLevel = defaults.LogLevel
 	}
+	settings.FeishuReplyRenderer = normalizeFeishuReplyRenderer(settings.FeishuReplyRenderer, settings.FeishuReplyCards)
+	settings.FeishuReplyCards = nil
 	settings.WorkDirPresets = normalizeWorkDirPresets(settings.WorkDirPresets)
 	if len(settings.Channels) == 0 {
 		settings.Channels = defaults.Channels
@@ -142,6 +150,22 @@ func normalizeSettings(settings BridgeSettings) (BridgeSettings, error) {
 		return BridgeSettings{}, fmt.Errorf("adminPort must be between 1 and 65535")
 	}
 	return settings, nil
+}
+
+func normalizeFeishuReplyRenderer(renderer string, legacy *bool) string {
+	switch strings.TrimSpace(strings.ToLower(renderer)) {
+	case FeishuReplyRendererPost:
+		return FeishuReplyRendererPost
+	case FeishuReplyRendererInteractive:
+		return FeishuReplyRendererInteractive
+	}
+	if legacy != nil {
+		if *legacy {
+			return FeishuReplyRendererInteractive
+		}
+		return FeishuReplyRendererPost
+	}
+	return FeishuReplyRendererInteractive
 }
 
 func normalizeWorkDirPresets(presets []WorkDirPreset) []WorkDirPreset {

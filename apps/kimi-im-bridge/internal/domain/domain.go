@@ -21,14 +21,75 @@ const (
 	ChannelStateError      ChannelRuntimeState = "error"
 )
 
+type AttachmentKind string
+
+const (
+	AttachmentKindImage AttachmentKind = "image"
+	AttachmentKindFile  AttachmentKind = "file"
+)
+
+type AttachmentDownloadState string
+
+const (
+	AttachmentDownloadPending AttachmentDownloadState = "pending"
+	AttachmentDownloadReady   AttachmentDownloadState = "ready"
+	AttachmentDownloadFailed  AttachmentDownloadState = "failed"
+)
+
 type InboundAttachment struct {
-	Name string `json:"name,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Kind           AttachmentKind         `json:"kind,omitempty"`
+	FileName       string                 `json:"fileName,omitempty"`
+	MimeType       string                 `json:"mimeType,omitempty"`
+	SizeBytes      int64                  `json:"sizeBytes,omitempty"`
+	PlatformKey    string                 `json:"platformKey,omitempty"`
+	LocalPath      string                 `json:"localPath,omitempty"`
+	SourceMessageID string                `json:"sourceMessageId,omitempty"`
+	DownloadState  AttachmentDownloadState `json:"downloadState,omitempty"`
 }
 
 type OutboundAttachment struct {
-	Name string `json:"name,omitempty"`
-	URL  string `json:"url,omitempty"`
+	Kind      AttachmentKind `json:"kind,omitempty"`
+	Title     string         `json:"title,omitempty"`
+	MimeType  string         `json:"mimeType,omitempty"`
+	SizeBytes int64          `json:"sizeBytes,omitempty"`
+	LocalPath string         `json:"localPath,omitempty"`
+}
+
+type PromptAttachment struct {
+	Kind            AttachmentKind `json:"kind,omitempty"`
+	FileName        string         `json:"fileName,omitempty"`
+	MimeType        string         `json:"mimeType,omitempty"`
+	SizeBytes       int64          `json:"sizeBytes,omitempty"`
+	PlatformKey     string         `json:"platformKey,omitempty"`
+	LocalPath       string         `json:"localPath,omitempty"`
+	SourceMessageID string         `json:"sourceMessageId,omitempty"`
+}
+
+type RuntimeArtifact struct {
+	Kind         AttachmentKind `json:"kind,omitempty"`
+	Title        string         `json:"title,omitempty"`
+	LocalPath    string         `json:"localPath,omitempty"`
+	MimeType     string         `json:"mimeType,omitempty"`
+	SizeBytes    int64          `json:"sizeBytes,omitempty"`
+	CardMarkdown string         `json:"cardMarkdown,omitempty"`
+}
+
+type PendingInboundAttachment struct {
+	AttachmentID    string                 `json:"attachmentId"`
+	Platform        string                 `json:"platform"`
+	ChatID          string                 `json:"chatId"`
+	ThreadID        string                 `json:"threadId,omitempty"`
+	Kind            AttachmentKind         `json:"kind"`
+	FileName        string                 `json:"fileName,omitempty"`
+	MimeType        string                 `json:"mimeType,omitempty"`
+	SizeBytes       int64                  `json:"sizeBytes,omitempty"`
+	PlatformKey     string                 `json:"platformKey,omitempty"`
+	LocalPath       string                 `json:"localPath,omitempty"`
+	SourceMessageID string                 `json:"sourceMessageId,omitempty"`
+	DownloadState   AttachmentDownloadState `json:"downloadState,omitempty"`
+	ExpiresAt       string                 `json:"expiresAt,omitempty"`
+	CreatedAt       string                 `json:"createdAt"`
+	UpdatedAt       string                 `json:"updatedAt"`
 }
 
 type InboundMessage struct {

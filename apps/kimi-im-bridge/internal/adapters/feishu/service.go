@@ -211,6 +211,17 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
+	if strings.TrimSpace(inbound.Text) == "" && len(inbound.Attachments) > 0 {
+		if err := s.cacheInboundAttachments(ctx, inbound); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	pendingAttachments, pendingAttachmentIDs, err := s.loadPendingPromptAttachments(ctx, key.ChatID, key.ThreadID)
+	if err != nil {
+		return false, err
+	}
 
 	binding, _, err := s.resolveOrCreateBindingWithState(ctx, key)
 	if err != nil {
@@ -221,6 +232,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if s.orchestrator != nil {
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
+			Attachments:    pendingAttachments,
 		}, func(turnEvent bridgecore.TurnEvent) error {
 			if turnEvent.Kind == bridgecore.EventApprovalRequested {
 				return s.sendApprovalMessageBridge(ctx, event, turnEvent)
@@ -230,18 +242,27 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		if err != nil {
 			return false, err
 		}
+		if len(pendingAttachmentIDs) > 0 {
+			if err := s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs); err != nil {
+				return false, reliability.Wrap("unknown", err)
+			}
+		}
 		if strings.TrimSpace(result.ReplyText) == "" {
+			if err := s.sendArtifacts(ctx, event, result.Artifacts); err != nil {
+				return false, err
+			}
 			return true, nil
 		}
-		if err := s.sendReply(ctx, event, result.Binding, result.ReplyText); err != nil {
+		if err := s.sendReplyBundle(ctx, event, result.Binding, result.ReplyText, result.Artifacts); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 
 	prompt := runtime.PromptRequest{
-		Prompt:  inbound.Text,
-		WorkDir: binding.WorkDir,
+		Prompt:      inbound.Text,
+		WorkDir:     binding.WorkDir,
+		Attachments: pendingAttachments,
 	}
 	if prompt.WorkDir == "" {
 		prompt.WorkDir = strings.TrimSpace(s.config.DefaultWorkDir)
@@ -261,6 +282,11 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	})
 	if err != nil {
 		return false, err
+	}
+	if len(pendingAttachmentIDs) > 0 {
+		if err := s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs); err != nil {
+			return false, reliability.Wrap("unknown", err)
+		}
 	}
 	if response.Result.Error != "" {
 		return false, reliability.Wrap(

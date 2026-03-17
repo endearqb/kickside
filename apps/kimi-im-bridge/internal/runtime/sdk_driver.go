@@ -1,14 +1,20 @@
 package runtime
 
 import (
+	"encoding/base64"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	kimi "github.com/MoonshotAI/kimi-agent-sdk/go"
 	"github.com/MoonshotAI/kimi-agent-sdk/go/wire"
+
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 )
 
 type SDKDriverOptions struct {
@@ -50,7 +56,11 @@ type sdkDriverSession struct {
 }
 
 func (s *sdkDriverSession) StartPrompt(ctx context.Context, request PromptRequest) (PromptStream, error) {
-	turn, err := s.session.Prompt(ctx, wire.NewStringContent(request.Prompt))
+	content, err := buildRuntimePromptContent(request.Prompt, request.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.session.Prompt(ctx, content)
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +72,63 @@ func (s *sdkDriverSession) StartPrompt(ctx context.Context, request PromptReques
 	}
 	go stream.consume()
 	return stream, nil
+}
+
+func buildRuntimePromptContent(prompt string, attachments []domain.PromptAttachment) (wire.Content, error) {
+	text := strings.TrimSpace(prompt)
+	if len(attachments) == 0 {
+		return wire.NewContent(wire.NewTextContentPart(text)), nil
+	}
+
+	fileLines := []string{}
+	parts := []wire.ContentPart{}
+	for _, attachment := range attachments {
+		switch attachment.Kind {
+		case domain.AttachmentKindImage:
+			dataURL, err := runtimePromptAttachmentDataURL(attachment)
+			if err != nil {
+				return wire.Content{}, err
+			}
+			parts = append(parts, wire.NewImageContentPart(dataURL))
+		case domain.AttachmentKindFile:
+			fileLines = append(fileLines, fmt.Sprintf("- %s (%s)", firstNonEmptyRuntimeValue(strings.TrimSpace(attachment.FileName), filepath.Base(strings.TrimSpace(attachment.LocalPath))), strings.TrimSpace(attachment.LocalPath)))
+		}
+	}
+	if len(fileLines) > 0 {
+		text = strings.Join([]string{
+			"Attached files staged locally:",
+			strings.Join(fileLines, "\n"),
+			"",
+			text,
+		}, "\n")
+	}
+	parts = append([]wire.ContentPart{wire.NewTextContentPart(text)}, parts...)
+	return wire.NewContent(parts...), nil
+}
+
+func runtimePromptAttachmentDataURL(attachment domain.PromptAttachment) (string, error) {
+	path := strings.TrimSpace(attachment.LocalPath)
+	if path == "" {
+		return "", fmt.Errorf("image attachment localPath is required")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read image attachment %s: %w", path, err)
+	}
+	mimeType := strings.TrimSpace(attachment.MimeType)
+	if mimeType == "" {
+		mimeType = http.DetectContentType(raw)
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(raw)), nil
+}
+
+func firstNonEmptyRuntimeValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *sdkDriverSession) Close() error {

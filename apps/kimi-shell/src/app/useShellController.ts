@@ -184,7 +184,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     enabled: false,
     autoStart: false,
     adminPort: 60110,
-    feishuReplyCards: false,
+    feishuReplyRenderer: "interactive",
     defaultWorkDir: "",
     workDirPresets: [],
     channels: [

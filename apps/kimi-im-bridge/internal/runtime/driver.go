@@ -1,6 +1,10 @@
 package runtime
 
-import "context"
+import (
+	"context"
+
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+)
 
 type Driver interface {
 	OpenSession(PromptRequest) (DriverSession, error)
@@ -23,6 +27,7 @@ const (
 	driverEventStepStarted       DriverEventType = "step_started"
 	driverEventContentDelta      DriverEventType = "content_delta"
 	driverEventStatusUpdate      DriverEventType = "status_update"
+	driverEventArtifactReady     DriverEventType = "artifact_ready"
 	driverEventApprovalRequested DriverEventType = "approval_requested"
 	driverEventApprovalResolved  DriverEventType = "approval_resolved"
 )
@@ -40,6 +45,7 @@ type DriverEvent struct {
 	RequestPayloadJSON string
 	ContextUsage       float64
 	TokenUsage         TokenUsage
+	Artifact           *domain.RuntimeArtifact
 	Responder          ApprovalResponder
 }
 

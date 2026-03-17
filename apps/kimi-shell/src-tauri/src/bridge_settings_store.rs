@@ -8,7 +8,7 @@ use crate::{
     settings_store,
     types::{
         AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgeOnboardingConfigInput,
-        BridgePlatform, BridgeSecrets, BridgeSettings, WorkDirPreset,
+        BridgePlatform, BridgeSecrets, BridgeSettings, FeishuReplyRenderer, WorkDirPreset,
         CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
@@ -317,7 +317,8 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         admin_port: app_settings
             .bridge_admin_port_override
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
-        feishu_reply_cards: false,
+        feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+        feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
         work_dir_presets: vec![],
         channels: vec![
@@ -328,6 +329,11 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
 }
 
 fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
+    let feishu_reply_renderer = match settings.feishu_reply_cards {
+        Some(true) => FeishuReplyRenderer::Interactive,
+        Some(false) => FeishuReplyRenderer::Post,
+        None => settings.feishu_reply_renderer,
+    };
     let telegram = settings
         .channels
         .iter()
@@ -349,7 +355,8 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         } else {
             settings.admin_port
         },
-        feishu_reply_cards: settings.feishu_reply_cards,
+        feishu_reply_renderer,
+        feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
         work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
         channels: vec![
@@ -465,7 +472,11 @@ mod tests {
         assert!(!bridge_settings.enabled);
         assert!(!bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, DEFAULT_BRIDGE_ADMIN_PORT);
-        assert!(!bridge_settings.feishu_reply_cards);
+        assert_eq!(
+            bridge_settings.feishu_reply_renderer,
+            FeishuReplyRenderer::Interactive
+        );
+        assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
         assert_eq!(bridge_settings.channels.len(), 2);
@@ -495,7 +506,8 @@ mod tests {
                 enabled: false,
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
-                feishu_reply_cards: false,
+                feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
                 channels: vec![],
@@ -522,7 +534,8 @@ mod tests {
             enabled: true,
             auto_start: true,
             admin_port: 60_112,
-            feishu_reply_cards: true,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: None,
             default_work_dir: Some(" D:/repo ".to_string()),
             work_dir_presets: vec![WorkDirPreset {
                 name: " Repo ".to_string(),
@@ -537,7 +550,10 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, 60_112);
-        assert!(bridge_settings.feishu_reply_cards);
+        assert_eq!(
+            bridge_settings.feishu_reply_renderer,
+            FeishuReplyRenderer::Interactive
+        );
         assert_eq!(bridge_settings.default_work_dir.as_deref(), Some("D:/repo"));
         assert_eq!(
             bridge_settings.work_dir_presets,
@@ -574,7 +590,8 @@ mod tests {
                 enabled: false,
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
-                feishu_reply_cards: false,
+                feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
                 channels: vec![],
@@ -595,7 +612,8 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
-            feishu_reply_cards: false,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: None,
             default_work_dir: Some("D:/old".to_string()),
             work_dir_presets: vec![],
             channels: vec![],
@@ -612,7 +630,8 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
-            feishu_reply_cards: false,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: None,
             default_work_dir: Some("D:/bridge-only".to_string()),
             work_dir_presets: vec![],
             channels: vec![],
@@ -646,7 +665,8 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
-            feishu_reply_cards: false,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![
                 WorkDirPreset {
@@ -682,6 +702,26 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn normalize_bridge_settings_maps_legacy_feishu_reply_cards_false_to_post() {
+        let normalized = normalize_bridge_settings(BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_reply_cards: Some(false),
+            default_work_dir: None,
+            work_dir_presets: vec![],
+            channels: vec![],
+        });
+
+        assert_eq!(
+            normalized.feishu_reply_renderer,
+            FeishuReplyRenderer::Post
+        );
+        assert!(normalized.feishu_reply_cards.is_none());
     }
 
     #[test]

@@ -10,6 +10,8 @@ export type BridgePlatform = "telegram" | "feishu";
 
 export type BridgeChannelMode = "polling" | "websocket";
 
+export type FeishuReplyRenderer = "post" | "interactive";
+
 export type BridgeRuntimeState =
   | "stopped"
   | "starting"
@@ -134,7 +136,7 @@ export interface BridgeSettings {
   enabled: boolean;
   autoStart: boolean;
   adminPort: number;
-  feishuReplyCards: boolean;
+  feishuReplyRenderer: FeishuReplyRenderer;
   defaultWorkDir?: string;
   workDirPresets: WorkDirPreset[];
   channels: BridgeChannelConfig[];

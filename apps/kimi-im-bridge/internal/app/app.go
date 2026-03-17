@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -536,11 +537,12 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 	case "feishu":
 		return feishuplatform.NewService(feishuplatform.Options{
 			Config: feishuplatform.Config{
-				AppID:             secretFeishuAppID(s.secrets),
-				AppSecret:         secretFeishuAppSecret(s.secrets),
-				DefaultWorkDir:    s.settings.DefaultWorkDir,
-				WorkDirPresets:    mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
-				ReplyCardsEnabled: s.settings.FeishuReplyCards,
+				AppID:          secretFeishuAppID(s.secrets),
+				AppSecret:      secretFeishuAppSecret(s.secrets),
+				DefaultWorkDir: s.settings.DefaultWorkDir,
+				WorkDirPresets: mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
+				ReplyRenderer:  s.settings.FeishuReplyRenderer,
+				AttachmentsDir: filepath.Join(filepath.Dir(s.options.DBPath), "attachments", "feishu"),
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,

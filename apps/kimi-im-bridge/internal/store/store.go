@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 8
+const userVersion = 9
 
 type Store struct {
 	db *sql.DB
@@ -993,6 +993,338 @@ func (s *Store) UpdateDeliveryEventStatus(ctx context.Context, deliveryKey strin
 		return fmt.Errorf("delivery event %s not found", deliveryKey)
 	}
 	return nil
+}
+
+func (s *Store) UpdateDeliveryEventSent(ctx context.Context, deliveryKey string, targetMessageID string) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE delivery_events
+		 SET status = 'sent', target_message_id = ?, error_message = NULL, updated_at = ?
+		 WHERE delivery_key = ?`,
+		nullIfEmpty(strings.TrimSpace(targetMessageID)),
+		nowRFC3339(),
+		deliveryKey,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to mark delivery event %s as sent: %w", deliveryKey, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect delivery sent rows affected for %s: %w", deliveryKey, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("delivery event %s not found", deliveryKey)
+	}
+	return nil
+}
+
+func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment domain.PendingInboundAttachment, maxPerContext int) error {
+	if strings.TrimSpace(attachment.AttachmentID) == "" {
+		return fmt.Errorf("attachment id is required")
+	}
+	if strings.TrimSpace(attachment.Platform) == "" || strings.TrimSpace(attachment.ChatID) == "" {
+		return fmt.Errorf("platform and chat id are required")
+	}
+	now := nowRFC3339()
+	if attachment.CreatedAt == "" {
+		attachment.CreatedAt = now
+	}
+	if attachment.UpdatedAt == "" {
+		attachment.UpdatedAt = attachment.CreatedAt
+	}
+	if maxPerContext <= 0 {
+		maxPerContext = 10
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin pending attachment transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, execErr := tx.ExecContext(
+		ctx,
+		`INSERT INTO pending_inbound_attachments (
+			attachment_id, platform, chat_id, thread_id, kind, file_name, mime_type, size_bytes,
+			platform_key, local_path, source_message_id, download_state, expires_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		attachment.AttachmentID,
+		attachment.Platform,
+		attachment.ChatID,
+		nullIfEmpty(attachment.ThreadID),
+		string(attachment.Kind),
+		nullIfEmpty(strings.TrimSpace(attachment.FileName)),
+		nullIfEmpty(strings.TrimSpace(attachment.MimeType)),
+		attachment.SizeBytes,
+		nullIfEmpty(strings.TrimSpace(attachment.PlatformKey)),
+		nullIfEmpty(strings.TrimSpace(attachment.LocalPath)),
+		nullIfEmpty(strings.TrimSpace(attachment.SourceMessageID)),
+		nullIfEmpty(string(attachment.DownloadState)),
+		nullIfEmpty(strings.TrimSpace(attachment.ExpiresAt)),
+		attachment.CreatedAt,
+		attachment.UpdatedAt,
+	); execErr != nil {
+		if !isUniqueConstraint(execErr) {
+			err = fmt.Errorf("failed to store pending attachment %s: %w", attachment.AttachmentID, execErr)
+			return err
+		}
+		if _, updateErr := tx.ExecContext(
+			ctx,
+			`UPDATE pending_inbound_attachments
+			 SET file_name = ?, mime_type = ?, size_bytes = ?, local_path = ?, download_state = ?, expires_at = ?, updated_at = ?
+			 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ? AND ifnull(platform_key, '') = ? AND ifnull(source_message_id, '') = ?`,
+			nullIfEmpty(strings.TrimSpace(attachment.FileName)),
+			nullIfEmpty(strings.TrimSpace(attachment.MimeType)),
+			attachment.SizeBytes,
+			nullIfEmpty(strings.TrimSpace(attachment.LocalPath)),
+			nullIfEmpty(string(attachment.DownloadState)),
+			nullIfEmpty(strings.TrimSpace(attachment.ExpiresAt)),
+			attachment.UpdatedAt,
+			attachment.Platform,
+			attachment.ChatID,
+			attachment.ThreadID,
+			attachment.PlatformKey,
+			attachment.SourceMessageID,
+		); updateErr != nil {
+			err = fmt.Errorf("failed to update pending attachment %s after dedupe: %w", attachment.AttachmentID, updateErr)
+			return err
+		}
+	}
+
+	if _, execErr := tx.ExecContext(
+		ctx,
+		`DELETE FROM pending_inbound_attachments
+		 WHERE attachment_id IN (
+		    SELECT attachment_id
+		    FROM pending_inbound_attachments
+		    WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		    ORDER BY created_at DESC, attachment_id DESC
+		    LIMIT -1 OFFSET ?
+		 )`,
+		attachment.Platform,
+		attachment.ChatID,
+		attachment.ThreadID,
+		maxPerContext,
+	); execErr != nil {
+		err = fmt.Errorf("failed to trim pending attachments: %w", execErr)
+		return err
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("failed to commit pending attachment %s: %w", attachment.AttachmentID, commitErr)
+	}
+	return nil
+}
+
+func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if strings.TrimSpace(now) == "" {
+		now = nowRFC3339()
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin consume pending attachments transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, execErr := tx.ExecContext(
+		ctx,
+		`DELETE FROM pending_inbound_attachments
+		 WHERE expires_at IS NOT NULL AND expires_at != '' AND expires_at <= ?`,
+		now,
+	); execErr != nil {
+		err = fmt.Errorf("failed to delete expired pending attachments: %w", execErr)
+		return nil, err
+	}
+
+	rows, queryErr := tx.QueryContext(
+		ctx,
+		`SELECT attachment_id, platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
+		        ifnull(mime_type, ''), ifnull(size_bytes, 0), ifnull(platform_key, ''), ifnull(local_path, ''),
+		        ifnull(source_message_id, ''), ifnull(download_state, ''), ifnull(expires_at, ''),
+		        created_at, updated_at
+		 FROM pending_inbound_attachments
+		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		 ORDER BY created_at ASC, attachment_id ASC
+		 LIMIT ?`,
+		platform,
+		chatID,
+		threadID,
+		limit,
+	)
+	if queryErr != nil {
+		err = fmt.Errorf("failed to query pending attachments: %w", queryErr)
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []domain.PendingInboundAttachment{}
+	ids := []string{}
+	for rows.Next() {
+		var item domain.PendingInboundAttachment
+		var kind string
+		var downloadState string
+		if scanErr := rows.Scan(
+			&item.AttachmentID,
+			&item.Platform,
+			&item.ChatID,
+			&item.ThreadID,
+			&kind,
+			&item.FileName,
+			&item.MimeType,
+			&item.SizeBytes,
+			&item.PlatformKey,
+			&item.LocalPath,
+			&item.SourceMessageID,
+			&downloadState,
+			&item.ExpiresAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); scanErr != nil {
+			err = fmt.Errorf("failed to scan pending attachment: %w", scanErr)
+			return nil, err
+		}
+		item.Kind = domain.AttachmentKind(kind)
+		item.DownloadState = domain.AttachmentDownloadState(downloadState)
+		items = append(items, item)
+		ids = append(ids, item.AttachmentID)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		err = fmt.Errorf("failed to iterate pending attachments: %w", rowsErr)
+		return nil, err
+	}
+	if len(ids) == 0 {
+		if commitErr := tx.Commit(); commitErr != nil {
+			return nil, fmt.Errorf("failed to commit consume pending attachments: %w", commitErr)
+		}
+		return nil, nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	if _, execErr := tx.ExecContext(ctx, `DELETE FROM pending_inbound_attachments WHERE attachment_id IN (`+placeholders+`)`, args...); execErr != nil {
+		err = fmt.Errorf("failed to delete consumed pending attachments: %w", execErr)
+		return nil, err
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return nil, fmt.Errorf("failed to commit consumed pending attachments: %w", commitErr)
+	}
+	return items, nil
+}
+
+func (s *Store) ListPendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if strings.TrimSpace(now) == "" {
+		now = nowRFC3339()
+	}
+	if _, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM pending_inbound_attachments
+		 WHERE expires_at IS NOT NULL AND expires_at != '' AND expires_at <= ?`,
+		now,
+	); err != nil {
+		return nil, fmt.Errorf("failed to delete expired pending attachments: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT attachment_id, platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
+		        ifnull(mime_type, ''), ifnull(size_bytes, 0), ifnull(platform_key, ''), ifnull(local_path, ''),
+		        ifnull(source_message_id, ''), ifnull(download_state, ''), ifnull(expires_at, ''),
+		        created_at, updated_at
+		 FROM pending_inbound_attachments
+		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		 ORDER BY created_at ASC, attachment_id ASC
+		 LIMIT ?`,
+		platform,
+		chatID,
+		threadID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending attachments: %w", err)
+	}
+	defer rows.Close()
+
+	items := []domain.PendingInboundAttachment{}
+	for rows.Next() {
+		var item domain.PendingInboundAttachment
+		var kind string
+		var downloadState string
+		if scanErr := rows.Scan(
+			&item.AttachmentID,
+			&item.Platform,
+			&item.ChatID,
+			&item.ThreadID,
+			&kind,
+			&item.FileName,
+			&item.MimeType,
+			&item.SizeBytes,
+			&item.PlatformKey,
+			&item.LocalPath,
+			&item.SourceMessageID,
+			&downloadState,
+			&item.ExpiresAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); scanErr != nil {
+			return nil, fmt.Errorf("failed to scan pending attachment: %w", scanErr)
+		}
+		item.Kind = domain.AttachmentKind(kind)
+		item.DownloadState = domain.AttachmentDownloadState(downloadState)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate pending attachments: %w", err)
+	}
+	return items, nil
+}
+
+func (s *Store) DeletePendingInboundAttachments(ctx context.Context, attachmentIDs []string) error {
+	if len(attachmentIDs) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(attachmentIDs)), ",")
+	args := make([]any, 0, len(attachmentIDs))
+	for _, id := range attachmentIDs {
+		args = append(args, id)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM pending_inbound_attachments WHERE attachment_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("failed to delete pending inbound attachments: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) CountPendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string) (int, error) {
+	var count int
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM pending_inbound_attachments
+		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
+		platform,
+		chatID,
+		threadID,
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count pending inbound attachments: %w", err)
+	}
+	return count, nil
 }
 
 func (s *Store) CountBindings(ctx context.Context) (int, error) {

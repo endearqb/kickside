@@ -185,6 +185,7 @@ func normalizePromptRequest(request PromptRequest) (PromptRequest, error) {
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	request.WorkDir = strings.TrimSpace(request.WorkDir)
 	request.KimiSessionID = strings.TrimSpace(request.KimiSessionID)
+	request.Attachments = append([]domain.PromptAttachment(nil), request.Attachments...)
 	if request.Prompt == "" {
 		return PromptRequest{}, fmt.Errorf("prompt is required")
 	}
@@ -246,6 +247,12 @@ func driverEventToPromptEvent(event DriverEvent) PromptEvent {
 			MessageID:    event.MessageID,
 			ContextUsage: event.ContextUsage,
 			TokenUsage:   event.TokenUsage,
+		}
+	case driverEventArtifactReady:
+		return PromptEvent{
+			Type:      EventTypeArtifactReady,
+			StepIndex: event.StepIndex,
+			Artifact:  event.Artifact,
 		}
 	case driverEventApprovalRequested:
 		return PromptEvent{

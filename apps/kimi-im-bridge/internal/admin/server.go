@@ -14,9 +14,12 @@ import (
 type Service interface {
 	Status(context.Context) (domain.BridgeStatus, error)
 	ListBindings(context.Context) ([]domain.BindingRecord, error)
+	ListSessions(context.Context) ([]domain.BridgeSession, error)
 	ClearBinding(context.Context, string) error
+	UpdateBinding(context.Context, string, domain.BindingUpdate) error
 	ListApprovals(context.Context, string) ([]domain.ApprovalTicket, error)
 	ResolveApproval(context.Context, string, string, string) error
+	ImportSession(context.Context, domain.SessionImportRequest) (domain.BridgeSession, error)
 	DebugPrompt(context.Context, runtime.PromptRequest) (runtime.PromptResponse, error)
 	RequestStop() error
 }
@@ -60,17 +63,65 @@ func NewHandler(service Service, adminToken string) http.Handler {
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"items": bindings})
 	})
+	mux.HandleFunc("/api/v1/sessions", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		sessions, err := service.ListSessions(request.Context())
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"items": sessions})
+	})
+	mux.HandleFunc("/api/v1/sessions/import", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorize(writer, request, adminToken) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			return
+		}
+		var payload domain.SessionImportRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		session, err := service.ImportSession(request.Context(), payload)
+		if err != nil {
+			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(writer, http.StatusOK, session)
+	})
 	mux.HandleFunc("/api/v1/bindings/", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
-		if request.Method != http.MethodDelete {
+		if request.Method != http.MethodDelete && request.Method != http.MethodPatch {
 			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 			return
 		}
 		bindingID := strings.TrimPrefix(request.URL.Path, "/api/v1/bindings/")
 		if bindingID == "" || strings.Contains(bindingID, "/") {
 			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_binding_id"})
+			return
+		}
+		if request.Method == http.MethodPatch {
+			var payload domain.BindingUpdate
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+				return
+			}
+			if err := service.UpdateBinding(request.Context(), bindingID, payload); err != nil {
+				writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
 			return
 		}
 		if err := service.ClearBinding(request.Context(), bindingID); err != nil {

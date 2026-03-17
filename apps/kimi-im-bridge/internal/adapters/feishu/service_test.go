@@ -180,8 +180,11 @@ func TestServiceProcessMessageCreatesBindingAndReusesSession(t *testing.T) {
 	if bindingCount != 1 {
 		t.Fatalf("expected one binding, got %d", bindingCount)
 	}
-	if len(gateway.replyCalls) != 2 {
-		t.Fatalf("expected two outbound replies, got %d", len(gateway.replyCalls))
+	if len(gateway.replyCalls) != 3 {
+		t.Fatalf("expected onboarding + two outbound replies, got %d", len(gateway.replyCalls))
+	}
+	if gateway.replyCalls[0].MessageType != "interactive" {
+		t.Fatalf("expected first outbound message to be onboarding card, got %+v", gateway.replyCalls[0])
 	}
 }
 
@@ -212,9 +215,9 @@ func TestServiceProcessMessageSendFailureDoesNotAdvanceAndDedupesChunks(t *testi
 		EventID:     "evt-10",
 		MessageID:   "msg-10",
 		ChatID:      "chat-10",
-		ChatType:    "p2p",
+		ChatType:    "group",
 		MessageType: "text",
-		Content:     `{"text":"hello"}`,
+		Content:     `{"text":"@kimi hello"}`,
 	}
 
 	advance, err := service.processMessageEvent(context.Background(), event)
@@ -241,6 +244,74 @@ func TestServiceProcessMessageSendFailureDoesNotAdvanceAndDedupesChunks(t *testi
 	}
 	if firstChunk == nil || firstChunk.Status != "sent" || secondChunk == nil || secondChunk.Status != "sent" {
 		t.Fatalf("expected both chunks to be sent after retry, got first=%+v second=%+v", firstChunk, secondChunk)
+	}
+}
+
+func TestServiceProcessMessageDoesNotAutoOnboardGroupChats(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, runtimeExec := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "group reply"}}},
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-group-1",
+		MessageID:   "msg-group-1",
+		ChatID:      "chat-group-1",
+		ChatType:    "group",
+		MessageType: "text",
+		Content:     `{"text":"@kimi hello group"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("group processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected only one normal reply for group chat, got %d", len(gateway.replyCalls))
+	}
+	if gateway.replyCalls[0].MessageType == "interactive" {
+		t.Fatalf("expected no auto-onboarding card in group, got %+v", gateway.replyCalls[0])
+	}
+}
+
+func TestServiceProcessMessageAutoOnboardsOnlyOncePerBindingVersion(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, gateway, runtimeExec := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	router := binding.NewRouter(storeHandle)
+	created, err := router.CreateBinding(context.Background(), domain.BindingKey{
+		Platform: platformID,
+		ChatID:   "chat-onboard-1",
+	}, "session-1", "", "auto")
+	if err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+	if err := router.UpdateBindingOnboarding(context.Background(), created.BindingID, currentOnboardingVersion); err != nil {
+		t.Fatalf("UpdateBindingOnboarding returned error: %v", err)
+	}
+
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "reply"}}},
+	}
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-onboard-1",
+		MessageID:   "msg-onboard-1",
+		ChatID:      "chat-onboard-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"hello"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected only normal reply once onboarding already current, got %d", len(gateway.replyCalls))
 	}
 }
 
@@ -288,6 +359,234 @@ func TestServiceProcessCardActionResolvesApproval(t *testing.T) {
 	}
 	if len(runtimeExec.resolveCalls) != 1 || runtimeExec.resolveCalls[0].status != approvalDecisionApproved {
 		t.Fatalf("expected approval resolve call, got %+v", runtimeExec.resolveCalls)
+	}
+}
+
+func TestServiceProcessCardActionAppliesPresetWorkDir(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, _, _ := newTestService(t, Config{
+		AppID:          "cli_a",
+		AppSecret:      "secret",
+		DefaultWorkDir: "D:/default",
+		WorkDirPresets: []WorkDirPreset{
+			{Name: "Repo", Path: "D:/repo"},
+		},
+	})
+
+	result, err := service.processCardAction(context.Background(), &CardActionEvent{
+		EventID:   "evt-card-preset-1",
+		MessageID: "card-msg-1",
+		ChatID:    "chat-1",
+		ActionValue: map[string]string{
+			"action":      cardActionSetPresetWorkDir,
+			"chat_id":     "chat-1",
+			"thread_id":   "thread-1",
+			"preset_name": "Repo",
+			"preset_path": "D:/repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processCardAction returned error: %v", err)
+	}
+	if result == nil || result.UpdatedCard == nil {
+		t.Fatalf("expected updated cwd card, got %+v", result)
+	}
+
+	binding, err := binding.NewRouter(storeHandle).ResolveBinding(context.Background(), domain.BindingKey{
+		Platform: platformID,
+		ChatID:   "chat-1",
+		ThreadID: "thread-1",
+	})
+	if err != nil {
+		t.Fatalf("ResolveBinding returned error: %v", err)
+	}
+	if binding == nil || binding.WorkDir != "D:/repo" {
+		t.Fatalf("expected binding workdir to be preset path, got %+v", binding)
+	}
+}
+
+func TestServiceProcessCardActionClearsWorkDirOverride(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, _, _ := newTestService(t, Config{
+		AppID:          "cli_a",
+		AppSecret:      "secret",
+		DefaultWorkDir: "D:/default",
+		WorkDirPresets: []WorkDirPreset{
+			{Name: "Repo", Path: "D:/repo"},
+		},
+	})
+	router := binding.NewRouter(storeHandle)
+	created, err := router.CreateBinding(context.Background(), domain.BindingKey{
+		Platform: platformID,
+		ChatID:   "chat-2",
+		ThreadID: "thread-2",
+	}, "session-1", "D:/repo", "manual")
+	if err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+
+	result, err := service.processCardAction(context.Background(), &CardActionEvent{
+		EventID:   "evt-card-clear-1",
+		MessageID: "card-msg-2",
+		ChatID:    "chat-2",
+		ActionValue: map[string]string{
+			"action":    cardActionClearWorkDir,
+			"chat_id":   "chat-2",
+			"thread_id": "thread-2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processCardAction returned error: %v", err)
+	}
+	if result == nil || result.UpdatedCard == nil {
+		t.Fatalf("expected updated cwd card, got %+v", result)
+	}
+
+	updated, err := router.ResolveBinding(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("ResolveBinding returned error: %v", err)
+	}
+	if updated == nil || updated.WorkDir != "" {
+		t.Fatalf("expected binding workdir to be cleared, got %+v", updated)
+	}
+}
+
+func TestServiceProcessCardActionShowsOnboardingPanelAndMarksBinding(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, _, _ := newTestService(t, Config{
+		AppID:          "cli_a",
+		AppSecret:      "secret",
+		DefaultWorkDir: "D:/default",
+	})
+	router := binding.NewRouter(storeHandle)
+	created, err := router.CreateBinding(context.Background(), domain.BindingKey{
+		Platform: platformID,
+		ChatID:   "chat-start-1",
+		ThreadID: "thread-start-1",
+	}, "session-1", "D:/default", "auto")
+	if err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+
+	result, err := service.processCardAction(context.Background(), &CardActionEvent{
+		EventID:   "evt-card-start-1",
+		MessageID: "card-msg-start-1",
+		ChatID:    "chat-start-1",
+		ActionValue: map[string]string{
+			"action":    cardActionShowPanel,
+			"panel":     bridgePanelStart,
+			"chat_id":   "chat-start-1",
+			"thread_id": "thread-start-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processCardAction returned error: %v", err)
+	}
+	if result == nil || result.UpdatedCard == nil {
+		t.Fatalf("expected updated onboarding card, got %+v", result)
+	}
+
+	updated, err := router.ResolveBinding(context.Background(), created.Key)
+	if err != nil {
+		t.Fatalf("ResolveBinding returned error: %v", err)
+	}
+	if updated == nil || updated.OnboardingVersion != currentOnboardingVersion || updated.OnboardedAt == "" {
+		t.Fatalf("expected onboarding metadata to be stored, got %+v", updated)
+	}
+}
+
+func TestServiceProcessCardActionShowsDoctorPanelWhenProbeFails(t *testing.T) {
+	t.Parallel()
+
+	service, _, _, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	service.gateway.(*fakeGateway).probeErr = &APIError{Operation: "probe_credentials", Message: "bad credentials"}
+
+	result, err := service.processCardAction(context.Background(), &CardActionEvent{
+		EventID:   "evt-card-doctor-1",
+		MessageID: "card-msg-doctor-1",
+		ChatID:    "chat-doctor-1",
+		ActionValue: map[string]string{
+			"action":    cardActionShowPanel,
+			"panel":     bridgePanelDoctor,
+			"chat_id":   "chat-doctor-1",
+			"thread_id": "thread-doctor-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processCardAction returned error: %v", err)
+	}
+	if result == nil || result.UpdatedCard == nil {
+		t.Fatalf("expected updated doctor card, got %+v", result)
+	}
+	rendered := fmt.Sprintf("%+v", result.UpdatedCard)
+	if !strings.Contains(rendered, "Bridge doctor") || !strings.Contains(rendered, "Live probe: `failed`") {
+		t.Fatalf("expected doctor card to mention failed probe, got %s", rendered)
+	}
+}
+
+func TestServiceProcessMessageBridgeDoctorCommandSendsDoctorCard(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-doctor-cmd-1",
+		MessageID:   "msg-doctor-cmd-1",
+		ChatID:      "chat-doctor-cmd-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"/bridge doctor"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(gateway.replyCalls) != 1 || gateway.replyCalls[0].MessageType != "interactive" {
+		t.Fatalf("expected one interactive doctor card reply, got %+v", gateway.replyCalls)
+	}
+	if !strings.Contains(gateway.replyCalls[0].Content, "Bridge doctor") {
+		t.Fatalf("expected doctor card payload, got %s", gateway.replyCalls[0].Content)
+	}
+}
+
+func TestConvertCardActionResultUsesCardJSONForUpdatedCards(t *testing.T) {
+	t.Parallel()
+
+	response := convertCardActionResult(&CardActionResult{
+		Toast: "approved",
+		UpdatedCard: map[string]any{
+			"config": map[string]any{
+				"wide_screen_mode": true,
+			},
+			"header": map[string]any{
+				"template": "green",
+				"title": map[string]string{
+					"tag":     "plain_text",
+					"content": "Approval approved",
+				},
+			},
+		},
+	})
+
+	if response == nil {
+		t.Fatal("expected non-nil card action response")
+	}
+	if response.Card == nil {
+		t.Fatalf("expected updated card payload, got %+v", response)
+	}
+	if response.Card.Type != "card_json" {
+		t.Fatalf("expected card update type card_json, got %q", response.Card.Type)
+	}
+	if response.Toast == nil || response.Toast.Content != "approved" {
+		t.Fatalf("expected approval toast to be preserved, got %+v", response.Toast)
 	}
 }
 

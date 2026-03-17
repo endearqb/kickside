@@ -34,6 +34,15 @@ struct ApiSession {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSessionRecord {
+    pub session_id: String,
+    pub work_dir: Option<String>,
+    pub is_running: bool,
+    pub last_updated: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct CreateSessionRequest {
     work_dir: String,
     create_dir: bool,
@@ -368,6 +377,63 @@ fn fetch_session_by_id(
 ) -> Result<Option<SessionSnapshot>, String> {
     let sessions = fetch_sessions(workspace_port)?;
     Ok(select_session_by_id(&sessions, session_id))
+}
+
+pub fn list_workspace_sessions_for_bridge(
+    app: &AppHandle,
+) -> anyhow::Result<Vec<WorkspaceSessionRecord>> {
+    let workspace_port = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        runtime.workspace_port
+    };
+
+    let Some(workspace_port) = workspace_port else {
+        return Ok(Vec::new());
+    };
+    let sessions = fetch_sessions(workspace_port)
+        .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    Ok(sessions
+        .into_iter()
+        .map(|session| WorkspaceSessionRecord {
+            session_id: session.session_id,
+            work_dir: session.work_dir,
+            is_running: session.is_running,
+            last_updated: session.last_updated,
+        })
+        .collect())
+}
+
+pub fn get_workspace_session_for_bridge(
+    app: &AppHandle,
+    session_id: &str,
+) -> anyhow::Result<Option<WorkspaceSessionRecord>> {
+    let workspace_port = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        runtime.workspace_port
+    };
+
+    let Some(workspace_port) = workspace_port else {
+        return Ok(None);
+    };
+    let sessions = fetch_sessions(workspace_port)
+        .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    Ok(sessions
+        .into_iter()
+        .find(|session| session.session_id == session_id.trim())
+        .map(|session| WorkspaceSessionRecord {
+            session_id: session.session_id,
+            work_dir: session.work_dir,
+            is_running: session.is_running,
+            last_updated: session.last_updated,
+        }))
 }
 
 fn fetch_sessions(workspace_port: u16) -> Result<Vec<ApiSession>, String> {

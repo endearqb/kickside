@@ -503,3 +503,145 @@ func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) 
 		t.Fatalf("expected persisted message, got %+v", statuses[0])
 	}
 }
+
+func TestListSessionsAndBindingWorkDirUpdates(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertSession(ctx, domain.BridgeSession{
+		KimiSessionID: "session-a",
+		WorkDir:       "D:/repo-a",
+		LastMessageAt: "2026-03-17T10:00:00Z",
+		Summary:       "A",
+		CreatedAt:     "2026-03-17T10:00:00Z",
+		UpdatedAt:     "2026-03-17T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("UpsertSession(session-a) returned error: %v", err)
+	}
+	if err := store.UpsertSession(ctx, domain.BridgeSession{
+		KimiSessionID: "session-b",
+		WorkDir:       "D:/repo-b",
+		LastMessageAt: "2026-03-17T11:00:00Z",
+		Summary:       "B",
+		CreatedAt:     "2026-03-17T11:00:00Z",
+		UpdatedAt:     "2026-03-17T11:00:00Z",
+	}); err != nil {
+		t.Fatalf("UpsertSession(session-b) returned error: %v", err)
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID:     "binding-a",
+		Key:           domain.BindingKey{Platform: "feishu", ChatID: "chat-a"},
+		KimiSessionID: "session-a",
+		WorkDir:       "D:/repo-a",
+		Source:        "auto",
+		CreatedAt:     "2026-03-17T10:00:00Z",
+		UpdatedAt:     "2026-03-17T10:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+
+	sessions, err := store.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions returned error: %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].KimiSessionID != "session-b" {
+		t.Fatalf("expected sessions ordered by latest activity, got %+v", sessions)
+	}
+
+	if err := store.UpdateBindingWorkDir(ctx, "binding-a", "D:/repo-a-updated"); err != nil {
+		t.Fatalf("UpdateBindingWorkDir returned error: %v", err)
+	}
+	binding, err := store.GetBindingByID(ctx, "binding-a")
+	if err != nil {
+		t.Fatalf("GetBindingByID returned error: %v", err)
+	}
+	if binding == nil || binding.WorkDir != "D:/repo-a-updated" {
+		t.Fatalf("expected binding workdir to be updated, got %+v", binding)
+	}
+	session, err := store.GetSessionByID(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("GetSessionByID returned error: %v", err)
+	}
+	if session == nil || session.WorkDir != "D:/repo-a-updated" {
+		t.Fatalf("expected session workdir to follow binding update, got %+v", session)
+	}
+
+	if err := store.Rebind(ctx, "binding-a", "session-b", "D:/repo-b", "manual_rebind"); err != nil {
+		t.Fatalf("Rebind returned error: %v", err)
+	}
+	rebound, err := store.GetBindingByID(ctx, "binding-a")
+	if err != nil {
+		t.Fatalf("GetBindingByID(after rebind) returned error: %v", err)
+	}
+	if rebound == nil || rebound.KimiSessionID != "session-b" || rebound.WorkDir != "D:/repo-b" {
+		t.Fatalf("expected rebind to update session and workdir, got %+v", rebound)
+	}
+}
+
+func TestBindingOnboardingMetadataMigratesAndPersists(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "bridge.db")
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open returned error: %v", err)
+	}
+	ordered, err := migrations.Ordered()
+	if err != nil {
+		t.Fatalf("Ordered returned error: %v", err)
+	}
+	for _, migration := range ordered {
+		if migration.Version > 7 {
+			break
+		}
+		if _, err := raw.Exec(migration.SQL); err != nil {
+			t.Fatalf("failed to apply migration %s: %v", migration.Name, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("failed to close raw db: %v", err)
+	}
+
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID:     "binding-onboard-1",
+		Key:           domain.BindingKey{Platform: "feishu", ChatID: "chat-onboard-1"},
+		KimiSessionID: "session-onboard-1",
+		Source:        "auto",
+		CreatedAt:     "2026-03-17T00:00:00Z",
+		UpdatedAt:     "2026-03-17T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+	if err := store.UpdateBindingOnboarding(ctx, "binding-onboard-1", "feishu_bridge_v1"); err != nil {
+		t.Fatalf("UpdateBindingOnboarding returned error: %v", err)
+	}
+
+	binding, err := store.GetBindingByID(ctx, "binding-onboard-1")
+	if err != nil {
+		t.Fatalf("GetBindingByID returned error: %v", err)
+	}
+	if binding == nil || binding.OnboardingVersion != "feishu_bridge_v1" || binding.OnboardedAt == "" {
+		t.Fatalf("expected onboarding metadata to persist, got %+v", binding)
+	}
+
+	records, err := store.ListBindings(ctx)
+	if err != nil {
+		t.Fatalf("ListBindings returned error: %v", err)
+	}
+	if len(records) != 1 || records[0].OnboardingVersion != "feishu_bridge_v1" || records[0].OnboardedAt == "" {
+		t.Fatalf("expected onboarding metadata in binding records, got %+v", records)
+	}
+}

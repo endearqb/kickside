@@ -29,7 +29,8 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
-    BridgeApprovalResolveInput, BridgeOnboardingConfigInput, BridgeSecretsMaskView, BridgeSettings,
+    BridgeApprovalResolveInput, BridgeOnboardingConfigInput, BridgeSecretsMaskView,
+    BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource, BridgeSettings,
     BridgeStatus, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog,
     InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
     InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
@@ -329,6 +330,7 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
     let trimmed = path.trim();
 
     let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let previous_work_dir = settings.work_dir.clone();
     if trimmed.is_empty() {
         settings.work_dir = None;
     } else {
@@ -349,6 +351,8 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
     }
 
     settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
+    bridge_settings_store::sync_default_work_dir_from_app(&app, previous_work_dir)
+        .map_err(|error| error.to_string())?;
     backend_manager::set_session_work_dir(&app, None).map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -414,6 +418,40 @@ fn list_bridge_bindings(app: AppHandle) -> Result<Vec<BindingRecord>, String> {
 }
 
 #[tauri::command]
+fn list_bridge_sessions(app: AppHandle) -> Result<Vec<BridgeSessionRecord>, String> {
+    let mut sessions =
+        bridge_manager::list_bridge_sessions(&app).map_err(|error| error.to_string())?;
+    let workspace_sessions = workspace_session::list_workspace_sessions_for_bridge(&app)
+        .map_err(|error| error.to_string())?;
+    sessions.extend(
+        workspace_sessions
+            .into_iter()
+            .map(|session| BridgeSessionRecord {
+                source: BridgeSessionSource::ShellWeb,
+                session_id: session.session_id,
+                work_dir: session.work_dir,
+                last_message_at: session.last_updated.clone(),
+                summary: None,
+                session_state: Some(if session.is_running {
+                    "running".to_string()
+                } else {
+                    "available".to_string()
+                }),
+                lease_owner: None,
+                lease_expires_at: None,
+                auto_approve: false,
+                provider_name: Some("kimi-web".to_string()),
+                runtime_metadata_json: None,
+                created_at: None,
+                updated_at: session.last_updated,
+                switchable: false,
+                importable: true,
+            }),
+    );
+    Ok(sessions)
+}
+
+#[tauri::command]
 fn clear_bridge_binding(app: AppHandle, binding_id: String) -> Result<(), String> {
     bridge_manager::clear_bridge_binding(&app, &binding_id).map_err(|error| error.to_string())
 }
@@ -433,6 +471,46 @@ fn resolve_bridge_approval(
     input: BridgeApprovalResolveInput,
 ) -> Result<(), String> {
     bridge_manager::resolve_bridge_approval(&app, &input).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_bridge_session(
+    app: AppHandle,
+    input: BridgeSessionImportInput,
+) -> Result<BridgeSessionRecord, String> {
+    let work_dir = if input
+        .work_dir
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        let workspace =
+            workspace_session::get_workspace_session_for_bridge(&app, &input.source_session_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| {
+                    format!("workspace session not found: {}", input.source_session_id)
+                })?;
+        workspace.work_dir.ok_or_else(|| {
+            format!(
+                "workspace session has no work directory: {}",
+                input.source_session_id
+            )
+        })?
+    } else {
+        input.work_dir.clone().unwrap_or_default()
+    };
+
+    bridge_manager::import_bridge_session(
+        &app,
+        &BridgeSessionImportInput {
+            source: input.source,
+            source_session_id: input.source_session_id,
+            work_dir: Some(work_dir),
+            summary: input.summary,
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -465,6 +543,7 @@ fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(
                 platform: channel.platform,
                 enabled: channel.enabled,
                 state: crate::types::BridgeChannelState::Idle,
+                last_heartbeat_at: None,
                 last_inbound_at: None,
                 last_outbound_at: None,
                 last_offset: None,
@@ -974,9 +1053,11 @@ pub fn run() {
             stop_bridge,
             restart_bridge,
             list_bridge_bindings,
+            list_bridge_sessions,
             clear_bridge_binding,
             list_bridge_approvals,
             resolve_bridge_approval,
+            import_bridge_session,
             get_bridge_log_tail,
             get_bridge_secrets_mask_view,
             get_diagnostics,

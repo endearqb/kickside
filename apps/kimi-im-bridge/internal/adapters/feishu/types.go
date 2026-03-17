@@ -12,11 +12,15 @@ const (
 	platformID         = "feishu"
 	feishuOffsetKind   = "feishu_checkpoint"
 	feishuTextMaxRunes = 3000
+	feishuCardMaxRunes = 2400
 )
 
 type BindingRouter interface {
 	ResolveBinding(context.Context, domain.BindingKey) (*domain.SessionBinding, error)
 	CreateBinding(context.Context, domain.BindingKey, string, string, string) (*domain.SessionBinding, error)
+	Rebind(context.Context, string, string) error
+	UpdateBindingWorkDir(context.Context, string, string) error
+	UpdateBindingOnboarding(context.Context, string, string) error
 }
 
 type RuntimeExecutor interface {
@@ -26,10 +30,14 @@ type RuntimeExecutor interface {
 
 type ChannelStore interface {
 	GetOffset(context.Context, string, string) (string, bool, error)
+	ListChannelStatuses(context.Context) ([]domain.ChannelStatus, error)
 	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
 	UpdateChannelOffset(context.Context, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
+	ListSessions(context.Context) ([]domain.BridgeSession, error)
+	GetSessionByID(context.Context, string) (*domain.BridgeSession, error)
+	ListApprovals(context.Context, string) ([]domain.ApprovalTicket, error)
 	GetApprovalByID(context.Context, string) (*domain.ApprovalTicket, error)
 	GetDeliveryEventByKey(context.Context, string) (*domain.DeliveryEvent, error)
 	RecordDeliveryEventIfAbsent(context.Context, domain.DeliveryEvent) (bool, error)
@@ -40,10 +48,17 @@ type Logger interface {
 	Printf(string, ...any)
 }
 
+type WorkDirPreset struct {
+	Name string
+	Path string
+}
+
 type Config struct {
-	AppID          string
-	AppSecret      string
-	DefaultWorkDir string
+	AppID             string
+	AppSecret         string
+	DefaultWorkDir    string
+	WorkDirPresets    []WorkDirPreset
+	ReplyCardsEnabled bool
 }
 
 type Options struct {

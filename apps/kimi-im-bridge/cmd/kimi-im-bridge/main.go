@@ -17,20 +17,17 @@ const version = "0.1.0-phase01"
 func main() {
 	options, err := parseFlags()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		fatalStartup("parse_flags", err, 2)
 	}
 
 	service, err := app.New(options)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to initialize bridge: %v\n", err)
-		os.Exit(1)
+		fatalStartup("initialize", err, 1)
 	}
 	defer service.Close()
 
 	if err := service.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to start bridge: %v\n", err)
-		os.Exit(1)
+		fatalStartup("start", err, 1)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -43,9 +40,13 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := service.Shutdown(shutdownCtx); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to shutdown bridge cleanly: %v\n", err)
-		os.Exit(1)
+		fatalStartup("shutdown", err, 1)
 	}
+}
+
+func fatalStartup(phase string, err error, code int) {
+	fmt.Fprintf(os.Stderr, "bridge startup phase=%s error=%v\n", phase, err)
+	os.Exit(code)
 }
 
 func parseFlags() (app.Options, error) {

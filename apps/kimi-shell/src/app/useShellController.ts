@@ -40,6 +40,8 @@ import type {
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
+  BridgeSessionImportInput,
+  BridgeSessionRecord,
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
@@ -182,6 +184,9 @@ function createDefaultBridgeSettings(): BridgeSettings {
     enabled: false,
     autoStart: false,
     adminPort: 60110,
+    feishuReplyCards: false,
+    defaultWorkDir: "",
+    workDirPresets: [],
     channels: [
       {
         platform: "telegram",
@@ -363,9 +368,13 @@ export function useShellController() {
   const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
     () => createDefaultBridgeSettings(),
   );
+  const [bridgeSettingsSnapshot, setBridgeSettingsSnapshot] = useState<BridgeSettings>(
+    () => createDefaultBridgeSettings(),
+  );
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(
     () => createDefaultBridgeStatus(),
   );
+  const [bridgeSessions, setBridgeSessions] = useState<BridgeSessionRecord[]>([]);
   const [bridgeBindings, setBridgeBindings] = useState<BindingRecord[]>([]);
   const [bridgeApprovals, setBridgeApprovals] = useState<BridgeApprovalRecord[]>([]);
   const [bridgeLogTail, setBridgeLogTail] = useState<string[]>([]);
@@ -948,6 +957,7 @@ export function useShellController() {
     try {
       const data = await invoke<BridgeSettings>("get_bridge_settings");
       setBridgeSettings(data);
+      setBridgeSettingsSnapshot(data);
       return data;
     } catch (error) {
       setActionError(String(error));
@@ -980,6 +990,17 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       return bridgeBindings;
+    }
+  }
+
+  async function refreshBridgeSessions() {
+    try {
+      const data = await invoke<BridgeSessionRecord[]>("list_bridge_sessions");
+      setBridgeSessions(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      return bridgeSessions;
     }
   }
 
@@ -2058,6 +2079,7 @@ export function useShellController() {
         input,
       });
       setBridgeSettings(saved);
+      setBridgeSettingsSnapshot(saved);
       setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(saved));
       await Promise.all([refreshBridgeStatus(), refreshBridgeSecretsMask()]);
     } catch (error) {
@@ -2071,11 +2093,24 @@ export function useShellController() {
     setBridgeBusy(true);
     setActionError(null);
     try {
+      const bridgeIsRunning =
+        bridgeStatus.state === "running" ||
+        bridgeStatus.state === "starting" ||
+        bridgeStatus.state === "degraded";
+      const presetsChanged =
+        JSON.stringify(bridgeSettingsSnapshot.workDirPresets ?? []) !==
+        JSON.stringify(bridgeSettings.workDirPresets ?? []);
       const saved = await invoke<BridgeSettings>("save_bridge_settings", {
         input: bridgeSettings,
       });
       setBridgeSettings(saved);
+      setBridgeSettingsSnapshot(saved);
       await refreshBridgeStatus();
+      if (bridgeIsRunning && presetsChanged) {
+        window.alert(
+          "工作目录预设已保存。重启 bridge 后，飞书 /bridge cwd 卡片会加载最新预设。",
+        );
+      }
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2090,6 +2125,7 @@ export function useShellController() {
       const data = await invoke<BridgeStatus>("start_bridge");
       setBridgeStatus(data);
       await Promise.all([
+        refreshBridgeSessions(),
         refreshBridgeBindings(),
         refreshBridgeApprovals(),
         refreshBridgeLogTail(),
@@ -2108,6 +2144,7 @@ export function useShellController() {
     try {
       const data = await invoke<BridgeStatus>("stop_bridge");
       setBridgeStatus(data);
+      setBridgeSessions([]);
       setBridgeBindings([]);
       setBridgeApprovals([]);
     } catch (error) {
@@ -2124,6 +2161,7 @@ export function useShellController() {
       const data = await invoke<BridgeStatus>("restart_bridge");
       setBridgeStatus(data);
       await Promise.all([
+        refreshBridgeSessions(),
         refreshBridgeBindings(),
         refreshBridgeApprovals(),
         refreshBridgeLogTail(),
@@ -2142,6 +2180,19 @@ export function useShellController() {
     try {
       await invoke("clear_bridge_binding", { bindingId });
       await Promise.all([refreshBridgeBindings(), refreshBridgeStatus()]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleImportBridgeSession(input: BridgeSessionImportInput) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      await invoke<BridgeSessionRecord>("import_bridge_session", { input });
+      await Promise.all([refreshBridgeSessions(), refreshBridgeLogTail()]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2499,6 +2550,7 @@ export function useShellController() {
         await Promise.all([
           refreshBridgeSettings(),
           refreshBridgeStatus(),
+          refreshBridgeSessions(),
           refreshBridgeBindings(),
           refreshBridgeApprovals(),
           refreshBridgeLogTail(),
@@ -2776,6 +2828,7 @@ export function useShellController() {
     loginProbeResult,
     bridgeSettings,
     bridgeStatus,
+    bridgeSessions,
     bridgeBindings,
     bridgeApprovals,
     bridgeLogTail,
@@ -2841,6 +2894,7 @@ export function useShellController() {
     refreshContextMenuStatus,
     refreshBridgeSettings,
     refreshBridgeStatus,
+    refreshBridgeSessions,
     refreshBridgeBindings,
     refreshBridgeApprovals,
     refreshBridgeLogTail,
@@ -2876,6 +2930,7 @@ export function useShellController() {
     handleStartBridge,
     handleStopBridge,
     handleRestartBridge,
+    handleImportBridgeSession,
     handleClearBridgeBinding,
     handleResolveBridgeApproval,
     handleInstallSourceChange,

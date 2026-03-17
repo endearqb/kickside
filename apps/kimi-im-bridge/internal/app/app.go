@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/admin"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
@@ -350,6 +353,10 @@ func (s *Service) ListBindings(ctx context.Context) ([]domain.BindingRecord, err
 	return s.store.ListBindings(ctx)
 }
 
+func (s *Service) ListSessions(ctx context.Context) ([]domain.BridgeSession, error) {
+	return s.store.ListSessions(ctx)
+}
+
 func (s *Service) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
 	return s.store.ListApprovals(ctx, status)
 }
@@ -360,6 +367,77 @@ func (s *Service) ClearBinding(ctx context.Context, bindingID string) error {
 	}
 	s.logger.Printf("binding cleared: %s", bindingID)
 	return nil
+}
+
+func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input domain.BindingUpdate) error {
+	if strings.TrimSpace(bindingID) == "" {
+		return fmt.Errorf("binding id is required")
+	}
+
+	workDirWasSet := input.WorkDir != nil
+	workDirValue := ""
+	if input.WorkDir != nil {
+		workDirValue = strings.TrimSpace(*input.WorkDir)
+	}
+
+	if strings.TrimSpace(input.KimiSessionID) == "" && !workDirWasSet {
+		return fmt.Errorf("binding update requires kimiSessionId or workDir")
+	}
+
+	if sessionID := strings.TrimSpace(input.KimiSessionID); sessionID != "" {
+		if err := s.bindings.Rebind(ctx, bindingID, sessionID); err != nil {
+			return err
+		}
+		s.logger.Printf("binding rebound: %s -> %s", bindingID, sessionID)
+	}
+	if workDirWasSet {
+		if err := s.bindings.UpdateBindingWorkDir(ctx, bindingID, workDirValue); err != nil {
+			return err
+		}
+		s.logger.Printf("binding workdir updated: %s -> %q", bindingID, workDirValue)
+	}
+	return nil
+}
+
+func (s *Service) ImportSession(ctx context.Context, input domain.SessionImportRequest) (domain.BridgeSession, error) {
+	workDir := strings.TrimSpace(input.WorkDir)
+	if workDir == "" {
+		return domain.BridgeSession{}, fmt.Errorf("workDir is required")
+	}
+
+	metadataJSON, err := json.Marshal(map[string]string{
+		"importedFromSource":    strings.TrimSpace(input.Source),
+		"importedFromSessionId": strings.TrimSpace(input.SourceSessionID),
+	})
+	if err != nil {
+		return domain.BridgeSession{}, fmt.Errorf("marshal import metadata: %w", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	session := domain.BridgeSession{
+		KimiSessionID:       uuid.NewString(),
+		WorkDir:             workDir,
+		Summary:             strings.TrimSpace(input.Summary),
+		SessionState:        "imported",
+		ProviderName:        "kimi",
+		RuntimeMetadataJSON: string(metadataJSON),
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	}
+	if session.Summary == "" {
+		session.Summary = fmt.Sprintf("Imported from %s session %s", firstNonEmpty(strings.TrimSpace(input.Source), "shell-web"), firstNonEmpty(strings.TrimSpace(input.SourceSessionID), "unknown"))
+	}
+	if err := s.store.UpsertSession(ctx, session); err != nil {
+		return domain.BridgeSession{}, err
+	}
+	s.logger.Printf(
+		"session imported: %s source=%s sourceSessionId=%s workdir=%q",
+		session.KimiSessionID,
+		firstNonEmpty(strings.TrimSpace(input.Source), "shell-web"),
+		strings.TrimSpace(input.SourceSessionID),
+		workDir,
+	)
+	return session, nil
 }
 
 func (s *Service) ResolveApproval(ctx context.Context, approvalID string, status string, resolutionPayloadJSON string) error {
@@ -458,9 +536,11 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 	case "feishu":
 		return feishuplatform.NewService(feishuplatform.Options{
 			Config: feishuplatform.Config{
-				AppID:          secretFeishuAppID(s.secrets),
-				AppSecret:      secretFeishuAppSecret(s.secrets),
-				DefaultWorkDir: s.settings.DefaultWorkDir,
+				AppID:             secretFeishuAppID(s.secrets),
+				AppSecret:         secretFeishuAppSecret(s.secrets),
+				DefaultWorkDir:    s.settings.DefaultWorkDir,
+				WorkDirPresets:    mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
+				ReplyCardsEnabled: s.settings.FeishuReplyCards,
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,
@@ -500,4 +580,28 @@ func secretFeishuAppSecret(secrets config.BridgeSecrets) string {
 		return ""
 	}
 	return strings.TrimSpace(secrets.Feishu.AppSecret)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mapFeishuWorkDirPresets(presets []config.WorkDirPreset) []feishuplatform.WorkDirPreset {
+	if len(presets) == 0 {
+		return nil
+	}
+
+	mapped := make([]feishuplatform.WorkDirPreset, 0, len(presets))
+	for _, preset := range presets {
+		mapped = append(mapped, feishuplatform.WorkDirPreset{
+			Name: strings.TrimSpace(preset.Name),
+			Path: strings.TrimSpace(preset.Path),
+		})
+	}
+	return mapped
 }

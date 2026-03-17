@@ -89,7 +89,23 @@ func (r *Router) Rebind(ctx context.Context, bindingID string, kimiSessionID str
 	}); err != nil {
 		return err
 	}
-	return r.store.Rebind(ctx, bindingID, kimiSessionID, "manual_rebind")
+	session, err := r.store.GetSessionByID(ctx, kimiSessionID)
+	if err != nil {
+		return err
+	}
+	workDir := ""
+	if session != nil {
+		workDir = session.WorkDir
+	}
+	return r.store.Rebind(ctx, bindingID, kimiSessionID, workDir, "manual_rebind")
+}
+
+func (r *Router) UpdateBindingWorkDir(ctx context.Context, bindingID string, workDir string) error {
+	return r.store.UpdateBindingWorkDir(ctx, bindingID, workDir)
+}
+
+func (r *Router) UpdateBindingOnboarding(ctx context.Context, bindingID string, onboardingVersion string) error {
+	return r.store.UpdateBindingOnboarding(ctx, bindingID, onboardingVersion)
 }
 
 func (r *Router) MarkInboundConsumed(ctx context.Context, bindingID string, messageID string) (bool, error) {

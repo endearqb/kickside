@@ -197,6 +197,13 @@ func (s *Service) OnCardAction(ctx context.Context, event *CardActionEvent) (*Ca
 }
 
 func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) (bool, error) {
+	if command, key, ok := parseBridgeCommand(event); ok {
+		if err := s.handleBridgeCommand(ctx, event, key, command); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
 	inbound, key, ok := mapMessageToInbound(event)
 	if !ok {
 		return true, nil
@@ -205,10 +212,11 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return false, reliability.Wrap("unknown", err)
 	}
 
-	binding, err := s.resolveOrCreateBinding(ctx, key)
+	binding, _, err := s.resolveOrCreateBindingWithState(ctx, key)
 	if err != nil {
 		return false, err
 	}
+	s.maybeSendAutoOnboarding(ctx, event, key, binding)
 
 	if s.orchestrator != nil {
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
@@ -272,22 +280,231 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 }
 
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
+	binding, _, err := s.resolveOrCreateBindingWithState(ctx, key)
+	return binding, err
+}
+
+func (s *Service) resolveOrCreateBindingWithState(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, bool, error) {
 	binding, err := s.bindings.ResolveBinding(ctx, key)
 	if err != nil {
-		return nil, reliability.Wrap("unknown", err)
+		return nil, false, reliability.Wrap("unknown", err)
 	}
 	if binding != nil {
 		if binding.WorkDir == "" {
 			binding.WorkDir = strings.TrimSpace(s.config.DefaultWorkDir)
 		}
-		return binding, nil
+		return binding, false, nil
 	}
 
 	created, err := s.bindings.CreateBinding(ctx, key, uuid.NewString(), strings.TrimSpace(s.config.DefaultWorkDir), "auto")
 	if err != nil {
-		return nil, reliability.Wrap("unknown", err)
+		return nil, false, reliability.Wrap("unknown", err)
 	}
-	return created, nil
+	return created, true, nil
+}
+
+func (s *Service) maybeSendAutoOnboarding(ctx context.Context, event *MessageEvent, key domain.BindingKey, binding *domain.SessionBinding) {
+	if event == nil || binding == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(event.ChatType), "p2p") {
+		return
+	}
+	if !bindingNeedsOnboarding(binding) {
+		return
+	}
+
+	card, shouldMark, err := s.loadOnboardingCard(ctx, key, binding)
+	if err != nil {
+		s.logf("feishu onboarding build failed chat=%s thread=%s err=%q", key.ChatID, key.ThreadID, err.Error())
+		return
+	}
+	content, err := marshalJSON(card)
+	if err != nil {
+		s.logf("feishu onboarding payload failed chat=%s thread=%s err=%q", key.ChatID, key.ThreadID, err.Error())
+		return
+	}
+	if err := s.sendRecordedMessage(ctx, SendMessageRequest{
+		ReplyToMessageID: event.MessageID,
+		ChatID:           event.ChatID,
+		MessageType:      "interactive",
+		Content:          content,
+		UUID:             uuid.NewString(),
+	}, fmt.Sprintf("feishu:%s:%s:onboarding:%s", event.ChatID, event.MessageID, currentOnboardingVersion), event.MessageID); err != nil {
+		s.logf("feishu onboarding send failed chat=%s thread=%s err=%q", key.ChatID, key.ThreadID, err.Error())
+		return
+	}
+	if shouldMark {
+		if err := s.bindings.UpdateBindingOnboarding(ctx, binding.BindingID, currentOnboardingVersion); err != nil {
+			s.logf("feishu onboarding mark failed binding=%s err=%q", binding.BindingID, err.Error())
+			return
+		}
+		binding.OnboardedAt = time.Now().UTC().Format(time.RFC3339)
+		binding.OnboardingVersion = currentOnboardingVersion
+	}
+}
+
+func (s *Service) loadOnboardingCard(ctx context.Context, key domain.BindingKey, binding *domain.SessionBinding) (map[string]any, bool, error) {
+	var session *domain.BridgeSession
+	var err error
+	if binding != nil && strings.TrimSpace(binding.KimiSessionID) != "" {
+		session, err = s.store.GetSessionByID(ctx, binding.KimiSessionID)
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+	}
+	return buildOnboardingCard(binding, session, strings.TrimSpace(s.config.DefaultWorkDir), s.config.WorkDirPresets, key), binding != nil && bindingNeedsOnboarding(binding), nil
+}
+
+func (s *Service) collectDoctorReport(ctx context.Context, key domain.BindingKey) (doctorReport, error) {
+	binding, err := s.bindings.ResolveBinding(ctx, key)
+	if err != nil {
+		return doctorReport{}, reliability.Wrap("unknown", err)
+	}
+	var session *domain.BridgeSession
+	if binding != nil && strings.TrimSpace(binding.KimiSessionID) != "" {
+		session, err = s.store.GetSessionByID(ctx, binding.KimiSessionID)
+		if err != nil {
+			return doctorReport{}, reliability.Wrap("unknown", err)
+		}
+	}
+
+	channelStatuses, err := s.store.ListChannelStatuses(ctx)
+	if err != nil {
+		return doctorReport{}, reliability.Wrap("unknown", err)
+	}
+	var feishuStatus *domain.ChannelStatus
+	for index := range channelStatuses {
+		if strings.EqualFold(strings.TrimSpace(channelStatuses[index].Platform), platformID) {
+			status := channelStatuses[index]
+			feishuStatus = &status
+			break
+		}
+	}
+
+	pendingApprovals := 0
+	items, err := s.store.ListApprovals(ctx, "pending")
+	if err != nil {
+		return doctorReport{}, reliability.Wrap("unknown", err)
+	}
+	pendingApprovals = len(filterApprovalsForContext(items, key.ChatID, key.ThreadID))
+
+	probeStatus := "ok"
+	probeError := ""
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := s.gateway.ProbeCredentials(probeCtx); err != nil {
+		probeStatus = "failed"
+		probeError = strings.TrimSpace(err.Error())
+	}
+
+	effectiveWorkDir := strings.TrimSpace(s.config.DefaultWorkDir)
+	if binding != nil && strings.TrimSpace(binding.WorkDir) != "" {
+		effectiveWorkDir = strings.TrimSpace(binding.WorkDir)
+	} else if session != nil && strings.TrimSpace(session.WorkDir) != "" {
+		effectiveWorkDir = strings.TrimSpace(session.WorkDir)
+	}
+	activePresetName, activePresetPath := findPresetForPath(s.config.WorkDirPresets, effectiveWorkDir)
+
+	report := doctorReport{
+		BridgeState:      deriveBridgeState(feishuStatus),
+		Channel:          feishuStatus,
+		Binding:          binding,
+		Session:          session,
+		ActivePresetName: activePresetName,
+		ActivePresetPath: activePresetPath,
+		EffectiveWorkDir: effectiveWorkDir,
+		PendingApprovals: pendingApprovals,
+		ProbeStatus:      probeStatus,
+		ProbeError:       probeError,
+	}
+	report.NextSteps = doctorNextSteps(report)
+	return report, nil
+}
+
+func (s *Service) buildPanelCard(ctx context.Context, key domain.BindingKey, panel string, showDetails bool) (map[string]any, bool, error) {
+	switch strings.TrimSpace(panel) {
+	case "", bridgePanelHelp:
+		return buildBridgeHelpCard(key), false, nil
+	case bridgePanelStart:
+		binding, err := s.bindings.ResolveBinding(ctx, key)
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+		card, shouldMark, err := s.loadOnboardingCard(ctx, key, binding)
+		return card, shouldMark, err
+	case bridgePanelSessions:
+		sessions, err := s.store.ListSessions(ctx)
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+		binding, err := s.bindings.ResolveBinding(ctx, key)
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+		return buildSessionsCard(binding, sessions, key), false, nil
+	case bridgePanelCwd:
+		binding, err := s.bindings.ResolveBinding(ctx, key)
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+		return buildWorkDirCard(binding, strings.TrimSpace(s.config.DefaultWorkDir), s.config.WorkDirPresets, key), false, nil
+	case bridgePanelApprovals:
+		items, err := s.store.ListApprovals(ctx, "pending")
+		if err != nil {
+			return nil, false, reliability.Wrap("unknown", err)
+		}
+		return buildApprovalsOverviewCard(filterApprovalsForContext(items, key.ChatID, key.ThreadID), key), false, nil
+	case bridgePanelDoctor:
+		report, err := s.collectDoctorReport(ctx, key)
+		if err != nil {
+			return nil, false, err
+		}
+		return buildDoctorCard(report, key, showDetails), false, nil
+	default:
+		return buildErrorCard("Unsupported panel", "Try `/bridge help` to reopen the available bridge panels."), false, nil
+	}
+}
+
+func bindingNeedsOnboarding(binding *domain.SessionBinding) bool {
+	if binding == nil {
+		return false
+	}
+	return strings.TrimSpace(binding.OnboardedAt) == "" || strings.TrimSpace(binding.OnboardingVersion) != currentOnboardingVersion
+}
+
+func deriveBridgeState(channel *domain.ChannelStatus) string {
+	if channel == nil {
+		return string(domain.BridgeStateRunning)
+	}
+	switch channel.State {
+	case domain.ChannelStateError, domain.ChannelStateDegraded:
+		return string(domain.BridgeStateDegraded)
+	case domain.ChannelStateConnecting:
+		return string(domain.BridgeStateStarting)
+	default:
+		return string(domain.BridgeStateRunning)
+	}
+}
+
+func doctorNextSteps(report doctorReport) []string {
+	steps := []string{}
+	if report.Binding == nil {
+		steps = append(steps, "Send a normal prompt or choose a session to create a binding for this chat.")
+	}
+	if report.ProbeStatus == "failed" {
+		steps = append(steps, "Re-check Feishu app credentials and long-connection settings in Control Center.")
+	}
+	if report.Channel != nil && report.Channel.State != domain.ChannelStateReady {
+		steps = append(steps, "Wait for the Feishu channel to become ready, or review the latest bridge diagnostics in Control Center.")
+	}
+	if report.PendingApprovals > 0 {
+		steps = append(steps, "Open approvals and resolve the pending requests before retrying blocked turns.")
+	}
+	if len(steps) == 0 {
+		steps = append(steps, "Bridge looks healthy for this chat. Use Sessions or Workdir if you want to change context.")
+	}
+	return steps
 }
 
 func (s *Service) loadCheckpoint(ctx context.Context) (string, error) {

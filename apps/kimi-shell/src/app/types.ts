@@ -125,10 +125,18 @@ export interface BridgeChannelConfig {
   accountLabel: string;
 }
 
+export interface WorkDirPreset {
+  name: string;
+  path: string;
+}
+
 export interface BridgeSettings {
   enabled: boolean;
   autoStart: boolean;
   adminPort: number;
+  feishuReplyCards: boolean;
+  defaultWorkDir?: string;
+  workDirPresets: WorkDirPreset[];
   channels: BridgeChannelConfig[];
 }
 
@@ -136,6 +144,7 @@ export interface BridgeChannelStatus {
   platform: BridgePlatform;
   enabled: boolean;
   state: BridgeChannelState;
+  lastHeartbeatAt?: string;
   lastInboundAt?: string;
   lastOutboundAt?: string;
   lastOffset?: string;
@@ -164,9 +173,38 @@ export interface BindingRecord {
   threadId?: string;
   kimiSessionId: string;
   workDir?: string;
+  onboardedAt?: string;
+  onboardingVersion?: string;
   createdAt: string;
   updatedAt: string;
   lastInboundMessageId?: string;
+}
+
+export type BridgeSessionSource = "bridge" | "shell_web";
+
+export interface BridgeSessionRecord {
+  source: BridgeSessionSource;
+  sessionId: string;
+  workDir?: string;
+  lastMessageAt?: string;
+  summary?: string;
+  sessionState?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  autoApprove: boolean;
+  providerName?: string;
+  runtimeMetadataJson?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  switchable: boolean;
+  importable: boolean;
+}
+
+export interface BridgeSessionImportInput {
+  source: BridgeSessionSource;
+  sourceSessionId: string;
+  workDir?: string;
+  summary?: string;
 }
 
 export interface BridgeApprovalRecord {

@@ -15,10 +15,13 @@ import (
 type fakeService struct {
 	status          domain.BridgeStatus
 	bindings        []domain.BindingRecord
+	sessions        []domain.BridgeSession
 	approvals       []domain.ApprovalTicket
 	debugResponse   runtime.PromptResponse
 	cleared         []string
 	resolved        []string
+	updated         []string
+	imported        []domain.SessionImportRequest
 	requestStopCall int
 }
 
@@ -30,8 +33,21 @@ func (f *fakeService) ListBindings(context.Context) ([]domain.BindingRecord, err
 	return f.bindings, nil
 }
 
+func (f *fakeService) ListSessions(context.Context) ([]domain.BridgeSession, error) {
+	return f.sessions, nil
+}
+
 func (f *fakeService) ClearBinding(_ context.Context, bindingID string) error {
 	f.cleared = append(f.cleared, bindingID)
+	return nil
+}
+
+func (f *fakeService) UpdateBinding(_ context.Context, bindingID string, input domain.BindingUpdate) error {
+	if input.WorkDir != nil {
+		f.updated = append(f.updated, bindingID+":"+*input.WorkDir)
+		return nil
+	}
+	f.updated = append(f.updated, bindingID+":"+input.KimiSessionID)
 	return nil
 }
 
@@ -42,6 +58,17 @@ func (f *fakeService) ListApprovals(_ context.Context, _ string) ([]domain.Appro
 func (f *fakeService) ResolveApproval(_ context.Context, approvalID string, _ string, _ string) error {
 	f.resolved = append(f.resolved, approvalID)
 	return nil
+}
+
+func (f *fakeService) ImportSession(_ context.Context, input domain.SessionImportRequest) (domain.BridgeSession, error) {
+	f.imported = append(f.imported, input)
+	return domain.BridgeSession{
+		KimiSessionID: "imported-1",
+		WorkDir:       input.WorkDir,
+		Summary:       input.Summary,
+		CreatedAt:     "2026-03-17T00:00:00Z",
+		UpdatedAt:     "2026-03-17T00:00:00Z",
+	}, nil
 }
 
 func (f *fakeService) DebugPrompt(_ context.Context, _ runtime.PromptRequest) (runtime.PromptResponse, error) {
@@ -111,6 +138,15 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 				UpdatedAt:     "2026-03-12T00:00:00Z",
 			},
 		},
+		sessions: []domain.BridgeSession{
+			{
+				KimiSessionID: "session-1",
+				WorkDir:       "D:/repo",
+				SessionState:  "active",
+				CreatedAt:     "2026-03-12T00:00:00Z",
+				UpdatedAt:     "2026-03-12T00:00:00Z",
+			},
+		},
 	}
 	server := httptest.NewServer(NewHandler(fake, "token-1"))
 	defer server.Close()
@@ -151,6 +187,26 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 	}
 	if len(payload.Items) != 1 {
 		t.Fatalf("expected 1 binding, got %d", len(payload.Items))
+	}
+
+	sessionsRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/sessions", nil)
+	sessionsRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	sessionsResponse, err := http.DefaultClient.Do(sessionsRequest)
+	if err != nil {
+		t.Fatalf("sessions request returned error: %v", err)
+	}
+	defer sessionsResponse.Body.Close()
+	if sessionsResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected sessions 200, got %d", sessionsResponse.StatusCode)
+	}
+	var sessionsPayload struct {
+		Items []domain.BridgeSession `json:"items"`
+	}
+	if err := json.NewDecoder(sessionsResponse.Body).Decode(&sessionsPayload); err != nil {
+		t.Fatalf("failed to decode sessions response: %v", err)
+	}
+	if len(sessionsPayload.Items) != 1 || sessionsPayload.Items[0].KimiSessionID != "session-1" {
+		t.Fatalf("expected session-1 in sessions payload, got %+v", sessionsPayload.Items)
 	}
 }
 
@@ -216,6 +272,52 @@ func TestDeleteBindingEndpoint(t *testing.T) {
 	}
 	if len(fake.cleared) != 1 || fake.cleared[0] != "binding-1" {
 		t.Fatalf("expected binding-1 to be cleared, got %+v", fake.cleared)
+	}
+}
+
+func TestPatchBindingAndImportSessionEndpoints(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeService{}
+	server := httptest.NewServer(NewHandler(fake, "token-1"))
+	defer server.Close()
+
+	patchRequest, _ := http.NewRequest(
+		http.MethodPatch,
+		server.URL+"/api/v1/bindings/binding-1",
+		strings.NewReader(`{"workDir":"D:/workspace"}`),
+	)
+	patchRequest.Header.Set("Content-Type", "application/json")
+	patchRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	patchResponse, err := http.DefaultClient.Do(patchRequest)
+	if err != nil {
+		t.Fatalf("patch request returned error: %v", err)
+	}
+	defer patchResponse.Body.Close()
+	if patchResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected patch 200, got %d", patchResponse.StatusCode)
+	}
+	if len(fake.updated) != 1 || fake.updated[0] != "binding-1:D:/workspace" {
+		t.Fatalf("expected binding update to be recorded, got %+v", fake.updated)
+	}
+
+	importRequest, _ := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/api/v1/sessions/import",
+		strings.NewReader(`{"source":"shell-web","sourceSessionId":"web-1","workDir":"D:/repo","summary":"Imported from shell"}`),
+	)
+	importRequest.Header.Set("Content-Type", "application/json")
+	importRequest.Header.Set("X-Bridge-Admin-Token", "token-1")
+	importResponse, err := http.DefaultClient.Do(importRequest)
+	if err != nil {
+		t.Fatalf("import request returned error: %v", err)
+	}
+	defer importResponse.Body.Close()
+	if importResponse.StatusCode != http.StatusOK {
+		t.Fatalf("expected import 200, got %d", importResponse.StatusCode)
+	}
+	if len(fake.imported) != 1 || fake.imported[0].SourceSessionID != "web-1" {
+		t.Fatalf("expected imported session request to be recorded, got %+v", fake.imported)
 	}
 }
 

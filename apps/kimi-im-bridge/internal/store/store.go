@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 7
+const userVersion = 8
 
 type Store struct {
 	db *sql.DB
@@ -128,7 +128,7 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT platform, enabled, state, ifnull(last_heartbeat_at, ''), ifnull(last_inbound_at, ''), ifnull(last_outbound_at, ''), ifnull(last_offset, ''), ifnull(last_error, '')
+		`SELECT platform, enabled, state, last_heartbeat_at, last_inbound_at, last_outbound_at, last_offset, last_error
 		 FROM bridge_channels
 		 ORDER BY platform`,
 	)
@@ -141,23 +141,30 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 	for rows.Next() {
 		var status domain.ChannelStatus
 		var enabled int
-		var heartbeatAt string
-		var rawError string
+		var heartbeatAt sql.NullString
+		var lastInboundAt sql.NullString
+		var lastOutboundAt sql.NullString
+		var lastOffset sql.NullString
+		var rawError sql.NullString
 		if err := rows.Scan(
 			&status.Platform,
 			&enabled,
 			&status.State,
 			&heartbeatAt,
-			&status.LastInboundAt,
-			&status.LastOutboundAt,
-			&status.LastOffset,
+			&lastInboundAt,
+			&lastOutboundAt,
+			&lastOffset,
 			&rawError,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan channel status: %w", err)
 		}
 		status.Enabled = enabled == 1
-		_ = heartbeatAt
-		status.LastErrorCode, status.LastError = decodeChannelError(rawError)
+		status.LastHeartbeatAt = nullStringValue(heartbeatAt)
+		status.LastInboundAt = nullStringValue(lastInboundAt)
+		status.LastOutboundAt = nullStringValue(lastOutboundAt)
+		status.LastOffset = nullStringValue(lastOffset)
+		_ = nullStringValue(heartbeatAt)
+		status.LastErrorCode, status.LastError = decodeChannelError(nullStringValue(rawError))
 		statuses = append(statuses, status)
 	}
 	if err := rows.Err(); err != nil {
@@ -330,11 +337,92 @@ func (s *Store) UpsertSession(ctx context.Context, session domain.BridgeSession)
 	return nil
 }
 
+func (s *Store) ListSessions(ctx context.Context) ([]domain.BridgeSession, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT kimi_session_id, ifnull(work_dir, ''), ifnull(last_turn_id, ''), ifnull(last_message_at, ''),
+		        ifnull(summary, ''), ifnull(session_state, ''), ifnull(lease_owner, ''), ifnull(lease_expires_at, ''),
+		        ifnull(auto_approve, 0), ifnull(provider_name, ''), ifnull(runtime_metadata_json, ''), created_at, updated_at
+		 FROM bridge_sessions
+		 ORDER BY ifnull(last_message_at, updated_at) DESC, updated_at DESC, kimi_session_id DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list bridge sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := []domain.BridgeSession{}
+	for rows.Next() {
+		var session domain.BridgeSession
+		var autoApprove int
+		if err := rows.Scan(
+			&session.KimiSessionID,
+			&session.WorkDir,
+			&session.LastTurnID,
+			&session.LastMessageAt,
+			&session.Summary,
+			&session.SessionState,
+			&session.LeaseOwner,
+			&session.LeaseExpiresAt,
+			&autoApprove,
+			&session.ProviderName,
+			&session.RuntimeMetadataJSON,
+			&session.CreatedAt,
+			&session.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan bridge session: %w", err)
+		}
+		session.AutoApprove = autoApprove == 1
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate bridge sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+func (s *Store) GetSessionByID(ctx context.Context, kimiSessionID string) (*domain.BridgeSession, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT kimi_session_id, ifnull(work_dir, ''), ifnull(last_turn_id, ''), ifnull(last_message_at, ''),
+		        ifnull(summary, ''), ifnull(session_state, ''), ifnull(lease_owner, ''), ifnull(lease_expires_at, ''),
+		        ifnull(auto_approve, 0), ifnull(provider_name, ''), ifnull(runtime_metadata_json, ''), created_at, updated_at
+		 FROM bridge_sessions
+		 WHERE kimi_session_id = ?`,
+		kimiSessionID,
+	)
+
+	var session domain.BridgeSession
+	var autoApprove int
+	if err := row.Scan(
+		&session.KimiSessionID,
+		&session.WorkDir,
+		&session.LastTurnID,
+		&session.LastMessageAt,
+		&session.Summary,
+		&session.SessionState,
+		&session.LeaseOwner,
+		&session.LeaseExpiresAt,
+		&autoApprove,
+		&session.ProviderName,
+		&session.RuntimeMetadataJSON,
+		&session.CreatedAt,
+		&session.UpdatedAt,
+	); errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get bridge session %s: %w", kimiSessionID, err)
+	}
+	session.AutoApprove = autoApprove == 1
+	return &session, nil
+}
+
 func (s *Store) ResolveBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
-		        ifnull(work_dir, ''), source, ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
+		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
+		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
 		 FROM channel_bindings
 		 WHERE platform = ? AND ifnull(account_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
@@ -368,8 +456,8 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 		ctx,
 		`INSERT INTO channel_bindings (
 			binding_id, platform, account_id, chat_id, thread_id, kimi_session_id, work_dir, source,
-			last_inbound_message_id, last_outbound_message_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			onboarded_at, onboarding_version, last_inbound_message_id, last_outbound_message_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		binding.BindingID,
 		binding.Key.Platform,
 		nullIfEmpty(binding.Key.AccountID),
@@ -378,6 +466,8 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 		binding.KimiSessionID,
 		nullIfEmpty(binding.WorkDir),
 		binding.Source,
+		nullIfEmpty(binding.OnboardedAt),
+		nullIfEmpty(binding.OnboardingVersion),
 		nullIfEmpty(binding.LastInboundMessageID),
 		nullIfEmpty(binding.LastOutboundMessageID),
 		binding.CreatedAt,
@@ -393,7 +483,8 @@ func (s *Store) GetBindingByID(ctx context.Context, bindingID string) (*domain.S
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
-		        ifnull(work_dir, ''), source, ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
+		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
+		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
 		 FROM channel_bindings
 		 WHERE binding_id = ?`,
@@ -413,7 +504,7 @@ func (s *Store) ListBindings(ctx context.Context) ([]domain.BindingRecord, error
 	rows, err := s.db.QueryContext(
 		ctx,
 		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
-		        ifnull(work_dir, ''), created_at, updated_at, ifnull(last_inbound_message_id, '')
+		        ifnull(work_dir, ''), ifnull(onboarded_at, ''), ifnull(onboarding_version, ''), created_at, updated_at, ifnull(last_inbound_message_id, '')
 		 FROM channel_bindings
 		 ORDER BY updated_at DESC, binding_id DESC`,
 	)
@@ -433,6 +524,8 @@ func (s *Store) ListBindings(ctx context.Context) ([]domain.BindingRecord, error
 			&record.ThreadID,
 			&record.KimiSessionID,
 			&record.WorkDir,
+			&record.OnboardedAt,
+			&record.OnboardingVersion,
 			&record.CreatedAt,
 			&record.UpdatedAt,
 			&record.LastInboundMessageID,
@@ -454,19 +547,120 @@ func (s *Store) ClearBinding(ctx context.Context, bindingID string) error {
 	return nil
 }
 
-func (s *Store) Rebind(ctx context.Context, bindingID string, kimiSessionID string, source string) error {
-	_, err := s.db.ExecContext(
+func (s *Store) Rebind(ctx context.Context, bindingID string, kimiSessionID string, workDir string, source string) error {
+	result, err := s.db.ExecContext(
 		ctx,
 		`UPDATE channel_bindings
-		 SET kimi_session_id = ?, source = ?, updated_at = ?
+		 SET kimi_session_id = ?, work_dir = ?, source = ?, updated_at = ?
 		 WHERE binding_id = ?`,
 		kimiSessionID,
+		nullIfEmpty(strings.TrimSpace(workDir)),
 		source,
 		nowRFC3339(),
 		bindingID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to rebind %s: %w", bindingID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect rebind rows affected for %s: %w", bindingID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("binding %s not found", bindingID)
+	}
+	return nil
+}
+
+func (s *Store) UpdateBindingWorkDir(ctx context.Context, bindingID string, workDir string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin binding workdir update for %s: %w", bindingID, err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var kimiSessionID string
+	if scanErr := tx.QueryRowContext(
+		ctx,
+		`SELECT kimi_session_id FROM channel_bindings WHERE binding_id = ?`,
+		bindingID,
+	).Scan(&kimiSessionID); errors.Is(scanErr, sql.ErrNoRows) {
+		err = fmt.Errorf("binding %s not found", bindingID)
+		return err
+	} else if scanErr != nil {
+		err = fmt.Errorf("failed to load binding %s before workdir update: %w", bindingID, scanErr)
+		return err
+	}
+
+	now := nowRFC3339()
+	result, execErr := tx.ExecContext(
+		ctx,
+		`UPDATE channel_bindings
+		 SET work_dir = ?, updated_at = ?
+		 WHERE binding_id = ?`,
+		nullIfEmpty(strings.TrimSpace(workDir)),
+		now,
+		bindingID,
+	)
+	if execErr != nil {
+		err = fmt.Errorf("failed to update binding workdir for %s: %w", bindingID, execErr)
+		return err
+	}
+	affected, rowsErr := result.RowsAffected()
+	if rowsErr != nil {
+		err = fmt.Errorf("failed to inspect binding workdir rows affected for %s: %w", bindingID, rowsErr)
+		return err
+	}
+	if affected == 0 {
+		err = fmt.Errorf("binding %s not found", bindingID)
+		return err
+	}
+
+	if strings.TrimSpace(kimiSessionID) != "" {
+		if _, execErr := tx.ExecContext(
+			ctx,
+			`UPDATE bridge_sessions
+			 SET work_dir = ?, updated_at = ?
+			 WHERE kimi_session_id = ?`,
+			nullIfEmpty(strings.TrimSpace(workDir)),
+			now,
+			kimiSessionID,
+		); execErr != nil {
+			err = fmt.Errorf("failed to update bridge session workdir for %s: %w", kimiSessionID, execErr)
+			return err
+		}
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("failed to commit binding workdir update for %s: %w", bindingID, commitErr)
+	}
+	return nil
+}
+
+func (s *Store) UpdateBindingOnboarding(ctx context.Context, bindingID string, onboardingVersion string) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE channel_bindings
+		 SET onboarded_at = ?, onboarding_version = ?, updated_at = ?
+		 WHERE binding_id = ?`,
+		nowRFC3339(),
+		nullIfEmpty(strings.TrimSpace(onboardingVersion)),
+		nowRFC3339(),
+		bindingID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update binding onboarding for %s: %w", bindingID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect binding onboarding rows affected for %s: %w", bindingID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("binding %s not found", bindingID)
 	}
 	return nil
 }
@@ -980,6 +1174,8 @@ func scanBinding(scanner interface {
 		&binding.KimiSessionID,
 		&binding.WorkDir,
 		&binding.Source,
+		&binding.OnboardedAt,
+		&binding.OnboardingVersion,
 		&binding.LastInboundMessageID,
 		&binding.LastOutboundMessageID,
 		&binding.CreatedAt,
@@ -995,6 +1191,13 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func nullStringValue(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }
 
 func nullIfEmpty(value string) any {

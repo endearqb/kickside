@@ -3,7 +3,10 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use reqwest::blocking::Client;
 
-use crate::types::{BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeStatus};
+use crate::types::{
+    BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeSessionImportInput,
+    BridgeSessionRecord, BridgeStatus,
+};
 
 const ADMIN_TOKEN_HEADER: &str = "X-Bridge-Admin-Token";
 
@@ -24,6 +27,29 @@ struct BindingListResponse {
 #[serde(rename_all = "camelCase")]
 struct ApprovalListResponse {
     items: Vec<BridgeApprovalRecord>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionListResponse {
+    items: Vec<AdminBridgeSessionRecord>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminBridgeSessionRecord {
+    kimi_session_id: String,
+    work_dir: Option<String>,
+    last_message_at: Option<String>,
+    summary: Option<String>,
+    session_state: Option<String>,
+    lease_owner: Option<String>,
+    lease_expires_at: Option<String>,
+    auto_approve: bool,
+    provider_name: Option<String>,
+    runtime_metadata_json: Option<String>,
+    created_at: Option<String>,
+    updated_at: Option<String>,
 }
 
 impl BridgeHttpClient {
@@ -92,6 +118,22 @@ impl BridgeHttpClient {
         Ok(payload.items)
     }
 
+    pub fn list_sessions(&self) -> anyhow::Result<Vec<BridgeSessionRecord>> {
+        let payload = self
+            .request(reqwest::Method::GET, "/api/v1/sessions")?
+            .send()
+            .context("failed to request bridge sessions")?
+            .error_for_status()
+            .context("bridge sessions returned error status")?
+            .json::<SessionListResponse>()
+            .context("failed to decode bridge sessions payload")?;
+        Ok(payload
+            .items
+            .into_iter()
+            .map(map_admin_session_record)
+            .collect())
+    }
+
     pub fn clear_binding(&self, binding_id: &str) -> anyhow::Result<()> {
         self.request(
             reqwest::Method::DELETE,
@@ -133,6 +175,21 @@ impl BridgeHttpClient {
         .error_for_status()
         .context("bridge resolve approval returned error status")?;
         Ok(())
+    }
+
+    pub fn import_session(
+        &self,
+        input: &BridgeSessionImportInput,
+    ) -> anyhow::Result<BridgeSessionRecord> {
+        self.request(reqwest::Method::POST, "/api/v1/sessions/import")?
+            .json(input)
+            .send()
+            .context("failed to import bridge session")?
+            .error_for_status()
+            .context("bridge import session returned error status")?
+            .json::<AdminBridgeSessionRecord>()
+            .map(map_admin_session_record)
+            .context("failed to decode imported bridge session")
     }
 
     pub fn stop_runtime(&self) -> anyhow::Result<()> {
@@ -303,5 +360,92 @@ mod tests {
         assert_eq!(url, "/api/v1/approvals/approval-1/resolve");
         assert!(body.contains(r#""status":"approved""#));
         assert!(body.contains(r#""resolutionPayloadJson":"{\"decision\":\"yes\"}""#));
+    }
+
+    #[test]
+    fn list_sessions_decodes_payload() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+
+        thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            let response = Response::from_string(
+                r#"{"items":[{"kimiSessionId":"session-1","workDir":"D:/repo","summary":"summary","autoApprove":false,"createdAt":"2026-03-17T00:00:00Z","updatedAt":"2026-03-17T00:00:00Z"}]}"#,
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        let sessions = client.list_sessions().expect("sessions should decode");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "session-1");
+        assert!(sessions[0].switchable);
+    }
+
+    #[test]
+    fn import_session_posts_payload_and_decodes_response() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut request = server.recv().expect("request should arrive");
+            let mut body = String::new();
+            request
+                .as_reader()
+                .read_to_string(&mut body)
+                .expect("request body should be readable");
+            sender.send(body).expect("payload should be forwarded");
+            let response = Response::from_string(
+                r#"{"kimiSessionId":"session-9","workDir":"D:/repo","summary":"Imported","autoApprove":false,"createdAt":"2026-03-17T00:00:00Z","updatedAt":"2026-03-17T00:00:00Z"}"#,
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        let imported = client
+            .import_session(&BridgeSessionImportInput {
+                source: crate::types::BridgeSessionSource::ShellWeb,
+                source_session_id: "web-1".to_string(),
+                work_dir: Some("D:/repo".to_string()),
+                summary: Some("Imported".to_string()),
+            })
+            .expect("import_session should succeed");
+
+        let body = receiver.recv().expect("payload should be captured");
+        assert!(body.contains(r#""source":"shell_web""#));
+        assert!(body.contains(r#""sourceSessionId":"web-1""#));
+        assert_eq!(imported.session_id, "session-9");
+    }
+}
+
+fn map_admin_session_record(session: AdminBridgeSessionRecord) -> BridgeSessionRecord {
+    BridgeSessionRecord {
+        source: crate::types::BridgeSessionSource::Bridge,
+        session_id: session.kimi_session_id,
+        work_dir: session.work_dir,
+        last_message_at: session.last_message_at,
+        summary: session.summary,
+        session_state: session.session_state,
+        lease_owner: session.lease_owner,
+        lease_expires_at: session.lease_expires_at,
+        auto_approve: session.auto_approve,
+        provider_name: session.provider_name,
+        runtime_metadata_json: session.runtime_metadata_json,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        switchable: true,
+        importable: false,
     }
 }

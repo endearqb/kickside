@@ -506,7 +506,7 @@ func convertCardActionResult(result *CardActionResult) *callback.CardActionTrigg
 	}
 	if result.UpdatedCard != nil {
 		response.Card = &callback.Card{
-			Type: "raw",
+			Type: "card_json",
 			Data: result.UpdatedCard,
 		}
 	}

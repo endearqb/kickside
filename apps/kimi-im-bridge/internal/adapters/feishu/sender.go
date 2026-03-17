@@ -14,23 +14,81 @@ import (
 )
 
 func (s *Service) sendReply(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, text string) error {
+	if source == nil {
+		return nil
+	}
+
+	requests, err := buildReplyRequests(*source, text, s.config.ReplyCardsEnabled)
+	if err != nil {
+		return reliability.Wrap("payload_invalid", err)
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+
+	for index, request := range requests {
+		if err := s.sendRecordedMessage(ctx, request, fmt.Sprintf("feishu:%s:%s:reply:%d", binding.Key.ChatID, source.MessageID, index), source.MessageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildReplyRequests(source MessageEvent, text string, replyCardsEnabled bool) ([]SendMessageRequest, error) {
+	if replyCardsEnabled {
+		return buildReplyCardRequests(source, text)
+	}
+	return buildRichTextReplyRequests(source, text), nil
+}
+
+func buildRichTextReplyRequests(source MessageEvent, text string) []SendMessageRequest {
 	chunks := splitTextChunks(text, feishuTextMaxRunes)
 	if len(chunks) == 0 {
 		return nil
 	}
 
-	for index, chunk := range chunks {
-		if err := s.sendRecordedMessage(ctx, SendMessageRequest{
+	requests := make([]SendMessageRequest, 0, len(chunks))
+	for _, chunk := range chunks {
+		requests = append(requests, SendMessageRequest{
 			ReplyToMessageID: source.MessageID,
 			ChatID:           source.ChatID,
 			MessageType:      "post",
 			Content:          chunk,
 			UUID:             uuid.NewString(),
-		}, fmt.Sprintf("feishu:%s:%s:reply:%d", binding.Key.ChatID, source.MessageID, index), source.MessageID); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	return requests
+}
+
+func buildReplyCardRequests(source MessageEvent, text string) ([]SendMessageRequest, error) {
+	chunks := splitTextChunks(text, feishuCardMaxRunes)
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+
+	requests := make([]SendMessageRequest, 0, len(chunks))
+	for index, chunk := range chunks {
+		content, err := buildReplyCardContent(chunk, index, len(chunks))
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, SendMessageRequest{
+			ReplyToMessageID: source.MessageID,
+			ChatID:           source.ChatID,
+			MessageType:      "interactive",
+			Content:          content,
+			UUID:             uuid.NewString(),
+		})
+	}
+	return requests, nil
+}
+
+func buildReplyCardContent(text string, index int, total int) (string, error) {
+	title := "Kimi reply"
+	if total > 1 {
+		title = fmt.Sprintf("Kimi reply (%d/%d)", index+1, total)
+	}
+	return marshalJSON(buildCard("blue", title, []any{buildMarkdownElement(text)}))
 }
 
 func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRequest, deliveryKey string, sourceMessageID string) error {
@@ -89,6 +147,14 @@ func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRe
 func (s *Service) replyRichTextWithFallback(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
 	var result *SendMessageResult
 	err := s.executeOutbound(ctx, "reply_message", func(ctx context.Context) error {
+		if strings.EqualFold(strings.TrimSpace(request.MessageType), "interactive") {
+			replyResult, err := s.gateway.ReplyMessage(ctx, request)
+			if err == nil {
+				result = replyResult
+			}
+			return err
+		}
+
 		postContent, postErr := buildPostMessageContent(request.Content)
 		if postErr == nil {
 			reply := request

@@ -303,12 +303,62 @@ pub struct BridgeChannelConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkDirPreset {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeSettings {
     pub enabled: bool,
     pub auto_start: bool,
     pub admin_port: u16,
     #[serde(default)]
+    pub feishu_reply_cards: bool,
+    pub default_work_dir: Option<String>,
+    #[serde(default)]
+    pub work_dir_presets: Vec<WorkDirPreset>,
+    #[serde(default)]
     pub channels: Vec<BridgeChannelConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSessionSource {
+    Bridge,
+    ShellWeb,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionRecord {
+    pub source: BridgeSessionSource,
+    pub session_id: String,
+    pub work_dir: Option<String>,
+    pub last_message_at: Option<String>,
+    pub summary: Option<String>,
+    pub session_state: Option<String>,
+    pub lease_owner: Option<String>,
+    pub lease_expires_at: Option<String>,
+    pub auto_approve: bool,
+    pub provider_name: Option<String>,
+    pub runtime_metadata_json: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub switchable: bool,
+    pub importable: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionImportInput {
+    pub source: BridgeSessionSource,
+    pub source_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -357,6 +407,7 @@ pub struct BridgeChannelStatus {
     pub platform: BridgePlatform,
     pub enabled: bool,
     pub state: BridgeChannelState,
+    pub last_heartbeat_at: Option<String>,
     pub last_inbound_at: Option<String>,
     pub last_outbound_at: Option<String>,
     pub last_offset: Option<String>,
@@ -390,6 +441,8 @@ pub struct BindingRecord {
     pub thread_id: Option<String>,
     pub kimi_session_id: String,
     pub work_dir: Option<String>,
+    pub onboarded_at: Option<String>,
+    pub onboarding_version: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub last_inbound_message_id: Option<String>,

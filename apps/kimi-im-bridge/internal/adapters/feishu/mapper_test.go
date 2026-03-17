@@ -75,7 +75,7 @@ func TestMapMessageToInbound(t *testing.T) {
 func TestApprovalCodecAndChunking(t *testing.T) {
 	t.Parallel()
 
-	value, ok := decodeActionValue(map[string]string{
+	value, ok := decodeApprovalActionValue(map[string]string{
 		"approval_id": "approval-1",
 		"decision":    approvalDecisionApproved,
 		"chat_id":     "chat-1",

@@ -24,6 +24,8 @@ import type {
   BridgeApprovalRecord,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
+  BridgeSessionImportInput,
+  BridgeSessionRecord,
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
@@ -86,6 +88,7 @@ type ControlCenterViewProps = {
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
   bridgeOnboardingDirty: boolean;
   bridgeOnboardingValidation: BridgeOnboardingValidation;
+  bridgeSessions: BridgeSessionRecord[];
   bridgeBindings: BindingRecord[];
   bridgeApprovals: BridgeApprovalRecord[];
   bridgeLogTail: string[];
@@ -118,6 +121,7 @@ type ControlCenterViewProps = {
   onRefreshContextMenuStatus: () => Promise<void>;
   onRefreshBridgeSettings: () => Promise<BridgeSettings>;
   onRefreshBridgeStatus: () => Promise<BridgeStatus>;
+  onRefreshBridgeSessions: () => Promise<BridgeSessionRecord[]>;
   onRefreshBridgeBindings: () => Promise<BindingRecord[]>;
   onRefreshBridgeApprovals: () => Promise<BridgeApprovalRecord[]>;
   onRefreshBridgeLogTail: () => Promise<string[]>;
@@ -146,6 +150,7 @@ type ControlCenterViewProps = {
   onStartBridge: () => Promise<void>;
   onStopBridge: () => Promise<void>;
   onRestartBridge: () => Promise<void>;
+  onImportBridgeSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onOpenConfigCenterModal: () => Promise<void>;
@@ -569,6 +574,7 @@ export function ControlCenterView({
   bridgeOnboardingDraft,
   bridgeOnboardingDirty,
   bridgeOnboardingValidation,
+  bridgeSessions,
   bridgeBindings,
   bridgeApprovals,
   bridgeLogTail,
@@ -601,6 +607,7 @@ export function ControlCenterView({
   onRefreshContextMenuStatus,
   onRefreshBridgeSettings,
   onRefreshBridgeStatus,
+  onRefreshBridgeSessions,
   onRefreshBridgeBindings,
   onRefreshBridgeApprovals,
   onRefreshBridgeLogTail,
@@ -629,6 +636,7 @@ export function ControlCenterView({
   onStartBridge,
   onStopBridge,
   onRestartBridge,
+  onImportBridgeSession,
   onClearBridgeBinding,
   onResolveBridgeApproval,
   onOpenConfigCenterModal,
@@ -1802,6 +1810,7 @@ export function ControlCenterView({
                 <BridgeRuntimePanel
                   settings={bridgeSettings}
                   status={bridgeStatus}
+                  sessions={bridgeSessions}
                   bindings={bridgeBindings}
                   approvals={bridgeApprovals}
                   logTail={bridgeLogTail}
@@ -1814,11 +1823,13 @@ export function ControlCenterView({
                   onStop={onStopBridge}
                   onRestart={onRestartBridge}
                   onRefreshStatus={onRefreshBridgeStatus}
+                  onRefreshSessions={onRefreshBridgeSessions}
                   onRefreshBindings={onRefreshBridgeBindings}
                   onRefreshApprovals={onRefreshBridgeApprovals}
                   onRefreshLogTail={onRefreshBridgeLogTail}
                   onRefreshSecretsMask={onRefreshBridgeSecretsMask}
                   onOpenLogs={onOpenLogs}
+                  onImportSession={onImportBridgeSession}
                   onClearBinding={onClearBridgeBinding}
                   onResolveApproval={onResolveBridgeApproval}
                 />

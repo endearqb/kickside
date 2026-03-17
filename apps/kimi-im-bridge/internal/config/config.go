@@ -5,17 +5,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const DefaultAdminPort = 60110
 
 type BridgeSettings struct {
-	Enabled        bool            `json:"enabled"`
-	AdminPort      int             `json:"adminPort"`
-	AutoStart      bool            `json:"autoStart"`
-	Channels       []ChannelConfig `json:"channels"`
-	DefaultWorkDir string          `json:"defaultWorkDir,omitempty"`
-	LogLevel       string          `json:"logLevel"`
+	Enabled          bool            `json:"enabled"`
+	AdminPort        int             `json:"adminPort"`
+	AutoStart        bool            `json:"autoStart"`
+	Channels         []ChannelConfig `json:"channels"`
+	DefaultWorkDir   string          `json:"defaultWorkDir,omitempty"`
+	WorkDirPresets   []WorkDirPreset `json:"workDirPresets"`
+	FeishuReplyCards bool            `json:"feishuReplyCards"`
+	LogLevel         string          `json:"logLevel"`
+}
+
+type WorkDirPreset struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 type ChannelConfig struct {
@@ -58,7 +66,9 @@ func DefaultSettings() BridgeSettings {
 				Mode:         "websocket",
 			},
 		},
-		LogLevel: "info",
+		WorkDirPresets:   []WorkDirPreset{},
+		FeishuReplyCards: false,
+		LogLevel:         "info",
 	}
 }
 
@@ -90,6 +100,7 @@ func normalizeSettings(settings BridgeSettings) (BridgeSettings, error) {
 	if settings.LogLevel == "" {
 		settings.LogLevel = defaults.LogLevel
 	}
+	settings.WorkDirPresets = normalizeWorkDirPresets(settings.WorkDirPresets)
 	if len(settings.Channels) == 0 {
 		settings.Channels = defaults.Channels
 	}
@@ -131,6 +142,31 @@ func normalizeSettings(settings BridgeSettings) (BridgeSettings, error) {
 		return BridgeSettings{}, fmt.Errorf("adminPort must be between 1 and 65535")
 	}
 	return settings, nil
+}
+
+func normalizeWorkDirPresets(presets []WorkDirPreset) []WorkDirPreset {
+	if len(presets) == 0 {
+		return []WorkDirPreset{}
+	}
+
+	normalized := make([]WorkDirPreset, 0, len(presets))
+	seenPaths := map[string]struct{}{}
+	for _, preset := range presets {
+		name := strings.TrimSpace(preset.Name)
+		path := strings.TrimSpace(preset.Path)
+		if name == "" || path == "" {
+			continue
+		}
+		if _, exists := seenPaths[path]; exists {
+			continue
+		}
+		seenPaths[path] = struct{}{}
+		normalized = append(normalized, WorkDirPreset{
+			Name: name,
+			Path: path,
+		})
+	}
+	return normalized
 }
 
 func loadOrCreateJSON[T any](path string, target *T, defaults T) error {

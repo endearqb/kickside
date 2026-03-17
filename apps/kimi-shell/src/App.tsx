@@ -152,6 +152,7 @@ function App() {
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
               bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
               bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
+              bridgeSessions={shell.bridgeSessions}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
               bridgeLogTail={shell.bridgeLogTail}
@@ -190,6 +191,7 @@ function App() {
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
               onRefreshBridgeSettings={shell.refreshBridgeSettings}
               onRefreshBridgeStatus={shell.refreshBridgeStatus}
+              onRefreshBridgeSessions={shell.refreshBridgeSessions}
               onRefreshBridgeBindings={shell.refreshBridgeBindings}
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
@@ -215,6 +217,7 @@ function App() {
               onStartBridge={shell.handleStartBridge}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
+              onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
@@ -273,6 +276,7 @@ function App() {
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
               bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
               bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
+              bridgeSessions={shell.bridgeSessions}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
               bridgeLogTail={shell.bridgeLogTail}
@@ -311,6 +315,7 @@ function App() {
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
               onRefreshBridgeSettings={shell.refreshBridgeSettings}
               onRefreshBridgeStatus={shell.refreshBridgeStatus}
+              onRefreshBridgeSessions={shell.refreshBridgeSessions}
               onRefreshBridgeBindings={shell.refreshBridgeBindings}
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
@@ -336,6 +341,7 @@ function App() {
               onStartBridge={shell.handleStartBridge}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
+              onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}

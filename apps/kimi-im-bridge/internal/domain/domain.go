@@ -59,6 +59,8 @@ type SessionBinding struct {
 	KimiSessionID         string     `json:"kimiSessionId"`
 	WorkDir               string     `json:"workDir,omitempty"`
 	Source                string     `json:"source"`
+	OnboardedAt           string     `json:"onboardedAt,omitempty"`
+	OnboardingVersion     string     `json:"onboardingVersion,omitempty"`
 	CreatedAt             string     `json:"createdAt"`
 	UpdatedAt             string     `json:"updatedAt"`
 	LastInboundMessageID  string     `json:"lastInboundMessageId,omitempty"`
@@ -73,9 +75,17 @@ type BindingRecord struct {
 	ThreadID             string `json:"threadId,omitempty"`
 	KimiSessionID        string `json:"kimiSessionId"`
 	WorkDir              string `json:"workDir,omitempty"`
+	OnboardedAt          string `json:"onboardedAt,omitempty"`
+	OnboardingVersion    string `json:"onboardingVersion,omitempty"`
 	CreatedAt            string `json:"createdAt"`
 	UpdatedAt            string `json:"updatedAt"`
 	LastInboundMessageID string `json:"lastInboundMessageId,omitempty"`
+}
+
+type BindingUpdate struct {
+	KimiSessionID string  `json:"kimiSessionId,omitempty"`
+	WorkDir       *string `json:"workDir,omitempty"`
+	Source        string  `json:"source,omitempty"`
 }
 
 type ApprovalTicket struct {
@@ -114,14 +124,15 @@ type OutboundMessage struct {
 }
 
 type ChannelStatus struct {
-	Platform       string              `json:"platform"`
-	Enabled        bool                `json:"enabled"`
-	State          ChannelRuntimeState `json:"state"`
-	LastInboundAt  string              `json:"lastInboundAt,omitempty"`
-	LastOutboundAt string              `json:"lastOutboundAt,omitempty"`
-	LastOffset     string              `json:"lastOffset,omitempty"`
-	LastErrorCode  string              `json:"lastErrorCode,omitempty"`
-	LastError      string              `json:"lastError,omitempty"`
+	Platform        string              `json:"platform"`
+	Enabled         bool                `json:"enabled"`
+	State           ChannelRuntimeState `json:"state"`
+	LastHeartbeatAt string              `json:"lastHeartbeatAt,omitempty"`
+	LastInboundAt   string              `json:"lastInboundAt,omitempty"`
+	LastOutboundAt  string              `json:"lastOutboundAt,omitempty"`
+	LastOffset      string              `json:"lastOffset,omitempty"`
+	LastErrorCode   string              `json:"lastErrorCode,omitempty"`
+	LastError       string              `json:"lastError,omitempty"`
 }
 
 type BridgeStatus struct {
@@ -151,6 +162,13 @@ type BridgeSession struct {
 	RuntimeMetadataJSON string `json:"runtimeMetadataJson,omitempty"`
 	CreatedAt           string `json:"createdAt"`
 	UpdatedAt           string `json:"updatedAt"`
+}
+
+type SessionImportRequest struct {
+	Source          string `json:"source,omitempty"`
+	SourceSessionID string `json:"sourceSessionId,omitempty"`
+	WorkDir         string `json:"workDir,omitempty"`
+	Summary         string `json:"summary,omitempty"`
 }
 
 type DeliveryEvent struct {

@@ -95,3 +95,185 @@
 - Sidecar `Status()` now treats channel listings and counters as independent best-effort reads, so `/api/v1/status` no longer collapses to HTTP 500 when SQLite snapshotting is partially unavailable.
 - Shell local fallback now synthesizes degraded channel states from settings whenever runtime probing fails in a degraded/crashed state, which removes the misleading `Bridge Degraded + Feishu Connecting` combination.
 - Feishu startup diagnostics now separate credential probe, endpoint fetch, and websocket handshake failures in `bridge.log`, and the control-center copy no longer implies that saved credentials alone prove platform connectivity.
+
+---
+
+# Feishu IM Bridge UX / Sessions / Startup Diagnostics Todo
+
+## Hard Constraints
+
+- [x] Keep the existing Go bridge architecture and admin shutdown lifecycle; do not introduce a new Node runtime or detached background daemon flow.
+- [x] Keep persisted approval correlation fields (`turn_id`, `step_id`) intact across new approval UX changes.
+- [x] Treat `shell-web` sessions as discoverable/importable only; never bind them as if they were bridge-native sessions.
+
+## Implementation
+
+- [x] Add bridge-native session listing and binding workdir update support to the bridge store/domain/admin API.
+- [x] Add Feishu bridge management commands and card-based responses for help, sessions, cwd, and approvals.
+- [x] Rebuild Feishu approval cards to render structured summaries and expose approve once / approve for session / reject actions.
+- [x] Add session aggregation in shell/runtime so bridge-native and shell/web sessions can be surfaced with clear source labels.
+- [x] Add `defaultWorkDir` to shell bridge settings and preserve it across Rust/TS/JSON round-trips.
+- [x] Capture bridge startup stdout/stderr tails and surface structured startup-failure diagnostics in shell runtime/control center.
+
+## Validation
+
+- [x] Run focused Go tests for store/admin/Feishu adapter/session behavior.
+- [x] Run focused Rust tests for bridge manager/settings/session aggregation behavior.
+- [x] Run targeted frontend validation or build for the touched control-center flow.
+- [ ] Manually verify Feishu command/card flows, approval card readability, and startup-failure surfacing.
+
+## Retrospective
+
+- Feishu bridge 现在先识别 `/bridge ...` 管理命令，再回落到普通 mention prompt 流程；这让 session/cwd/approval 管理不再和模型对话路径耦合。
+- 飞书审批卡片不再被错误降级成 text/post 发送，结合结构化摘要提取和 `Approve for session` 动作后，pending approvals 不再把原始 JSON 直接暴露给用户。
+- 飞书卡片回调更新现在显式返回 `card_json` 而不是 `raw`，避免审批按钮点击后因回调卡片更新载荷不被接受而出现通用错误码。
+- Shell 侧把 `defaultWorkDir`、bridge-native sessions、shell/web sessions 和启动失败日志尾部整合进同一块控制中心面板；其中 shell/web session 目前只允许“导入为新的 bridge session”，避免误绑异构 session id。
+- 已完成 `go test ./...`、`cargo test --manifest-path src-tauri/Cargo.toml`、`pnpm build`；飞书真机卡片交互和桌面端手点 smoke 仍需补一次人工验收。
+
+---
+
+# Bridge WorkDir Sync / Feishu Markdown Todo
+
+## Hard Constraints
+
+- [x] Keep bridge runtime lifecycle unchanged unless a work-dir sync fix strictly requires config persistence updates.
+- [x] Preserve existing bridge settings compatibility; explicit bridge-specific work-dir overrides must still win over app defaults.
+- [x] Keep Feishu normal chat replies compatible with current `post/text` fallback while clarifying markdown limitations honestly.
+
+## Implementation
+
+- [x] Make bridge `defaultWorkDir` follow the app `work_dir` when bridge is still inheriting the app default or currently unset.
+- [x] Update shell `save_work_dir` flow so changing the app work directory also persists the bridge default-follow behavior.
+- [x] Add clearer IM bridge work-dir command aliases/help text so Feishu users can directly add/remove per-chat work directories.
+- [x] Add focused tests for work-dir sync and Feishu command parsing aliases.
+
+## Validation
+
+- [x] Run focused Rust tests for bridge settings/work-dir sync.
+- [x] Run focused Go tests for Feishu command parsing/help behavior.
+
+## Retrospective
+
+- Bridge 现在把 app 的 `work_dir` 当作全局默认来源：bridge 默认目录为空时会自动继承它，且只有在 bridge 之前本来就在跟随 app 默认目录时，app 改目录才会继续联动更新。
+- 飞书里已经能直接按聊天“增删工作目录”了；这次把命令别名补成了更直观的 `/bridge cwd add <path>` 和 `/bridge cwd remove`，并在帮助卡片里明确了它们与全局默认目录的关系。
+- 已完成 `go test ./internal/adapters/feishu -v`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm build`。
+
+---
+
+# Feishu Reply Card Mode Todo
+
+## Hard Constraints
+
+- [x] Keep Feishu normal replies backward-compatible by making card rendering opt-in.
+- [x] Preserve bridge settings compatibility across Go bridge, Rust store, and TS UI round-trips.
+- [x] Reuse existing Feishu interactive card primitives instead of introducing a new message transport path.
+
+## Implementation
+
+- [x] Add a persisted `feishuReplyCards` bridge setting and expose it in shell control center.
+- [x] Thread the new setting into the Go bridge app wiring and Feishu adapter config.
+- [x] Make normal Feishu model replies optionally send `interactive` cards with `lark_md`, while keeping current `post/text` fallback when disabled.
+- [x] Add focused regression coverage for reply-mode selection and bridge settings normalization.
+
+## Validation
+
+- [x] Run focused Go tests for Feishu sender/config behavior.
+- [x] Run focused Rust tests for bridge settings persistence.
+- [x] Run a frontend build for the updated bridge runtime panel.
+
+## Retrospective
+
+- 普通 Feishu 模型回复现在可以按设置切到 `interactive` 卡片模式，沿用已有 `buildCard + lark_md` 组件，因此命令卡片、审批卡片和普通回复最终都走同一套渲染语义。
+- `feishuReplyCards` 已经贯通到 Go bridge 配置、Rust `bridge_settings.json`、TypeScript UI 类型和控制中心面板，旧配置缺少该字段时会安全回落到 `false`。
+- 卡片模式对长回复会按较小分片大小拆成多张卡片，并带上 `Kimi reply (n/N)` 标题；关闭开关时仍保持原来的 `post/text` fallback，不影响现有聊天。
+- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`。
+
+---
+
+# Feishu WorkDir Presets Todo
+
+## Hard Constraints
+
+- [x] Keep bridge settings backward-compatible; missing `workDirPresets` must safely fall back to an empty list.
+- [x] Preserve current `/bridge cwd set|add|clear|remove` text-command behavior while adding preset buttons.
+- [x] Do not add runtime hot-reload for presets; saving while bridge is running should only warn that restart is required for Feishu card freshness.
+
+## Implementation
+
+- [x] Add `workDirPresets` to Go bridge config, Rust settings store, and TypeScript bridge settings types with trim/filter/dedupe normalization.
+- [x] Extend the Bridge Runtime panel with add/remove preset rows and a save-time restart hint for running bridge sessions.
+- [x] Extend Feishu `/bridge cwd` cards to show preset buttons, highlight the active preset, and keep a clear-current-workdir action.
+- [x] Add Feishu card callback handling for preset apply/clear and update the card in place after the click.
+
+## Validation
+
+- [x] Run focused Go tests for config normalization and Feishu cwd card/callback behavior.
+- [x] Run focused Rust tests for bridge settings preset normalization.
+- [x] Run a frontend build for the Bridge Runtime panel changes.
+
+## Retrospective
+
+- `workDirPresets` 现在已经贯通到 Go bridge、Rust `bridge_settings.json` 和 TypeScript 控制中心类型，保存时会统一做 trim、空值过滤和按路径去重，旧配置缺字段时安全回落为空列表。
+- 控制中心 Bridge Runtime 面板新增了可编辑的预设目录列表，支持逐行新增/删除；如果 bridge 正在运行，保存成功后会提示需要重启 bridge，飞书 `/bridge cwd` 卡片才会加载最新预设。
+- 飞书 `/bridge cwd` 现在会同时显示默认目录、当前 binding workdir、选中的 preset，以及可点击的 preset 按钮和 `Clear current workdir` 操作；点按钮后卡片会原地刷新高亮状态。
+- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`；真实飞书点击 smoke 仍需手工补一轮。
+
+---
+
+# OpenClaw-Lark Interaction Absorption Todo
+
+## Hard Constraints
+
+- [x] Keep the current Go Feishu adapter architecture and sidecar lifecycle unchanged; no Node runtime or detached daemon work.
+- [x] Keep `/bridge help|sessions|cwd|approvals` backward-compatible while adding `start` and `doctor`.
+- [x] Use additive SQLite migration only for binding onboarding metadata, and keep admin bindings JSON backward-compatible.
+
+## Implementation
+
+- [x] Add binding onboarding persistence fields plus a migration and store/router support for reading/updating onboarding state.
+- [x] Extend Feishu bridge commands with `/bridge start`, `/bridge doctor`, and a shared `bridge_show_panel` card action.
+- [x] Add onboarding cards with DM auto-send, group manual-send behavior, and quick actions into sessions/cwd/approvals/doctor.
+- [x] Add doctor report/card generation that reuses bridge status, binding/session state, pending approvals, and a live Feishu credential probe.
+- [x] Update Rust/TS binding record types if needed so new admin fields round-trip safely.
+
+## Validation
+
+- [x] Run focused Go tests for store migrations, Feishu command parsing/cards, onboarding gating, and doctor behavior.
+- [x] Run targeted Rust tests if binding record shape changes require shell client coverage.
+- [ ] Manually verify DM auto-onboarding, group `/bridge start`, and `/bridge doctor` card refresh in Feishu.
+
+## Retrospective
+
+- 这次没有把 openclaw-lark 的 runtime 搬进来，而是把最有价值的三层模式吸收到现有 Go Feishu adapter：统一 `/bridge` 命令入口、首次 welcome/onboarding 卡片、以及可原地刷新的 doctor 自诊断卡片。
+- onboarding 元数据现在按 binding 持久化在 SQLite 里，采用加法式 `0008` 迁移补了 `onboarded_at` 和 `onboarding_version`，这样 DM 首次自动欢迎和未来版本化重引导都不再依赖内存状态。
+- `bridge_show_panel` 把 help/start/sessions/cwd/approvals/doctor 六类卡片统一到一条 callback 链路，避免每个新面板都要单独发明 action 类型；同时继续沿用现有 `card_json` 原地更新路径。
+- doctor 卡片复用了现有 bridge store + Feishu gateway 轻量 credential probe，默认给安全摘要和下一步建议，详情按按钮展开，不暴露 secrets 或原始日志尾部。
+- 已完成 `go test ./internal/adapters/feishu ./internal/store ./internal/admin`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_manager -- --nocapture`、`pnpm build`；真实 Feishu 会话的 DM/group smoke 仍需手工点一轮。
+
+---
+
+# Feishu Tools Doc Todo
+
+## Hard Constraints
+
+- [x] 文档只覆盖仓库里已经落地的飞书 IM Bridge 能力，不预写未来功能。
+- [x] `tools.md` 放在项目根目录，采用“使用者手册 + 开发者附录”的双层结构。
+- [x] 命令、卡片按钮、审批决策值、触发条件必须与当前实现完全一致。
+
+## Implementation
+
+- [x] 新增根目录 `tools.md`，说明飞书侧前置配置、入口规则、普通对话行为和回复模式。
+- [x] 在 `tools.md` 中列出 `/bridge help|start|sessions|use|cwd|approvals|doctor` 及其别名、示例和返回结果。
+- [x] 在 `tools.md` 中写清 onboarding、session 切换、workdir preset、clear workdir、approval resolve、panel switch 等卡片交互。
+- [x] 在 `tools.md` 中补充开发者附录，说明 `mapMessageToInbound`、`parseBridgeCommand`、`stripExplicitSummon`、card actions 和 reply 渲染策略。
+
+## Validation
+
+- [x] 逐项对照 `commands_cards.go`、`approval.go`、`service.go`、`sender.go`，静态核对文档与实现一致。
+- [x] 对照手工测试运行手册，确认文档没有声称支持未验证或不存在的飞书能力。
+
+## Retrospective
+
+- 新增的 `tools.md` 现在把飞书侧“怎么用”和“代码里怎么实现”放在同一份入口文档里，适合同时给使用者和开发者使用。
+- 文档明确限定在当前已实现能力内：文本消息、`/bridge` 命令、交互卡片、审批、workdir、doctor；没有把文件上传、图片输入或未来 OpenClaw/Lark 演进提前写进去。
+- 已完成静态核对，重点对齐了命令解析、群聊显式召唤、card action、审批决策值、reply card 开关，以及手工运行手册中已经定义的 Feishu 验证边界；本次未运行自动化测试，因为改动仅涉及文档与任务记录。

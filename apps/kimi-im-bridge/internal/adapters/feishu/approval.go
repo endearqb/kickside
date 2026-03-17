@@ -12,12 +12,13 @@ import (
 )
 
 const (
-	approvalDecisionApproved = "approved"
-	approvalDecisionDenied   = "denied"
+	approvalDecisionApproved           = "approved"
+	approvalDecisionApprovedForSession = "approved_for_session"
+	approvalDecisionDenied             = "denied"
 )
 
 func (s *Service) sendApprovalMessage(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, event runtime.PromptEvent) error {
-	content, err := buildApprovalCardContent(event.ApprovalID, source.ChatID, primaryID(source.ThreadID, source.RootID), event.RequestKind, event.Prompt)
+	content, err := buildApprovalCardContent(approvalDataFromRuntimeEvent(source, binding, event))
 	if err != nil {
 		return reliability.Wrap("payload_invalid", err)
 	}
@@ -31,7 +32,7 @@ func (s *Service) sendApprovalMessage(ctx context.Context, source *MessageEvent,
 }
 
 func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *MessageEvent, event bridgecore.TurnEvent) error {
-	content, err := buildApprovalCardContent(event.ApprovalID, source.ChatID, primaryID(source.ThreadID, source.RootID), event.RequestKind, event.Prompt)
+	content, err := buildApprovalCardContent(approvalDataFromTurnEvent(source, event))
 	if err != nil {
 		return reliability.Wrap("payload_invalid", err)
 	}
@@ -49,7 +50,62 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 		return nil, reliability.Wrap("unknown", err)
 	}
 
-	value, ok := decodeActionValue(event.ActionValue)
+	action := strings.TrimSpace(event.ActionValue["action"])
+	switch action {
+	case "", cardActionApprovalDecision:
+		return s.processApprovalCardAction(ctx, event)
+	case cardActionUseSession:
+		return s.processSessionCardAction(ctx, event)
+	case cardActionShowPanel:
+		return s.processShowPanelCardAction(ctx, event)
+	case cardActionSetPresetWorkDir:
+		return s.processSetPresetWorkDirCardAction(ctx, event)
+	case cardActionClearWorkDir:
+		return s.processClearWorkDirCardAction(ctx, event)
+	default:
+		return &CardActionResult{Toast: "unsupported action"}, nil
+	}
+}
+
+func (s *Service) processShowPanelCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	value, ok := decodePanelActionValue(event.ActionValue)
+	if !ok {
+		return &CardActionResult{Toast: "unsupported action"}, nil
+	}
+	if value.ChatID != "" && strings.TrimSpace(value.ChatID) != strings.TrimSpace(event.ChatID) {
+		return &CardActionResult{Toast: "invalid card context"}, nil
+	}
+
+	key := domain.BindingKey{
+		Platform: platformID,
+		ChatID:   strings.TrimSpace(event.ChatID),
+		ThreadID: strings.TrimSpace(value.ThreadID),
+	}
+	card, shouldMarkOnboarding, err := s.buildPanelCard(ctx, key, value.Panel, value.ShowDetails)
+	if err != nil {
+		return nil, err
+	}
+	if shouldMarkOnboarding {
+		binding, resolveErr := s.bindings.ResolveBinding(ctx, key)
+		if resolveErr != nil {
+			return nil, reliability.Wrap("unknown", resolveErr)
+		}
+		if binding != nil {
+			if err := s.bindings.UpdateBindingOnboarding(ctx, binding.BindingID, currentOnboardingVersion); err != nil {
+				return nil, reliability.Wrap("unknown", err)
+			}
+		}
+	}
+	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	return &CardActionResult{
+		UpdatedCard: card,
+	}, nil
+}
+
+func (s *Service) processApprovalCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	value, ok := decodeApprovalActionValue(event.ActionValue)
 	if !ok {
 		return &CardActionResult{Toast: "unsupported action"}, nil
 	}
@@ -64,7 +120,7 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 	if ticket.Status != "pending" {
 		return &CardActionResult{Toast: "already resolved"}, nil
 	}
-	if !approvalContextMatches(ticket, event, value) {
+	if !approvalContextMatches(ticket, event, value.ChatID, value.ThreadID) {
 		return &CardActionResult{Toast: "invalid approval context"}, nil
 	}
 
@@ -90,7 +146,15 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 		return nil, reliability.Wrap("unknown", err)
 	}
 
-	card, err := buildResolvedApprovalCard(value.Decision, ticket.Prompt)
+	card, err := buildResolvedApprovalCard(value.Decision, approvalCardData{
+		ApprovalID:         ticket.ApprovalID,
+		ChatID:             ticket.ChatID,
+		ThreadID:           ticket.ThreadID,
+		KimiSessionID:      ticket.KimiSessionID,
+		RequestKind:        ticket.RequestKind,
+		Prompt:             ticket.Prompt,
+		RequestPayloadJSON: ticket.RequestPayloadJSON,
+	})
 	if err != nil {
 		fallbackErr := s.sendResolutionFallback(ctx, event, ticket, value.Decision)
 		if fallbackErr != nil {
@@ -107,38 +171,136 @@ func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent)
 	}, nil
 }
 
+func (s *Service) processSessionCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	value, ok := decodeSessionActionValue(event.ActionValue)
+	if !ok {
+		return &CardActionResult{Toast: "unsupported action"}, nil
+	}
+	if value.ChatID != "" && strings.TrimSpace(value.ChatID) != strings.TrimSpace(event.ChatID) {
+		return &CardActionResult{Toast: "invalid session context"}, nil
+	}
+
+	key := domain.BindingKey{
+		Platform: platformID,
+		ChatID:   strings.TrimSpace(event.ChatID),
+		ThreadID: strings.TrimSpace(value.ThreadID),
+	}
+	card, err := s.useSessionForBinding(ctx, key, value.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	return &CardActionResult{
+		Toast:       "session updated",
+		UpdatedCard: card,
+	}, nil
+}
+
+func (s *Service) processSetPresetWorkDirCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	value, ok := decodeWorkDirPresetActionValue(event.ActionValue)
+	if !ok {
+		return &CardActionResult{Toast: "unsupported action"}, nil
+	}
+	if value.ChatID != "" && strings.TrimSpace(value.ChatID) != strings.TrimSpace(event.ChatID) {
+		return &CardActionResult{Toast: "invalid workdir context"}, nil
+	}
+
+	key := domain.BindingKey{
+		Platform: platformID,
+		ChatID:   strings.TrimSpace(event.ChatID),
+		ThreadID: strings.TrimSpace(value.ThreadID),
+	}
+	binding, err := s.resolveOrCreateBinding(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.bindings.UpdateBindingWorkDir(ctx, binding.BindingID, value.PresetPath); err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	binding.WorkDir = strings.TrimSpace(value.PresetPath)
+	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	toast := "workdir updated"
+	if strings.TrimSpace(value.PresetName) != "" {
+		toast = fmt.Sprintf("workdir set to %s", strings.TrimSpace(value.PresetName))
+	} else if strings.TrimSpace(value.PresetPath) != "" {
+		toast = fmt.Sprintf("workdir set to %s", strings.TrimSpace(value.PresetPath))
+	}
+	return &CardActionResult{
+		Toast:       toast,
+		UpdatedCard: buildWorkDirCard(binding, strings.TrimSpace(s.config.DefaultWorkDir), s.config.WorkDirPresets, key),
+	}, nil
+}
+
+func (s *Service) processClearWorkDirCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	value, ok := decodeClearWorkDirActionValue(event.ActionValue)
+	if !ok {
+		return &CardActionResult{Toast: "unsupported action"}, nil
+	}
+	if value.ChatID != "" && strings.TrimSpace(value.ChatID) != strings.TrimSpace(event.ChatID) {
+		return &CardActionResult{Toast: "invalid workdir context"}, nil
+	}
+
+	key := domain.BindingKey{
+		Platform: platformID,
+		ChatID:   strings.TrimSpace(event.ChatID),
+		ThreadID: strings.TrimSpace(value.ThreadID),
+	}
+	binding, err := s.bindings.ResolveBinding(ctx, key)
+	if err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	if binding != nil {
+		if err := s.bindings.UpdateBindingWorkDir(ctx, binding.BindingID, ""); err != nil {
+			return nil, reliability.Wrap("unknown", err)
+		}
+		binding.WorkDir = ""
+	}
+	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	return &CardActionResult{
+		Toast:       "workdir cleared",
+		UpdatedCard: buildWorkDirCard(binding, strings.TrimSpace(s.config.DefaultWorkDir), s.config.WorkDirPresets, key),
+	}, nil
+}
+
 func (s *Service) sendResolutionFallback(ctx context.Context, event *CardActionEvent, ticket *domain.ApprovalTicket, status string) error {
 	return s.sendRecordedMessage(ctx, SendMessageRequest{
 		ReplyToMessageID: event.MessageID,
 		ChatID:           event.ChatID,
 		MessageType:      "text",
-		Content:          resolvedApprovalText(status, ticket.Prompt),
-		UUID:             fmt.Sprintf("%s:%s", ticket.ApprovalID, status),
+		Content: resolvedApprovalText(status, summarizeApproval(approvalCardData{
+			ApprovalID:         ticket.ApprovalID,
+			ChatID:             ticket.ChatID,
+			ThreadID:           ticket.ThreadID,
+			KimiSessionID:      ticket.KimiSessionID,
+			RequestKind:        ticket.RequestKind,
+			Prompt:             ticket.Prompt,
+			RequestPayloadJSON: ticket.RequestPayloadJSON,
+		}).Description),
+		UUID: fmt.Sprintf("%s:%s", ticket.ApprovalID, status),
 	}, fmt.Sprintf("feishu:approval:%s:resolved", ticket.ApprovalID), event.MessageID)
 }
 
-type actionValue struct {
-	ApprovalID string
-	Decision   string
-	ChatID     string
-	ThreadID   string
-}
-
-func decodeActionValue(values map[string]string) (actionValue, bool) {
+func decodeApprovalActionValue(values map[string]string) (approvalActionValue, bool) {
 	if len(values) == 0 {
-		return actionValue{}, false
+		return approvalActionValue{}, false
 	}
 	approvalID := strings.TrimSpace(values["approval_id"])
 	decision := strings.TrimSpace(values["decision"])
 	switch decision {
-	case approvalDecisionApproved, approvalDecisionDenied:
+	case approvalDecisionApproved, approvalDecisionApprovedForSession, approvalDecisionDenied:
 	default:
-		return actionValue{}, false
+		return approvalActionValue{}, false
 	}
 	if approvalID == "" {
-		return actionValue{}, false
+		return approvalActionValue{}, false
 	}
-	return actionValue{
+	return approvalActionValue{
 		ApprovalID: approvalID,
 		Decision:   decision,
 		ChatID:     strings.TrimSpace(values["chat_id"]),
@@ -146,85 +308,101 @@ func decodeActionValue(values map[string]string) (actionValue, bool) {
 	}, true
 }
 
-func buildApprovalCardContent(approvalID string, chatID string, threadID string, requestKind string, prompt string) (string, error) {
-	card, err := buildApprovalCard(approvalID, chatID, threadID, requestKind, prompt)
+func decodeSessionActionValue(values map[string]string) (sessionActionValue, bool) {
+	if len(values) == 0 {
+		return sessionActionValue{}, false
+	}
+	sessionID := strings.TrimSpace(values["session_id"])
+	if sessionID == "" {
+		return sessionActionValue{}, false
+	}
+	return sessionActionValue{
+		SessionID: sessionID,
+		ChatID:    strings.TrimSpace(values["chat_id"]),
+		ThreadID:  strings.TrimSpace(values["thread_id"]),
+	}, true
+}
+
+func decodeWorkDirPresetActionValue(values map[string]string) (workDirPresetActionValue, bool) {
+	if len(values) == 0 {
+		return workDirPresetActionValue{}, false
+	}
+	presetPath := strings.TrimSpace(values["preset_path"])
+	if presetPath == "" {
+		return workDirPresetActionValue{}, false
+	}
+	return workDirPresetActionValue{
+		ChatID:     strings.TrimSpace(values["chat_id"]),
+		ThreadID:   strings.TrimSpace(values["thread_id"]),
+		PresetName: strings.TrimSpace(values["preset_name"]),
+		PresetPath: presetPath,
+	}, true
+}
+
+func decodeClearWorkDirActionValue(values map[string]string) (clearWorkDirActionValue, bool) {
+	if len(values) == 0 {
+		return clearWorkDirActionValue{}, false
+	}
+	return clearWorkDirActionValue{
+		ChatID:   strings.TrimSpace(values["chat_id"]),
+		ThreadID: strings.TrimSpace(values["thread_id"]),
+	}, true
+}
+
+func decodePanelActionValue(values map[string]string) (panelActionValue, bool) {
+	if len(values) == 0 {
+		return panelActionValue{}, false
+	}
+	panel := strings.TrimSpace(values["panel"])
+	if panel == "" {
+		return panelActionValue{}, false
+	}
+	return panelActionValue{
+		Panel:       panel,
+		ChatID:      strings.TrimSpace(values["chat_id"]),
+		ThreadID:    strings.TrimSpace(values["thread_id"]),
+		ShowDetails: strings.EqualFold(strings.TrimSpace(values["show_details"]), "true"),
+	}, true
+}
+
+func buildApprovalCardContent(data approvalCardData) (string, error) {
+	card, err := buildApprovalCard(data)
 	if err != nil {
 		return "", err
 	}
 	return marshalJSON(card)
 }
 
-func buildApprovalCard(approvalID string, chatID string, threadID string, requestKind string, prompt string) (map[string]any, error) {
-	text := formatApprovalPrompt(requestKind, prompt)
+func buildApprovalCard(data approvalCardData) (map[string]any, error) {
+	summary := summarizeApproval(data)
 	valueBase := map[string]string{
-		"approval_id": approvalID,
-		"chat_id":     strings.TrimSpace(chatID),
-		"thread_id":   strings.TrimSpace(threadID),
+		"action":      cardActionApprovalDecision,
+		"approval_id": data.ApprovalID,
+		"chat_id":     strings.TrimSpace(data.ChatID),
+		"thread_id":   strings.TrimSpace(data.ThreadID),
 	}
-	return map[string]any{
-		"config": map[string]any{
-			"wide_screen_mode": true,
-		},
-		"header": map[string]any{
-			"template": "orange",
-			"title": map[string]string{
-				"tag":     "plain_text",
-				"content": "Approval requested",
-			},
-		},
-		"elements": []any{
-			map[string]any{
-				"tag": "div",
-				"text": map[string]string{
-					"tag":     "plain_text",
-					"content": text,
-				},
-			},
-			map[string]any{
-				"tag": "action",
-				"actions": []any{
-					buildApprovalButton("Approve", "primary", mergeActionValue(valueBase, approvalDecisionApproved)),
-					buildApprovalButton("Deny", "default", mergeActionValue(valueBase, approvalDecisionDenied)),
-				},
-			},
-		},
-	}, nil
+	return buildCard("orange", "Approval requested", []any{
+		buildMarkdownElement(renderApprovalSummary(summary)),
+		buildActionElement(
+			buildApprovalButton("Approve once", "primary", mergeActionValue(valueBase, approvalDecisionApproved)),
+			buildApprovalButton("Approve for session", "default", mergeActionValue(valueBase, approvalDecisionApprovedForSession)),
+			buildApprovalButton("Reject", "danger", mergeActionValue(valueBase, approvalDecisionDenied)),
+		),
+	}), nil
 }
 
-func buildResolvedApprovalCard(status string, prompt string) (map[string]any, error) {
-	return map[string]any{
-		"config": map[string]any{
-			"wide_screen_mode": true,
-		},
-		"header": map[string]any{
-			"template": resolvedApprovalTemplate(status),
-			"title": map[string]string{
-				"tag":     "plain_text",
-				"content": resolvedApprovalHeader(status),
-			},
-		},
-		"elements": []any{
-			map[string]any{
-				"tag": "div",
-				"text": map[string]string{
-					"tag":     "plain_text",
-					"content": resolvedApprovalText(status, prompt),
-				},
-			},
-		},
-	}, nil
+func buildResolvedApprovalCard(status string, data approvalCardData) (map[string]any, error) {
+	summary := summarizeApproval(data)
+	return buildCard(resolvedApprovalTemplate(status), resolvedApprovalHeader(status), []any{
+		buildMarkdownElement(strings.Join([]string{
+			resolvedApprovalText(status, summary.Description),
+			renderApprovalSummary(summary),
+		}, "\n\n")),
+	}), nil
 }
 
 func buildApprovalButton(label string, buttonType string, value map[string]string) map[string]any {
-	return map[string]any{
-		"tag":  "button",
-		"type": buttonType,
-		"text": map[string]string{
-			"tag":     "plain_text",
-			"content": label,
-		},
-		"value": value,
-	}
+	return buildCardButton(label, buttonType, value)
 }
 
 func mergeActionValue(base map[string]string, decision string) map[string]string {
@@ -236,7 +414,7 @@ func mergeActionValue(base map[string]string, decision string) map[string]string
 	return merged
 }
 
-func approvalContextMatches(ticket *domain.ApprovalTicket, event *CardActionEvent, value actionValue) bool {
+func approvalContextMatches(ticket *domain.ApprovalTicket, event *CardActionEvent, chatID string, threadID string) bool {
 	if ticket == nil || event == nil {
 		return false
 	}
@@ -246,33 +424,20 @@ func approvalContextMatches(ticket *domain.ApprovalTicket, event *CardActionEven
 	if strings.TrimSpace(ticket.ChatID) != strings.TrimSpace(event.ChatID) {
 		return false
 	}
-	if value.ChatID != "" && strings.TrimSpace(ticket.ChatID) != strings.TrimSpace(value.ChatID) {
+	if chatID != "" && strings.TrimSpace(ticket.ChatID) != strings.TrimSpace(chatID) {
 		return false
 	}
-	if ticket.ThreadID == "" {
-		return true
-	}
-	return strings.TrimSpace(ticket.ThreadID) == strings.TrimSpace(value.ThreadID)
-}
-
-func formatApprovalPrompt(requestKind string, prompt string) string {
-	requestKind = strings.TrimSpace(requestKind)
-	if requestKind == "" {
-		requestKind = "approval"
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return fmt.Sprintf("Approval requested for %s.", requestKind)
-	}
-	return fmt.Sprintf("Approval requested for %s.\n\n%s", requestKind, prompt)
+	return strings.TrimSpace(ticket.ThreadID) == strings.TrimSpace(threadID)
 }
 
 func callbackAckText(status string) string {
 	switch status {
 	case approvalDecisionApproved:
 		return "approved"
+	case approvalDecisionApprovedForSession:
+		return "approved for session"
 	case approvalDecisionDenied:
-		return "denied"
+		return "rejected"
 	default:
 		return strings.TrimSpace(status)
 	}
@@ -282,8 +447,10 @@ func resolvedApprovalHeader(status string) string {
 	switch status {
 	case approvalDecisionApproved:
 		return "Approval approved"
+	case approvalDecisionApprovedForSession:
+		return "Approval approved for session"
 	case approvalDecisionDenied:
-		return "Approval denied"
+		return "Approval rejected"
 	default:
 		return "Approval resolved"
 	}
@@ -291,7 +458,7 @@ func resolvedApprovalHeader(status string) string {
 
 func resolvedApprovalTemplate(status string) string {
 	switch status {
-	case approvalDecisionApproved:
+	case approvalDecisionApproved, approvalDecisionApprovedForSession:
 		return "green"
 	case approvalDecisionDenied:
 		return "red"

@@ -2941,9 +2941,33 @@ input:focus {
 .bridge-binding-list,
 .bridge-approval-list,
 .bridge-secret-list,
-.bridge-error-list {
+.bridge-error-list,
+.bridge-preset-list {
   display: grid;
   gap: 10px;
+}
+
+.bridge-preset-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.bridge-preset-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bridge-preset-field {
+  display: grid;
+  gap: 6px;
+}
+
+.bridge-preset-field span {
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
 
 .bridge-panel-subsection {
@@ -3167,6 +3191,11 @@ input:focus {
   .path-row,
   .diagnostics-grid,
   .bridge-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-preset-row,
+  .bridge-preset-fields {
     grid-template-columns: 1fr;
   }
 

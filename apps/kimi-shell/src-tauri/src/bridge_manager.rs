@@ -18,8 +18,8 @@ use crate::{
     types::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
         BridgeChannelStatus, BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue,
-        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSettings, BridgeStatus,
-        BridgeTelegramSecretsMaskView,
+        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
+        BridgeSettings, BridgeStatus, BridgeTelegramSecretsMaskView,
     },
 };
 
@@ -133,6 +133,20 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     };
 
     let mut command = build_bridge_command(app, &binary_path, &settings, &admin_token)?;
+    {
+        let state = app.state::<AppState>();
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge spawn command prepared: binary={}, config={}, secrets={}, db={}, admin_port={}",
+                binary_path.display(),
+                state.bridge_settings_path.display(),
+                state.bridge_secrets_path.display(),
+                state.bridge_db_path.display(),
+                settings.admin_port
+            ),
+        );
+    }
     let child = command.spawn().with_context(|| {
         format!(
             "failed to spawn bridge sidecar: {}",
@@ -266,6 +280,32 @@ pub fn list_bridge_bindings(app: &AppHandle) -> anyhow::Result<Vec<BindingRecord
     client.list_bindings()
 }
 
+pub fn list_bridge_sessions(app: &AppHandle) -> anyhow::Result<Vec<BridgeSessionRecord>> {
+    refresh_child_state(app)?;
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Ok(Vec::new());
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    client.list_sessions()
+}
+
 pub fn clear_bridge_binding(app: &AppHandle, binding_id: &str) -> anyhow::Result<()> {
     refresh_child_state(app)?;
     let (runtime_state, admin_port, admin_token) = {
@@ -352,6 +392,35 @@ pub fn resolve_bridge_approval(
     Ok(())
 }
 
+pub fn import_bridge_session(
+    app: &AppHandle,
+    input: &BridgeSessionImportInput,
+) -> anyhow::Result<BridgeSessionRecord> {
+    refresh_child_state(app)?;
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Err(anyhow::anyhow!("bridge is not running"));
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    client.import_session(input)
+}
+
 pub fn get_bridge_log_tail(
     app: &AppHandle,
     max_lines: Option<usize>,
@@ -397,6 +466,7 @@ fn build_bridge_command(
     admin_token: &str,
 ) -> anyhow::Result<Command> {
     let state = app.state::<AppState>();
+    let (stdout, stderr) = open_bridge_stdio_logs(app)?;
     let mut command = Command::new(binary_path);
     command
         .arg("--config")
@@ -412,8 +482,8 @@ fn build_bridge_command(
         .arg("--admin-token")
         .arg(admin_token)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(stdout)
+        .stderr(stderr);
 
     #[cfg(windows)]
     {
@@ -422,6 +492,27 @@ fn build_bridge_command(
     }
 
     Ok(command)
+}
+
+fn open_bridge_stdio_logs(app: &AppHandle) -> anyhow::Result<(Stdio, Stdio)> {
+    let path = log_manager::bridge_log_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create bridge log directory before stdio setup: {}",
+                parent.display()
+            )
+        })?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .with_context(|| format!("failed to open bridge stdio log: {}", path.display()))?;
+    let stdout = file
+        .try_clone()
+        .context("failed to clone bridge stdio log handle")?;
+    Ok((Stdio::from(stdout), Stdio::from(file)))
 }
 
 fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -659,6 +750,7 @@ fn merge_channels(
                     platform: channel.platform,
                     enabled: channel.enabled,
                     state: default_channel_state(channel.enabled, runtime_state),
+                    last_heartbeat_at: None,
                     last_inbound_at: None,
                     last_outbound_at: None,
                     last_offset: None,
@@ -680,6 +772,7 @@ fn settings_channels(
             platform: channel.platform,
             enabled: channel.enabled,
             state: default_channel_state(channel.enabled, runtime_state),
+            last_heartbeat_at: None,
             last_inbound_at: None,
             last_outbound_at: None,
             last_offset: None,
@@ -719,12 +812,18 @@ fn refresh_child_state(app: &AppHandle) -> anyhow::Result<()> {
                 if runtime.state == BridgeRuntimeState::Stopping {
                     stopping_exit = true;
                 } else {
-                    exit_message = Some(format!("bridge sidecar exited: {status}"));
+                    exit_message = Some(enrich_bridge_failure_message(
+                        app,
+                        &format!("bridge sidecar exited: {status}"),
+                    ));
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                exit_message = Some(format!("failed to inspect bridge process: {error}"));
+                exit_message = Some(enrich_bridge_failure_message(
+                    app,
+                    &format!("failed to inspect bridge process: {error}"),
+                ));
                 runtime.child = None;
                 runtime.pid = None;
             }
@@ -752,11 +851,12 @@ fn record_failure(app: &AppHandle, message: &str) -> anyhow::Result<()> {
     runtime.child = None;
     runtime.pid = None;
     runtime.last_error_code = Some("platform_unavailable".to_string());
-    runtime.last_error = Some(message.to_string());
+    runtime.last_error = Some(enrich_bridge_failure_message(app, message));
     Ok(())
 }
 
 fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> {
+    let detailed_message = enrich_bridge_failure_message(app, &message);
     let child = {
         let state = app.state::<AppState>();
         let mut runtime = state
@@ -765,7 +865,7 @@ fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> 
             .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
         runtime.state = BridgeRuntimeState::Crashed;
         runtime.last_error_code = Some("platform_unavailable".to_string());
-        runtime.last_error = Some(message.clone());
+        runtime.last_error = Some(detailed_message.clone());
         runtime.pid = None;
         runtime.child.take()
     };
@@ -774,8 +874,21 @@ fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> 
         let _ = terminate_child(&mut child, Duration::from_millis(250));
     }
 
-    log_manager::append_line(app, format!("bridge start failed: {message}"));
+    log_manager::append_line(app, format!("bridge start failed: {detailed_message}"));
     Ok(())
+}
+
+fn enrich_bridge_failure_message(app: &AppHandle, message: &str) -> String {
+    let tail = log_manager::read_log_tail(&app.state::<AppState>().bridge_log_path, 12);
+    let relevant = tail
+        .into_iter()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default();
+    if relevant.is_empty() {
+        return message.to_string();
+    }
+    format!("{message}; recent bridge log: {relevant}")
 }
 
 fn begin_start_transition(
@@ -1050,6 +1163,7 @@ mod tests {
                 platform: BridgePlatform::Telegram,
                 enabled: true,
                 state: BridgeChannelState::Ready,
+                last_heartbeat_at: None,
                 last_inbound_at: None,
                 last_outbound_at: None,
                 last_offset: None,
@@ -1079,6 +1193,9 @@ mod tests {
             enabled: true,
             auto_start: false,
             admin_port: 60_110,
+            feishu_reply_cards: false,
+            default_work_dir: None,
+            work_dir_presets: vec![],
             channels: vec![
                 BridgeChannelConfig {
                     platform: BridgePlatform::Telegram,
@@ -1098,6 +1215,7 @@ mod tests {
             platform: BridgePlatform::Feishu,
             enabled: true,
             state: BridgeChannelState::Connecting,
+            last_heartbeat_at: None,
             last_inbound_at: None,
             last_outbound_at: None,
             last_offset: None,

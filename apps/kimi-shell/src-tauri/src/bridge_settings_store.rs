@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
@@ -8,7 +8,8 @@ use crate::{
     settings_store,
     types::{
         AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgeOnboardingConfigInput,
-        BridgePlatform, BridgeSecrets, BridgeSettings, CURRENT_SETTINGS_SCHEMA_VERSION,
+        BridgePlatform, BridgeSecrets, BridgeSettings, WorkDirPreset,
+        CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -52,6 +53,36 @@ pub fn ensure_bridge_files(app: &AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn sync_default_work_dir_from_app(
+    app: &AppHandle,
+    previous_app_work_dir: Option<String>,
+) -> anyhow::Result<BridgeSettings> {
+    let state = app.state::<AppState>();
+    let mut app_settings = load_app_settings_at(&state.settings_path)?;
+    let bridge_settings_exists = state.bridge_settings_path.exists();
+    let mut bridge_settings = if bridge_settings_exists {
+        read_json::<BridgeSettings>(&state.bridge_settings_path)?
+    } else {
+        default_bridge_settings(&app_settings)
+    };
+    bridge_settings = normalize_bridge_settings(bridge_settings);
+
+    let changed = sync_bridge_default_work_dir_from_app(
+        &mut bridge_settings,
+        previous_app_work_dir.as_deref(),
+        app_settings.work_dir.as_deref(),
+    );
+    if changed || !bridge_settings_exists {
+        write_json(&state.bridge_settings_path, &bridge_settings)?;
+    }
+
+    if sync_bridge_mirror(&bridge_settings, &mut app_settings) {
+        save_app_settings_at(&state.settings_path, &app_settings)?;
+    }
+
+    Ok(bridge_settings)
+}
+
 fn load_or_default_files(
     app_settings_path: &Path,
     bridge_settings_path: &Path,
@@ -63,6 +94,11 @@ fn load_or_default_files(
         default_bridge_settings(&app_settings)
     };
     bridge_settings = normalize_bridge_settings(bridge_settings);
+    sync_bridge_default_work_dir_from_app(
+        &mut bridge_settings,
+        None,
+        app_settings.work_dir.as_deref(),
+    );
     write_json(bridge_settings_path, &bridge_settings)?;
 
     if sync_bridge_mirror(&bridge_settings, &mut app_settings) {
@@ -78,7 +114,12 @@ fn save_files(
     input: &BridgeSettings,
 ) -> anyhow::Result<(AppSettings, BridgeSettings)> {
     let mut app_settings = load_app_settings_at(app_settings_path)?;
-    let bridge_settings = normalize_bridge_settings(input.clone());
+    let mut bridge_settings = normalize_bridge_settings(input.clone());
+    sync_bridge_default_work_dir_from_app(
+        &mut bridge_settings,
+        None,
+        app_settings.work_dir.as_deref(),
+    );
     write_json(bridge_settings_path, &bridge_settings)?;
 
     if sync_bridge_mirror(&bridge_settings, &mut app_settings) {
@@ -104,6 +145,11 @@ fn save_onboarding_files(
     let mut bridge_secrets = load_secrets_at(bridge_secrets_path)?;
 
     apply_onboarding_input(&mut bridge_settings, &mut bridge_secrets, input)?;
+    sync_bridge_default_work_dir_from_app(
+        &mut bridge_settings,
+        None,
+        app_settings.work_dir.as_deref(),
+    );
 
     write_json(bridge_secrets_path, &bridge_secrets)?;
     write_json(bridge_settings_path, &bridge_settings)?;
@@ -155,6 +201,55 @@ fn trim_optional_string(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn normalize_work_dir_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+}
+
+fn normalize_work_dir_presets(presets: Vec<WorkDirPreset>) -> Vec<WorkDirPreset> {
+    if presets.is_empty() {
+        return Vec::new();
+    }
+
+    let mut normalized = Vec::with_capacity(presets.len());
+    let mut seen_paths = HashSet::new();
+    for preset in presets {
+        let name = preset.name.trim();
+        let path = preset.path.trim();
+        if name.is_empty() || path.is_empty() {
+            continue;
+        }
+        if !seen_paths.insert(path.to_string()) {
+            continue;
+        }
+        normalized.push(WorkDirPreset {
+            name: name.to_string(),
+            path: path.to_string(),
+        });
+    }
+    normalized
+}
+
+fn sync_bridge_default_work_dir_from_app(
+    bridge_settings: &mut BridgeSettings,
+    previous_app_work_dir: Option<&str>,
+    next_app_work_dir: Option<&str>,
+) -> bool {
+    let previous = normalize_work_dir_value(previous_app_work_dir);
+    let next = normalize_work_dir_value(next_app_work_dir);
+    let current = bridge_settings.default_work_dir.clone();
+
+    let should_follow_app = current.is_none() || current == previous;
+    if !should_follow_app || current == next {
+        return false;
+    }
+
+    bridge_settings.default_work_dir = next;
+    true
 }
 
 fn apply_onboarding_input(
@@ -222,6 +317,9 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         admin_port: app_settings
             .bridge_admin_port_override
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
+        feishu_reply_cards: false,
+        default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
+        work_dir_presets: vec![],
         channels: vec![
             default_channel(BridgePlatform::Telegram),
             default_channel(BridgePlatform::Feishu),
@@ -251,6 +349,9 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         } else {
             settings.admin_port
         },
+        feishu_reply_cards: settings.feishu_reply_cards,
+        default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
+        work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
         channels: vec![
             normalize_channel(telegram, BridgePlatform::Telegram),
             normalize_channel(feishu, BridgePlatform::Feishu),
@@ -364,11 +465,51 @@ mod tests {
         assert!(!bridge_settings.enabled);
         assert!(!bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, DEFAULT_BRIDGE_ADMIN_PORT);
+        assert!(!bridge_settings.feishu_reply_cards);
+        assert!(bridge_settings.default_work_dir.is_none());
+        assert!(bridge_settings.work_dir_presets.is_empty());
         assert_eq!(bridge_settings.channels.len(), 2);
         assert!(!app_settings.bridge_enabled);
         assert!(!app_settings.bridge_auto_start);
         assert!(bridge_settings_path.exists());
         assert!(settings_path.exists());
+    }
+
+    #[test]
+    fn load_or_default_backfills_bridge_default_work_dir_from_app_settings() {
+        let temp = TempDirGuard::new("inherit-app-workdir");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+
+        write_json(
+            &settings_path,
+            &AppSettings {
+                work_dir: Some(" D:/workspace ".to_string()),
+                ..AppSettings::default()
+            },
+        )
+        .expect("seed app settings");
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: false,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                feishu_reply_cards: false,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                channels: vec![],
+            },
+        )
+        .expect("seed bridge settings");
+
+        let (_, bridge_settings) =
+            load_or_default_files(&settings_path, &bridge_settings_path).expect("bridge settings");
+
+        assert_eq!(
+            bridge_settings.default_work_dir.as_deref(),
+            Some("D:/workspace")
+        );
     }
 
     #[test]
@@ -381,6 +522,12 @@ mod tests {
             enabled: true,
             auto_start: true,
             admin_port: 60_112,
+            feishu_reply_cards: true,
+            default_work_dir: Some(" D:/repo ".to_string()),
+            work_dir_presets: vec![WorkDirPreset {
+                name: " Repo ".to_string(),
+                path: " D:/repo ".to_string(),
+            }],
             channels: vec![default_channel(BridgePlatform::Telegram)],
         };
 
@@ -390,10 +537,96 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, 60_112);
+        assert!(bridge_settings.feishu_reply_cards);
+        assert_eq!(bridge_settings.default_work_dir.as_deref(), Some("D:/repo"));
+        assert_eq!(
+            bridge_settings.work_dir_presets,
+            vec![WorkDirPreset {
+                name: "Repo".to_string(),
+                path: "D:/repo".to_string(),
+            }]
+        );
         assert_eq!(bridge_settings.channels.len(), 2);
         assert!(app_settings.bridge_enabled);
         assert!(app_settings.bridge_auto_start);
         assert_eq!(app_settings.bridge_admin_port_override, Some(60_112));
+    }
+
+    #[test]
+    fn save_files_treats_blank_bridge_default_work_dir_as_follow_app_setting() {
+        let temp = TempDirGuard::new("save-follow-app-workdir");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+
+        write_json(
+            &settings_path,
+            &AppSettings {
+                work_dir: Some("D:/workspace".to_string()),
+                ..AppSettings::default()
+            },
+        )
+        .expect("seed app settings");
+
+        let (app_settings, bridge_settings) = save_files(
+            &settings_path,
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: false,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                feishu_reply_cards: false,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                channels: vec![],
+            },
+        )
+        .expect("save bridge files");
+
+        assert_eq!(app_settings.work_dir.as_deref(), Some("D:/workspace"));
+        assert_eq!(
+            bridge_settings.default_work_dir.as_deref(),
+            Some("D:/workspace")
+        );
+    }
+
+    #[test]
+    fn sync_bridge_default_work_dir_from_app_updates_only_when_bridge_was_following() {
+        let mut inherited = BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            feishu_reply_cards: false,
+            default_work_dir: Some("D:/old".to_string()),
+            work_dir_presets: vec![],
+            channels: vec![],
+        };
+
+        assert!(sync_bridge_default_work_dir_from_app(
+            &mut inherited,
+            Some("D:/old"),
+            Some("D:/new")
+        ));
+        assert_eq!(inherited.default_work_dir.as_deref(), Some("D:/new"));
+
+        let mut explicit_override = BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            feishu_reply_cards: false,
+            default_work_dir: Some("D:/bridge-only".to_string()),
+            work_dir_presets: vec![],
+            channels: vec![],
+        };
+
+        assert!(!sync_bridge_default_work_dir_from_app(
+            &mut explicit_override,
+            Some("D:/old"),
+            Some("D:/new")
+        ));
+        assert_eq!(
+            explicit_override.default_work_dir.as_deref(),
+            Some("D:/bridge-only")
+        );
     }
 
     #[test]
@@ -405,6 +638,50 @@ mod tests {
 
         assert_eq!(secrets, BridgeSecrets::default());
         assert!(secrets_path.exists());
+    }
+
+    #[test]
+    fn normalize_bridge_settings_filters_and_dedupes_work_dir_presets() {
+        let normalized = normalize_bridge_settings(BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            feishu_reply_cards: false,
+            default_work_dir: None,
+            work_dir_presets: vec![
+                WorkDirPreset {
+                    name: " Repo ".to_string(),
+                    path: " D:/repo ".to_string(),
+                },
+                WorkDirPreset {
+                    name: "".to_string(),
+                    path: "D:/skip".to_string(),
+                },
+                WorkDirPreset {
+                    name: "Duplicate".to_string(),
+                    path: "D:/repo".to_string(),
+                },
+                WorkDirPreset {
+                    name: "Docs".to_string(),
+                    path: "D:/docs".to_string(),
+                },
+            ],
+            channels: vec![],
+        });
+
+        assert_eq!(
+            normalized.work_dir_presets,
+            vec![
+                WorkDirPreset {
+                    name: "Repo".to_string(),
+                    path: "D:/repo".to_string(),
+                },
+                WorkDirPreset {
+                    name: "Docs".to_string(),
+                    path: "D:/docs".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]

@@ -73,6 +73,33 @@ func TestNewReconcilesPendingApprovalsFromPreviousRuntime(t *testing.T) {
 	}
 }
 
+func TestNewStatusHandlesFreshDatabaseChannelRows(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	service, err := New(Options{
+		Version:     "test",
+		ConfigPath:  filepath.Join(dir, "bridge_settings.json"),
+		SecretsPath: filepath.Join(dir, "bridge_secrets.json"),
+		DBPath:      filepath.Join(dir, "bridge.db"),
+		LogFilePath: filepath.Join(dir, "logs", "bridge.log"),
+		AdminPort:   60110,
+		AdminToken:  "token-1",
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	defer service.Close()
+
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status returned error for fresh database: %v", err)
+	}
+	if len(status.Channels) != 2 {
+		t.Fatalf("expected fresh database status to include configured channels, got %+v", status.Channels)
+	}
+}
+
 func TestStatusFallsBackToConfiguredChannelsWhenStoreSnapshotFails(t *testing.T) {
 	t.Parallel()
 

@@ -318,6 +318,7 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
             .bridge_admin_port_override
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
         feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+        feishu_auto_approve: true,
         feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
         work_dir_presets: vec![],
@@ -356,6 +357,7 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
             settings.admin_port
         },
         feishu_reply_renderer,
+        feishu_auto_approve: settings.feishu_auto_approve,
         feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
         work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
@@ -476,6 +478,7 @@ mod tests {
             bridge_settings.feishu_reply_renderer,
             FeishuReplyRenderer::Interactive
         );
+        assert!(bridge_settings.feishu_auto_approve);
         assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
@@ -507,6 +510,7 @@ mod tests {
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
                 feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_auto_approve: true,
                 feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
@@ -525,6 +529,30 @@ mod tests {
     }
 
     #[test]
+    fn load_or_default_backfills_missing_feishu_auto_approve_to_true() {
+        let temp = TempDirGuard::new("inherit-feishu-auto-approve");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+
+        fs::write(
+            &bridge_settings_path,
+            r#"{
+  "enabled": false,
+  "autoStart": false,
+  "adminPort": 60110,
+  "feishuReplyRenderer": "interactive",
+  "channels": []
+}"#,
+        )
+        .expect("seed bridge settings json");
+
+        let (_, bridge_settings) =
+            load_or_default_files(&settings_path, &bridge_settings_path).expect("bridge settings");
+
+        assert!(bridge_settings.feishu_auto_approve);
+    }
+
+    #[test]
     fn save_syncs_mirror_fields_into_settings_json() {
         let temp = TempDirGuard::new("mirror");
         let settings_path = temp.path.join("settings.json");
@@ -535,6 +563,7 @@ mod tests {
             auto_start: true,
             admin_port: 60_112,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
             feishu_reply_cards: None,
             default_work_dir: Some(" D:/repo ".to_string()),
             work_dir_presets: vec![WorkDirPreset {
@@ -554,6 +583,7 @@ mod tests {
             bridge_settings.feishu_reply_renderer,
             FeishuReplyRenderer::Interactive
         );
+        assert!(bridge_settings.feishu_auto_approve);
         assert_eq!(bridge_settings.default_work_dir.as_deref(), Some("D:/repo"));
         assert_eq!(
             bridge_settings.work_dir_presets,
@@ -591,6 +621,7 @@ mod tests {
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
                 feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_auto_approve: true,
                 feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
@@ -613,6 +644,7 @@ mod tests {
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
             feishu_reply_cards: None,
             default_work_dir: Some("D:/old".to_string()),
             work_dir_presets: vec![],
@@ -631,6 +663,7 @@ mod tests {
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
             feishu_reply_cards: None,
             default_work_dir: Some("D:/bridge-only".to_string()),
             work_dir_presets: vec![],
@@ -666,6 +699,7 @@ mod tests {
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
             feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![
@@ -711,6 +745,7 @@ mod tests {
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
             feishu_reply_cards: Some(false),
             default_work_dir: None,
             work_dir_presets: vec![],

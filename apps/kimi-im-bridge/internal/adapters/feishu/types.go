@@ -63,12 +63,13 @@ type WorkDirPreset struct {
 }
 
 type Config struct {
-	AppID            string
-	AppSecret        string
-	DefaultWorkDir   string
-	WorkDirPresets   []WorkDirPreset
-	ReplyRenderer    string
-	AttachmentsDir   string
+	AppID          string
+	AppSecret      string
+	AutoApprove    bool
+	DefaultWorkDir string
+	WorkDirPresets []WorkDirPreset
+	ReplyRenderer  string
+	AttachmentsDir string
 }
 
 type Options struct {

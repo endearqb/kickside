@@ -26,6 +26,9 @@ func TestLoadOrCreateSettingsWritesDefaults(t *testing.T) {
 	if settings.FeishuReplyRenderer != FeishuReplyRendererInteractive {
 		t.Fatalf("expected feishuReplyRenderer to default interactive, got %q", settings.FeishuReplyRenderer)
 	}
+	if !settings.FeishuAutoApprove {
+		t.Fatalf("expected feishuAutoApprove to default true")
+	}
 	if len(settings.WorkDirPresets) != 0 {
 		t.Fatalf("expected workDirPresets to default empty, got %d", len(settings.WorkDirPresets))
 	}
@@ -97,6 +100,46 @@ func TestLoadOrCreateSettingsPreservesFeishuReplyRenderer(t *testing.T) {
 
 	if settings.FeishuReplyRenderer != FeishuReplyRendererPost {
 		t.Fatalf("expected feishuReplyRenderer to be preserved, got %q", settings.FeishuReplyRenderer)
+	}
+}
+
+func TestLoadOrCreateSettingsBackfillsMissingFeishuAutoApprove(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge_settings.json")
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"channels":[{"platform":"telegram","enabled":true}]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("failed to seed settings file: %v", err)
+	}
+
+	settings, err := LoadOrCreateSettings(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
+	}
+
+	if !settings.FeishuAutoApprove {
+		t.Fatalf("expected missing feishuAutoApprove to default true")
+	}
+}
+
+func TestLoadOrCreateSettingsPreservesFeishuAutoApproveFalse(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge_settings.json")
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuAutoApprove":false,"channels":[{"platform":"telegram","enabled":true}]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("failed to seed settings file: %v", err)
+	}
+
+	settings, err := LoadOrCreateSettings(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
+	}
+
+	if settings.FeishuAutoApprove {
+		t.Fatalf("expected explicit feishuAutoApprove=false to be preserved")
 	}
 }
 

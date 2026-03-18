@@ -36,6 +36,10 @@ pub enum FeishuReplyRenderer {
     Interactive,
 }
 
+fn default_feishu_auto_approve() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeRuntimeState {
@@ -324,6 +328,8 @@ pub struct BridgeSettings {
     pub admin_port: u16,
     #[serde(default)]
     pub feishu_reply_renderer: FeishuReplyRenderer,
+    #[serde(default = "default_feishu_auto_approve")]
+    pub feishu_auto_approve: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feishu_reply_cards: Option<bool>,
     pub default_work_dir: Option<String>,

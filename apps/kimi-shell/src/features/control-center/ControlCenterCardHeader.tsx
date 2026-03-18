@@ -4,8 +4,9 @@ import { ChevronRight } from "lucide-react";
 type CardStatusTone = "neutral" | "success" | "warning" | "danger";
 
 type ControlCenterCardHeaderProps = {
+  eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   statusLabel: string;
   statusTone?: CardStatusTone;
   primaryAction?: ReactNode;
@@ -15,6 +16,7 @@ type ControlCenterCardHeaderProps = {
 };
 
 export function ControlCenterCardHeader({
+  eyebrow,
   title,
   description,
   statusLabel,
@@ -36,8 +38,9 @@ export function ControlCenterCardHeader({
             aria-expanded={expanded}
           >
             <span className="cc-step-title-copy">
+              {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
               <h3 className="cc-step-title-line">{title}</h3>
-              <p className="cc-step-inline-summary">{description}</p>
+              {description ? <p className="cc-step-inline-summary">{description}</p> : null}
             </span>
             <ChevronRight
               size={14}
@@ -45,14 +48,17 @@ export function ControlCenterCardHeader({
             />
           </button>
         ) : (
-          <>
+          <div className="cc-card-header-static-copy">
+            {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
             <h3>{title}</h3>
-            <p>{description}</p>
-          </>
+            {description ? <p>{description}</p> : null}
+          </div>
         )}
       </div>
       <div className="cc-card-header-actions">
-        <span className={`cc-status-badge tone-${statusTone}`}>{statusLabel}</span>
+        <span className={`cc-status-badge tone-${statusTone}`} data-tone={statusTone}>
+          {statusLabel}
+        </span>
         {primaryAction}
       </div>
     </header>

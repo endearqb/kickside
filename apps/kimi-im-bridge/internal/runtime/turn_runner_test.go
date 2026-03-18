@@ -253,6 +253,9 @@ func TestTurnRunnerRunPromptApprovalFlow(t *testing.T) {
 	if session.LastTurnID == "" {
 		t.Fatal("expected last turn id to be persisted")
 	}
+	if session.AutoApprove {
+		t.Fatalf("expected AutoApprove to default false, got %+v", session)
+	}
 }
 
 func TestTurnRunnerExecuteBindingPromptUsesBindingApprovalTarget(t *testing.T) {
@@ -315,5 +318,40 @@ func TestTurnRunnerExecuteBindingPromptUsesBindingApprovalTarget(t *testing.T) {
 	}
 	if events[0].Type != EventTypeTurnStarted || events[1].Type != EventTypeApprovalRequested || events[2].Type != EventTypeTurnCompleted {
 		t.Fatalf("unexpected sink event order: %+v", events)
+	}
+}
+
+func TestTurnRunnerRunPromptPersistsAutoApprove(t *testing.T) {
+	t.Parallel()
+
+	stream := newFakePromptStream()
+	driver := &fakeDriver{stream: stream}
+	approvalStore := newTurnRunnerApprovalStore()
+	approvals := NewApprovalCoordinator(approvalStore)
+	sessionStore := &fakeSessionStore{}
+	runner := NewTurnRunner(driver, NewSessionRegistry(), approvals, sessionStore)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := runner.RunPrompt(context.Background(), PromptRequest{
+			Prompt:      "hello",
+			AutoApprove: true,
+		})
+		done <- err
+	}()
+
+	go func() {
+		close(stream.events)
+		stream.result <- DriverResult{Status: "finished"}
+		close(stream.result)
+	}()
+
+	if err := <-done; err != nil {
+		t.Fatalf("RunPrompt returned error: %v", err)
+	}
+
+	session := sessionStore.lastSession()
+	if !session.AutoApprove {
+		t.Fatalf("expected AutoApprove=true to be persisted, got %+v", session)
 	}
 }

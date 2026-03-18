@@ -63,6 +63,7 @@ export function ControlCenterModalShell({
         aria-modal="true"
         aria-label={ariaLabel ?? title}
       >
+        <div className="cc-modal-shell-aura" aria-hidden />
         <header className="cc-modal-shell-header">
           <div className="cc-modal-shell-title">
             <h3>{title}</h3>

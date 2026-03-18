@@ -45,7 +45,6 @@ import type {
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
-  ControlCenterChrome,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
@@ -185,6 +184,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     autoStart: false,
     adminPort: 60110,
     feishuReplyRenderer: "interactive",
+    feishuAutoApprove: true,
     defaultWorkDir: "",
     workDirPresets: [],
     channels: [
@@ -421,8 +421,6 @@ export function useShellController() {
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
   const [controlCenterModalOpen, setControlCenterModalOpen] = useState(false);
-  const [controlCenterChrome, setControlCenterChrome] =
-    useState<ControlCenterChrome>("dashboard");
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
   const [listenersReady, setListenersReady] = useState(false);
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
@@ -670,10 +668,9 @@ export function useShellController() {
     setRouteHash(window.location.hash);
   }
 
-  function resetControlCenterNavigation(nextChrome: ControlCenterChrome = "dashboard") {
+  function resetControlCenterNavigation() {
     setActiveControlSection("overview");
     setActiveRuntimePanel("paths");
-    setControlCenterChrome(nextChrome);
   }
 
   function isWorkspaceReady(nextStatus: AppStatus | null | undefined) {
@@ -690,7 +687,7 @@ export function useShellController() {
       setConfigCenterOpen(false);
       setInstallFlowOpen(false);
       setInstallCommandsOpen(false);
-      resetControlCenterNavigation("dashboard");
+      resetControlCenterNavigation();
       setControlCenterModalOpen(false);
       return;
     }
@@ -703,7 +700,6 @@ export function useShellController() {
     setPendingWorkspaceEntryAfterOnboarding(true);
     setActiveControlSection("overview");
     setActiveRuntimePanel("paths");
-    setControlCenterChrome(controlCenterModalOpen ? "dashboard" : "full");
     if (!controlCenterModalOpen) {
       applyRouteHash("/control-center");
     }
@@ -1675,13 +1671,15 @@ export function useShellController() {
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
     const bridgeControlsVisible =
       controlCenterVisible &&
-      (activeControlSection === "onboarding" ||
+      (activeControlSection === "bridge_center" ||
+        activeControlSection === "onboarding" ||
         (activeControlSection === "runtime_center" &&
           activeRuntimePanel === "bridge"));
     const bridgePanelVisible =
       controlCenterVisible &&
-      activeControlSection === "runtime_center" &&
-      activeRuntimePanel === "bridge";
+      (activeControlSection === "bridge_center" ||
+        (activeControlSection === "runtime_center" &&
+          activeRuntimePanel === "bridge"));
 
     if (bridgeControlsVisible) {
       void refreshBridgeSettings();
@@ -1710,8 +1708,9 @@ export function useShellController() {
       void refreshBridgeStatus();
       if (
         controlCenterVisible &&
-        activeControlSection === "runtime_center" &&
-        activeRuntimePanel === "bridge"
+        (activeControlSection === "bridge_center" ||
+          (activeControlSection === "runtime_center" &&
+            activeRuntimePanel === "bridge"))
       ) {
         void refreshBridgeBindings();
         void refreshBridgeApprovals();
@@ -1781,13 +1780,12 @@ export function useShellController() {
 
     const hashRoute = parseHashRoute(routeHash);
     if (hashRoute === "control-center") {
-      resetControlCenterNavigation("full");
+      resetControlCenterNavigation();
       return;
     }
 
     if (hashRoute === "onboarding") {
       setActiveControlSection("onboarding");
-      setControlCenterChrome("full");
       void refreshOnboarding();
       return;
     }
@@ -1795,7 +1793,6 @@ export function useShellController() {
     if (hashRoute === "diagnostics") {
       setActiveControlSection("runtime_center");
       setActiveRuntimePanel("core");
-      setControlCenterChrome("full");
       void refreshDiagnostics();
       return;
     }
@@ -1803,7 +1800,6 @@ export function useShellController() {
     if (hashRoute === "logs_paths") {
       setActiveControlSection("runtime_center");
       setActiveRuntimePanel("paths");
-      setControlCenterChrome("full");
       void Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
       return;
     }
@@ -2100,15 +2096,18 @@ export function useShellController() {
       const presetsChanged =
         JSON.stringify(bridgeSettingsSnapshot.workDirPresets ?? []) !==
         JSON.stringify(bridgeSettings.workDirPresets ?? []);
+      const feishuAutoApproveChanged =
+        bridgeSettingsSnapshot.feishuAutoApprove !==
+        bridgeSettings.feishuAutoApprove;
       const saved = await invoke<BridgeSettings>("save_bridge_settings", {
         input: bridgeSettings,
       });
       setBridgeSettings(saved);
       setBridgeSettingsSnapshot(saved);
       await refreshBridgeStatus();
-      if (bridgeIsRunning && presetsChanged) {
+      if (bridgeIsRunning && (presetsChanged || feishuAutoApproveChanged)) {
         window.alert(
-          "工作目录预设已保存。重启 bridge 后，飞书 /bridge cwd 卡片会加载最新预设。",
+          "Bridge 配置已保存。重启 bridge 后，飞书工作目录预设和 Auto Approve 变更才会生效。",
         );
       }
     } catch (error) {
@@ -2535,43 +2534,10 @@ export function useShellController() {
     resetControlCenterNavigation();
   }
 
-  async function openOnboardingFromDashboard() {
-    try {
-      await refreshOnboarding();
-    } finally {
-      setActiveControlSection("onboarding");
-      setControlCenterChrome("full");
-    }
-  }
-
-  async function openRuntimePanelFromDashboard(panel: RuntimePanelId) {
-    try {
-      if (panel === "bridge") {
-        await Promise.all([
-          refreshBridgeSettings(),
-          refreshBridgeStatus(),
-          refreshBridgeSessions(),
-          refreshBridgeBindings(),
-          refreshBridgeApprovals(),
-          refreshBridgeLogTail(),
-          refreshBridgeSecretsMask(),
-        ]);
-      } else if (panel === "paths") {
-        await Promise.all([refreshDiagnostics(), refreshContextMenuStatus()]);
-      } else {
-        await refreshDiagnostics();
-      }
-    } finally {
-      setActiveControlSection("runtime_center");
-      setActiveRuntimePanel(panel);
-      setControlCenterChrome("full");
-    }
-  }
-
   function openControlCenter() {
     if (screen === "workspace") {
       setConfigCenterOpen(false);
-      resetControlCenterNavigation("dashboard");
+      resetControlCenterNavigation();
       setControlCenterModalOpen(true);
       return;
     }
@@ -2853,7 +2819,6 @@ export function useShellController() {
     activeRuntimePanel,
     setActiveRuntimePanel,
     controlCenterModalOpen,
-    controlCenterChrome,
     tauriRuntime,
     screen,
     uiBackendState,
@@ -2952,8 +2917,6 @@ export function useShellController() {
     handleSkipOnboarding,
     openControlCenter,
     closeControlCenterModal,
-    openOnboardingFromDashboard,
-    openRuntimePanelFromDashboard,
     backToStatus,
     handleStartWindowDrag,
     handleMinimizeWindow,

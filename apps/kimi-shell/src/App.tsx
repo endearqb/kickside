@@ -13,6 +13,26 @@ import "./App.css";
 function App() {
   const shell = useShellController();
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
+  const bridgeState = shell.bridgeStatus.state;
+  const bridgeStateLabel =
+    bridgeState === "running"
+      ? "就绪"
+      : bridgeState === "starting" || bridgeState === "stopping"
+        ? "进行中"
+        : bridgeState === "degraded"
+          ? "异常"
+          : bridgeState === "crashed"
+            ? "异常"
+            : "待办";
+  const bridgeStateTone =
+    bridgeState === "running"
+      ? "ready"
+      : bridgeState === "starting" || bridgeState === "stopping"
+        ? "progress"
+        : bridgeState === "degraded" || bridgeState === "crashed"
+          ? "error"
+          : "todo";
+  const bridgeStartable = bridgeState === "stopped" || bridgeState === "crashed";
   const statusChipClass =
     shell.uiBackendState === "running"
       ? "saved"
@@ -135,7 +155,6 @@ function App() {
           <div className="shell-overlay-layer">
             <ControlCenterView
               surface="fullscreen"
-              chrome="full"
               status={shell.status}
               diagnostics={shell.diagnostics}
               onboarding={shell.onboarding}
@@ -184,8 +203,6 @@ function App() {
               installCommandsBusy={shell.installCommandsBusy}
               installCommandCatalog={shell.installCommandCatalog}
               onClose={shell.backToStatus}
-              onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
-              onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
               onRefreshCoreState={shell.refreshCoreState}
               onRefreshDiagnostics={shell.refreshDiagnostics}
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
@@ -259,7 +276,6 @@ function App() {
           <div className="cc-shell-modal" role="dialog" aria-modal="true" aria-label="控制中心">
             <ControlCenterView
               surface="modal"
-              chrome={shell.controlCenterChrome}
               status={shell.status}
               diagnostics={shell.diagnostics}
               onboarding={shell.onboarding}
@@ -308,8 +324,6 @@ function App() {
               installCommandsBusy={shell.installCommandsBusy}
               installCommandCatalog={shell.installCommandCatalog}
               onClose={shell.closeControlCenterModal}
-              onOpenOnboardingFromDashboard={shell.openOnboardingFromDashboard}
-              onOpenRuntimePanelFromDashboard={shell.openRuntimePanelFromDashboard}
               onRefreshCoreState={shell.refreshCoreState}
               onRefreshDiagnostics={shell.refreshDiagnostics}
               onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
@@ -409,6 +423,27 @@ function App() {
           <span className={`status-indicator ${statusChipClass}`}>
             {formatBackendState(shell.uiBackendState)}
           </span>
+          <button
+            type="button"
+            className={`status-bridge-chip tone-${bridgeStateTone} ${bridgeStartable ? "is-action" : "is-static"}`}
+            onClick={() => {
+              if (!bridgeStartable) return;
+              void shell.handleStartBridge();
+            }}
+            disabled={!bridgeStartable || shell.bridgeBusy || shell.actionBusy}
+            aria-label={
+              bridgeStartable
+                ? "一键启动 IM Bridge"
+                : `IM Bridge 当前状态：${bridgeStateLabel}`
+            }
+            title={
+              bridgeStartable
+                ? "IM Bridge 未启动，点击一键启动"
+                : `IM Bridge 当前状态：${bridgeStateLabel}`
+            }
+          >
+            IM Bridge · {bridgeStateLabel}
+          </button>
           {shell.isLoading && (
             <span className="status-text">Checking backend status...</span>
           )}

@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/adapterkit"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
@@ -21,12 +23,12 @@ import (
 type fakeGateway struct {
 	mu sync.Mutex
 
-	probeErr     error
-	runFunc      func(context.Context, EventHandler) error
-	replyFunc    func(context.Context, SendMessageRequest) (*SendMessageResult, error)
-	createFunc   func(context.Context, SendMessageRequest) (*SendMessageResult, error)
-	uploadImage  func(context.Context, string) (*UploadedResource, error)
-	uploadFile   func(context.Context, string, string) (*UploadedResource, error)
+	probeErr      error
+	runFunc       func(context.Context, EventHandler) error
+	replyFunc     func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	createFunc    func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	uploadImage   func(context.Context, string) (*UploadedResource, error)
+	uploadFile    func(context.Context, string, string) (*UploadedResource, error)
 	downloadImage func(context.Context, string) (*DownloadedResource, error)
 	downloadFile  func(context.Context, string) (*DownloadedResource, error)
 
@@ -137,6 +139,29 @@ type runtimeResolveCall struct {
 	payload    string
 }
 
+type fakeInboundExecutor struct {
+	handleOptions []bridgecore.HandleOptions
+	result        bridgecore.HandleResult
+	err           error
+}
+
+func (f *fakeInboundExecutor) HandleInbound(
+	_ context.Context,
+	_ adapterkit.NormalizedInbound,
+	options bridgecore.HandleOptions,
+	_ bridgecore.TurnEventSink,
+) (bridgecore.HandleResult, error) {
+	f.handleOptions = append(f.handleOptions, options)
+	if f.err != nil {
+		return bridgecore.HandleResult{}, f.err
+	}
+	return f.result, nil
+}
+
+func (f *fakeInboundExecutor) ResolveApproval(context.Context, string, string, string) error {
+	return nil
+}
+
 func (f *fakeRuntimeExecutor) ExecuteBindingPrompt(
 	ctx context.Context,
 	binding domain.SessionBinding,
@@ -244,6 +269,68 @@ func TestServiceProcessMessageCreatesBindingAndReusesSession(t *testing.T) {
 	}
 	if gateway.replyCalls[0].MessageType != "interactive" {
 		t.Fatalf("expected first outbound message to be onboarding card, got %+v", gateway.replyCalls[0])
+	}
+}
+
+func TestServiceProcessMessagePassesAutoApproveToOrchestrator(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	storeHandle, err := store.Open(filepath.Join(dir, "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = storeHandle.Close()
+	})
+	if err := storeHandle.SyncConfiguredChannels(context.Background(), []config.ChannelConfig{{
+		Platform: "feishu",
+		Enabled:  true,
+	}}); err != nil {
+		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
+	}
+
+	gateway := &fakeGateway{}
+	orchestrator := &fakeInboundExecutor{
+		result: bridgecore.HandleResult{
+			ReplyText: "ok",
+			Binding: domain.SessionBinding{
+				BindingID:     "binding-1",
+				Key:           domain.BindingKey{Platform: platformID, ChatID: "chat-1"},
+				KimiSessionID: "session-1",
+			},
+		},
+	}
+	service := NewService(Options{
+		Config: Config{
+			AppID:         "cli_a",
+			AppSecret:     "secret",
+			AutoApprove:   true,
+			ReplyRenderer: "interactive",
+		},
+		Gateway:       gateway,
+		BindingRouter: binding.NewRouter(storeHandle),
+		Orchestrator:  orchestrator,
+		Store:         storeHandle,
+		Logger:        noopLogger{},
+	})
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-auto-approve-1",
+		MessageID:   "msg-auto-approve-1",
+		ChatID:      "chat-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"hello"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(orchestrator.handleOptions) != 1 {
+		t.Fatalf("expected exactly one orchestrator call, got %d", len(orchestrator.handleOptions))
+	}
+	if !orchestrator.handleOptions[0].AutoApprove {
+		t.Fatalf("expected AutoApprove=true to be passed into orchestrator options")
 	}
 }
 

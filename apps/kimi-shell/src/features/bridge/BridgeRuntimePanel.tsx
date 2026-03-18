@@ -315,6 +315,23 @@ export function BridgeRuntimePanel({
               </select>
               <small>普通模型回复默认建议使用 `interactive + lark_md`；`post` 仅作为兼容回退。</small>
             </label>
+
+            <label className="bridge-switch-card">
+              <span className="bridge-switch-copy">
+                <strong>Feishu Auto Approve</strong>
+                <small>开启后，飞书对话会自动批准工具执行审批（WithAutoApprove）。</small>
+              </span>
+              <input
+                type="checkbox"
+                checked={settings.feishuAutoApprove}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settings,
+                    feishuAutoApprove: event.currentTarget.checked,
+                  })
+                }
+              />
+            </label>
           </div>
 
           <div className="bridge-channel-list">

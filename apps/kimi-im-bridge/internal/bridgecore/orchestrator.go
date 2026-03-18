@@ -149,6 +149,7 @@ func (o *Orchestrator) HandleInbound(
 		WorkDir:       binding.WorkDir,
 		LastTurnID:    turnID,
 		LastMessageAt: turn.UpdatedAt,
+		AutoApprove:   options.AutoApprove,
 		ProviderName:  "kimi",
 		CreatedAt:     turn.CreatedAt,
 		UpdatedAt:     turn.UpdatedAt,

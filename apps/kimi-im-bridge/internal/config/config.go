@@ -16,15 +16,16 @@ const (
 )
 
 type BridgeSettings struct {
-	Enabled              bool            `json:"enabled"`
-	AdminPort            int             `json:"adminPort"`
-	AutoStart            bool            `json:"autoStart"`
-	Channels             []ChannelConfig `json:"channels"`
-	DefaultWorkDir       string          `json:"defaultWorkDir,omitempty"`
-	WorkDirPresets       []WorkDirPreset `json:"workDirPresets"`
-	FeishuReplyRenderer  string          `json:"feishuReplyRenderer,omitempty"`
-	FeishuReplyCards     *bool           `json:"feishuReplyCards,omitempty"`
-	LogLevel             string          `json:"logLevel"`
+	Enabled             bool            `json:"enabled"`
+	AdminPort           int             `json:"adminPort"`
+	AutoStart           bool            `json:"autoStart"`
+	Channels            []ChannelConfig `json:"channels"`
+	FeishuAutoApprove   bool            `json:"feishuAutoApprove"`
+	DefaultWorkDir      string          `json:"defaultWorkDir,omitempty"`
+	WorkDirPresets      []WorkDirPreset `json:"workDirPresets"`
+	FeishuReplyRenderer string          `json:"feishuReplyRenderer,omitempty"`
+	FeishuReplyCards    *bool           `json:"feishuReplyCards,omitempty"`
+	LogLevel            string          `json:"logLevel"`
 }
 
 type WorkDirPreset struct {
@@ -72,6 +73,7 @@ func DefaultSettings() BridgeSettings {
 				Mode:         "websocket",
 			},
 		},
+		FeishuAutoApprove:   true,
 		WorkDirPresets:      []WorkDirPreset{},
 		FeishuReplyRenderer: FeishuReplyRendererInteractive,
 		LogLevel:            "info",

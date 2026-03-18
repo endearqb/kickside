@@ -137,6 +137,7 @@ export interface BridgeSettings {
   autoStart: boolean;
   adminPort: number;
   feishuReplyRenderer: FeishuReplyRenderer;
+  feishuAutoApprove: boolean;
   defaultWorkDir?: string;
   workDirPresets: WorkDirPreset[];
   channels: BridgeChannelConfig[];
@@ -767,13 +768,14 @@ export type Theme = "light" | "dark";
 export type ControlSectionId =
   | "overview"
   | "onboarding"
-  | "runtime_center";
+  | "runtime_center"
+  | "bridge_center";
 
 export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 
 export type ControlCenterSurface = "fullscreen" | "modal";
 
-export type ControlCenterChrome = "dashboard" | "full";
+export type ControlCenterChrome = "full";
 
 export const ONBOARDING_STEP_ORDER: ActionableOnboardingStep[] = [
   "install_kimi",

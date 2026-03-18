@@ -539,6 +539,7 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 			Config: feishuplatform.Config{
 				AppID:          secretFeishuAppID(s.secrets),
 				AppSecret:      secretFeishuAppSecret(s.secrets),
+				AutoApprove:    s.settings.FeishuAutoApprove,
 				DefaultWorkDir: s.settings.DefaultWorkDir,
 				WorkDirPresets: mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
 				ReplyRenderer:  s.settings.FeishuReplyRenderer,

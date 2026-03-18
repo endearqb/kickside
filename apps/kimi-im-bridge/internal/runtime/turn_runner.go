@@ -166,6 +166,7 @@ func (r *TurnRunner) executePrompt(
 			WorkDir:       normalized.WorkDir,
 			LastTurnID:    response.TurnID,
 			LastMessageAt: now,
+			AutoApprove:   normalized.AutoApprove,
 			CreatedAt:     now,
 		}); err != nil {
 			return err

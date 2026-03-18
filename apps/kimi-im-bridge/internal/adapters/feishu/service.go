@@ -232,6 +232,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if s.orchestrator != nil {
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
+			AutoApprove:    s.config.AutoApprove,
 			Attachments:    pendingAttachments,
 		}, func(turnEvent bridgecore.TurnEvent) error {
 			if turnEvent.Kind == bridgecore.EventApprovalRequested {
@@ -262,6 +263,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	prompt := runtime.PromptRequest{
 		Prompt:      inbound.Text,
 		WorkDir:     binding.WorkDir,
+		AutoApprove: s.config.AutoApprove,
 		Attachments: pendingAttachments,
 	}
 	if prompt.WorkDir == "" {

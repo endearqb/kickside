@@ -126,4 +126,45 @@ func TestOrchestratorHandlesInboundAndPersistsApproval(t *testing.T) {
 	if len(events.events) < 4 {
 		t.Fatalf("expected accepted plus runtime events to be persisted, got %+v", events.events)
 	}
+	if len(turns.sessions) == 0 {
+		t.Fatalf("expected session upsert to be called")
+	}
+	if turns.sessions[len(turns.sessions)-1].AutoApprove {
+		t.Fatalf("expected AutoApprove=false for default HandleOptions, got %+v", turns.sessions[len(turns.sessions)-1])
+	}
+}
+
+func TestOrchestratorPersistsSessionAutoApproveFromHandleOptions(t *testing.T) {
+	t.Parallel()
+
+	approvals := &fakeApprovals{}
+	turns := &fakeTurns{}
+	events := &fakeEventStore{}
+	runtime := &fakeRuntime{
+		result: TurnResult{Status: "completed"},
+		events: []TurnEvent{
+			{Kind: EventTurnStarted},
+			{Kind: EventTurnCompleted, Status: "completed"},
+		},
+	}
+
+	orchestrator := NewOrchestrator(&fakeBindings{}, runtime, approvals, turns, events)
+	_, err := orchestrator.HandleInbound(context.Background(), adapterkit.NormalizedInbound{
+		MessageID:  "msg-1",
+		Platform:   "feishu",
+		ChatID:     "chat-1",
+		ThreadID:   "thread-1",
+		Text:       "ping",
+		ReceivedAt: "2026-03-16T00:00:00Z",
+		BindingKey: domain.BindingKey{Platform: "feishu", ChatID: "chat-1", ThreadID: "thread-1"},
+	}, HandleOptions{DefaultWorkDir: "D:/workspace", AutoApprove: true}, nil)
+	if err != nil {
+		t.Fatalf("HandleInbound returned error: %v", err)
+	}
+	if len(turns.sessions) == 0 {
+		t.Fatalf("expected session upsert to be called")
+	}
+	if !turns.sessions[len(turns.sessions)-1].AutoApprove {
+		t.Fatalf("expected AutoApprove=true to be persisted, got %+v", turns.sessions[len(turns.sessions)-1])
+	}
 }

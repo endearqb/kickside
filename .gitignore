@@ -40,3 +40,7 @@ apps/kimi-shell/src-tauri/.cargo/
 !/docs/kimi-im-bridge-release-checklist.md
 !/docs/kimi-im-bridge-troubleshooting.md
 
+# Local scratch docs / previews
+.trae/
+control_center_preview/
+

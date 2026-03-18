@@ -25,6 +25,7 @@ const (
 	workDirPresetButtonsPerRow = 3
 	commandButtonsPerRow       = 3
 	currentOnboardingVersion   = "feishu_bridge_v1"
+	bridgeEntryPointsExposed   = false
 )
 
 type bridgeCommandKind string
@@ -134,6 +135,9 @@ type doctorReport struct {
 }
 
 func parseBridgeCommand(event *MessageEvent) (bridgeCommand, domain.BindingKey, bool) {
+	if !bridgeEntryPointsExposed {
+		return bridgeCommand{}, domain.BindingKey{}, false
+	}
 	if event == nil {
 		return bridgeCommand{}, domain.BindingKey{}, false
 	}
@@ -405,6 +409,9 @@ func (s *Service) useSessionForBinding(ctx context.Context, key domain.BindingKe
 }
 
 func buildBridgeHelpCard(key domain.BindingKey) map[string]any {
+	if !bridgeEntryPointsExposed {
+		return buildBridgeEntryHiddenCard()
+	}
 	elements := []any{
 		buildMarkdownElement(strings.Join([]string{
 			"Use these commands in Feishu:",
@@ -431,6 +438,16 @@ func buildBridgeHelpCard(key domain.BindingKey) map[string]any {
 		panelButtonSpec{Label: "Doctor", Panel: bridgePanelDoctor, ButtonType: "default"},
 	)...)
 	return buildCard("blue", "Bridge commands", elements)
+}
+
+func buildBridgeEntryHiddenCard() map[string]any {
+	return buildCard("grey", "IM Bridge management hidden", []any{
+		buildMarkdownElement(strings.Join([]string{
+			"Bridge management commands and panels are no longer exposed in Feishu chat.",
+			"IM Bridge runtime, session binding, and approval processing continue to work in the background.",
+			"Pending approvals will still appear automatically when a turn requires confirmation.",
+		}, "\n\n")),
+	})
 }
 
 func buildOnboardingCard(

@@ -16,14 +16,14 @@ function App() {
   const bridgeState = shell.bridgeStatus.state;
   const bridgeStateLabel =
     bridgeState === "running"
-      ? "就绪"
+      ? "IM Running"
       : bridgeState === "starting" || bridgeState === "stopping"
-        ? "进行中"
+        ? "IM Working"
         : bridgeState === "degraded"
-          ? "异常"
+          ? "IM Error"
           : bridgeState === "crashed"
-            ? "异常"
-            : "待办";
+            ? "IM Error"
+            : "IM Pending";
   const bridgeStateTone =
     bridgeState === "running"
       ? "ready"
@@ -225,6 +225,7 @@ function App() {
               onDisableContextMenu={shell.handleDisableContextMenu}
               onProbeLogin={shell.handleProbeLogin}
               onPickWorkDir={shell.handlePickWorkDir}
+              onPickBridgeDefaultWorkDir={shell.handlePickBridgeDefaultWorkDir}
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
@@ -346,6 +347,7 @@ function App() {
               onDisableContextMenu={shell.handleDisableContextMenu}
               onProbeLogin={shell.handleProbeLogin}
               onPickWorkDir={shell.handlePickWorkDir}
+              onPickBridgeDefaultWorkDir={shell.handlePickBridgeDefaultWorkDir}
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
@@ -442,7 +444,7 @@ function App() {
                 : `IM Bridge 当前状态：${bridgeStateLabel}`
             }
           >
-            IM Bridge · {bridgeStateLabel}
+            {bridgeStateLabel}
           </button>
           {shell.isLoading && (
             <span className="status-text">Checking backend status...</span>

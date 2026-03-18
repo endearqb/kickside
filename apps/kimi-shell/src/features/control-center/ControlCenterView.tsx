@@ -45,10 +45,7 @@ import type {
   PowerShellPreflightSummary,
   RuntimePanelId,
 } from "@/app/types";
-import {
-  formatLoginState,
-  ONBOARDING_STEP_ORDER,
-} from "@/app/types";
+import { formatLoginState } from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,6 +134,7 @@ type ControlCenterViewProps = {
   onDisableContextMenu: () => Promise<void>;
   onProbeLogin: () => Promise<void>;
   onPickWorkDir: () => Promise<void>;
+  onPickBridgeDefaultWorkDir: () => Promise<void>;
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
   onBridgeSettingsChange: (next: BridgeSettings) => void;
@@ -527,6 +525,14 @@ function formatBridgeChannelStateLabel(state: string): string {
   }
 }
 
+function formatImFinalStatusLabel(status: BridgeStatus, feishuEnabled: boolean): string {
+  if (feishuEnabled) {
+    const feishuStatus = getBridgeChannelStatus(status, "feishu")?.state ?? "idle";
+    return formatBridgeChannelStateLabel(feishuStatus);
+  }
+  return formatBridgeRuntimeStateLabel(status.state);
+}
+
 function renderBridgeOnboardingSecretRow(
   label: string,
   value: BridgeSecretsMaskView["telegram"]["botToken"],
@@ -615,6 +621,7 @@ export function ControlCenterView({
   onDisableContextMenu,
   onProbeLogin,
   onPickWorkDir,
+  onPickBridgeDefaultWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
   onBridgeSettingsChange,
@@ -656,10 +663,8 @@ export function ControlCenterView({
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
   const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
+  const [bridgeRuntimePanelExpanded, setBridgeRuntimePanelExpanded] = useState(false);
   const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
-  const completedSteps = ONBOARDING_STEP_ORDER.filter(
-    (step) => stepCompletion[step],
-  ).length;
   void installCommandsOpen;
   void installCommandsBusy;
   void installCommandCatalog;
@@ -709,17 +714,11 @@ export function ControlCenterView({
       ? "success"
       : "warning";
   const authStatusLabel =
-    onboarding?.loginState === "logged_in"
-      ? "就绪"
-      : onboarding?.apiConfigAck
-        ? "进行中"
-        : "待办";
+    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck ? "就绪" : "待办";
   const authStatusTone =
-    onboarding?.loginState === "logged_in"
+    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck
       ? "success"
-      : onboarding?.apiConfigAck
-        ? "warning"
-        : "neutral";
+      : "neutral";
   const workDirStatusLabel = effectiveWorkDir ? "就绪" : "待办";
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
   const bridgeStatusLabel =
@@ -749,15 +748,11 @@ export function ControlCenterView({
         : feishuRuntimeState === "error"
           ? "danger"
           : "neutral";
-  const authProgressCount =
-    Number(Boolean(stepCompletion.login_kimi)) +
-    Number(Boolean(stepCompletion.api_config));
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
   const installReady = onboarding?.kimiInstalled ?? stepCompletion.install_kimi;
-  const authReady =
-    onboarding?.loginState === "logged_in" ||
-    onboarding?.apiConfigAck ||
-    authProgressCount > 0;
+  const authReady = Boolean(
+    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck,
+  );
   const workDirReady = Boolean(effectiveWorkDir);
   const recommendedOnboardingCard: OnboardingCardId = !installReady
     ? "install"
@@ -787,6 +782,12 @@ export function ControlCenterView({
       return;
     }
     setRuntimePanelExpanded(false);
+  }, [activeControlSection]);
+
+  useEffect(() => {
+    if (activeControlSection !== "bridge_center") {
+      setBridgeRuntimePanelExpanded(false);
+    }
   }, [activeControlSection]);
 
   useEffect(() => {
@@ -1061,6 +1062,7 @@ export function ControlCenterView({
   }
 
   function renderBridgeStepContent() {
+    const bridgeDefaultWorkDir = bridgeSettings.defaultWorkDir?.trim() ?? "";
     return (
       <div className="cc-step-main">
         <div className="cc-bridge-onboarding-tag-row">
@@ -1095,6 +1097,43 @@ export function ControlCenterView({
             />
             <span className="cc-switch-track" aria-hidden />
           </label>
+        </div>
+
+        <div className="bridge-port-card cc-bridge-default-workdir-card">
+          <span>IM Default Work Dir</span>
+          <div className="bridge-inline-path-row">
+            <Input
+              value={bridgeSettings.defaultWorkDir ?? ""}
+              onChange={(event) =>
+                onBridgeSettingsChange({
+                  ...bridgeSettings,
+                  defaultWorkDir: event.currentTarget.value,
+                })
+              }
+              placeholder="留空时跟随应用工作目录，例如 D:/workspace"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="cc-action-btn cc-inline-btn"
+              onClick={() => void onPickBridgeDefaultWorkDir()}
+              disabled={bridgeBusy}
+            >
+              浏览
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              icon={<FolderOpen size={14} />}
+              className="cc-inline-icon-btn"
+              onClick={() => void onOpenFolder(bridgeDefaultWorkDir)}
+              disabled={bridgeBusy || !bridgeDefaultWorkDir}
+              aria-label="打开 IM 默认工作目录"
+              title="打开 IM 默认工作目录"
+            />
+          </div>
+          <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
         </div>
 
         <p
@@ -1140,6 +1179,15 @@ export function ControlCenterView({
             disabled={bridgeBusy}
           >
             刷新状态
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="cc-action-btn"
+            onClick={() => void onSaveBridgeSettings()}
+            disabled={bridgeBusy}
+          >
+            保存 IM 目录
           </Button>
           <Button
             type="button"
@@ -1238,7 +1286,7 @@ export function ControlCenterView({
       title: "登录与 Provider API",
       statusLabel: authStatusLabel,
       statusTone: authStatusTone,
-      progressLabel: `${authProgressCount}/2`,
+      progressLabel: `${authReady ? 1 : 0}/1`,
       complete: authReady,
       primaryAction: authPrimaryAction,
     },
@@ -1254,6 +1302,7 @@ export function ControlCenterView({
       primaryAction: workDirPrimaryAction,
     },
   ];
+  const completedOnboardingCards = onboardingSteps.filter((step) => step.complete).length;
   const activeOnboardingCard = expandedOnboardingCard ?? recommendedOnboardingCard;
   const activeOnboardingStep =
     onboardingSteps.find((step) => step.id === activeOnboardingCard) ?? onboardingSteps[0];
@@ -1269,6 +1318,7 @@ export function ControlCenterView({
       : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
+  const imFinalStatusLabel = formatImFinalStatusLabel(bridgeStatus, feishuEnabled);
   const overviewBriefs = [
     !installReady ? "Kimi CLI 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
@@ -1292,16 +1342,8 @@ export function ControlCenterView({
                   <strong>{diagnostics?.state ?? status?.state ?? "-"}</strong>
                 </article>
                 <article className="cc-signal-card">
-                  <span>活动端口</span>
-                  <strong>{String(diagnostics?.activePort ?? status?.activePort ?? "-")}</strong>
-                </article>
-                <article className="cc-signal-card">
-                  <span>工作区端口</span>
-                  <strong>{String(diagnostics?.workspacePort ?? status?.workspacePort ?? "-")}</strong>
-                </article>
-                <article className="cc-signal-card">
-                  <span>后端就绪</span>
-                  <strong>{String(diagnostics?.backendReadyMs ?? status?.backendReadyMs ?? "-")} ms</strong>
+                  <span>IM Bridge 最终状态</span>
+                  <strong>{imFinalStatusLabel}</strong>
                 </article>
               </div>
               <div className="cc-actions cc-hero-actions">
@@ -1385,7 +1427,9 @@ export function ControlCenterView({
                     <span className="cc-task-card-copy">
                       <strong>完成快速设置</strong>
                     </span>
-                    <span className="cc-task-card-meta">{completedSteps}/{ONBOARDING_STEP_ORDER.length}</span>
+                    <span className="cc-task-card-meta">
+                      {completedOnboardingCards}/{onboardingSteps.length}
+                    </span>
                   </button>
 
                   <button
@@ -1473,15 +1517,6 @@ export function ControlCenterView({
                 )}
               </div>
             </section>
-
-            <section className="cc-card">
-              <header className="cc-card-header">
-                <h3>最新摘录</h3>
-              </header>
-              <div className="cc-card-body">
-                <pre className="log-tail cc-log-snippet">{condensedLogPreview}</pre>
-              </div>
-            </section>
           </aside>
         </section>
       </div>
@@ -1502,12 +1537,14 @@ export function ControlCenterView({
           <div className="cc-onboarding-progress-block">
             <div className="cc-onboarding-progress-label">
               <span>流程进度</span>
-              <strong>{completedSteps}/{ONBOARDING_STEP_ORDER.length}</strong>
+              <strong>{completedOnboardingCards}/{onboardingSteps.length}</strong>
             </div>
             <div className="cc-onboarding-progress-track" aria-hidden>
               <span
                 className="cc-onboarding-progress-fill"
-                style={{ width: `${(completedSteps / ONBOARDING_STEP_ORDER.length) * 100}%` }}
+                style={{
+                  width: `${(completedOnboardingCards / onboardingSteps.length) * 100}%`,
+                }}
               />
             </div>
           </div>
@@ -1948,37 +1985,45 @@ export function ControlCenterView({
         </section>
 
         <section className="cc-card">
-          <header className="cc-card-header">
-            <h3>Bridge 运行面板</h3>
-          </header>
-          <div className="cc-card-body">
-            <BridgeRuntimePanel
-              settings={bridgeSettings}
-              status={bridgeStatus}
-              sessions={bridgeSessions}
-              bindings={bridgeBindings}
-              approvals={bridgeApprovals}
-              logTail={bridgeLogTail}
-              recentErrors={bridgeRecentErrors}
-              secretsMask={bridgeSecretsMask}
-              busy={bridgeBusy}
-              onSettingsChange={onBridgeSettingsChange}
-              onSave={onSaveBridgeSettings}
-              onStart={onStartBridge}
-              onStop={onStopBridge}
-              onRestart={onRestartBridge}
-              onRefreshStatus={onRefreshBridgeStatus}
-              onRefreshSessions={onRefreshBridgeSessions}
-              onRefreshBindings={onRefreshBridgeBindings}
-              onRefreshApprovals={onRefreshBridgeApprovals}
-              onRefreshLogTail={onRefreshBridgeLogTail}
-              onRefreshSecretsMask={onRefreshBridgeSecretsMask}
-              onOpenLogs={onOpenLogs}
-              onImportSession={onImportBridgeSession}
-              onClearBinding={onClearBridgeBinding}
-              onResolveApproval={onResolveBridgeApproval}
-            />
-          </div>
+          <ControlCenterCardHeader
+            title="Bridge 运行面板"
+            description="展开后查看运行配置、sessions、bindings、审批和日志。"
+            statusLabel={bridgeStatusLabel}
+            statusTone={bridgeRuntimeTone}
+            collapsible
+            expanded={bridgeRuntimePanelExpanded}
+            onToggle={() => setBridgeRuntimePanelExpanded((current) => !current)}
+          />
+          {bridgeRuntimePanelExpanded ? (
+            <div className="cc-card-body">
+              <BridgeRuntimePanel
+                settings={bridgeSettings}
+                status={bridgeStatus}
+                sessions={bridgeSessions}
+                bindings={bridgeBindings}
+                approvals={bridgeApprovals}
+                logTail={bridgeLogTail}
+                recentErrors={bridgeRecentErrors}
+                secretsMask={bridgeSecretsMask}
+                busy={bridgeBusy}
+                onSettingsChange={onBridgeSettingsChange}
+                onSave={onSaveBridgeSettings}
+                onStart={onStartBridge}
+                onStop={onStopBridge}
+                onRestart={onRestartBridge}
+                onRefreshStatus={onRefreshBridgeStatus}
+                onRefreshSessions={onRefreshBridgeSessions}
+                onRefreshBindings={onRefreshBridgeBindings}
+                onRefreshApprovals={onRefreshBridgeApprovals}
+                onRefreshLogTail={onRefreshBridgeLogTail}
+                onRefreshSecretsMask={onRefreshBridgeSecretsMask}
+                onOpenLogs={onOpenLogs}
+                onImportSession={onImportBridgeSession}
+                onClearBinding={onClearBridgeBinding}
+                onResolveApproval={onResolveBridgeApproval}
+              />
+            </div>
+          ) : null}
         </section>
       </div>
     );

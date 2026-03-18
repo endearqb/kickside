@@ -1,4 +1,116 @@
+# Shell IM Bridge Entry Restore Todo
+
+## Hard Constraints
+
+- [x] Only restore Shell UI entry points for IM Bridge; keep the Feishu `/bridge` soft-hide behavior unchanged.
+- [x] Limit the code change to control-center navigation and overview entry visibility.
+
+## Implementation
+
+- [x] Re-add the `IM Bridge` tab in Control Center header navigation.
+- [x] Re-add the overview-side “打开 IM Bridge” task card.
+- [x] Restore control-section routing so selecting `bridge_center` opens the IM Bridge panel again.
+
+## Validation
+
+- [x] Run `pnpm build` in `apps/kimi-shell`.
+
+## Retrospective
+
+- [x] Restored only the Shell-side IM Bridge navigation surfaces in Control Center; the Feishu `/bridge` text-command and legacy card-entry soft-hide remains unchanged.
+- [x] Validation passed with `pnpm build` in `apps/kimi-shell`; version-sync touched `package.json`, `Cargo.toml`, `Cargo.lock`, and `tauri.conf.json` again during the build.
+
+---
+
+# Bridge Command Soft Hide Todo
+
+## Hard Constraints
+
+- [x] Keep bridge runtime, binding, approval, and session internals intact; only remove user-facing `/bridge` and shell-management entry points.
+- [x] Preserve approval decision cards in Feishu so runtime approval flow still works.
+- [x] Avoid changing bridge admin API or persisted bridge settings/state formats.
+
+## Implementation
+
+- [x] Disable Feishu text-command exposure for `/bridge ...` while keeping normal IM prompt flow unchanged.
+- [x] Downgrade legacy Feishu bridge panel/session/workdir card actions to a hidden-entry response so old cards cannot reopen management UI.
+- [x] Hide shell-side IM Bridge management entry points from visible navigation and overview cards without removing runtime status surfaces.
+- [x] Update focused Go/TS tests to match the hidden-entry behavior.
+
+## Validation
+
+- [x] Run focused Go tests for Feishu adapter command/card behavior.
+- [x] Run `pnpm build` in `apps/kimi-shell`.
+
+## Retrospective
+
+- [x] `/bridge` text commands are no longer intercepted in Feishu; they now fall back to the normal IM prompt path, while runtime/session/binding/approval internals stay in place.
+- [x] Legacy bridge management card callbacks (`bridge_show_panel`, session switching, workdir preset/clear) now collapse into a hidden-entry card so old chat cards cannot reopen management UI.
+- [x] Control Center no longer exposes the `IM Bridge` tab or overview jump card, but dashboard/status surfaces and background bridge runtime remain untouched.
+- [x] Validation passed with `go test ./internal/adapters/feishu` and `pnpm build` in `apps/kimi-shell`; the frontend build again triggered version-sync noise in `package.json`, `Cargo.toml`, `Cargo.lock`, and `tauri.conf.json`.
+
+---
+
+# Control Center / IM Bridge Interaction Cleanup Todo
+
+## Hard Constraints
+
+- [x] Keep existing bridge admin/runtime APIs and persisted `BridgeSettings` / `BridgeStatus` wire shape unchanged.
+- [x] Limit behavior changes to control-center UX, shell status chip rendering, onboarding dirty/save handling, and focused Rust test coverage.
+- [x] Reuse existing Tauri dialog and `open_folder` capabilities for IM default work-dir actions; do not add new commands.
+
+## Implementation
+
+- [x] Change onboarding progress and auth-card completion to count 4 cards, with login/API completion treated as one card.
+- [x] Update dashboard hero to show backend state plus IM final state, and remove the latest excerpt card.
+- [x] Normalize footer IM chip sizing and labels so success displays `IM Running`.
+- [x] Refactor `BridgeRuntimePanel` into collapsible sections with only the first section expanded by default.
+- [x] Add IM default work-dir input actions in the first bridge runtime card: browse directory and open current folder.
+- [x] Fix IM bridge onboarding auto-start dirty detection and keep auto-start persisted across restart.
+- [x] Add/update focused Rust assertions for onboarding auto-start persistence.
+- [x] Collapse the entire outer “Bridge 运行面板” card by default and move `IM Default Work Dir` controls into the main IM Bridge panel.
+
+## Validation
+
+- [x] Run `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`.
+- [x] Run `pnpm build` in `apps/kimi-shell`.
+- [x] Note remaining manual desktop validation for dashboard, bridge accordion, and auto-start-on-relaunch behavior.
+- [x] Re-run `pnpm build` after moving the IM default work-dir controls and folding the outer runtime panel.
+
+## Retrospective
+
+- Quick setup progress now follows the 4 visible onboarding cards instead of mixing card UX with the old 5-step backend checklist, so auth completion is no longer double-counted.
+- Dashboard hero was simplified to backend state plus IM final state, and the IM runtime panel now uses collapsible cards with a dedicated default-workdir browse/open-folder flow.
+- The auto-start regression came from frontend dirty-state logic, not Rust persistence; adding `autoStart` to onboarding dirty detection fixed the toggle reset while Rust coverage now rechecks the saved round-trip.
+- Validation completed with `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture` and `pnpm build`; desktop click-through for dashboard visuals, accordion defaults, and relaunch auto-start still needs one manual smoke pass.
+- Follow-up adjustment: the outer `Bridge 运行面板` card is now collapsed by default, while `IM Default Work Dir` has been promoted into the main IM Bridge panel so users can edit it without opening the advanced runtime panel.
+
+---
+
 # Feishu Image/File/Interactive Integration Todo
+
+# Feishu Reply Card Title Cleanup Todo
+
+## Hard Constraints
+
+- [x] Keep existing Feishu interactive reply delivery and fallback behavior unchanged; only remove the visible reply-card title text.
+- [x] Limit the code change to the reply-card renderer and its focused regression tests.
+
+## Implementation
+
+- [x] Locate the interactive reply-card title generation path used by normal IM bridge replies.
+- [x] Remove the `Kimi reply` / `Kimi reply (n/N)` title text from normal reply cards.
+- [x] Update focused Go tests to assert the new card header behavior.
+
+## Validation
+
+- [x] Run focused Go tests for the Feishu sender reply-card path.
+
+## Retrospective
+
+- Normal Feishu interactive replies now send a body-only card payload without `header.title`, so the visible `Kimi reply` label is gone while markdown content and chunk splitting remain unchanged.
+- Updated sender- and service-level tests to assert the new no-header shape and to keep coverage on interactive reply delivery.
+- Verified with `go test ./internal/adapters/feishu`.
 
 ## Hard Constraints
 

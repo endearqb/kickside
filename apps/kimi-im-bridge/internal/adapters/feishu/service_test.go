@@ -264,11 +264,8 @@ func TestServiceProcessMessageCreatesBindingAndReusesSession(t *testing.T) {
 	if bindingCount != 1 {
 		t.Fatalf("expected one binding, got %d", bindingCount)
 	}
-	if len(gateway.replyCalls) != 3 {
-		t.Fatalf("expected onboarding + two outbound replies, got %d", len(gateway.replyCalls))
-	}
-	if gateway.replyCalls[0].MessageType != "interactive" {
-		t.Fatalf("expected first outbound message to be onboarding card, got %+v", gateway.replyCalls[0])
+	if len(gateway.replyCalls) != 2 {
+		t.Fatalf("expected only two outbound replies once bridge entrypoints are hidden, got %d", len(gateway.replyCalls))
 	}
 }
 
@@ -418,7 +415,7 @@ func TestServiceProcessMessageDoesNotAutoOnboardGroupChats(t *testing.T) {
 	if len(gateway.replyCalls) != 1 {
 		t.Fatalf("expected only one normal reply for group chat, got %d", len(gateway.replyCalls))
 	}
-	if !strings.Contains(gateway.replyCalls[0].Content, "Kimi reply") {
+	if gateway.replyCalls[0].MessageType != "interactive" || !strings.Contains(gateway.replyCalls[0].Content, "group reply") {
 		t.Fatalf("expected the single group reply to be the model response card, got %+v", gateway.replyCalls[0])
 	}
 }
@@ -508,7 +505,7 @@ func TestServiceProcessCardActionResolvesApproval(t *testing.T) {
 	}
 }
 
-func TestServiceProcessCardActionAppliesPresetWorkDir(t *testing.T) {
+func TestServiceProcessCardActionShowsHiddenCardForLegacyPresetWorkDir(t *testing.T) {
 	t.Parallel()
 
 	service, storeHandle, _, _ := newTestService(t, Config{
@@ -536,7 +533,10 @@ func TestServiceProcessCardActionAppliesPresetWorkDir(t *testing.T) {
 		t.Fatalf("processCardAction returned error: %v", err)
 	}
 	if result == nil || result.UpdatedCard == nil {
-		t.Fatalf("expected updated cwd card, got %+v", result)
+		t.Fatalf("expected hidden bridge entry card, got %+v", result)
+	}
+	if rendered := fmt.Sprintf("%+v", result.UpdatedCard); !strings.Contains(rendered, "IM Bridge management hidden") {
+		t.Fatalf("expected hidden bridge entry card, got %s", rendered)
 	}
 
 	binding, err := binding.NewRouter(storeHandle).ResolveBinding(context.Background(), domain.BindingKey{
@@ -547,12 +547,12 @@ func TestServiceProcessCardActionAppliesPresetWorkDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBinding returned error: %v", err)
 	}
-	if binding == nil || binding.WorkDir != "D:/repo" {
-		t.Fatalf("expected binding workdir to be preset path, got %+v", binding)
+	if binding != nil {
+		t.Fatalf("expected hidden legacy preset action to avoid creating/updating bindings, got %+v", binding)
 	}
 }
 
-func TestServiceProcessCardActionClearsWorkDirOverride(t *testing.T) {
+func TestServiceProcessCardActionShowsHiddenCardForLegacyClearWorkDir(t *testing.T) {
 	t.Parallel()
 
 	service, storeHandle, _, _ := newTestService(t, Config{
@@ -587,19 +587,22 @@ func TestServiceProcessCardActionClearsWorkDirOverride(t *testing.T) {
 		t.Fatalf("processCardAction returned error: %v", err)
 	}
 	if result == nil || result.UpdatedCard == nil {
-		t.Fatalf("expected updated cwd card, got %+v", result)
+		t.Fatalf("expected hidden bridge entry card, got %+v", result)
+	}
+	if rendered := fmt.Sprintf("%+v", result.UpdatedCard); !strings.Contains(rendered, "IM Bridge management hidden") {
+		t.Fatalf("expected hidden bridge entry card, got %s", rendered)
 	}
 
 	updated, err := router.ResolveBinding(context.Background(), created.Key)
 	if err != nil {
 		t.Fatalf("ResolveBinding returned error: %v", err)
 	}
-	if updated == nil || updated.WorkDir != "" {
-		t.Fatalf("expected binding workdir to be cleared, got %+v", updated)
+	if updated == nil || updated.WorkDir != "D:/repo" {
+		t.Fatalf("expected hidden legacy clear action to leave binding unchanged, got %+v", updated)
 	}
 }
 
-func TestServiceProcessCardActionShowsOnboardingPanelAndMarksBinding(t *testing.T) {
+func TestServiceProcessCardActionShowsHiddenCardForLegacyOnboardingPanel(t *testing.T) {
 	t.Parallel()
 
 	service, storeHandle, _, _ := newTestService(t, Config{
@@ -632,19 +635,23 @@ func TestServiceProcessCardActionShowsOnboardingPanelAndMarksBinding(t *testing.
 		t.Fatalf("processCardAction returned error: %v", err)
 	}
 	if result == nil || result.UpdatedCard == nil {
-		t.Fatalf("expected updated onboarding card, got %+v", result)
+		t.Fatalf("expected hidden bridge entry card, got %+v", result)
+	}
+	rendered := fmt.Sprintf("%+v", result.UpdatedCard)
+	if !strings.Contains(rendered, "IM Bridge management hidden") {
+		t.Fatalf("expected hidden bridge entry card, got %s", rendered)
 	}
 
 	updated, err := router.ResolveBinding(context.Background(), created.Key)
 	if err != nil {
 		t.Fatalf("ResolveBinding returned error: %v", err)
 	}
-	if updated == nil || updated.OnboardingVersion != currentOnboardingVersion || updated.OnboardedAt == "" {
-		t.Fatalf("expected onboarding metadata to be stored, got %+v", updated)
+	if updated == nil || updated.OnboardingVersion != "" || updated.OnboardedAt != "" {
+		t.Fatalf("expected legacy onboarding action to stop mutating onboarding metadata, got %+v", updated)
 	}
 }
 
-func TestServiceProcessCardActionShowsDoctorPanelWhenProbeFails(t *testing.T) {
+func TestServiceProcessCardActionShowsHiddenCardForLegacyDoctorPanel(t *testing.T) {
 	t.Parallel()
 
 	service, _, _, _ := newTestService(t, Config{
@@ -668,21 +675,24 @@ func TestServiceProcessCardActionShowsDoctorPanelWhenProbeFails(t *testing.T) {
 		t.Fatalf("processCardAction returned error: %v", err)
 	}
 	if result == nil || result.UpdatedCard == nil {
-		t.Fatalf("expected updated doctor card, got %+v", result)
+		t.Fatalf("expected hidden bridge entry card, got %+v", result)
 	}
 	rendered := fmt.Sprintf("%+v", result.UpdatedCard)
-	if !strings.Contains(rendered, "Bridge doctor") || !strings.Contains(rendered, "Live probe: `failed`") {
-		t.Fatalf("expected doctor card to mention failed probe, got %s", rendered)
+	if !strings.Contains(rendered, "IM Bridge management hidden") {
+		t.Fatalf("expected hidden bridge entry card, got %s", rendered)
 	}
 }
 
-func TestServiceProcessMessageBridgeDoctorCommandSendsDoctorCard(t *testing.T) {
+func TestServiceProcessMessageBridgeDoctorCommandFallsBackToNormalPrompt(t *testing.T) {
 	t.Parallel()
 
-	service, _, gateway, _ := newTestService(t, Config{
+	service, _, gateway, runtimeExec := newTestService(t, Config{
 		AppID:     "cli_a",
 		AppSecret: "secret",
 	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "plain reply"}}},
+	}
 
 	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
 		EventID:     "evt-doctor-cmd-1",
@@ -695,11 +705,17 @@ func TestServiceProcessMessageBridgeDoctorCommandSendsDoctorCard(t *testing.T) {
 	if err != nil || !advance {
 		t.Fatalf("processMessageEvent returned advance=%v err=%v", advance, err)
 	}
-	if len(gateway.replyCalls) != 1 || gateway.replyCalls[0].MessageType != "interactive" {
-		t.Fatalf("expected one interactive doctor card reply, got %+v", gateway.replyCalls)
+	if len(runtimeExec.execCalls) != 1 {
+		t.Fatalf("expected /bridge text to route through normal runtime prompt flow, got %+v", runtimeExec.execCalls)
 	}
-	if !strings.Contains(gateway.replyCalls[0].Content, "Bridge doctor") {
-		t.Fatalf("expected doctor card payload, got %s", gateway.replyCalls[0].Content)
+	if runtimeExec.execCalls[0].request.Prompt != "/bridge doctor" {
+		t.Fatalf("expected raw /bridge text to be preserved as a normal prompt, got %+v", runtimeExec.execCalls[0].request)
+	}
+	if len(gateway.replyCalls) != 1 || gateway.replyCalls[0].MessageType != "interactive" {
+		t.Fatalf("expected one normal model reply instead of a doctor card, got %+v", gateway.replyCalls)
+	}
+	if strings.Contains(gateway.replyCalls[0].Content, "Bridge doctor") || strings.Contains(gateway.replyCalls[0].Content, "IM Bridge management hidden") {
+		t.Fatalf("expected normal reply payload, got %s", gateway.replyCalls[0].Content)
 	}
 }
 

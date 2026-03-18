@@ -778,7 +778,7 @@ mod tests {
             },
         };
 
-        let (_, bridge_settings, bridge_secrets) = save_onboarding_files(
+        let (app_settings, bridge_settings, bridge_secrets) = save_onboarding_files(
             &settings_path,
             &bridge_settings_path,
             &bridge_secrets_path,
@@ -788,6 +788,7 @@ mod tests {
 
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
+        assert!(app_settings.bridge_auto_start);
         assert_eq!(bridge_settings.channels.len(), 2);
         assert!(
             bridge_settings
@@ -810,6 +811,12 @@ mod tests {
             bridge_secrets.feishu.encrypt_key.as_deref(),
             Some("encrypt-key")
         );
+
+        let (reloaded_app_settings, reloaded_bridge_settings) =
+            load_or_default_files(&settings_path, &bridge_settings_path)
+                .expect("reload onboarding config");
+        assert!(reloaded_app_settings.bridge_auto_start);
+        assert!(reloaded_bridge_settings.auto_start);
     }
 
     #[test]

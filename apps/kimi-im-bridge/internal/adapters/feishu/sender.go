@@ -70,8 +70,8 @@ func buildReplyCardRequests(source MessageEvent, text string) ([]SendMessageRequ
 	}
 
 	requests := make([]SendMessageRequest, 0, len(chunks))
-	for index, chunk := range chunks {
-		content, err := buildReplyCardContent(chunk, index, len(chunks))
+	for _, chunk := range chunks {
+		content, err := buildReplyCardContent(chunk)
 		if err != nil {
 			return nil, err
 		}
@@ -148,12 +148,13 @@ func (s *Service) sendArtifact(ctx context.Context, source *MessageEvent, artifa
 	})
 }
 
-func buildReplyCardContent(text string, index int, total int) (string, error) {
-	title := "Kimi reply"
-	if total > 1 {
-		title = fmt.Sprintf("Kimi reply (%d/%d)", index+1, total)
-	}
-	return marshalJSON(buildCard("blue", title, []any{buildMarkdownElement(text)}))
+func buildReplyCardContent(text string) (string, error) {
+	return marshalJSON(map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"elements": []any{buildMarkdownElement(text)},
+	})
 }
 
 func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRequest, deliveryKey string, sourceMessageID string) error {

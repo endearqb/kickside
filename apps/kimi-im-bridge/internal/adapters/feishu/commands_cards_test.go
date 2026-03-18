@@ -8,34 +8,22 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 )
 
-func TestParseBridgeCommandTextSupportsWorkDirAddAlias(t *testing.T) {
+func TestParseBridgeCommandIgnoresBridgeTextCommands(t *testing.T) {
 	t.Parallel()
 
-	command, ok := parseBridgeCommandText("/bridge cwd add D:/repo path")
-	if !ok {
-		t.Fatal("expected cwd add alias to parse")
-	}
-	if command.Kind != bridgeCommandCwdSet {
-		t.Fatalf("expected cwd set kind, got %q", command.Kind)
-	}
-	if command.Arg != "D:/repo path" {
-		t.Fatalf("expected work dir arg to be preserved, got %q", command.Arg)
+	command, key, ok := parseBridgeCommand(&MessageEvent{
+		ChatID:      "chat-1",
+		ThreadID:    "thread-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"/bridge doctor"}`,
+	})
+	if ok {
+		t.Fatalf("expected /bridge command exposure to be disabled, got command=%+v key=%+v", command, key)
 	}
 }
 
-func TestParseBridgeCommandTextSupportsWorkDirRemoveAlias(t *testing.T) {
-	t.Parallel()
-
-	command, ok := parseBridgeCommandText("/bridge cwd remove")
-	if !ok {
-		t.Fatal("expected cwd remove alias to parse")
-	}
-	if command.Kind != bridgeCommandCwdClear {
-		t.Fatalf("expected cwd clear kind, got %q", command.Kind)
-	}
-}
-
-func TestBuildBridgeHelpCardMentionsWorkDirAliases(t *testing.T) {
+func TestBuildBridgeHelpCardReturnsHiddenEntryMessage(t *testing.T) {
 	t.Parallel()
 
 	card := buildBridgeHelpCard(domain.BindingKey{
@@ -43,62 +31,12 @@ func TestBuildBridgeHelpCardMentionsWorkDirAliases(t *testing.T) {
 		ChatID:   "chat-1",
 		ThreadID: "thread-1",
 	})
-	elements, ok := card["elements"].([]any)
-	if !ok || len(elements) == 0 {
-		t.Fatal("expected help card elements")
+	rendered := fmt.Sprintf("%+v", card)
+	if !strings.Contains(rendered, "IM Bridge management hidden") {
+		t.Fatalf("expected hidden bridge entry card, got %+v", card)
 	}
-
-	foundAddAlias := false
-	foundRemoveAlias := false
-	foundPresetHint := false
-	foundStartCommand := false
-	foundDoctorCommand := false
-	foundPanelAction := false
-	for _, raw := range elements {
-		element, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if tag, _ := element["tag"].(string); tag == "action" {
-			foundPanelAction = true
-		}
-		text, ok := element["text"].(map[string]string)
-		if !ok {
-			continue
-		}
-		content := text["content"]
-		if strings.Contains(content, "/bridge cwd add <path>") {
-			foundAddAlias = true
-		}
-		if strings.Contains(content, "/bridge cwd remove") {
-			foundRemoveAlias = true
-		}
-		if strings.Contains(content, "clickable work directory presets") {
-			foundPresetHint = true
-		}
-		if strings.Contains(content, "/bridge start") {
-			foundStartCommand = true
-		}
-		if strings.Contains(content, "/bridge doctor") {
-			foundDoctorCommand = true
-		}
-	}
-
-	if !foundAddAlias || !foundRemoveAlias || !foundPresetHint || !foundStartCommand || !foundDoctorCommand || !foundPanelAction {
-		t.Fatalf("expected help card to mention cwd add/remove aliases, got %+v", elements)
-	}
-}
-
-func TestParseBridgeCommandTextSupportsStartAndDoctor(t *testing.T) {
-	t.Parallel()
-
-	start, ok := parseBridgeCommandText("/bridge start")
-	if !ok || start.Kind != bridgeCommandStart {
-		t.Fatalf("expected /bridge start to parse, got %+v ok=%v", start, ok)
-	}
-	doctor, ok := parseBridgeCommandText("/bridge doctor")
-	if !ok || doctor.Kind != bridgeCommandDoctor {
-		t.Fatalf("expected /bridge doctor to parse, got %+v ok=%v", doctor, ok)
+	if strings.Contains(rendered, "/bridge") {
+		t.Fatalf("expected no /bridge command hints in hidden card, got %+v", card)
 	}
 }
 

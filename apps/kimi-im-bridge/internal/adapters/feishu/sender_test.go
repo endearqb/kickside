@@ -38,10 +38,8 @@ func TestSendReplyUsesInteractiveCardsWhenEnabled(t *testing.T) {
 	}
 
 	card := decodeCardPayload(t, gateway.replyCalls[0].Content)
-	header := readMapField(t, card, "header")
-	title := readMapField(t, header, "title")
-	if title["content"] != "Kimi reply" {
-		t.Fatalf("expected card title %q, got %#v", "Kimi reply", title["content"])
+	if _, ok := card["header"]; ok {
+		t.Fatalf("expected reply card to omit header, got %#v", card["header"])
 	}
 
 	elements, ok := card["elements"].([]any)
@@ -93,13 +91,13 @@ func TestBuildReplyCardRequestsSplitLongReplies(t *testing.T) {
 		t.Fatalf("expected two card chunks, got %d", len(requests))
 	}
 
-	firstTitle := readMapField(t, readMapField(t, decodeCardPayload(t, requests[0].Content), "header"), "title")
-	secondTitle := readMapField(t, readMapField(t, decodeCardPayload(t, requests[1].Content), "header"), "title")
-	if firstTitle["content"] != "Kimi reply (1/2)" {
-		t.Fatalf("unexpected first title: %#v", firstTitle["content"])
+	firstCard := decodeCardPayload(t, requests[0].Content)
+	secondCard := decodeCardPayload(t, requests[1].Content)
+	if _, ok := firstCard["header"]; ok {
+		t.Fatalf("expected first chunk reply card to omit header, got %#v", firstCard["header"])
 	}
-	if secondTitle["content"] != "Kimi reply (2/2)" {
-		t.Fatalf("unexpected second title: %#v", secondTitle["content"])
+	if _, ok := secondCard["header"]; ok {
+		t.Fatalf("expected second chunk reply card to omit header, got %#v", secondCard["header"])
 	}
 }
 

@@ -2720,20 +2720,20 @@ input:focus {
   flex-shrink: 0;
 }
 
-.status-indicator {
+.status-indicator,
+.status-bridge-chip {
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
   padding: 1px 7px;
   border: 1px solid transparent;
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .status-bridge-chip {
-  border-radius: 999px;
   border: 1px solid var(--chrome-border);
-  padding: 2px 10px;
   font-size: 11px;
-  font-weight: 600;
-  line-height: 1.5;
   white-space: nowrap;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   color: var(--text-secondary);
@@ -2895,6 +2895,11 @@ input:focus {
   background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
+.bridge-panel-section-body {
+  display: grid;
+  gap: 14px;
+}
+
 .bridge-panel-header {
   display: flex;
   justify-content: space-between;
@@ -3002,8 +3007,8 @@ input:focus {
 }
 
 .cc-switch-input:checked + .cc-switch-track {
-  background: color-mix(in srgb, var(--accent) 70%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 70%, var(--chrome-border));
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--accent) 14%);
+  border-color: color-mix(in srgb, var(--text-primary) 70%, var(--chrome-border));
 }
 
 .cc-switch-input:checked + .cc-switch-track::after {
@@ -3020,9 +3025,24 @@ input:focus {
   flex-direction: column;
 }
 
+.bridge-port-card-wide {
+  grid-column: span 2;
+}
+
 .bridge-port-card span {
   font-size: 12px;
   color: var(--muted-foreground);
+}
+
+.bridge-port-card small {
+  color: var(--muted-foreground);
+}
+
+.bridge-inline-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .bridge-channel-list,
@@ -3277,6 +3297,14 @@ input:focus {
   .bridge-preset-row,
   .bridge-preset-fields {
     grid-template-columns: 1fr;
+  }
+
+  .bridge-inline-path-row {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-port-card-wide {
+    grid-column: auto;
   }
 
   .bridge-approval-card,

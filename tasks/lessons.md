@@ -1,5 +1,6 @@
 # Lessons Learned
 
+- 当用户要求“对用户不暴露某功能”但同时单独点名某一渠道（例如“飞书/IM 里的 `/bridge`”）时，不要擅自把同名的 Shell UI 入口一并隐藏；先按渠道边界收敛。
 - 救火式重试逻辑必须显式“锁存成功状态”（latch）：一旦 fallback 导航成功，后续循环只能观察，不可继续发送会覆盖目标页面的导航指令。
 - 当 `tauri://localhost` 重试导航仍持续 `about:blank` 时，要尽快切换“协议绕行兜底”（直接导航 `http://127.0.0.1:<workspace_port>`），先恢复可用性再追协议根因。
 - 当截图显示 DevTools 目标仅有 `about:blank` 且无资源树时，优先按“协议加载时序故障”处理：在 Rust setup 加入 about:blank 自救重试导航，而不是只在前端层继续加 fallback。

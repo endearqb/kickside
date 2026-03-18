@@ -341,6 +341,15 @@ func (s *Service) maybeSendAutoOnboarding(ctx context.Context, event *MessageEve
 	if !bindingNeedsOnboarding(binding) {
 		return
 	}
+	if !bridgeEntryPointsExposed {
+		if err := s.bindings.UpdateBindingOnboarding(ctx, binding.BindingID, currentOnboardingVersion); err != nil {
+			s.logf("feishu onboarding hide-mark failed binding=%s err=%q", binding.BindingID, err.Error())
+			return
+		}
+		binding.OnboardedAt = time.Now().UTC().Format(time.RFC3339)
+		binding.OnboardingVersion = currentOnboardingVersion
+		return
+	}
 
 	card, shouldMark, err := s.loadOnboardingCard(ctx, key, binding)
 	if err != nil {
@@ -451,6 +460,9 @@ func (s *Service) collectDoctorReport(ctx context.Context, key domain.BindingKey
 }
 
 func (s *Service) buildPanelCard(ctx context.Context, key domain.BindingKey, panel string, showDetails bool) (map[string]any, bool, error) {
+	if !bridgeEntryPointsExposed {
+		return buildBridgeEntryHiddenCard(), false, nil
+	}
 	switch strings.TrimSpace(panel) {
 	case "", bridgePanelHelp:
 		return buildBridgeHelpCard(key), false, nil

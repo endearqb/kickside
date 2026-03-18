@@ -1641,6 +1641,7 @@ export function useShellController() {
   const bridgeOnboardingDirty = useMemo(() => {
     return (
       bridgeOnboardingDraft.enabled !== bridgeSettings.enabled ||
+      bridgeOnboardingDraft.autoStart !== bridgeSettings.autoStart ||
       bridgeOnboardingDraft.feishuEnabled !==
         getBridgeChannelEnabled(bridgeSettings, "feishu") ||
       hasBridgeDraftSecretValue(bridgeOnboardingDraft.feishu.appId) ||
@@ -2012,6 +2013,24 @@ export function useShellController() {
       });
       if (typeof selected === "string") {
         setWorkDirInput(selected);
+      }
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handlePickBridgeDefaultWorkDir() {
+    try {
+      const selected = await open({
+        title: "Select IM bridge default work directory",
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        setBridgeSettings((current) => ({
+          ...current,
+          defaultWorkDir: selected,
+        }));
       }
     } catch (error) {
       setActionError(String(error));
@@ -2886,6 +2905,7 @@ export function useShellController() {
     handlePickKimiPath,
     handleSavePathAndRetry,
     handlePickWorkDir,
+    handlePickBridgeDefaultWorkDir,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleBridgeSettingsChange,

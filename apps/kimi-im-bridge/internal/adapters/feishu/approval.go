@@ -172,6 +172,9 @@ func (s *Service) processApprovalCardAction(ctx context.Context, event *CardActi
 }
 
 func (s *Service) processSessionCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	if !bridgeEntryPointsExposed {
+		return hiddenBridgeEntryCardResult(), nil
+	}
 	value, ok := decodeSessionActionValue(event.ActionValue)
 	if !ok {
 		return &CardActionResult{Toast: "unsupported action"}, nil
@@ -199,6 +202,9 @@ func (s *Service) processSessionCardAction(ctx context.Context, event *CardActio
 }
 
 func (s *Service) processSetPresetWorkDirCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	if !bridgeEntryPointsExposed {
+		return hiddenBridgeEntryCardResult(), nil
+	}
 	value, ok := decodeWorkDirPresetActionValue(event.ActionValue)
 	if !ok {
 		return &CardActionResult{Toast: "unsupported action"}, nil
@@ -236,6 +242,9 @@ func (s *Service) processSetPresetWorkDirCardAction(ctx context.Context, event *
 }
 
 func (s *Service) processClearWorkDirCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
+	if !bridgeEntryPointsExposed {
+		return hiddenBridgeEntryCardResult(), nil
+	}
 	value, ok := decodeClearWorkDirActionValue(event.ActionValue)
 	if !ok {
 		return &CardActionResult{Toast: "unsupported action"}, nil
@@ -363,6 +372,13 @@ func decodePanelActionValue(values map[string]string) (panelActionValue, bool) {
 		ThreadID:    strings.TrimSpace(values["thread_id"]),
 		ShowDetails: strings.EqualFold(strings.TrimSpace(values["show_details"]), "true"),
 	}, true
+}
+
+func hiddenBridgeEntryCardResult() *CardActionResult {
+	return &CardActionResult{
+		Toast:       "bridge entry hidden",
+		UpdatedCard: buildBridgeEntryHiddenCard(),
+	}
 }
 
 func buildApprovalCardContent(data approvalCardData) (string, error) {

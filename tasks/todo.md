@@ -609,3 +609,30 @@
 - 当前 Explorer 右键链路支持目录、单文件与多文件三类入口：目录会直接接管为工作目录，文件会复制到新建工作区后再启动 shell。
 - 这套逻辑目前是“工作区接管/复制导入”语义，而不是“自动切换到对应 session”语义，因此 README 文案已避免误导性表述。
 - 中英文 README 已同步补上这项亮点，保持产品向表达，同时不失真。
+
+---
+
+# Release v0.0.28 Todo
+
+## Hard Constraints
+
+- [ ] 合并到 `main` 前先同步远端状态，避免基于过期 `main` 发版。
+- [ ] 发布说明与版本号必须与当前 `0.0.28` 保持一致，不夸大未落地的能力。
+- [ ] 推送时同时处理 `main` 与版本 tag，确保 release 可追溯。
+
+## Implementation
+
+- [x] 核对当前分支、远端、版本文件与已有 release notes。
+- [ ] 同步远端 `main` 并完成合并准备。
+- [ ] 运行关键校验并创建发布提交/版本 tag（如缺失）。
+- [ ] 推送 `main` 与 `v0.0.28`，整理简要中文更新说明。
+
+## Validation
+
+- [ ] 确认 `apps/kimi-shell/package.json` 与 `src-tauri/Cargo.toml` 版本均为 `0.0.28`。
+- [ ] 确认 `apps/kimi-shell/docs/release-notes-0.0.28.md` 可作为发布说明来源。
+- [ ] 确认远端已收到 `main` 最新提交与 `v0.0.28` tag。
+
+## Retrospective
+
+- [ ] 待完成发布后回填。

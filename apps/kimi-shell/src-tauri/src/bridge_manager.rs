@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{AppState, BridgeProcessState},
-    bridge_http_client::BridgeHttpClient,
+    bridge_http_client::{BindingUpdateInput, BridgeHttpClient},
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
     log_manager,
     types::{
@@ -191,6 +191,17 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
         }
     };
     apply_status_snapshot(app, &status)?;
+    if settings.reset_binding_session_on_bridge_start {
+        let rotated_count = rotate_binding_sessions_on_bridge_start(app, &client)?;
+        if rotated_count > 0 {
+            log_manager::append_line(
+                app,
+                format!(
+                    "bridge session rotation completed on start (bindings_rotated={rotated_count})"
+                ),
+            );
+        }
+    }
     log_manager::append_line(
         app,
         format!(
@@ -330,6 +341,45 @@ pub fn clear_bridge_binding(app: &AppHandle, binding_id: &str) -> anyhow::Result
 
     let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
     client.clear_binding(binding_id)?;
+    Ok(())
+}
+
+pub fn reset_bridge_binding_session(app: &AppHandle, binding_id: &str) -> anyhow::Result<()> {
+    refresh_child_state(app)?;
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Err(anyhow::anyhow!("bridge is not running"));
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    let binding = client
+        .list_bindings()?
+        .into_iter()
+        .find(|item| item.binding_id == binding_id)
+        .ok_or_else(|| anyhow::anyhow!("bridge binding not found: {binding_id}"))?;
+    let next_session_id = generate_bridge_session_id();
+    client.update_binding(
+        binding_id,
+        &BindingUpdateInput {
+            kimi_session_id: next_session_id,
+            work_dir: binding.work_dir,
+        },
+    )?;
     Ok(())
 }
 
@@ -584,6 +634,52 @@ fn binary_name() -> OsString {
     {
         OsString::from("kimi-im-bridge")
     }
+}
+
+fn rotate_binding_sessions_on_bridge_start(
+    app: &AppHandle,
+    client: &BridgeHttpClient,
+) -> anyhow::Result<usize> {
+    let bindings = client.list_bindings()?;
+    if bindings.is_empty() {
+        return Ok(0);
+    }
+
+    for binding in &bindings {
+        let next_session_id = generate_bridge_session_id();
+        client
+            .update_binding(
+                &binding.binding_id,
+                &BindingUpdateInput {
+                    kimi_session_id: next_session_id,
+                    work_dir: binding.work_dir.clone(),
+                },
+            )
+            .with_context(|| {
+                format!(
+                    "failed to rotate bridge session on start for binding {}",
+                    binding.binding_id
+                )
+            })?;
+    }
+
+    log_manager::append_line(
+        app,
+        format!(
+            "bridge session rotation requested on start (bindings_found={})",
+            bindings.len()
+        ),
+    );
+    Ok(bindings.len())
+}
+
+fn generate_bridge_session_id() -> String {
+    let epoch_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let entropy = rand::random::<u64>();
+    format!("bridge-{epoch_ms:x}-{entropy:016x}")
 }
 
 fn wait_for_bridge_ready(app: &AppHandle, client: &BridgeHttpClient) -> anyhow::Result<()> {
@@ -1195,6 +1291,7 @@ mod tests {
             admin_port: 60_110,
             feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
+            reset_binding_session_on_bridge_start: true,
             feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![],

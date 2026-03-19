@@ -8,6 +8,10 @@ export type BackendState =
 
 export type BridgePlatform = "telegram" | "feishu";
 
+export type MainWindowCloseBehavior = "ask" | "exit" | "minimize_to_tray";
+
+export type MainWindowCloseDecision = "exit" | "minimize_to_tray";
+
 export type BridgeChannelMode = "polling" | "websocket";
 
 export type FeishuReplyRenderer = "post" | "interactive";
@@ -138,6 +142,7 @@ export interface BridgeSettings {
   adminPort: number;
   feishuReplyRenderer: FeishuReplyRenderer;
   feishuAutoApprove: boolean;
+  resetBindingSessionOnBridgeStart: boolean;
   defaultWorkDir?: string;
   workDirPresets: WorkDirPreset[];
   channels: BridgeChannelConfig[];
@@ -293,6 +298,19 @@ export interface PrefillChatPayload {
 export interface ShellRoutePayload {
   route: string;
   source: string;
+}
+
+export interface MainWindowCloseDecisionInput {
+  decision: MainWindowCloseDecision;
+  remember: boolean;
+}
+
+export interface MainWindowCloseDecisionRequestPayload {
+  title: string;
+  message: string;
+  exitLabel: string;
+  minimizeLabel: string;
+  rememberLabel: string;
 }
 
 export interface SubmitPrefillAck {

@@ -52,6 +52,7 @@ type BridgeRuntimePanelProps = {
   onOpenLogs: () => Promise<void>;
   onImportSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBinding: (bindingId: string) => Promise<void>;
+  onResetBindingSession: (bindingId: string) => Promise<void>;
   onResolveApproval: (
     approvalId: string,
     status: BridgeApprovalResolveInput["status"],
@@ -215,6 +216,7 @@ export function BridgeRuntimePanel({
   onOpenLogs,
   onImportSession,
   onClearBinding,
+  onResetBindingSession,
   onResolveApproval,
 }: BridgeRuntimePanelProps) {
   const [expandedSections, setExpandedSections] = useState<Record<BridgePanelSectionId, boolean>>({
@@ -289,7 +291,18 @@ export function BridgeRuntimePanel({
                   <strong>Enable bridge</strong>
                   <small>控制 sidecar 总开关。</small>
                 </span>
-                <input type="checkbox" checked={settings.enabled} onChange={(event) => onSettingsChange({ ...settings, enabled: event.currentTarget.checked })} />
+                <input
+                  type="checkbox"
+                  className="cc-switch-input"
+                  checked={settings.enabled}
+                  onChange={(event) =>
+                    onSettingsChange({
+                      ...settings,
+                      enabled: event.currentTarget.checked,
+                    })
+                  }
+                />
+                <span className="cc-switch-track" aria-hidden />
               </label>
 
               <label className="bridge-port-card">
@@ -311,18 +324,65 @@ export function BridgeRuntimePanel({
                   <strong>Feishu Auto Approve</strong>
                   <small>开启后，飞书对话会自动批准工具执行审批（WithAutoApprove）。</small>
                 </span>
-                <input type="checkbox" checked={settings.feishuAutoApprove} onChange={(event) => onSettingsChange({ ...settings, feishuAutoApprove: event.currentTarget.checked })} />
+                <input
+                  type="checkbox"
+                  className="cc-switch-input"
+                  checked={settings.feishuAutoApprove}
+                  onChange={(event) =>
+                    onSettingsChange({
+                      ...settings,
+                      feishuAutoApprove: event.currentTarget.checked,
+                    })
+                  }
+                />
+                <span className="cc-switch-track" aria-hidden />
+              </label>
+
+              <label className="bridge-switch-card">
+                <span className="bridge-switch-copy">
+                  <strong>每次 Bridge 启动新建会话</strong>
+                  <small>开启后，Bridge 每次启动成功都会为现有 binding 生成并切换到新的会话。</small>
+                </span>
+                <input
+                  type="checkbox"
+                  className="cc-switch-input"
+                  checked={settings.resetBindingSessionOnBridgeStart}
+                  onChange={(event) =>
+                    onSettingsChange({
+                      ...settings,
+                      resetBindingSessionOnBridgeStart: event.currentTarget.checked,
+                    })
+                  }
+                />
+                <span className="cc-switch-track" aria-hidden />
               </label>
             </div>
 
             <div className="bridge-channel-list">
               {settings.channels.map((channel) => (
-                <label key={channel.platform} className="bridge-channel-card">
+                <label
+                  key={channel.platform}
+                  className="bridge-channel-card bridge-switch-card"
+                >
                   <div className="bridge-channel-copy">
                     <strong>{platformLabel(channel.platform)}</strong>
                     <small>mode: {channel.mode}</small>
                   </div>
-                  <input type="checkbox" checked={channel.enabled} onChange={(event) => onSettingsChange(updateChannelEnabled(settings, channel.platform, event.currentTarget.checked))} />
+                  <input
+                    type="checkbox"
+                    className="cc-switch-input"
+                    checked={channel.enabled}
+                    onChange={(event) =>
+                      onSettingsChange(
+                        updateChannelEnabled(
+                          settings,
+                          channel.platform,
+                          event.currentTarget.checked,
+                        ),
+                      )
+                    }
+                  />
+                  <span className="cc-switch-track" aria-hidden />
                 </label>
               ))}
             </div>
@@ -509,6 +569,18 @@ export function BridgeRuntimePanel({
                         {binding.workDir ? ` | cwd ${binding.workDir}` : ""}
                         {binding.lastInboundMessageId ? ` | last inbound ${binding.lastInboundMessageId}` : ""}
                       </small>
+                    </div>
+                    <div className="bridge-approval-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Plus size={14} />}
+                        className="cc-action-btn"
+                        onClick={() => void onResetBindingSession(binding.bindingId)}
+                        disabled={busy}
+                      >
+                        新建并切换会话
+                      </Button>
                     </div>
                   </div>
                 ))}

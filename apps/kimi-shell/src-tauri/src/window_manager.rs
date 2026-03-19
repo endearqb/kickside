@@ -22,7 +22,10 @@ use windows::core::{Interface, HSTRING, PWSTR};
 use crate::{
     app_state::AppState,
     log_manager,
+    settings_store,
     types::{
+        MainWindowCloseBehavior, MainWindowCloseDecision, MainWindowCloseDecisionInput,
+        MainWindowCloseDecisionRequestPayload,
         OpenRequestErrorPayload, PrefillChatPayload, PrefillStatusPayload, PrefillStatusState,
         ShellRoutePayload, StartupFailureKind, StartupMonitorTargetRoute, StartupPhase,
         SubmitPrefillAck, WebviewRuntimeKind, WorkspaceSessionBridgePayload,
@@ -36,6 +39,7 @@ const SHELL_ROUTE_EVENT: &str = "shell-route";
 const PREFILL_CHAT_EVENT: &str = "prefill-chat";
 const PREFILL_STATUS_EVENT: &str = "prefill-status";
 const OPEN_REQUEST_ERROR_EVENT: &str = "open-request-error";
+pub const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT: &str = "main-window-close-decision-request";
 const STARTUP_TRACE_LIMIT: usize = 48;
 const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(2);
 const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -452,6 +456,7 @@ struct NavigationState {
     main_ready_watchdog_generation: u64,
     suppress_next_main_close_requested: bool,
     suppress_next_main_destroyed: bool,
+    main_close_decision_prompt_open: bool,
     suppress_next_prefill_close_requested: bool,
     suppress_next_prefill_destroyed: bool,
 }
@@ -480,6 +485,7 @@ impl Default for NavigationState {
             main_ready_watchdog_generation: 0,
             suppress_next_main_close_requested: false,
             suppress_next_main_destroyed: false,
+            main_close_decision_prompt_open: false,
             suppress_next_prefill_close_requested: false,
             suppress_next_prefill_destroyed: false,
         }
@@ -715,7 +721,51 @@ pub fn handle_prefill_window_destroyed(app: &AppHandle, source: &str) {
     );
 }
 
+fn load_main_window_close_behavior(app: &AppHandle) -> MainWindowCloseBehavior {
+    settings_store::load_or_default(app)
+        .map(|settings| settings.main_window_close_behavior)
+        .unwrap_or(MainWindowCloseBehavior::Ask)
+}
+
+fn emit_main_window_close_decision_request(app: &AppHandle, source: &str) -> bool {
+    let payload = MainWindowCloseDecisionRequestPayload {
+        title: "关闭主窗口".to_string(),
+        message: "关闭主窗口时，选择退出应用或最小化到系统托盘。".to_string(),
+        exit_label: "退出应用".to_string(),
+        minimize_label: "最小化到系统托盘".to_string(),
+        remember_label: "记住我的选择".to_string(),
+    };
+
+    match app.emit_to(
+        MAIN_WINDOW_LABEL,
+        MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT,
+        payload,
+    ) {
+        Ok(_) => true,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "failed to emit main close decision request (source={source}): {error}"
+                ),
+            );
+            false
+        }
+    }
+}
+
+pub fn minimize_main_window_to_tray(app: &AppHandle, source: &str) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.hide();
+        log_manager::append_line(
+            app,
+            format!("main window hidden to tray (source={source})"),
+        );
+    }
+}
+
 pub fn handle_main_close_requested(app: &AppHandle, source: &str) -> bool {
+    let close_behavior = load_main_window_close_behavior(app);
     let action = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
@@ -727,6 +777,15 @@ pub fn handle_main_close_requested(app: &AppHandle, source: &str) -> bool {
             0_u8
         } else if state.startup_pending && !state.allow_process_exit {
             1_u8
+        } else if close_behavior == MainWindowCloseBehavior::Ask {
+            if state.main_close_decision_prompt_open {
+                2_u8
+            } else {
+                state.main_close_decision_prompt_open = true;
+                3_u8
+            }
+        } else if close_behavior == MainWindowCloseBehavior::MinimizeToTray {
+            4_u8
         } else {
             0_u8
         }
@@ -743,7 +802,60 @@ pub fn handle_main_close_requested(app: &AppHandle, source: &str) -> bool {
         return true;
     }
 
+    if action == 2 {
+        return true;
+    }
+
+    if action == 3 {
+        let emitted = emit_main_window_close_decision_request(app, source);
+        if !emitted {
+            if let Ok(mut state) = shared_navigation_state().lock() {
+                state.main_close_decision_prompt_open = false;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    if action == 4 {
+        minimize_main_window_to_tray(app, source);
+        return true;
+    }
+
     false
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainWindowCloseDecisionOutcome {
+    Exit,
+    MinimizeToTray,
+}
+
+pub fn apply_main_window_close_decision(
+    app: &AppHandle,
+    input: MainWindowCloseDecisionInput,
+    source: &str,
+) -> Result<MainWindowCloseDecisionOutcome, String> {
+    if let Ok(mut state) = shared_navigation_state().lock() {
+        state.main_close_decision_prompt_open = false;
+    }
+
+    if input.remember {
+        let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+        settings.main_window_close_behavior = match input.decision {
+            MainWindowCloseDecision::Exit => MainWindowCloseBehavior::Exit,
+            MainWindowCloseDecision::MinimizeToTray => MainWindowCloseBehavior::MinimizeToTray,
+        };
+        settings_store::save(app, &settings).map_err(|error| error.to_string())?;
+    }
+
+    match input.decision {
+        MainWindowCloseDecision::Exit => Ok(MainWindowCloseDecisionOutcome::Exit),
+        MainWindowCloseDecision::MinimizeToTray => {
+            minimize_main_window_to_tray(app, source);
+            Ok(MainWindowCloseDecisionOutcome::MinimizeToTray)
+        }
+    }
 }
 
 pub fn complete_startup_monitor_route(

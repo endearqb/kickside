@@ -45,3 +45,4 @@
 - For Windows sidecar lifecycle management, do not treat `taskkill` as the primary stop path once the sidecar owns queues or approvals. Always provide a cooperative loopback/admin shutdown first, and use force-kill only as a bounded fallback.
 - When a persisted approval is expected to be resumable later, store the runtime correlation identifiers at creation time. For the IM bridge, `approval_requests` must keep `turn_id` and `step_id`, not just user-facing metadata.
 - 控制中心这类“外层固定壳 + 内层滚动正文”的页面，不能只给最内层内容区加 `overflow-y: auto`；必须沿着 `grid/flex` 父链同时补齐 `min-height: 0` 和明确高度约束，否则内容会把容器撑开，表现成“卡片显示不全且没有滚动条”。
+- 当用户把 UI 行为矩阵明确到状态级（例如“tabs 必须标题栏同一行常驻”、“Bridge 已启动仅展示不可点击”、“tips 仅局部刷新”）时，先按矩阵收敛分支与交互再做视觉微调，避免先实现再返工。

@@ -859,9 +859,58 @@
 
 .cc-bridge-onboarding-switches {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+
+.cc-bridge-resource-row {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cc-bridge-binding-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cc-bridge-binding-reset-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.cc-bridge-ready-hint {
+  position: relative;
+}
+
+.cc-bridge-ready-hint-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cc-bridge-ready-info-btn {
+  border: 1px solid var(--chrome-border);
+}
+
+.cc-bridge-ready-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: min(520px, calc(100vw - 40px));
+  padding: 10px 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .cc-bridge-onboarding-grid {
@@ -942,6 +991,18 @@
 .cc-auth-switch-btn.active {
   background: color-mix(in srgb, var(--text-primary) 8%, var(--surface));
   color: var(--text-primary);
+}
+
+.cc-runtime-close-behavior {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-muted));
+}
+
+.cc-runtime-close-behavior .log-tail-title {
+  margin: 0 0 6px;
 }
 
 .cc-auth-panel {
@@ -2564,6 +2625,86 @@ input:focus {
   padding: 12px;
 }
 
+.main-close-decision-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, #09111f 42%, transparent);
+}
+
+.main-close-decision-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 22px 48px color-mix(in srgb, #09111f 18%, transparent);
+}
+
+.main-close-decision-card h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.main-close-decision-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.main-close-decision-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.main-close-decision-remember-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--chrome-border);
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-muted));
+  color: transparent;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.main-close-decision-remember-btn:hover {
+  border-color: color-mix(in srgb, var(--text-primary) 32%, var(--chrome-border));
+}
+
+.main-close-decision-remember-btn.is-active {
+  border-color: color-mix(in srgb, var(--text-primary) 70%, var(--chrome-border));
+  background: color-mix(in srgb, var(--text-primary) 86%, var(--accent) 14%);
+  color: var(--surface);
+}
+
+.main-close-decision-remember-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ring) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.main-close-decision-remember-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.main-close-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .shutdown-overlay {
   position: fixed;
   inset: 0;
@@ -2868,6 +3009,14 @@ input:focus {
 
   .cc-bridge-onboarding-grid,
   .cc-bridge-onboarding-switches {
+    grid-template-columns: 1fr;
+  }
+
+  .cc-bridge-resource-row {
+    grid-template-columns: 1fr;
+  }
+
+  .cc-bridge-binding-row {
     grid-template-columns: 1fr;
   }
 

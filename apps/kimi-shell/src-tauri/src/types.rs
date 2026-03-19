@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -40,6 +40,10 @@ fn default_feishu_auto_approve() -> bool {
     true
 }
 
+fn default_reset_binding_session_on_bridge_start() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeRuntimeState {
@@ -74,6 +78,22 @@ pub enum WebviewRuntimeKind {
 pub enum MainCreateMode {
     Auto,
     Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MainWindowCloseBehavior {
+    #[default]
+    Ask,
+    Exit,
+    MinimizeToTray,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MainWindowCloseDecision {
+    Exit,
+    MinimizeToTray,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -268,6 +288,7 @@ pub struct AppSettings {
     pub kimi_path: Option<String>,
     pub work_dir: Option<String>,
     pub hotkey: String,
+    pub main_window_close_behavior: MainWindowCloseBehavior,
     pub start_minimized_to_tray: bool,
     pub auto_restart_on_crash: bool,
     #[serde(rename = "bridge_enabled")]
@@ -290,6 +311,7 @@ impl Default for AppSettings {
             kimi_path: None,
             work_dir: None,
             hotkey: "CmdOrCtrl+Shift+K".to_string(),
+            main_window_close_behavior: MainWindowCloseBehavior::Ask,
             start_minimized_to_tray: false,
             auto_restart_on_crash: false,
             bridge_enabled: false,
@@ -302,6 +324,23 @@ impl Default for AppSettings {
             custom_mirror_config: InstallCustomMirrorConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainWindowCloseDecisionInput {
+    pub decision: MainWindowCloseDecision,
+    pub remember: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainWindowCloseDecisionRequestPayload {
+    pub title: String,
+    pub message: String,
+    pub exit_label: String,
+    pub minimize_label: String,
+    pub remember_label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -330,6 +369,8 @@ pub struct BridgeSettings {
     pub feishu_reply_renderer: FeishuReplyRenderer,
     #[serde(default = "default_feishu_auto_approve")]
     pub feishu_auto_approve: bool,
+    #[serde(default = "default_reset_binding_session_on_bridge_start")]
+    pub reset_binding_session_on_bridge_start: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feishu_reply_cards: Option<bool>,
     pub default_work_dir: Option<String>,

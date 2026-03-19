@@ -52,6 +52,14 @@ struct AdminBridgeSessionRecord {
     updated_at: Option<String>,
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingUpdateInput {
+    pub kimi_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
+}
+
 impl BridgeHttpClient {
     pub fn new(
         base_url: impl Into<String>,
@@ -144,6 +152,24 @@ impl BridgeHttpClient {
         .error_for_status()
         .context("bridge clear binding returned error status")?;
         Ok(())
+    }
+
+    pub fn update_binding(
+        &self,
+        binding_id: &str,
+        input: &BindingUpdateInput,
+    ) -> anyhow::Result<BindingRecord> {
+        self.request(
+            reqwest::Method::PATCH,
+            &format!("/api/v1/bindings/{binding_id}"),
+        )?
+        .json(input)
+        .send()
+        .context("failed to update bridge binding")?
+        .error_for_status()
+        .context("bridge update binding returned error status")?
+        .json::<BindingRecord>()
+        .context("failed to decode updated bridge binding")
     }
 
     pub fn list_approvals(
@@ -427,6 +453,57 @@ mod tests {
         assert!(body.contains(r#""source":"shell_web""#));
         assert!(body.contains(r#""sourceSessionId":"web-1""#));
         assert_eq!(imported.session_id, "session-9");
+    }
+
+    #[test]
+    fn update_binding_patches_payload_and_decodes_response() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+        let (sender, receiver) = mpsc::channel();
+
+        thread::spawn(move || {
+            let mut request = server.recv().expect("request should arrive");
+            let mut body = String::new();
+            request
+                .as_reader()
+                .read_to_string(&mut body)
+                .expect("request body should be readable");
+            sender
+                .send((
+                    request.method().as_str().to_string(),
+                    request.url().to_string(),
+                    body,
+                ))
+                .expect("payload should be forwarded");
+            let response = Response::from_string(
+                r#"{"bindingId":"binding-1","platform":"telegram","chatId":"chat-1","kimiSessionId":"session-next","workDir":"D:/repo","createdAt":"2026-03-19T00:00:00Z","updatedAt":"2026-03-19T00:00:01Z"}"#,
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        let updated = client
+            .update_binding(
+                "binding-1",
+                &BindingUpdateInput {
+                    kimi_session_id: "session-next".to_string(),
+                    work_dir: Some("D:/repo".to_string()),
+                },
+            )
+            .expect("update binding should succeed");
+
+        let (method, url, body) = receiver.recv().expect("payload should be captured");
+        assert_eq!(method, "PATCH");
+        assert_eq!(url, "/api/v1/bindings/binding-1");
+        assert!(body.contains(r#""kimiSessionId":"session-next""#));
+        assert!(body.contains(r#""workDir":"D:/repo""#));
+        assert_eq!(updated.binding_id, "binding-1");
+        assert_eq!(updated.kimi_session_id, "session-next");
     }
 }
 

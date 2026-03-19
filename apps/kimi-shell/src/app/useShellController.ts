@@ -61,6 +61,9 @@ import type {
   InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
+  MainWindowCloseBehavior,
+  MainWindowCloseDecisionInput,
+  MainWindowCloseDecisionRequestPayload,
   LoginProbeResult,
   OnboardingStatus,
   OpenRequestErrorPayload,
@@ -88,6 +91,7 @@ const SHUTDOWN_PROGRESS_EVENT = "shutdown-progress";
 const OPEN_REQUEST_ERROR_EVENT = "open-request-error";
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT = "workspace-session-bridge";
+const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT = "main-window-close-decision-request";
 const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
 const PREFILL_MAX_ATTEMPTS = 12;
@@ -185,6 +189,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     adminPort: 60110,
     feishuReplyRenderer: "interactive",
     feishuAutoApprove: true,
+    resetBindingSessionOnBridgeStart: true,
     defaultWorkDir: "",
     workDirPresets: [],
     channels: [
@@ -385,6 +390,8 @@ export function useShellController() {
     useState<BridgeOnboardingConfigInput>(() =>
       createDefaultBridgeOnboardingConfigInput(),
     );
+  const [bridgeOnboardingDraftTouched, setBridgeOnboardingDraftTouched] =
+    useState(false);
   const [bridgeBusy, setBridgeBusy] = useState(false);
   const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
   const [powershellPreflight, setPowershellPreflight] =
@@ -415,6 +422,10 @@ export function useShellController() {
   const [workspaceEmbedState, setWorkspaceEmbedState] =
     useState<WorkspaceEmbedState>("idle");
   const [chatEmbedState, setChatEmbedState] = useState<WorkspacePaneState>("idle");
+  const [mainWindowCloseBehavior, setMainWindowCloseBehavior] =
+    useState<MainWindowCloseBehavior>("ask");
+  const [mainWindowCloseDecisionRequest, setMainWindowCloseDecisionRequest] =
+    useState<MainWindowCloseDecisionRequestPayload | null>(null);
   const [themeMode, setThemeMode] = useState<Theme>(() => getInitialThemeMode());
   const [activeControlSection, setActiveControlSection] =
     useState<ControlSectionId>("overview");
@@ -1041,6 +1052,50 @@ export function useShellController() {
     return Promise.all([refreshStatus(), refreshOnboarding()]);
   }
 
+  async function refreshMainWindowCloseBehavior() {
+    try {
+      const behavior = await invoke<MainWindowCloseBehavior>(
+        "get_main_window_close_behavior",
+      );
+      setMainWindowCloseBehavior(behavior);
+      return behavior;
+    } catch (error) {
+      setActionError(String(error));
+      return mainWindowCloseBehavior;
+    }
+  }
+
+  async function handleSaveMainWindowCloseBehavior(behavior: MainWindowCloseBehavior) {
+    setActionError(null);
+    try {
+      const saved = await invoke<MainWindowCloseBehavior>(
+        "save_main_window_close_behavior",
+        { behavior },
+      );
+      setMainWindowCloseBehavior(saved);
+      return saved;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
+  }
+
+  async function handleSubmitMainWindowCloseDecision(
+    input: MainWindowCloseDecisionInput,
+  ) {
+    setActionError(null);
+    try {
+      await invoke("submit_main_window_close_decision", { input });
+      setMainWindowCloseDecisionRequest(null);
+      const persisted = await refreshMainWindowCloseBehavior();
+      if (!input.remember && persisted !== "ask") {
+        setMainWindowCloseBehavior("ask");
+      }
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
   useEffect(() => {
     if (!tauriRuntime) {
       setListenersReady(false);
@@ -1054,6 +1109,7 @@ export function useShellController() {
     let unlistenOpenRequestError: (() => void) | undefined;
     let unlistenSessionBootstrap: (() => void) | undefined;
     let unlistenSessionBridge: (() => void) | undefined;
+    let unlistenMainCloseDecisionRequest: (() => void) | undefined;
 
     const bindListeners = async () => {
       try {
@@ -1065,6 +1121,7 @@ export function useShellController() {
           openRequestErrorOff,
           bootstrapOff,
           sessionBridgeOff,
+          mainCloseDecisionRequestOff,
         ] =
           await Promise.all([
           currentWebviewWindow.listen<ShellRoutePayload>(
@@ -1158,6 +1215,12 @@ export function useShellController() {
               }
             },
           ),
+          currentWebviewWindow.listen<MainWindowCloseDecisionRequestPayload>(
+            MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT,
+            (event) => {
+              setMainWindowCloseDecisionRequest(event.payload);
+            },
+          ),
         ]);
 
         if (disposed) {
@@ -1167,6 +1230,7 @@ export function useShellController() {
           openRequestErrorOff();
           bootstrapOff();
           sessionBridgeOff();
+          mainCloseDecisionRequestOff();
           return;
         }
 
@@ -1176,6 +1240,7 @@ export function useShellController() {
         unlistenOpenRequestError = openRequestErrorOff;
         unlistenSessionBootstrap = bootstrapOff;
         unlistenSessionBridge = sessionBridgeOff;
+        unlistenMainCloseDecisionRequest = mainCloseDecisionRequestOff;
         setListenersReady(true);
       } catch (error) {
         setActionError(String(error));
@@ -1204,6 +1269,9 @@ export function useShellController() {
       }
       if (unlistenSessionBridge) {
         unlistenSessionBridge();
+      }
+      if (unlistenMainCloseDecisionRequest) {
+        unlistenMainCloseDecisionRequest();
       }
     };
   }, [dispatchPendingSessionBridge, enqueuePrefillPayload, tauriRuntime]);
@@ -1615,6 +1683,7 @@ export function useShellController() {
     void refreshPowerShellPreflight();
     void refreshBridgeSettings();
     void refreshBridgeStatus();
+    void refreshMainWindowCloseBehavior();
     const timer = window.setInterval(() => {
       void refreshStatus();
     }, POLL_MS);
@@ -1662,11 +1731,13 @@ export function useShellController() {
   );
 
   useEffect(() => {
-    if (bridgeOnboardingDirty) {
+    // Keep onboarding draft synced with persisted settings unless the user is actively editing.
+    if (bridgeOnboardingDirty && bridgeOnboardingDraftTouched) {
       return;
     }
     setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(bridgeSettings));
-  }, [bridgeOnboardingDirty, bridgeSettings]);
+    setBridgeOnboardingDraftTouched(false);
+  }, [bridgeOnboardingDirty, bridgeOnboardingDraftTouched, bridgeSettings]);
 
   useEffect(() => {
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
@@ -2072,6 +2143,7 @@ export function useShellController() {
 
   function handleBridgeOnboardingDraftChange(next: BridgeOnboardingConfigInput) {
     setBridgeOnboardingDraft(next);
+    setBridgeOnboardingDraftTouched(true);
   }
 
   async function handleSaveBridgeOnboarding() {
@@ -2096,6 +2168,7 @@ export function useShellController() {
       setBridgeSettings(saved);
       setBridgeSettingsSnapshot(saved);
       setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(saved));
+      setBridgeOnboardingDraftTouched(false);
       await Promise.all([refreshBridgeStatus(), refreshBridgeSecretsMask()]);
     } catch (error) {
       setActionError(String(error));
@@ -2198,6 +2271,23 @@ export function useShellController() {
     try {
       await invoke("clear_bridge_binding", { bindingId });
       await Promise.all([refreshBridgeBindings(), refreshBridgeStatus()]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleResetBridgeBindingSession(bindingId: string) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      await invoke("reset_bridge_binding_session", { bindingId });
+      await Promise.all([
+        refreshBridgeBindings(),
+        refreshBridgeSessions(),
+        refreshBridgeStatus(),
+      ]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2823,6 +2913,8 @@ export function useShellController() {
     bridgeOnboardingDirty,
     bridgeOnboardingValidation,
     bridgeBusy,
+    mainWindowCloseBehavior,
+    mainWindowCloseDecisionRequest,
     kimiPathInput,
     setKimiPathInput,
     workDirInput,
@@ -2917,6 +3009,7 @@ export function useShellController() {
     handleRestartBridge,
     handleImportBridgeSession,
     handleClearBridgeBinding,
+    handleResetBridgeBindingSession,
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
@@ -2942,6 +3035,8 @@ export function useShellController() {
     handleMinimizeWindow,
     handleToggleMaximizeWindow,
     handleCloseWindow,
+    handleSaveMainWindowCloseBehavior,
+    handleSubmitMainWindowCloseDecision,
     handleTitlebarDoubleClick,
     handleToggleThemeMode,
     activeWorkspaceView,

@@ -14,23 +14,23 @@ const MENU_QUIT: &str = "quit_app";
 
 pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let toggle_window =
-        MenuItem::with_id(app, MENU_TOGGLE_WINDOW, "Toggle Window", true, None::<&str>)?;
+        MenuItem::with_id(app, MENU_TOGGLE_WINDOW, "显示/隐藏窗口", true, None::<&str>)?;
     let restart_backend = MenuItem::with_id(
         app,
         MENU_RESTART_BACKEND,
-        "Restart Backend",
+        "重启后端服务",
         true,
         None::<&str>,
     )?;
     let open_diagnostics = MenuItem::with_id(
         app,
         MENU_OPEN_DIAGNOSTICS,
-        "Open Diagnostics",
+        "打开诊断",
         true,
         None::<&str>,
     )?;
-    let open_logs = MenuItem::with_id(app, MENU_OPEN_LOGS, "Open Logs Folder", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, MENU_QUIT, "Quit This Instance", true, None::<&str>)?;
+    let open_logs = MenuItem::with_id(app, MENU_OPEN_LOGS, "打开日志目录", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
 
     let menu = Menu::with_items(

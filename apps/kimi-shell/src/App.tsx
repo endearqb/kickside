@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Settings } from "lucide-react";
+import { Check, Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { formatBackendState } from "@/app/types";
 import { IconButton } from "@/components/common/IconButton";
@@ -13,6 +13,7 @@ import "./App.css";
 function App() {
   const shell = useShellController();
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
+  const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const bridgeState = shell.bridgeStatus.state;
   const bridgeStateLabel =
     bridgeState === "running"
@@ -67,6 +68,12 @@ function App() {
 
     setShutdownTip(null);
   }, [shell.shutdownProgress]);
+
+  useEffect(() => {
+    if (!shell.mainWindowCloseDecisionRequest) {
+      setRememberMainCloseDecision(false);
+    }
+  }, [shell.mainWindowCloseDecisionRequest]);
 
   return (
     <main
@@ -166,6 +173,7 @@ function App() {
               diagnosticsBusy={shell.diagnosticsBusy}
               contextMenuBusy={shell.contextMenuBusy}
               loginProbeBusy={shell.loginProbeBusy}
+              mainWindowCloseBehavior={shell.mainWindowCloseBehavior}
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
@@ -237,12 +245,14 @@ function App() {
               onRestartBridge={shell.handleRestartBridge}
               onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
+              onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
               onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
               onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
+              onSaveMainWindowCloseBehavior={shell.handleSaveMainWindowCloseBehavior}
               onInstallSourceChange={shell.handleInstallSourceChange}
               onSaveInstallSettings={shell.handleSaveInstallSettings}
               onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
@@ -288,6 +298,7 @@ function App() {
               diagnosticsBusy={shell.diagnosticsBusy}
               contextMenuBusy={shell.contextMenuBusy}
               loginProbeBusy={shell.loginProbeBusy}
+              mainWindowCloseBehavior={shell.mainWindowCloseBehavior}
               bridgeSettings={shell.bridgeSettings}
               bridgeStatus={shell.bridgeStatus}
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
@@ -359,12 +370,14 @@ function App() {
               onRestartBridge={shell.handleRestartBridge}
               onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
+              onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
               onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
               onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
+              onSaveMainWindowCloseBehavior={shell.handleSaveMainWindowCloseBehavior}
               onInstallSourceChange={shell.handleInstallSourceChange}
               onSaveInstallSettings={shell.handleSaveInstallSettings}
               onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
@@ -382,6 +395,73 @@ function App() {
               onSkipOnboarding={shell.handleSkipOnboarding}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
             />
+          </div>
+        </div>
+      ) : null}
+
+      {shell.mainWindowCloseDecisionRequest ? (
+        <div className="main-close-decision-overlay" role="presentation">
+          <div
+            className="main-close-decision-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              shell.mainWindowCloseDecisionRequest.title.trim() || "关闭主窗口"
+            }
+          >
+            <h3>{shell.mainWindowCloseDecisionRequest.title || "关闭主窗口"}</h3>
+            <p>
+              {shell.mainWindowCloseDecisionRequest.message ||
+                "关闭主窗口时，选择退出应用或最小化到系统托盘。"}
+            </p>
+            <div className="main-close-decision-remember">
+              <button
+                type="button"
+                className={`main-close-decision-remember-btn ${
+                  rememberMainCloseDecision ? "is-active" : ""
+                }`}
+                aria-pressed={rememberMainCloseDecision}
+                aria-label={
+                  shell.mainWindowCloseDecisionRequest.rememberLabel || "记住我的选择"
+                }
+                title={shell.mainWindowCloseDecisionRequest.rememberLabel || "记住我的选择"}
+                onClick={() => {
+                  setRememberMainCloseDecision((current) => !current);
+                }}
+              >
+                <Check size={14} />
+              </button>
+              <span className="main-close-decision-remember-label">
+                {shell.mainWindowCloseDecisionRequest.rememberLabel || "记住我的选择"}
+              </span>
+            </div>
+            <div className="main-close-decision-actions">
+              <button
+                type="button"
+                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                onClick={() => {
+                  void shell.handleSubmitMainWindowCloseDecision({
+                    decision: "exit",
+                    remember: rememberMainCloseDecision,
+                  });
+                }}
+              >
+                {shell.mainWindowCloseDecisionRequest.exitLabel || "退出应用"}
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-default ui-btn-size-default"
+                autoFocus
+                onClick={() => {
+                  void shell.handleSubmitMainWindowCloseDecision({
+                    decision: "minimize_to_tray",
+                    remember: rememberMainCloseDecision,
+                  });
+                }}
+              >
+                {shell.mainWindowCloseDecisionRequest.minimizeLabel || "最小化到系统托盘"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

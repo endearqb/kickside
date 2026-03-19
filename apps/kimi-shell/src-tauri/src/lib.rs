@@ -35,7 +35,8 @@ use types::{
     InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
     InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
     KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    OnboardingStatus, OnboardingStep, PowerShellPreflightSummary, ShutdownProgressPayload,
+    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
+    PowerShellPreflightSummary, ShutdownProgressPayload,
     StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
     SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
 };
@@ -304,6 +305,39 @@ fn quit_app_gracefully(app: AppHandle) {
 }
 
 #[tauri::command]
+fn get_main_window_close_behavior(app: AppHandle) -> Result<MainWindowCloseBehavior, String> {
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    Ok(settings.main_window_close_behavior)
+}
+
+#[tauri::command]
+fn save_main_window_close_behavior(
+    app: AppHandle,
+    behavior: MainWindowCloseBehavior,
+) -> Result<MainWindowCloseBehavior, String> {
+    let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    settings.main_window_close_behavior = behavior;
+    settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
+    Ok(settings.main_window_close_behavior)
+}
+
+#[tauri::command]
+fn submit_main_window_close_decision(
+    app: AppHandle,
+    input: MainWindowCloseDecisionInput,
+) -> Result<(), String> {
+    let outcome = window_manager::apply_main_window_close_decision(
+        &app,
+        input,
+        "submit_main_window_close_decision_invoke",
+    )?;
+    if matches!(outcome, window_manager::MainWindowCloseDecisionOutcome::Exit) {
+        start_graceful_exit(app, "main_close_decision_confirmed_exit");
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn save_kimi_path(app: AppHandle, path: String) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -454,6 +488,12 @@ fn list_bridge_sessions(app: AppHandle) -> Result<Vec<BridgeSessionRecord>, Stri
 #[tauri::command]
 fn clear_bridge_binding(app: AppHandle, binding_id: String) -> Result<(), String> {
     bridge_manager::clear_bridge_binding(&app, &binding_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn reset_bridge_binding_session(app: AppHandle, binding_id: String) -> Result<(), String> {
+    bridge_manager::reset_bridge_binding_session(&app, &binding_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1043,6 +1083,9 @@ pub fn run() {
             submit_prefill,
             recover_main_window_boot,
             quit_app_gracefully,
+            get_main_window_close_behavior,
+            save_main_window_close_behavior,
+            submit_main_window_close_decision,
             save_kimi_path,
             save_work_dir,
             get_bridge_settings,
@@ -1055,6 +1098,7 @@ pub fn run() {
             list_bridge_bindings,
             list_bridge_sessions,
             clear_bridge_binding,
+            reset_bridge_binding_session,
             list_bridge_approvals,
             resolve_bridge_approval,
             import_bridge_session,

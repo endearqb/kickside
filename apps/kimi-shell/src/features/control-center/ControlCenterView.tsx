@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Check,
@@ -6,6 +6,7 @@ import {
   Eraser,
   FileText,
   FolderOpen,
+  Info,
   KeyRound,
   LayoutDashboard,
   Minus,
@@ -41,6 +42,7 @@ import type {
   InstallTaskId,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
+  MainWindowCloseBehavior,
   OnboardingStatus,
   PowerShellPreflightSummary,
   RuntimePanelId,
@@ -76,6 +78,7 @@ type ControlCenterViewProps = {
   diagnosticsBusy: boolean;
   contextMenuBusy: boolean;
   loginProbeBusy: boolean;
+  mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
   installAction: "dependencies" | "kimi" | "upgrade_kimi" | "nodejs" | null;
   bridgeSettings: BridgeSettings;
@@ -146,12 +149,16 @@ type ControlCenterViewProps = {
   onRestartBridge: () => Promise<void>;
   onImportBridgeSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
+  onResetBridgeBindingSession: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onOpenConfigCenterModal: () => Promise<void>;
   onCloseConfigCenterModal: () => void;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
   onResetConfigCenterDraft: () => void;
   onSaveKimiCliConfigCenter: () => Promise<void>;
+  onSaveMainWindowCloseBehavior: (
+    behavior: MainWindowCloseBehavior,
+  ) => Promise<MainWindowCloseBehavior>;
   onInstallSourceChange: (source: "official" | "mirror") => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
   onRefreshPowerShellPreflight: () => Promise<PowerShellPreflightSummary>;
@@ -202,6 +209,7 @@ function BridgeConfigModal({
   open,
   busy,
   dirty,
+  titleLabel,
   draft,
   validation,
   status,
@@ -216,6 +224,7 @@ function BridgeConfigModal({
   open: boolean;
   busy: boolean;
   dirty: boolean;
+  titleLabel: string;
   draft: BridgeOnboardingConfigInput;
   validation: BridgeOnboardingValidation;
   status: BridgeStatus;
@@ -246,9 +255,9 @@ function BridgeConfigModal({
   return (
     <ControlCenterModalShell
       open={open}
-      title="Bridge 配置"
+      title={titleLabel}
       description="在这里维护 Bridge 与 Feishu 长连接配置；保存凭据只代表 sidecar 可以尝试连接，平台是否检测到应用连接仍要看长连接和权限是否真正建立。"
-      ariaLabel="Bridge 配置"
+      ariaLabel={titleLabel}
       className="cc-bridge-config-modal"
       bodyClassName="cc-bridge-config-body"
       onRequestClose={requestClose}
@@ -533,6 +542,40 @@ function formatImFinalStatusLabel(status: BridgeStatus, feishuEnabled: boolean):
   return formatBridgeRuntimeStateLabel(status.state);
 }
 
+function hasLatinLetters(value: string): boolean {
+  return /[A-Za-z]/.test(value);
+}
+
+function getBridgeDisplayName(settings: BridgeSettings): string {
+  const feishuEnabled = settings.channels.some(
+    (channel) => channel.platform === "feishu" && channel.enabled,
+  );
+  const telegramEnabled = settings.channels.some(
+    (channel) => channel.platform === "telegram" && channel.enabled,
+  );
+  if (feishuEnabled && !telegramEnabled) {
+    return "飞书";
+  }
+  if (telegramEnabled && !feishuEnabled) {
+    return "Telegram";
+  }
+  return "IM Bridge";
+}
+
+function formatBridgeDisplayNameLabel(displayName: string, suffix: string): string {
+  return hasLatinLetters(displayName) ? `${displayName} ${suffix}` : `${displayName}${suffix}`;
+}
+
+function formatOpenBridgeDisplayName(displayName: string): string {
+  return hasLatinLetters(displayName) ? `打开 ${displayName}` : `打开${displayName}`;
+}
+
+function formatOpenBridgeDisplayNameLabel(displayName: string, suffix: string): string {
+  return hasLatinLetters(displayName)
+    ? `打开 ${displayName} ${suffix}`
+    : `打开${displayName}${suffix}`;
+}
+
 function renderBridgeOnboardingSecretRow(
   label: string,
   value: BridgeSecretsMaskView["telegram"]["botToken"],
@@ -563,6 +606,7 @@ export function ControlCenterView({
   diagnosticsBusy,
   contextMenuBusy,
   loginProbeBusy,
+  mainWindowCloseBehavior,
   installBusy,
   installAction,
   bridgeSettings,
@@ -633,12 +677,14 @@ export function ControlCenterView({
   onRestartBridge,
   onImportBridgeSession,
   onClearBridgeBinding,
+  onResetBridgeBindingSession,
   onResolveBridgeApproval,
   onOpenConfigCenterModal,
   onCloseConfigCenterModal,
   onConfigCenterDraftChange,
   onResetConfigCenterDraft,
   onSaveKimiCliConfigCenter,
+  onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
   onSaveInstallSettings,
   onRefreshPowerShellPreflight,
@@ -660,11 +706,15 @@ export function ControlCenterView({
   const [authCardView, setAuthCardView] = useState<"login" | "api">("login");
   const [installProbeRequested, setInstallProbeRequested] = useState(false);
   const [bridgeConfigOpen, setBridgeConfigOpen] = useState(false);
+  const [selectedBindingId, setSelectedBindingId] = useState("");
+  const [bridgeReadyHintOpen, setBridgeReadyHintOpen] = useState(false);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
   const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
   const [bridgeRuntimePanelExpanded, setBridgeRuntimePanelExpanded] = useState(false);
+  const [mainCloseBehaviorSaving, setMainCloseBehaviorSaving] = useState(false);
   const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
+  const bridgeReadyHintRef = useRef<HTMLDivElement | null>(null);
   void installCommandsOpen;
   void installCommandsBusy;
   void installCommandCatalog;
@@ -699,6 +749,20 @@ export function ControlCenterView({
   const feishuEnabled = bridgeSettings.channels.find(
     (channel) => channel.platform === "feishu",
   )?.enabled ?? false;
+  const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
+  const bridgeFinalStatusTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "最终状态");
+  const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
+  const bridgeRuntimePanelTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "运行面板");
+  const bridgeConfigTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "配置");
+  const openBridgeConfigTitle = formatOpenBridgeDisplayNameLabel(bridgeDisplayName, "配置");
+  const mainWindowCloseBehaviorOptions: Array<{
+    value: MainWindowCloseBehavior;
+    label: string;
+  }> = [
+    { value: "ask", label: "首次询问（可记住）" },
+    { value: "exit", label: "直接退出应用" },
+    { value: "minimize_to_tray", label: "最小化到系统托盘" },
+  ];
   const bridgeOnboardingStartDisabled =
     bridgeBusy || isBridgeRunning || !bridgeOnboardingValidation.canStart;
   const installStatusLabel = onboarding?.kimiInstalled ? "就绪" : "待办";
@@ -789,6 +853,56 @@ export function ControlCenterView({
       setBridgeRuntimePanelExpanded(false);
     }
   }, [activeControlSection]);
+
+  useEffect(() => {
+    if (!bridgeOnboardingValidation.canStart && bridgeReadyHintOpen) {
+      setBridgeReadyHintOpen(false);
+    }
+  }, [bridgeOnboardingValidation.canStart, bridgeReadyHintOpen]);
+
+  useEffect(() => {
+    if (!bridgeReadyHintOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (!bridgeReadyHintRef.current?.contains(target)) {
+        setBridgeReadyHintOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setBridgeReadyHintOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [bridgeReadyHintOpen]);
+
+  useEffect(() => {
+    if (bridgeBindings.length === 0) {
+      if (selectedBindingId) {
+        setSelectedBindingId("");
+      }
+      return;
+    }
+    if (
+      !selectedBindingId ||
+      !bridgeBindings.some((binding) => binding.bindingId === selectedBindingId)
+    ) {
+      setSelectedBindingId(bridgeBindings[0]?.bindingId ?? "");
+    }
+  }, [bridgeBindings, selectedBindingId]);
 
   useEffect(() => {
     if (installProbe) {
@@ -952,6 +1066,18 @@ export function ControlCenterView({
     await handleSelectRuntimePanel(panel);
   }
 
+  async function handleSelectMainWindowCloseBehavior(behavior: MainWindowCloseBehavior) {
+    if (mainCloseBehaviorSaving || behavior === mainWindowCloseBehavior) {
+      return;
+    }
+    setMainCloseBehaviorSaving(true);
+    try {
+      await onSaveMainWindowCloseBehavior(behavior);
+    } finally {
+      setMainCloseBehaviorSaving(false);
+    }
+  }
+
   async function handleSelectBridgeSection() {
     try {
       await Promise.all([
@@ -1063,6 +1189,9 @@ export function ControlCenterView({
 
   function renderBridgeStepContent() {
     const bridgeDefaultWorkDir = bridgeSettings.defaultWorkDir?.trim() ?? "";
+    const hasBridgeBindings = bridgeBindings.length > 0;
+    const bridgeReadyLongHint =
+      "现在只能说明 sidecar 可以尝试建立飞书长连接，是否被平台识别为已连接仍取决于长连接和应用权限。";
     return (
       <div className="cc-step-main">
         <div className="cc-bridge-onboarding-tag-row">
@@ -1097,53 +1226,149 @@ export function ControlCenterView({
             />
             <span className="cc-switch-track" aria-hidden />
           </label>
-        </div>
 
-        <div className="bridge-port-card cc-bridge-default-workdir-card">
-          <span>IM Default Work Dir</span>
-          <div className="bridge-inline-path-row">
-            <Input
-              value={bridgeSettings.defaultWorkDir ?? ""}
+          <label className="bridge-switch-card">
+            <span className="bridge-switch-copy">
+              <strong>飞书自动审批</strong>
+            </span>
+            <input
+              type="checkbox"
+              className="cc-switch-input"
+              checked={bridgeSettings.feishuAutoApprove}
               onChange={(event) =>
                 onBridgeSettingsChange({
                   ...bridgeSettings,
-                  defaultWorkDir: event.currentTarget.value,
+                  feishuAutoApprove: event.currentTarget.checked,
                 })
               }
-              placeholder="留空时跟随应用工作目录，例如 D:/workspace"
             />
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn cc-inline-btn"
-              onClick={() => void onPickBridgeDefaultWorkDir()}
-              disabled={bridgeBusy}
-            >
-              浏览
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              icon={<FolderOpen size={14} />}
-              className="cc-inline-icon-btn"
-              onClick={() => void onOpenFolder(bridgeDefaultWorkDir)}
-              disabled={bridgeBusy || !bridgeDefaultWorkDir}
-              aria-label="打开 IM 默认工作目录"
-              title="打开 IM 默认工作目录"
+            <span className="cc-switch-track" aria-hidden />
+          </label>
+
+          <label className="bridge-switch-card">
+            <span className="bridge-switch-copy">
+              <strong>每次 Bridge 启动新建会话</strong>
+            </span>
+            <input
+              type="checkbox"
+              className="cc-switch-input"
+              checked={bridgeSettings.resetBindingSessionOnBridgeStart}
+              onChange={(event) =>
+                onBridgeSettingsChange({
+                  ...bridgeSettings,
+                  resetBindingSessionOnBridgeStart: event.currentTarget.checked,
+                })
+              }
             />
-          </div>
-          <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
+            <span className="cc-switch-track" aria-hidden />
+          </label>
         </div>
 
-        <p
-          className={`hint cc-step-meta cc-bridge-onboarding-message ${
-            bridgeOnboardingValidation.canStart ? "" : "is-error"
-          }`}
-        >
-          {bridgeOnboardingValidation.message ??
-            "配置保存后，可直接在这里启动或停止 bridge。"}
-        </p>
+        <div className="cc-bridge-resource-row">
+          <div className="bridge-port-card cc-bridge-binding-card">
+            <span>当前绑定</span>
+            <div className="cc-bridge-binding-row">
+              <select
+                className="ui-input"
+                value={selectedBindingId}
+                onChange={(event) => setSelectedBindingId(event.currentTarget.value)}
+                disabled={bridgeBusy || !hasBridgeBindings}
+              >
+                {hasBridgeBindings ? (
+                  bridgeBindings.map((binding) => (
+                    <option key={binding.bindingId} value={binding.bindingId}>
+                      {binding.bindingId} ({binding.platform})
+                    </option>
+                  ))
+                ) : (
+                  <option value="">暂无 binding</option>
+                )}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                icon={<Plus size={14} />}
+                className="cc-action-btn cc-bridge-binding-reset-btn"
+                onClick={() => {
+                  if (!selectedBindingId) {
+                    return;
+                  }
+                  void onResetBridgeBindingSession(selectedBindingId);
+                }}
+                disabled={bridgeBusy || !selectedBindingId}
+              >
+                新建并切换会话
+              </Button>
+            </div>
+            <small>仅重置当前绑定会话，保持绑定与工作目录不变。</small>
+          </div>
+
+          <div className="bridge-port-card cc-bridge-default-workdir-card">
+            <span>IM 默认工作目录</span>
+            <div className="bridge-inline-path-row">
+              <Input
+                value={bridgeSettings.defaultWorkDir ?? ""}
+                onChange={(event) =>
+                  onBridgeSettingsChange({
+                    ...bridgeSettings,
+                    defaultWorkDir: event.currentTarget.value,
+                  })
+                }
+                placeholder="留空时跟随应用工作目录，例如 D:/workspace"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="cc-action-btn cc-inline-btn"
+                onClick={() => void onPickBridgeDefaultWorkDir()}
+                disabled={bridgeBusy}
+              >
+                浏览
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                icon={<FolderOpen size={14} />}
+                className="cc-inline-icon-btn"
+                onClick={() => void onOpenFolder(bridgeDefaultWorkDir)}
+                disabled={bridgeBusy || !bridgeDefaultWorkDir}
+                aria-label="打开 IM 默认工作目录"
+                title="打开 IM 默认工作目录"
+              />
+            </div>
+            <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
+          </div>
+        </div>
+
+        {bridgeOnboardingValidation.canStart ? (
+          <div className="cc-bridge-ready-hint" ref={bridgeReadyHintRef}>
+            <p className="hint cc-step-meta cc-bridge-onboarding-message cc-bridge-ready-hint-line">
+              配置已就绪
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                icon={<Info size={14} />}
+                className="cc-inline-icon-btn cc-bridge-ready-info-btn"
+                onClick={() => setBridgeReadyHintOpen((current) => !current)}
+                aria-label="查看连接说明"
+                aria-expanded={bridgeReadyHintOpen}
+                title="查看连接说明"
+              />
+            </p>
+            {bridgeReadyHintOpen ? (
+              <div className="cc-bridge-ready-popover" role="status">
+                {bridgeReadyLongHint}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="hint cc-step-meta cc-bridge-onboarding-message is-error">
+            {bridgeOnboardingValidation.message ??
+              "配置保存后，可直接在这里启动或停止 bridge。"}
+          </p>
+        )}
 
         <div className="cc-step-secondary-actions">
           <Button
@@ -1196,7 +1421,7 @@ export function ControlCenterView({
             onClick={() => setBridgeConfigOpen(true)}
             disabled={bridgeBusy}
           >
-            打开 Bridge 配置
+            {openBridgeConfigTitle}
           </Button>
         </div>
         <div className="cc-danger-group">
@@ -1342,7 +1567,7 @@ export function ControlCenterView({
                   <strong>{diagnostics?.state ?? status?.state ?? "-"}</strong>
                 </article>
                 <article className="cc-signal-card">
-                  <span>IM Bridge 最终状态</span>
+                  <span>{bridgeFinalStatusTitle}</span>
                   <strong>{imFinalStatusLabel}</strong>
                 </article>
               </div>
@@ -1457,7 +1682,7 @@ export function ControlCenterView({
                   >
                     <span className="cc-task-card-icon"><Play size={16} /></span>
                     <span className="cc-task-card-copy">
-                      <strong>打开 IM Bridge</strong>
+                      <strong>{openBridgeTitle}</strong>
                     </span>
                     <span className="cc-task-card-meta">{bridgeStatusLabel}</span>
                   </button>
@@ -1948,6 +2173,27 @@ export function ControlCenterView({
               <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用右键菜单</Button>
               <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
             </div>
+            <div className="cc-runtime-close-behavior">
+              <h4 className="log-tail-title">关闭窗口行为</h4>
+              <p className="hint">仅主窗口生效（prefill 不变）</p>
+              <div className="cc-auth-switch" role="group" aria-label="关闭窗口行为">
+                {mainWindowCloseBehaviorOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`cc-auth-switch-btn ${
+                      mainWindowCloseBehavior === option.value ? "active" : ""
+                    }`}
+                    onClick={() => {
+                      void handleSelectMainWindowCloseBehavior(option.value);
+                    }}
+                    disabled={mainCloseBehaviorSaving || actionBusy}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="diagnostics-grid">
               <DiagnosticItem label="Started At (Epoch UTC)" value={diagnostics?.startedAt ?? "-"} />
               <DiagnosticItem label="Configured Kimi Path" value={diagnostics?.configuredKimiPath ?? "-"} />
@@ -1977,7 +2223,7 @@ export function ControlCenterView({
       <div className="cc-bridge-shell">
         <section className="cc-card">
           <header className="cc-card-header">
-            <h3>IM Bridge</h3>
+            <h3>{bridgeDisplayName}</h3>
           </header>
           <div className="cc-card-body cc-step-body cc-step-body-single">
             {renderBridgeStepContent()}
@@ -1986,7 +2232,7 @@ export function ControlCenterView({
 
         <section className="cc-card">
           <ControlCenterCardHeader
-            title="Bridge 运行面板"
+            title={bridgeRuntimePanelTitle}
             description="展开后查看运行配置、sessions、bindings、审批和日志。"
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
@@ -2020,6 +2266,7 @@ export function ControlCenterView({
                 onOpenLogs={onOpenLogs}
                 onImportSession={onImportBridgeSession}
                 onClearBinding={onClearBridgeBinding}
+                onResetBindingSession={onResetBridgeBindingSession}
                 onResolveApproval={onResolveBridgeApproval}
               />
             </div>
@@ -2050,7 +2297,7 @@ export function ControlCenterView({
                 void handleSelectControlSection(section.id);
               }}
             >
-              {section.label}
+              {section.id === "bridge_center" ? bridgeDisplayName : section.label}
             </Button>
           ))}
         </nav>
@@ -2084,6 +2331,7 @@ export function ControlCenterView({
         open={bridgeConfigOpen}
         busy={bridgeBusy}
         dirty={bridgeOnboardingDirty}
+        titleLabel={bridgeConfigTitle}
         draft={bridgeOnboardingDraft}
         validation={bridgeOnboardingValidation}
         status={bridgeStatus}

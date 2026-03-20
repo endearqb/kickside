@@ -158,6 +158,14 @@ export interface BridgeChannelStatus {
   lastOffset?: string;
   lastErrorCode?: string;
   lastError?: string;
+  lastReadyAt?: string;
+  lastFailureAt?: string;
+  lastFailureOperation?: string;
+  lastFailureRetryable?: boolean;
+  consecutiveFailures?: number;
+  nextRetryAt?: string;
+  lastRecoveryAt?: string;
+  recoveryHint?: string;
 }
 
 export interface BridgeStatus {

@@ -37,14 +37,14 @@ const (
 )
 
 type InboundAttachment struct {
-	Kind           AttachmentKind         `json:"kind,omitempty"`
-	FileName       string                 `json:"fileName,omitempty"`
-	MimeType       string                 `json:"mimeType,omitempty"`
-	SizeBytes      int64                  `json:"sizeBytes,omitempty"`
-	PlatformKey    string                 `json:"platformKey,omitempty"`
-	LocalPath      string                 `json:"localPath,omitempty"`
-	SourceMessageID string                `json:"sourceMessageId,omitempty"`
-	DownloadState  AttachmentDownloadState `json:"downloadState,omitempty"`
+	Kind            AttachmentKind          `json:"kind,omitempty"`
+	FileName        string                  `json:"fileName,omitempty"`
+	MimeType        string                  `json:"mimeType,omitempty"`
+	SizeBytes       int64                   `json:"sizeBytes,omitempty"`
+	PlatformKey     string                  `json:"platformKey,omitempty"`
+	LocalPath       string                  `json:"localPath,omitempty"`
+	SourceMessageID string                  `json:"sourceMessageId,omitempty"`
+	DownloadState   AttachmentDownloadState `json:"downloadState,omitempty"`
 }
 
 type OutboundAttachment struct {
@@ -75,21 +75,21 @@ type RuntimeArtifact struct {
 }
 
 type PendingInboundAttachment struct {
-	AttachmentID    string                 `json:"attachmentId"`
-	Platform        string                 `json:"platform"`
-	ChatID          string                 `json:"chatId"`
-	ThreadID        string                 `json:"threadId,omitempty"`
-	Kind            AttachmentKind         `json:"kind"`
-	FileName        string                 `json:"fileName,omitempty"`
-	MimeType        string                 `json:"mimeType,omitempty"`
-	SizeBytes       int64                  `json:"sizeBytes,omitempty"`
-	PlatformKey     string                 `json:"platformKey,omitempty"`
-	LocalPath       string                 `json:"localPath,omitempty"`
-	SourceMessageID string                 `json:"sourceMessageId,omitempty"`
+	AttachmentID    string                  `json:"attachmentId"`
+	Platform        string                  `json:"platform"`
+	ChatID          string                  `json:"chatId"`
+	ThreadID        string                  `json:"threadId,omitempty"`
+	Kind            AttachmentKind          `json:"kind"`
+	FileName        string                  `json:"fileName,omitempty"`
+	MimeType        string                  `json:"mimeType,omitempty"`
+	SizeBytes       int64                   `json:"sizeBytes,omitempty"`
+	PlatformKey     string                  `json:"platformKey,omitempty"`
+	LocalPath       string                  `json:"localPath,omitempty"`
+	SourceMessageID string                  `json:"sourceMessageId,omitempty"`
 	DownloadState   AttachmentDownloadState `json:"downloadState,omitempty"`
-	ExpiresAt       string                 `json:"expiresAt,omitempty"`
-	CreatedAt       string                 `json:"createdAt"`
-	UpdatedAt       string                 `json:"updatedAt"`
+	ExpiresAt       string                  `json:"expiresAt,omitempty"`
+	CreatedAt       string                  `json:"createdAt"`
+	UpdatedAt       string                  `json:"updatedAt"`
 }
 
 type InboundMessage struct {
@@ -185,15 +185,37 @@ type OutboundMessage struct {
 }
 
 type ChannelStatus struct {
-	Platform        string              `json:"platform"`
-	Enabled         bool                `json:"enabled"`
-	State           ChannelRuntimeState `json:"state"`
-	LastHeartbeatAt string              `json:"lastHeartbeatAt,omitempty"`
-	LastInboundAt   string              `json:"lastInboundAt,omitempty"`
-	LastOutboundAt  string              `json:"lastOutboundAt,omitempty"`
-	LastOffset      string              `json:"lastOffset,omitempty"`
-	LastErrorCode   string              `json:"lastErrorCode,omitempty"`
-	LastError       string              `json:"lastError,omitempty"`
+	Platform             string              `json:"platform"`
+	Enabled              bool                `json:"enabled"`
+	State                ChannelRuntimeState `json:"state"`
+	LastHeartbeatAt      string              `json:"lastHeartbeatAt,omitempty"`
+	LastInboundAt        string              `json:"lastInboundAt,omitempty"`
+	LastOutboundAt       string              `json:"lastOutboundAt,omitempty"`
+	LastOffset           string              `json:"lastOffset,omitempty"`
+	LastErrorCode        string              `json:"lastErrorCode,omitempty"`
+	LastError            string              `json:"lastError,omitempty"`
+	LastReadyAt          string              `json:"lastReadyAt,omitempty"`
+	LastFailureAt        string              `json:"lastFailureAt,omitempty"`
+	LastFailureOperation string              `json:"lastFailureOperation,omitempty"`
+	LastFailureRetryable bool                `json:"lastFailureRetryable,omitempty"`
+	ConsecutiveFailures  int                 `json:"consecutiveFailures,omitempty"`
+	NextRetryAt          string              `json:"nextRetryAt,omitempty"`
+	LastRecoveryAt       string              `json:"lastRecoveryAt,omitempty"`
+	RecoveryHint         string              `json:"recoveryHint,omitempty"`
+}
+
+type ChannelDiagnosticsUpdate struct {
+	State                ChannelRuntimeState
+	LastErrorCode        string
+	LastError            string
+	LastReadyAt          *string
+	LastFailureAt        *string
+	LastFailureOperation *string
+	LastFailureRetryable *bool
+	ConsecutiveFailures  *int
+	NextRetryAt          *string
+	LastRecoveryAt       *string
+	RecoveryHint         *string
 }
 
 type BridgeStatus struct {

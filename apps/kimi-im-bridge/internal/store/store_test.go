@@ -504,6 +504,66 @@ func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) 
 	}
 }
 
+func TestChannelDiagnosticsPersistRecoveryFields(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SyncConfiguredChannels(ctx, []config.ChannelConfig{{
+		Platform: "feishu",
+		Enabled:  true,
+	}}); err != nil {
+		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
+	}
+
+	lastReadyAt := "2026-03-20T01:00:00Z"
+	lastFailureAt := "2026-03-20T01:25:41Z"
+	lastFailureOperation := "long_connection"
+	lastFailureRetryable := true
+	consecutiveFailures := 2
+	nextRetryAt := "2026-03-20T01:25:43Z"
+	lastRecoveryAt := "2026-03-20T01:26:10Z"
+	recoveryHint := "host_connection_aborted"
+	if err := store.UpdateChannelDiagnostics(ctx, "feishu", domain.ChannelDiagnosticsUpdate{
+		State:                domain.ChannelStateDegraded,
+		LastErrorCode:        "transient_network",
+		LastError:            "wsasend aborted by host machine",
+		LastReadyAt:          &lastReadyAt,
+		LastFailureAt:        &lastFailureAt,
+		LastFailureOperation: &lastFailureOperation,
+		LastFailureRetryable: &lastFailureRetryable,
+		ConsecutiveFailures:  &consecutiveFailures,
+		NextRetryAt:          &nextRetryAt,
+		LastRecoveryAt:       &lastRecoveryAt,
+		RecoveryHint:         &recoveryHint,
+	}); err != nil {
+		t.Fatalf("UpdateChannelDiagnostics returned error: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected one channel status, got %+v", statuses)
+	}
+	status := statuses[0]
+	if status.LastReadyAt != lastReadyAt || status.LastFailureAt != lastFailureAt || status.LastRecoveryAt != lastRecoveryAt {
+		t.Fatalf("expected recovery timestamps to persist, got %+v", status)
+	}
+	if status.LastFailureOperation != lastFailureOperation || !status.LastFailureRetryable {
+		t.Fatalf("expected failure operation/retryable to persist, got %+v", status)
+	}
+	if status.ConsecutiveFailures != consecutiveFailures || status.NextRetryAt != nextRetryAt || status.RecoveryHint != recoveryHint {
+		t.Fatalf("expected recovery counters and hint to persist, got %+v", status)
+	}
+}
+
 func TestListSessionsAndBindingWorkDirUpdates(t *testing.T) {
 	t.Parallel()
 

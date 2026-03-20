@@ -1,5 +1,6 @@
 mod app_state;
 mod backend_manager;
+mod bridge_host_control;
 mod bridge_http_client;
 mod bridge_manager;
 mod bridge_settings_store;
@@ -36,9 +37,9 @@ use types::{
     InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
     KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
     MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
-    PowerShellPreflightSummary, ShutdownProgressPayload,
-    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
-    SubmitPrefillAck, WebviewRuntimeKind, CURRENT_ONBOARDING_VERSION,
+    PowerShellPreflightSummary, ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -331,7 +332,10 @@ fn submit_main_window_close_decision(
         input,
         "submit_main_window_close_decision_invoke",
     )?;
-    if matches!(outcome, window_manager::MainWindowCloseDecisionOutcome::Exit) {
+    if matches!(
+        outcome,
+        window_manager::MainWindowCloseDecisionOutcome::Exit
+    ) {
         start_graceful_exit(app, "main_close_decision_confirmed_exit");
     }
     Ok(())
@@ -589,6 +593,14 @@ fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(
                 last_offset: None,
                 last_error_code: None,
                 last_error: None,
+                last_ready_at: None,
+                last_failure_at: None,
+                last_failure_operation: None,
+                last_failure_retryable: None,
+                consecutive_failures: None,
+                next_retry_at: None,
+                last_recovery_at: None,
+                recovery_hint: None,
             })
             .collect();
     }

@@ -158,6 +158,7 @@ impl BridgeProcessState {
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub bridge_runtime: Mutex<BridgeProcessState>,
+    pub bridge_host_control_port: Mutex<Option<u16>>,
     pub settings_path: PathBuf,
     pub bridge_settings_path: PathBuf,
     pub bridge_secrets_path: PathBuf,
@@ -206,6 +207,7 @@ impl AppState {
         Ok(Self {
             runtime: Mutex::new(RuntimeState::default()),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
+            bridge_host_control_port: Mutex::new(None),
             settings_path: config_dir.join("settings.json"),
             bridge_settings_path: config_dir.join("bridge_settings.json"),
             bridge_secrets_path: config_dir.join("bridge_secrets.json"),

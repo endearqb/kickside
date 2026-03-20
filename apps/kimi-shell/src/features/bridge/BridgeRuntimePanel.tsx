@@ -192,6 +192,81 @@ function formatCountLabel(count: number, singular: string, plural = `${singular}
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function isChannelAutoRecovering(channel?: BridgeStatus["channels"][number]): boolean {
+  return Boolean(
+    channel &&
+      channel.state !== "ready" &&
+      channel.lastFailureRetryable &&
+      channel.nextRetryAt,
+  );
+}
+
+function formatRelativeTime(value?: string): string {
+  if (!value) return "未记录";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  const diffMs = Math.abs(Date.now() - timestamp);
+  const seconds = Math.max(1, Math.round(diffMs / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  const days = Math.round(hours / 24);
+  return `${days} 天`;
+}
+
+function formatRetrySchedule(nextRetryAt?: string): string {
+  if (!nextRetryAt) return "未安排自动重试";
+  const timestamp = Date.parse(nextRetryAt);
+  if (Number.isNaN(timestamp)) return nextRetryAt;
+  const diffMs = timestamp - Date.now();
+  if (diffMs <= 0) return `${formatTimestamp(nextRetryAt)}（应已到达）`;
+  return `${formatTimestamp(nextRetryAt)}（约 ${formatRelativeTime(new Date(Date.now() + diffMs).toISOString())} 后）`;
+}
+
+function formatRecoveryHint(hint?: string): string {
+  switch (hint) {
+    case "host_connection_aborted":
+      return "本机连接被中断，优先检查网络、代理、VPN、防火墙或杀软。";
+    case "tls_timeout":
+      return "TLS 握手超时，优先检查网络质量和代理链路。";
+    case "connection_reset":
+      return "连接被重置，通常是上游网络或中间链路抖动。";
+    case "invalid_credentials":
+      return "凭证无效，请检查 appId/appSecret。";
+    case "permission_denied":
+      return "权限或事件订阅不足，请检查飞书后台配置。";
+    default:
+      return hint?.trim() ? hint : "暂无恢复提示。";
+  }
+}
+
+function formatFailureOperation(operation?: string): string {
+  switch (operation) {
+    case "credential_probe":
+      return "credential_probe（凭证探活）";
+    case "long_connection":
+      return "long_connection（长连接）";
+    default:
+      return operation?.trim() ? operation : "未记录";
+  }
+}
+
+function formatFeishuDiagnosis(channel?: BridgeStatus["channels"][number]): string {
+  if (!channel) return "当前没有 Feishu 实时诊断数据。";
+  if (isChannelAutoRecovering(channel)) {
+    return "Feishu 通道正在自动恢复，建议先等待下一次自动重试。";
+  }
+  if (channel.recoveryHint === "host_connection_aborted") {
+    return "最近一次断连更像是宿主机网络或安全软件中断了长连接。";
+  }
+  if (channel.state !== "ready") {
+    return "Feishu 通道异常，但这不等于 binding 或 session 已损坏。";
+  }
+  return "Feishu 通道已 ready；若仍感觉没回复，优先检查 binding、session、workdir 和 approvals。";
+}
+
 export function BridgeRuntimePanel({
   settings,
   status,
@@ -231,6 +306,8 @@ export function BridgeRuntimePanel({
     status.state === "running" ||
     status.state === "starting" ||
     status.state === "degraded";
+  const feishuChannel = status.channels.find((channel) => channel.platform === "feishu");
+  const feishuAutoRecovering = isChannelAutoRecovering(feishuChannel);
 
   function toggleSection(sectionId: BridgePanelSectionId) {
     setExpandedSections((current) => ({
@@ -447,6 +524,7 @@ export function BridgeRuntimePanel({
         <>
           <div className="cc-actions">
             <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshStatus()} disabled={busy}>刷新状态</Button>
+            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void Promise.all([onRefreshStatus(), onRefreshLogTail()])} disabled={busy}>刷新诊断</Button>
           </div>
           <div className="diagnostics-grid">
             <div className="diag-item"><span className="diag-label">PID</span><strong>{status.pid ?? "-"}</strong></div>
@@ -462,7 +540,11 @@ export function BridgeRuntimePanel({
               status.channels.map((channel) => (
                 <div key={channel.platform} className="bridge-channel-status-card">
                   <strong>{platformLabel(channel.platform)}</strong>
-                  <span>{channel.state}</span>
+                  <span>
+                    {channel.platform === "feishu" && channel.recoveryHint === "host_connection_aborted"
+                      ? "本机连接被中断"
+                      : channel.state}
+                  </span>
                   <small>
                     offset: {channel.lastOffset ?? "-"}
                     {channel.lastError || channel.lastErrorCode ? ` | error: ${formatErrorLine(channel.lastErrorCode, channel.lastError)}` : ""}
@@ -471,6 +553,36 @@ export function BridgeRuntimePanel({
               ))
             ) : (
               <p className="hint">bridge 未运行时不会返回实时 channel 状态。</p>
+            )}
+          </div>
+          <div className="bridge-panel-subsection">
+            <div className="bridge-panel-subheader">
+              <h5>Feishu 连接恢复状态</h5>
+            </div>
+            {feishuChannel ? (
+              <>
+                <div className="diagnostics-grid">
+                  <div className="diag-item"><span className="diag-label">当前状态</span><strong>{feishuChannel.recoveryHint === "host_connection_aborted" ? "本机连接被中断" : feishuChannel.state}</strong></div>
+                  <div className="diag-item"><span className="diag-label">自动恢复中</span><strong>{feishuAutoRecovering ? "是" : "否"}</strong></div>
+                  <div className="diag-item"><span className="diag-label">最近 ready</span><strong>{feishuChannel.lastReadyAt ? `${formatTimestamp(feishuChannel.lastReadyAt)} / ${formatRelativeTime(feishuChannel.lastReadyAt)} 前` : "-"}</strong></div>
+                  <div className="diag-item"><span className="diag-label">最近失败</span><strong>{feishuChannel.lastFailureAt ? `${formatTimestamp(feishuChannel.lastFailureAt)} / ${formatRelativeTime(feishuChannel.lastFailureAt)} 前` : "-"}</strong></div>
+                  <div className="diag-item"><span className="diag-label">连续失败</span><strong>{feishuChannel.consecutiveFailures ?? 0}</strong></div>
+                  <div className="diag-item"><span className="diag-label">下一次重试</span><strong>{formatRetrySchedule(feishuChannel.nextRetryAt)}</strong></div>
+                </div>
+                <div className="bridge-error-list">
+                  <div className="bridge-error-card">{formatFeishuDiagnosis(feishuChannel)}</div>
+                  <div className="bridge-error-card">失败阶段：{formatFailureOperation(feishuChannel.lastFailureOperation)}</div>
+                  <div className="bridge-error-card">恢复提示：{formatRecoveryHint(feishuChannel.recoveryHint)}</div>
+                  {feishuChannel.lastError || feishuChannel.lastErrorCode ? (
+                    <div className="bridge-error-card">最近错误：{formatErrorLine(feishuChannel.lastErrorCode, feishuChannel.lastError)}</div>
+                  ) : null}
+                  {feishuChannel.lastRecoveryAt ? (
+                    <div className="bridge-error-card">最近恢复：{formatTimestamp(feishuChannel.lastRecoveryAt)}</div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <p className="hint">当前没有 Feishu 通道状态；bridge 未运行或 Feishu 未启用时不会展示恢复诊断。</p>
             )}
           </div>
           <div className="bridge-panel-subsection">

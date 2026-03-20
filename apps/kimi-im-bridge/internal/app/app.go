@@ -28,25 +28,29 @@ import (
 )
 
 type Options struct {
-	Version     string
-	ConfigPath  string
-	SecretsPath string
-	DBPath      string
-	LogFilePath string
-	AdminPort   int
-	AdminToken  string
+	Version          string
+	ConfigPath       string
+	SecretsPath      string
+	DBPath           string
+	LogFilePath      string
+	AdminPort        int
+	AdminToken       string
+	HostControlURL   string
+	HostControlToken string
+	SkillsDir        string
 }
 
 type Service struct {
-	options      Options
-	settings     config.BridgeSettings
-	secrets      config.BridgeSecrets
-	store        *store.Store
-	logger       *logging.Logger
-	bindings     *binding.Router
-	orchestrator *bridgecore.Orchestrator
-	provider     bridgecore.RuntimeProvider
-	runtimeSvc   *runtime.Service
+	options            Options
+	settings           config.BridgeSettings
+	secrets            config.BridgeSecrets
+	store              *store.Store
+	logger             *logging.Logger
+	bindings           *binding.Router
+	orchestrator       *bridgecore.Orchestrator
+	provider           bridgecore.RuntimeProvider
+	runtimeSvc         *runtime.Service
+	skillsAuthFilePath string
 
 	mu            sync.RWMutex
 	state         domain.BridgeRuntimeState
@@ -96,8 +100,19 @@ func New(options Options) (*Service, error) {
 		state:    domain.BridgeStateStopped,
 		stopCh:   make(chan struct{}),
 	}
+	if strings.TrimSpace(options.SkillsDir) != "" {
+		authFilePath, err := writeBridgeSkillsAuthFile(options)
+		if err != nil {
+			_ = service.Close()
+			return nil, err
+		}
+		service.skillsAuthFilePath = authFilePath
+	}
 	service.provider = kimiprovider.NewProvider(
-		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{}),
+		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{
+			SkillsDir:    strings.TrimSpace(options.SkillsDir),
+			AuthFilePath: service.skillsAuthFilePath,
+		}),
 		storeHandle,
 		storeHandle,
 	)
@@ -109,7 +124,10 @@ func New(options Options) (*Service, error) {
 		storeHandle,
 	)
 	service.runtimeSvc = runtime.NewService(
-		runtime.NewSDKDriver(runtime.SDKDriverOptions{}),
+		runtime.NewSDKDriver(runtime.SDKDriverOptions{
+			SkillsDir:    strings.TrimSpace(options.SkillsDir),
+			AuthFilePath: service.skillsAuthFilePath,
+		}),
 		storeHandle,
 		storeHandle,
 	)
@@ -230,6 +248,7 @@ func (s *Service) Close() error {
 	errRuntime := s.runtimeSvc.Close()
 	errStore := s.store.Close()
 	errLogger := s.logger.Close()
+	cleanupBridgeSkillsAuthFile(s.skillsAuthFilePath)
 	if errProvider != nil {
 		return errProvider
 	}
@@ -535,18 +554,24 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 			Logger:        s.logger,
 		}), nil
 	case "feishu":
+		var hostControl feishuplatform.HostController
+		if strings.TrimSpace(s.options.HostControlURL) != "" && strings.TrimSpace(s.options.HostControlToken) != "" {
+			hostControl = feishuplatform.NewHostControlClient(s.options.HostControlURL, s.options.HostControlToken)
+		}
 		return feishuplatform.NewService(feishuplatform.Options{
 			Config: feishuplatform.Config{
-				AppID:          secretFeishuAppID(s.secrets),
-				AppSecret:      secretFeishuAppSecret(s.secrets),
-				AutoApprove:    s.settings.FeishuAutoApprove,
-				DefaultWorkDir: s.settings.DefaultWorkDir,
-				WorkDirPresets: mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
-				ReplyRenderer:  s.settings.FeishuReplyRenderer,
-				AttachmentsDir: filepath.Join(filepath.Dir(s.options.DBPath), "attachments", "feishu"),
+				AppID:                 secretFeishuAppID(s.secrets),
+				AppSecret:             secretFeishuAppSecret(s.secrets),
+				AutoApprove:           s.settings.FeishuAutoApprove,
+				DefaultWorkDir:        s.settings.DefaultWorkDir,
+				WorkDirPresets:        mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
+				ReplyRenderer:         s.settings.FeishuReplyRenderer,
+				AttachmentsDir:        filepath.Join(filepath.Dir(s.options.DBPath), "attachments", "feishu"),
+				BridgeOpsSkillEnabled: strings.TrimSpace(s.options.SkillsDir) != "",
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,
+			HostControl:   hostControl,
 			Store:         s.store,
 			Logger:        s.logger,
 		}), nil

@@ -3,10 +3,13 @@ package feishu
 import (
 	"errors"
 	"net"
+	"regexp"
 	"strings"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 )
+
+var feishuWhitespacePattern = regexp.MustCompile(`\s+`)
 
 func classifyFeishuError(err error) reliability.Classification {
 	var apiErr *APIError
@@ -58,7 +61,9 @@ func classifyFeishuError(err error) reliability.Classification {
 
 	lower := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(lower, "context deadline exceeded"),
+	case strings.Contains(lower, "aborted by the software in your host machine"),
+		strings.Contains(lower, "wsasend:"),
+		strings.Contains(lower, "context deadline exceeded"),
 		strings.Contains(lower, "connection reset"),
 		strings.Contains(lower, "connection refused"),
 		strings.Contains(lower, "tls handshake timeout"),
@@ -81,4 +86,69 @@ func classifyFeishuError(err error) reliability.Classification {
 	}
 
 	return reliability.Classification{Code: "unknown"}
+}
+
+func feishuRecoveryHint(code string, err error) string {
+	lower := strings.ToLower(strings.TrimSpace(errString(err)))
+	switch {
+	case code == "invalid_credentials":
+		return "invalid_credentials"
+	case code == "permission_denied":
+		return "permission_denied"
+	case strings.Contains(lower, "aborted by the software in your host machine"),
+		strings.Contains(lower, "wsasend:"):
+		return "host_connection_aborted"
+	case strings.Contains(lower, "tls handshake timeout"):
+		return "tls_timeout"
+	case strings.Contains(lower, "connection reset"):
+		return "connection_reset"
+	default:
+		return ""
+	}
+}
+
+func feishuFailureFingerprint(code string, err error) string {
+	normalized := normalizeFeishuErrorMessage(err)
+	if normalized == "" {
+		return strings.TrimSpace(code)
+	}
+	if strings.TrimSpace(code) == "" {
+		return normalized
+	}
+	return strings.TrimSpace(code) + "|" + normalized
+}
+
+func normalizeFeishuErrorMessage(err error) string {
+	lower := strings.ToLower(strings.TrimSpace(errString(err)))
+	if lower == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(lower, "aborted by the software in your host machine"),
+		strings.Contains(lower, "wsasend:"):
+		return "host_connection_aborted"
+	case strings.Contains(lower, "tls handshake timeout"):
+		return "tls_timeout"
+	case strings.Contains(lower, "connection reset"):
+		return "connection_reset"
+	case strings.Contains(lower, "connection refused"):
+		return "connection_refused"
+	case strings.Contains(lower, "context deadline exceeded"):
+		return "context_deadline_exceeded"
+	case strings.Contains(lower, "unexpected eof"):
+		return "unexpected_eof"
+	case strings.Contains(lower, "timeout"):
+		return "timeout"
+	case strings.Contains(lower, "broken pipe"):
+		return "broken_pipe"
+	default:
+		return feishuWhitespacePattern.ReplaceAllString(lower, " ")
+	}
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

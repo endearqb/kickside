@@ -1,8 +1,8 @@
 package runtime
 
 import (
-	"encoding/base64"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +18,9 @@ import (
 )
 
 type SDKDriverOptions struct {
-	Executable string
+	Executable   string
+	SkillsDir    string
+	AuthFilePath string
 }
 
 type SDKDriver struct {
@@ -30,9 +32,15 @@ func NewSDKDriver(options SDKDriverOptions) *SDKDriver {
 }
 
 func (d *SDKDriver) OpenSession(request PromptRequest) (DriverSession, error) {
-	options := make([]kimi.Option, 0, 4)
+	if err := configureSDKDriverEnvironment(d.options.AuthFilePath); err != nil {
+		return nil, err
+	}
+	options := make([]kimi.Option, 0, 5)
 	if d.options.Executable != "" {
 		options = append(options, kimi.WithExecutable(d.options.Executable))
+	}
+	if d.options.SkillsDir != "" {
+		options = append(options, kimi.WithSkillsDir(d.options.SkillsDir))
 	}
 	if request.KimiSessionID != "" {
 		options = append(options, kimi.WithSession(request.KimiSessionID))
@@ -51,6 +59,17 @@ func (d *SDKDriver) OpenSession(request PromptRequest) (DriverSession, error) {
 	return &sdkDriverSession{session: session}, nil
 }
 
+func configureSDKDriverEnvironment(authFilePath string) error {
+	authFilePath = strings.TrimSpace(authFilePath)
+	if authFilePath == "" {
+		return os.Unsetenv("KIMI_BRIDGE_AUTH_FILE")
+	}
+	if err := os.Setenv("KIMI_BRIDGE_AUTH_FILE", authFilePath); err != nil {
+		return fmt.Errorf("set KIMI_BRIDGE_AUTH_FILE: %w", err)
+	}
+	return nil
+}
+
 type sdkDriverSession struct {
 	session *kimi.Session
 }
@@ -66,9 +85,9 @@ func (s *sdkDriverSession) StartPrompt(ctx context.Context, request PromptReques
 	}
 
 	stream := &sdkPromptStream{
-		turn:    turn,
-		events:  make(chan DriverEvent),
-		result:  make(chan DriverResult, 1),
+		turn:   turn,
+		events: make(chan DriverEvent),
+		result: make(chan DriverResult, 1),
 	}
 	go stream.consume()
 	return stream, nil

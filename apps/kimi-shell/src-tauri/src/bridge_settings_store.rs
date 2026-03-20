@@ -764,10 +764,7 @@ mod tests {
             channels: vec![],
         });
 
-        assert_eq!(
-            normalized.feishu_reply_renderer,
-            FeishuReplyRenderer::Post
-        );
+        assert_eq!(normalized.feishu_reply_renderer, FeishuReplyRenderer::Post);
         assert!(normalized.feishu_reply_cards.is_none());
     }
 

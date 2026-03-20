@@ -121,17 +121,20 @@ type panelButtonSpec struct {
 }
 
 type doctorReport struct {
-	BridgeState      string
-	Channel          *domain.ChannelStatus
-	Binding          *domain.SessionBinding
-	Session          *domain.BridgeSession
-	ActivePresetName string
-	ActivePresetPath string
-	EffectiveWorkDir string
-	PendingApprovals int
-	ProbeStatus      string
-	ProbeError       string
-	NextSteps        []string
+	BridgeState           string
+	Channel               *domain.ChannelStatus
+	Binding               *domain.SessionBinding
+	Session               *domain.BridgeSession
+	ActivePresetName      string
+	ActivePresetPath      string
+	EffectiveWorkDir      string
+	PendingApprovals      int
+	ProbeStatus           string
+	ProbeError            string
+	ChannelAutoRecovering bool
+	BindingHealthy        bool
+	SessionHealthy        bool
+	NextSteps             []string
 }
 
 func parseBridgeCommand(event *MessageEvent) (bridgeCommand, domain.BindingKey, bool) {
@@ -380,32 +383,45 @@ func (s *Service) sendCommandCard(ctx context.Context, source *MessageEvent, suf
 }
 
 func (s *Service) useSessionForBinding(ctx context.Context, key domain.BindingKey, sessionID string) (map[string]any, error) {
-	session, err := s.store.GetSessionByID(ctx, sessionID)
+	binding, session, err := s.switchBindingToSession(ctx, key, sessionID)
 	if err != nil {
-		return nil, reliability.Wrap("unknown", err)
+		return nil, err
 	}
 	if session == nil {
 		return buildErrorCard("Session not found", fmt.Sprintf("Bridge session `%s` was not found.", sessionID)), nil
 	}
-
-	binding, err := s.bindings.ResolveBinding(ctx, key)
-	if err != nil {
-		return nil, reliability.Wrap("unknown", err)
-	}
-	if binding == nil {
-		binding, err = s.bindings.CreateBinding(ctx, key, session.KimiSessionID, session.WorkDir, "manual_rebind")
-		if err != nil {
-			return nil, reliability.Wrap("unknown", err)
-		}
-	} else {
-		if err := s.bindings.Rebind(ctx, binding.BindingID, session.KimiSessionID); err != nil {
-			return nil, reliability.Wrap("unknown", err)
-		}
-		binding.KimiSessionID = session.KimiSessionID
-		binding.WorkDir = session.WorkDir
-	}
-
 	return buildSessionUpdatedCard(binding, *session), nil
+}
+
+func (s *Service) switchBindingToSession(ctx context.Context, key domain.BindingKey, sessionID string) (*domain.SessionBinding, *domain.BridgeSession, error) {
+	binding, err := s.resolveOrCreateBinding(ctx, key)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	session, err := s.store.GetSessionByID(ctx, sessionID)
+	if err != nil {
+		return nil, nil, reliability.Wrap("unknown", err)
+	}
+	if session == nil {
+		return binding, nil, nil
+	}
+
+	if err := s.bindings.Rebind(ctx, binding.BindingID, session.KimiSessionID); err != nil {
+		return nil, nil, reliability.Wrap("unknown", err)
+	}
+
+	nextWorkDir := strings.TrimSpace(binding.WorkDir)
+	if strings.TrimSpace(session.WorkDir) != "" {
+		nextWorkDir = strings.TrimSpace(session.WorkDir)
+	}
+	if err := s.bindings.UpdateBindingWorkDir(ctx, binding.BindingID, nextWorkDir); err != nil {
+		return nil, nil, reliability.Wrap("unknown", err)
+	}
+
+	binding.KimiSessionID = session.KimiSessionID
+	binding.WorkDir = nextWorkDir
+	return binding, session, nil
 }
 
 func buildBridgeHelpCard(key domain.BindingKey) map[string]any {
@@ -613,6 +629,13 @@ func buildDoctorCard(report doctorReport, key domain.BindingKey, showDetails boo
 	lastHeartbeat := "(not seen)"
 	lastInbound := "(not seen)"
 	lastOffset := "(none)"
+	lastReadyAt := "(not seen)"
+	lastFailureAt := "(not seen)"
+	lastFailureOperation := "(unknown)"
+	lastRecoveryAt := "(not yet)"
+	nextRetryAt := "(none)"
+	recoveryHint := "(none)"
+	consecutiveFailures := 0
 	if report.Channel != nil {
 		channelState = string(report.Channel.State)
 		channelErrorCode = firstNonEmpty(strings.TrimSpace(report.Channel.LastErrorCode), "(none)")
@@ -620,8 +643,15 @@ func buildDoctorCard(report doctorReport, key domain.BindingKey, showDetails boo
 		lastHeartbeat = inlineCodeOrFallback(report.Channel.LastHeartbeatAt, "(not seen)")
 		lastInbound = inlineCodeOrFallback(report.Channel.LastInboundAt, "(not seen)")
 		lastOffset = inlineCodeOrFallback(report.Channel.LastOffset, "(none)")
+		lastReadyAt = inlineCodeOrFallback(report.Channel.LastReadyAt, "(not seen)")
+		lastFailureAt = inlineCodeOrFallback(report.Channel.LastFailureAt, "(not seen)")
+		lastFailureOperation = inlineCodeOrFallback(report.Channel.LastFailureOperation, "(unknown)")
+		lastRecoveryAt = inlineCodeOrFallback(report.Channel.LastRecoveryAt, "(not yet)")
+		nextRetryAt = inlineCodeOrFallback(report.Channel.NextRetryAt, "(none)")
+		recoveryHint = inlineCodeOrFallback(report.Channel.RecoveryHint, "(none)")
+		consecutiveFailures = report.Channel.ConsecutiveFailures
 	}
-	bindingSummary := "No binding exists for this chat yet."
+	bindingSummary := "当前聊天还没有 binding。"
 	if report.Binding != nil {
 		bindingSummary = fmt.Sprintf(
 			"Binding `%s` -> session `%s`",
@@ -629,24 +659,39 @@ func buildDoctorCard(report doctorReport, key domain.BindingKey, showDetails boo
 			strings.TrimSpace(report.Binding.KimiSessionID),
 		)
 	}
+	channelDiagnosis := "当前看不出明显的通道异常。"
+	if report.Channel != nil {
+		switch {
+		case report.ChannelAutoRecovering:
+			channelDiagnosis = fmt.Sprintf(
+				"Feishu 通道正在自动恢复，下一次重试 %s。",
+				formatRetryWindow(report.Channel.NextRetryAt),
+			)
+		case strings.TrimSpace(report.Channel.RecoveryHint) == "host_connection_aborted":
+			channelDiagnosis = "最近一次长连接更像是被本机网络、代理、VPN、防火墙或杀软中断了。"
+		case report.Channel.State != domain.ChannelStateReady:
+			channelDiagnosis = "Feishu 通道当前异常，但 binding/session 本身不一定有问题。"
+		case report.Binding != nil:
+			channelDiagnosis = "Feishu 通道已经 ready；如果仍感觉没回复，优先检查 binding、session、workdir 和 approvals。"
+		}
+	}
 	summaryLines := []string{
-		fmt.Sprintf("Bridge overall state: `%s`", firstNonEmpty(report.BridgeState, "running")),
-		fmt.Sprintf("Feishu channel state: `%s`", channelState),
-		fmt.Sprintf("Current chat binding: %s", bindingSummary),
-		fmt.Sprintf("Pending approvals here: `%d`", report.PendingApprovals),
-		fmt.Sprintf("Live probe: `%s`", firstNonEmpty(report.ProbeStatus, "unknown")),
-		fmt.Sprintf("Recent error code: `%s`", channelErrorCode),
+		fmt.Sprintf("Bridge 总体状态：`%s`", firstNonEmpty(report.BridgeState, "running")),
+		fmt.Sprintf("Feishu 通道状态：`%s`", channelState),
+		fmt.Sprintf("自动恢复中：`%t`", report.ChannelAutoRecovering),
+		fmt.Sprintf("当前聊天 binding：%s", bindingSummary),
+		fmt.Sprintf("当前聊天 pending approvals：`%d`", report.PendingApprovals),
+		fmt.Sprintf("实时探活：`%s`", firstNonEmpty(report.ProbeStatus, "unknown")),
+		fmt.Sprintf("诊断结论：%s", channelDiagnosis),
 	}
 	if len(report.NextSteps) > 0 {
-		summaryLines = append(summaryLines, "Next steps:")
+		summaryLines = append(summaryLines, "建议下一步：")
 		for _, step := range report.NextSteps {
 			summaryLines = append(summaryLines, "- "+step)
 		}
 	}
 
-	elements := []any{
-		buildMarkdownElement(strings.Join(summaryLines, "\n")),
-	}
+	elements := []any{buildMarkdownElement(strings.Join(summaryLines, "\n"))}
 	elements = append(elements, buildPanelActionRows(key,
 		panelButtonSpec{Label: "Refresh doctor", Panel: bridgePanelDoctor, ButtonType: "primary"},
 		panelButtonSpec{Label: "Open approvals", Panel: bridgePanelApprovals, ButtonType: "default"},
@@ -660,34 +705,124 @@ func buildDoctorCard(report doctorReport, key domain.BindingKey, showDetails boo
 	)...)
 	if showDetails {
 		detailLines := []string{
-			fmt.Sprintf("Binding key: `%s|%s|%s|%s`", key.Platform, key.AccountID, key.ChatID, key.ThreadID),
-			fmt.Sprintf("Effective workdir: %s", inlineCodeOrFallback(report.EffectiveWorkDir, "(not set)")),
-			fmt.Sprintf("Last heartbeat: %s", lastHeartbeat),
-			fmt.Sprintf("Last inbound: %s", lastInbound),
-			fmt.Sprintf("Checkpoint: %s", lastOffset),
-			fmt.Sprintf("Last error: %s", channelError),
+			fmt.Sprintf("Binding key：`%s|%s|%s|%s`", key.Platform, key.AccountID, key.ChatID, key.ThreadID),
+			fmt.Sprintf("Effective workdir：%s", inlineCodeOrFallback(report.EffectiveWorkDir, "(not set)")),
+			fmt.Sprintf("最近 ready：%s（%s）", lastReadyAt, formatSinceNow(report.ChannelValue(func(channel *domain.ChannelStatus) string { return channel.LastReadyAt }))),
+			fmt.Sprintf("最近失败：%s（%s）", lastFailureAt, formatSinceNow(report.ChannelValue(func(channel *domain.ChannelStatus) string { return channel.LastFailureAt }))),
+			fmt.Sprintf("失败阶段：%s", formatFailureOperationLabel(lastFailureOperation)),
+			fmt.Sprintf("连续失败次数：`%d`", consecutiveFailures),
+			fmt.Sprintf("下一次自动重试：%s", formatRetryWindow(nextRetryAt)),
+			fmt.Sprintf("恢复提示：%s", formatRecoveryHintLabel(recoveryHint)),
+			fmt.Sprintf("最近恢复时间：%s", lastRecoveryAt),
+			fmt.Sprintf("Last heartbeat：%s", lastHeartbeat),
+			fmt.Sprintf("Last inbound：%s", lastInbound),
+			fmt.Sprintf("Checkpoint：%s", lastOffset),
+			fmt.Sprintf("最近错误 code：`%s`", channelErrorCode),
+			fmt.Sprintf("最近错误详情：%s", channelError),
 		}
 		if report.Binding != nil {
 			detailLines = append(detailLines,
-				fmt.Sprintf("Onboarded at: %s", inlineCodeOrFallback(report.Binding.OnboardedAt, "(not yet)")),
-				fmt.Sprintf("Onboarding version: %s", inlineCodeOrFallback(report.Binding.OnboardingVersion, "(not set)")),
+				fmt.Sprintf("Onboarded at：%s", inlineCodeOrFallback(report.Binding.OnboardedAt, "(not yet)")),
+				fmt.Sprintf("Onboarding version：%s", inlineCodeOrFallback(report.Binding.OnboardingVersion, "(not set)")),
 			)
 		}
 		if report.Session != nil {
 			detailLines = append(detailLines,
-				fmt.Sprintf("Session id: `%s`", report.Session.KimiSessionID),
-				fmt.Sprintf("Session summary: %s", firstNonEmpty(strings.TrimSpace(report.Session.Summary), "(none)")),
+				fmt.Sprintf("Session id：`%s`", report.Session.KimiSessionID),
+				fmt.Sprintf("Session summary：%s", firstNonEmpty(strings.TrimSpace(report.Session.Summary), "(none)")),
 			)
 		}
 		if report.ActivePresetName != "" {
-			detailLines = append(detailLines, fmt.Sprintf("Preset match: `%s` -> `%s`", report.ActivePresetName, report.ActivePresetPath))
+			detailLines = append(detailLines, fmt.Sprintf("Preset match：`%s` -> `%s`", report.ActivePresetName, report.ActivePresetPath))
 		}
 		if strings.TrimSpace(report.ProbeError) != "" {
-			detailLines = append(detailLines, fmt.Sprintf("Probe detail: %s", strings.TrimSpace(report.ProbeError)))
+			detailLines = append(detailLines, fmt.Sprintf("Probe detail：%s", strings.TrimSpace(report.ProbeError)))
 		}
 		elements = append(elements, buildMarkdownElement(strings.Join(detailLines, "\n\n")))
 	}
 	return buildCard("grey", "Bridge doctor", elements)
+}
+
+func (report doctorReport) ChannelValue(selector func(*domain.ChannelStatus) string) string {
+	if report.Channel == nil {
+		return ""
+	}
+	return strings.TrimSpace(selector(report.Channel))
+}
+
+func formatFailureOperationLabel(value string) string {
+	switch strings.TrimSpace(value) {
+	case "credential_probe":
+		return "`credential_probe`（凭证探活）"
+	case "long_connection":
+		return "`long_connection`（长连接）"
+	case "":
+		return "(unknown)"
+	default:
+		return inlineCodeOrFallback(value, "(unknown)")
+	}
+}
+
+func formatRecoveryHintLabel(value string) string {
+	switch strings.TrimSpace(value) {
+	case "host_connection_aborted":
+		return "`host_connection_aborted`（更像是本机连接被中断）"
+	case "tls_timeout":
+		return "`tls_timeout`（TLS 握手超时）"
+	case "connection_reset":
+		return "`connection_reset`（连接被重置）"
+	case "invalid_credentials":
+		return "`invalid_credentials`（凭证无效）"
+	case "permission_denied":
+		return "`permission_denied`（权限或订阅不足）"
+	case "":
+		return "(none)"
+	default:
+		return inlineCodeOrFallback(value, "(none)")
+	}
+}
+
+func formatSinceNow(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "未记录"
+	}
+	timestamp, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "时间格式异常"
+	}
+	return humanDuration(time.Since(timestamp))
+}
+
+func formatRetryWindow(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "未安排自动重试"
+	}
+	timestamp, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return inlineCodeOrFallback(value, "未安排自动重试")
+	}
+	if time.Until(timestamp) <= 0 {
+		return fmt.Sprintf("%s（应已到达）", inlineCodeOrFallback(value, value))
+	}
+	return fmt.Sprintf("%s（约 %s 后）", inlineCodeOrFallback(value, value), humanDuration(time.Until(timestamp)))
+}
+
+func humanDuration(duration time.Duration) string {
+	if duration < 0 {
+		duration = -duration
+	}
+	switch {
+	case duration < time.Minute:
+		return fmt.Sprintf("%d 秒", int(duration.Seconds()))
+	case duration < time.Hour:
+		return fmt.Sprintf("%d 分钟", int(duration.Minutes()))
+	case duration < 24*time.Hour:
+		return fmt.Sprintf("%d 小时", int(duration.Hours()))
+	default:
+		return fmt.Sprintf("%d 天", int(duration.Hours()/24))
+	}
 }
 
 func buildWorkDirPresetButtons(presets []WorkDirPreset, key domain.BindingKey, activePresetPath string) []any {

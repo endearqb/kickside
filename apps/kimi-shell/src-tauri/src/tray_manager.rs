@@ -22,13 +22,8 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let open_diagnostics = MenuItem::with_id(
-        app,
-        MENU_OPEN_DIAGNOSTICS,
-        "打开诊断",
-        true,
-        None::<&str>,
-    )?;
+    let open_diagnostics =
+        MenuItem::with_id(app, MENU_OPEN_DIAGNOSTICS, "打开诊断", true, None::<&str>)?;
     let open_logs = MenuItem::with_id(app, MENU_OPEN_LOGS, "打开日志目录", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;

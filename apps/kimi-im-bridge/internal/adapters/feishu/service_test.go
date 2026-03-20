@@ -911,6 +911,49 @@ func TestServiceStartSkipsPersistedCheckpoint(t *testing.T) {
 	}
 }
 
+func TestServiceOnReadyClearsRecoveryChainAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, _, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	err := fmt.Errorf("write tcp 198.18.0.1:6219->183.136.203.179:443: wsasend: An established connection was aborted by the software in your host machine.")
+	classification := classifyFeishuError(err)
+	service.recordConnectionFailure(
+		context.Background(),
+		"long_connection",
+		classification,
+		err,
+		domain.ChannelStateDegraded,
+		1,
+		time.Second,
+	)
+
+	service.OnReady(context.Background())
+
+	statuses, err := storeHandle.ListChannelStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected one channel status, got %+v", statuses)
+	}
+	status := statuses[0]
+	if status.State != domain.ChannelStateReady {
+		t.Fatalf("expected ready state after recovery, got %+v", status)
+	}
+	if status.ConsecutiveFailures != 0 || status.NextRetryAt != "" {
+		t.Fatalf("expected recovery chain to be cleared, got %+v", status)
+	}
+	if status.LastReadyAt == "" || status.LastRecoveryAt == "" {
+		t.Fatalf("expected ready and recovery timestamps, got %+v", status)
+	}
+	if status.RecoveryHint != "host_connection_aborted" || status.LastFailureOperation != "long_connection" {
+		t.Fatalf("expected last failure context to be preserved, got %+v", status)
+	}
+}
+
 func newTestService(t *testing.T, cfg Config) (*Service, *store.Store, *fakeGateway, *fakeRuntimeExecutor) {
 	t.Helper()
 
@@ -1021,5 +1064,86 @@ func TestServiceCachesInboundImageUntilNextPrompt(t *testing.T) {
 	}
 	if pendingAfter != 0 {
 		t.Fatalf("expected cached attachment to be cleared after prompt acceptance, got %d", pendingAfter)
+	}
+}
+
+func TestServiceBridgeOpsTextFallsBackToNormalPrompt(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, runtimeExec := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "plain bridge ops reply"}}},
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-status-1",
+		MessageID:   "msg-status-1",
+		ChatID:      "chat-status-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"桥接：查看状态"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("bridge ops status returned advance=%v err=%v", advance, err)
+	}
+	if len(runtimeExec.execCalls) != 1 {
+		t.Fatalf("expected bridge ops text to flow through runtime, got %d calls", len(runtimeExec.execCalls))
+	}
+	if len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected one reply call, got %d", len(gateway.replyCalls))
+	}
+	if runtimeExec.execCalls[0].request.Prompt != "桥接：查看状态" {
+		t.Fatalf("expected bridge ops text to be preserved as prompt, got %q", runtimeExec.execCalls[0].request.Prompt)
+	}
+	if !strings.Contains(gateway.replyCalls[0].Content, "plain bridge ops reply") {
+		t.Fatalf("expected normal runtime reply, got %+v", gateway.replyCalls)
+	}
+}
+
+func TestServiceBridgeOpsSkillContextPrependsBindingMetadata(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, runtimeExec := newTestService(t, Config{
+		AppID:                 "cli_a",
+		AppSecret:             "secret",
+		DefaultWorkDir:        "D:/skill-default",
+		BridgeOpsSkillEnabled: true,
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "skill reply"}}},
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-skill-1",
+		MessageID:   "msg-skill-1",
+		ChatID:      "chat-skill-1",
+		ThreadID:    "thread-skill-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"重启"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(runtimeExec.execCalls) != 1 {
+		t.Fatalf("expected exactly one runtime call, got %d", len(runtimeExec.execCalls))
+	}
+
+	prompt := runtimeExec.execCalls[0].request.Prompt
+	if !strings.Contains(prompt, "[bridge_context]") ||
+		!strings.Contains(prompt, "platform=feishu") ||
+		!strings.Contains(prompt, "chat_id=chat-skill-1") ||
+		!strings.Contains(prompt, "thread_id=thread-skill-1") ||
+		!strings.Contains(prompt, "current_workdir=D:/skill-default") {
+		t.Fatalf("expected bridge skill context block, got %q", prompt)
+	}
+	if !strings.Contains(prompt, "重启") {
+		t.Fatalf("expected original user message to remain in prompt, got %q", prompt)
+	}
+	if len(gateway.replyCalls) != 1 || !strings.Contains(gateway.replyCalls[0].Content, "skill reply") {
+		t.Fatalf("expected normal runtime reply, got %+v", gateway.replyCalls)
 	}
 }

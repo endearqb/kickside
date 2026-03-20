@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 9
+const userVersion = 10
 
 type Store struct {
 	db *sql.DB
@@ -128,7 +128,10 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT platform, enabled, state, last_heartbeat_at, last_inbound_at, last_outbound_at, last_offset, last_error
+		`SELECT platform, enabled, state, last_heartbeat_at, last_inbound_at, last_outbound_at, last_offset, last_error,
+		        ifnull(last_ready_at, ''), ifnull(last_failure_at, ''), ifnull(last_failure_operation, ''),
+		        ifnull(last_failure_retryable, 0), ifnull(consecutive_failures, 0), ifnull(next_retry_at, ''),
+		        ifnull(last_recovery_at, ''), ifnull(recovery_hint, '')
 		 FROM bridge_channels
 		 ORDER BY platform`,
 	)
@@ -146,6 +149,14 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 		var lastOutboundAt sql.NullString
 		var lastOffset sql.NullString
 		var rawError sql.NullString
+		var lastReadyAt sql.NullString
+		var lastFailureAt sql.NullString
+		var lastFailureOperation sql.NullString
+		var lastFailureRetryable int
+		var consecutiveFailures int
+		var nextRetryAt sql.NullString
+		var lastRecoveryAt sql.NullString
+		var recoveryHint sql.NullString
 		if err := rows.Scan(
 			&status.Platform,
 			&enabled,
@@ -155,6 +166,14 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 			&lastOutboundAt,
 			&lastOffset,
 			&rawError,
+			&lastReadyAt,
+			&lastFailureAt,
+			&lastFailureOperation,
+			&lastFailureRetryable,
+			&consecutiveFailures,
+			&nextRetryAt,
+			&lastRecoveryAt,
+			&recoveryHint,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan channel status: %w", err)
 		}
@@ -165,6 +184,14 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 		status.LastOffset = nullStringValue(lastOffset)
 		_ = nullStringValue(heartbeatAt)
 		status.LastErrorCode, status.LastError = decodeChannelError(nullStringValue(rawError))
+		status.LastReadyAt = nullStringValue(lastReadyAt)
+		status.LastFailureAt = nullStringValue(lastFailureAt)
+		status.LastFailureOperation = nullStringValue(lastFailureOperation)
+		status.LastFailureRetryable = lastFailureRetryable == 1
+		status.ConsecutiveFailures = consecutiveFailures
+		status.NextRetryAt = nullStringValue(nextRetryAt)
+		status.LastRecoveryAt = nullStringValue(lastRecoveryAt)
+		status.RecoveryHint = nullStringValue(recoveryHint)
 		statuses = append(statuses, status)
 	}
 	if err := rows.Err(); err != nil {
@@ -180,17 +207,71 @@ func (s *Store) UpdateChannelState(
 	lastErrorCode string,
 	lastError string,
 ) error {
+	return s.UpdateChannelDiagnostics(ctx, platform, domain.ChannelDiagnosticsUpdate{
+		State:         state,
+		LastErrorCode: lastErrorCode,
+		LastError:     lastError,
+	})
+}
+
+func (s *Store) UpdateChannelDiagnostics(
+	ctx context.Context,
+	platform string,
+	update domain.ChannelDiagnosticsUpdate,
+) error {
 	now := nowRFC3339()
-	_, err := s.db.ExecContext(
-		ctx,
-		`UPDATE bridge_channels
-		 SET state = ?, last_error = ?, updated_at = ?
-		 WHERE channel_id = ?`,
-		state,
-		nullIfEmpty(encodeChannelError(lastErrorCode, lastError)),
+	setClauses := []string{
+		"state = ?",
+		"last_error = ?",
+		"updated_at = ?",
+	}
+	args := []any{
+		update.State,
+		nullIfEmpty(encodeChannelError(update.LastErrorCode, update.LastError)),
 		now,
-		platform,
+	}
+
+	if update.LastReadyAt != nil {
+		setClauses = append(setClauses, "last_ready_at = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.LastReadyAt)))
+	}
+	if update.LastFailureAt != nil {
+		setClauses = append(setClauses, "last_failure_at = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.LastFailureAt)))
+	}
+	if update.LastFailureOperation != nil {
+		setClauses = append(setClauses, "last_failure_operation = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.LastFailureOperation)))
+	}
+	if update.LastFailureRetryable != nil {
+		setClauses = append(setClauses, "last_failure_retryable = ?")
+		args = append(args, boolToInt(*update.LastFailureRetryable))
+	}
+	if update.ConsecutiveFailures != nil {
+		setClauses = append(setClauses, "consecutive_failures = ?")
+		args = append(args, *update.ConsecutiveFailures)
+	}
+	if update.NextRetryAt != nil {
+		setClauses = append(setClauses, "next_retry_at = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.NextRetryAt)))
+	}
+	if update.LastRecoveryAt != nil {
+		setClauses = append(setClauses, "last_recovery_at = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.LastRecoveryAt)))
+	}
+	if update.RecoveryHint != nil {
+		setClauses = append(setClauses, "recovery_hint = ?")
+		args = append(args, nullIfEmpty(strings.TrimSpace(*update.RecoveryHint)))
+	}
+
+	args = append(args, platform)
+	query := fmt.Sprintf(
+		`UPDATE bridge_channels
+		 SET %s
+		 WHERE channel_id = ?`,
+		strings.Join(setClauses, ", "),
 	)
+	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("failed to update channel state for %s: %w", platform, err)
 	}

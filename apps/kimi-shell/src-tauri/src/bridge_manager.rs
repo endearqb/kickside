@@ -1,4 +1,5 @@
 use std::{
+    env,
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -12,6 +13,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{AppState, BridgeProcessState},
+    bridge_host_control,
     bridge_http_client::{BindingUpdateInput, BridgeHttpClient},
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
     log_manager,
@@ -535,6 +537,26 @@ fn build_bridge_command(
         .stdout(stdout)
         .stderr(stderr);
 
+    match bridge_host_control::ensure_running(app) {
+        Ok(port) => {
+            command
+                .arg("--host-control-url")
+                .arg(format!("http://127.0.0.1:{port}"))
+                .arg("--host-control-token")
+                .arg(admin_token);
+        }
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!("bridge host control unavailable; restart via Feishu ops will be disabled: {error:#}"),
+            );
+        }
+    }
+
+    if let Some(skills_dir) = resolve_bridge_skills_dir_from_env() {
+        command.arg("--skills-dir").arg(skills_dir);
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -852,6 +874,14 @@ fn merge_channels(
                     last_offset: None,
                     last_error_code: None,
                     last_error: None,
+                    last_ready_at: None,
+                    last_failure_at: None,
+                    last_failure_operation: None,
+                    last_failure_retryable: None,
+                    consecutive_failures: None,
+                    next_retry_at: None,
+                    last_recovery_at: None,
+                    recovery_hint: None,
                 })
         })
         .collect()
@@ -874,8 +904,28 @@ fn settings_channels(
             last_offset: None,
             last_error_code: None,
             last_error: None,
+            last_ready_at: None,
+            last_failure_at: None,
+            last_failure_operation: None,
+            last_failure_retryable: None,
+            consecutive_failures: None,
+            next_retry_at: None,
+            last_recovery_at: None,
+            recovery_hint: None,
         })
         .collect()
+}
+
+fn resolve_bridge_skills_dir_from_env() -> Option<PathBuf> {
+    let raw = env::var_os("KIMI_BRIDGE_SKILLS_DIR")?;
+    let path = PathBuf::from(raw);
+    if path.as_os_str().is_empty() {
+        return None;
+    }
+    if path.is_dir() {
+        return Some(path);
+    }
+    None
 }
 
 fn default_channel_state(enabled: bool, runtime_state: BridgeRuntimeState) -> BridgeChannelState {
@@ -1241,6 +1291,34 @@ mod tests {
     }
 
     #[test]
+    fn resolve_bridge_skills_dir_from_env_returns_existing_directory_only() {
+        let temp = TempDirGuard::new("skills-dir-env");
+        let key = "KIMI_BRIDGE_SKILLS_DIR";
+        let original = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, temp.path.as_os_str());
+        }
+        assert_eq!(
+            resolve_bridge_skills_dir_from_env(),
+            Some(temp.path.clone())
+        );
+
+        unsafe {
+            std::env::set_var(key, temp.path.join("missing").as_os_str());
+        }
+        assert_eq!(resolve_bridge_skills_dir_from_env(), None);
+
+        match original {
+            Some(value) => unsafe {
+                std::env::set_var(key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
+    }
+
+    #[test]
     fn lifecycle_transition_helpers_update_bridge_runtime_state() {
         let mut runtime = BridgeProcessState::new("token".to_string());
         begin_start_transition(&mut runtime, 60_110, PathBuf::from("bridge.exe"), 4242);
@@ -1265,6 +1343,14 @@ mod tests {
                 last_offset: None,
                 last_error_code: None,
                 last_error: None,
+                last_ready_at: None,
+                last_failure_at: None,
+                last_failure_operation: None,
+                last_failure_retryable: None,
+                consecutive_failures: None,
+                next_retry_at: None,
+                last_recovery_at: None,
+                recovery_hint: None,
             }],
             pending_approvals: 1,
             bindings: 2,
@@ -1320,6 +1406,14 @@ mod tests {
             last_offset: None,
             last_error_code: None,
             last_error: None,
+            last_ready_at: None,
+            last_failure_at: None,
+            last_failure_operation: None,
+            last_failure_retryable: None,
+            consecutive_failures: None,
+            next_retry_at: None,
+            last_recovery_at: None,
+            recovery_hint: None,
         }];
 
         let channels =

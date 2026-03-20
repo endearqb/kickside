@@ -470,6 +470,14 @@ pub struct BridgeChannelStatus {
     pub last_offset: Option<String>,
     pub last_error_code: Option<String>,
     pub last_error: Option<String>,
+    pub last_ready_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub last_failure_operation: Option<String>,
+    pub last_failure_retryable: Option<bool>,
+    pub consecutive_failures: Option<usize>,
+    pub next_retry_at: Option<String>,
+    pub last_recovery_at: Option<String>,
+    pub recovery_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

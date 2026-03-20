@@ -1,3 +1,71 @@
+# Bridge Ops V2 CLI Skill Todo
+
+## Hard Constraints
+
+- [x] Keep Feishu `/bridge` entrypoints hidden; do not re-enable slash commands or card callbacks.
+- [x] Convert bridge ops to a pure CLI-agent skill; remove the Feishu-native bridge-ops executor path instead of keeping a fallback.
+- [x] Do not auto-load the project `skills/` directory; only enable bridge ops skills when `KIMI_BRIDGE_SKILLS_DIR` is explicitly provided.
+
+## Implementation
+
+- [x] Rewrite `skills/bridge-ops/SKILL.md` so it instructs the agent to run a deterministic PowerShell helper instead of relying on adapter-native execution.
+- [x] Add `skills/bridge-ops/scripts/bridge_ops.ps1` with JSON-returning `status`, `list-sessions`, `switch-session`, and `restart` commands.
+- [x] Add optional `--skills-dir` bridge startup plumbing and thread it into both Kimi SDK driver paths via `WithSkillsDir(...)`.
+- [x] Generate a bridge-local auth file for CLI skills and expose its path to spawned Kimi CLI sessions via `KIMI_BRIDGE_AUTH_FILE`.
+- [x] Prepend a compact bridge context block to Feishu inbound prompts only when bridge skills are enabled.
+- [x] Remove the Feishu-native `bridge_ops.go` interception / pending-confirmation flow so Feishu messages return to the normal agent prompt path.
+- [x] Add focused regression coverage for skills-dir plumbing, auth-file injection, Feishu prompt behavior, and script-facing bridge admin data flow.
+
+## Validation
+
+- [x] Run focused Go tests for bridge app/runtime/provider/Feishu adapter changes.
+- [x] Run focused Rust tests for shell bridge startup argument plumbing.
+- [ ] Run a manual PowerShell smoke of `skills/bridge-ops/scripts/bridge_ops.ps1` against the local bridge admin surface when available.
+
+## Retrospective
+
+- [x] Capture what changed between v1 native bridge-ops execution and v2 pure CLI skill execution, including the fact that bridge ops are unavailable until `skillsDir` is explicitly enabled.
+
+## Retrospective
+
+- 第二版把 Feishu `bridge-ops` 从适配层原生拦截改成了真正的 CLI skill：消息重新进入正常 agent prompt，只有在 bridge 启动时显式传入 `--skills-dir` 时，Kimi CLI session 才会加载 `D:\MyProject\kimi-app\skills\bridge-ops`。
+- 由于 bridge admin token 只存在宿主内存里，纯 CLI skill 不能直接“猜到” localhost 权限；这次通过 sidecar 生成桥接 auth file，并在拉起 Kimi CLI session 前注入 `KIMI_BRIDGE_AUTH_FILE`，把权限交给脚本而不是写死在 workdir 或日志里。
+- 当前仓库内已完成 `go test ./...`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --nocapture`，并验证脚本在未注入 `KIMI_BRIDGE_AUTH_FILE` 时会安全失败；真正的 live bridge 手工 smoke 仍需在你显式启用 `KIMI_BRIDGE_SKILLS_DIR` 后再做一次。
+
+---
+
+# Feishu Bridge Ops Skill Todo
+
+## Hard Constraints
+
+- [x] Keep Feishu `/bridge` entrypoints hidden; do not re-enable slash commands or card callbacks.
+- [x] Reuse existing bridge admin/binding/session control semantics; avoid changing public bridge APIs unless host restart plumbing strictly requires it.
+- [x] Keep bridge ops replies lightweight and text-based so restart/switch flows do not depend on interactive card callbacks.
+
+## Implementation
+
+- [x] Add a project-local `skills/bridge-ops/SKILL.md` that defines the supported bridge ops intents, confirmation rules, and concise reply style.
+- [x] Add Feishu bridge-ops intent parsing for explicit prefixes and high-confidence natural language while preserving hidden `/bridge` behavior.
+- [x] Add chat/thread-scoped pending confirmation and session-selection state for `restart` and `switch_session`.
+- [x] Reuse existing doctor/session/binding capabilities to implement `status`, `list_sessions`, and `switch_session` responses without routing through the normal model prompt path.
+- [x] Add a minimal shell host-control endpoint so the bridge sidecar can request `restart_bridge` from the Tauri host.
+- [x] Thread the host-control endpoint/token into bridge startup so Feishu restart confirmations can trigger a real bridge restart.
+- [x] Add focused Go and Rust regression coverage for bridge ops parsing/execution and host-control restart plumbing.
+
+## Validation
+
+- [x] Run focused Go tests for Feishu bridge ops parsing, confirmation, and execution behavior.
+- [x] Run focused Rust tests or cargo test coverage for the new host-control plumbing.
+- [x] Verify the new skill file is present at `D:\MyProject\kimi-app\skills\bridge-ops\SKILL.md`.
+
+## Retrospective
+
+- `/bridge` 的底层 bridge 管理能力仍然保留；这次没有恢复飞书 slash/card 入口，而是在 Feishu 适配层前置了一层 text-based bridge ops executor。
+- `restart` 之所以不能只在 sidecar 内部做，是因为真正的拉起动作掌握在 shell/Tauri 宿主里；因此这次补了一个最小 localhost host-control 通道来承接重启。
+- session 选择流的编号必须和展示顺序完全一致；实现里最终以“当前绑定 session 优先显示”的顺序生成候选和编号，避免出现用户看到的序号与实际切换目标不一致。
+
+---
+
 # Feishu Image/File/Interactive Integration Todo
 
 ## Hard Constraints
@@ -309,3 +377,61 @@
 - 新增的 `tools.md` 现在把飞书侧“怎么用”和“代码里怎么实现”放在同一份入口文档里，适合同时给使用者和开发者使用。
 - 文档明确限定在当前已实现能力内：文本消息、`/bridge` 命令、交互卡片、审批、workdir、doctor；没有把文件上传、图片输入或未来 OpenClaw/Lark 演进提前写进去。
 - 已完成静态核对，重点对齐了命令解析、群聊显式召唤、card action、审批决策值、reply card 开关，以及手工运行手册中已经定义的 Feishu 验证边界；本次未运行自动化测试，因为改动仅涉及文档与任务记录。
+
+---
+
+# IM Bridge Session Switch Investigation Todo
+
+## Hard Constraints
+
+- [x] 先确认问题是否由 web 侧切换 session 直接触发，再决定是否需要代码修复，避免误把网络抖动当作绑定逻辑问题。
+- [x] 排查时优先复用现有日志、binding/session 持久化与 shell/session 聚合实现，不做猜测式结论。
+- [x] 若发现问题，需要给出最小影响面的修复方案，并在验证后再标记完成。
+
+## Investigation
+
+- [x] 梳理用户提供日志中的时间线，确认 bridge 停止/重启前是否已有网络或连接异常信号。
+- [x] 检查 Feishu binding、session 切换、shell/web session 聚合与 bridge dispatch 相关代码路径。
+- [x] 判断 Kimi Code Web 切换 session 是否会影响当前 binding 命中的 bridge-native session 或消息派发门禁。
+- [x] 如发现根因在代码，实施修复并补充最小必要验证；如不是代码问题，整理可复现条件和排查建议。
+
+## Validation
+
+- [x] 运行最小必要的测试或静态验证，证明结论与代码现状一致。
+
+## Retrospective
+
+- [x] 这次日志里真正异常先出现在 Feishu 长连接：`transient_network` + `wsasend: An established connection was aborted by the software in your host machine.`，它比 bridge 重启更早出现，更像宿主机网络/安全软件中断了连接，而不是 web 切 session 直接打断了 binding。
+- [x] shell/web session 与 IM bridge session 在当前实现里是分层的：shell 侧只把 workspace session 聚合展示为 `source = shell/web`，并明确标记 `switchable = false`、`importable = true`；飞书 binding 真正使用的是 bridge-native session，因此单纯在 web 上切 session 不会直接改写 Feishu binding。
+- [x] 用户日志里的 `binding rebound` 与 `binding workdir updated` 更符合 bridge 启动后自动轮换 binding session 的现有设计；`resetBindingSessionOnBridgeStart` 默认值就是 `true`，bridge 成功启动后 shell 会对已有 binding 逐个生成新的 bridge-native session id 并回写 workdir。
+- [x] 本次未改业务代码；完成了静态代码核对，并跑通 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_manager -- --nocapture` 与 `go test ./internal/binding ./internal/store ./internal/adapters/feishu` 作为最小验证。
+
+---
+
+# Feishu IM Bridge Recovery Diagnostics Todo
+
+## Hard Constraints
+
+- [x] 不改现有 sidecar 架构，不引入独立 watchdog 或额外后台进程。
+- [x] 保持现有 session / binding / import 语义不变，只增强通道恢复可观测性、doctor 与控制中心状态展示。
+- [x] 诊断文案优先解释“通道异常”和“binding/session 异常”是不同问题，避免误导用户直接重启。
+
+## Implementation
+
+- [x] 为 bridge channel status 扩展恢复诊断字段：`lastReadyAt`、`lastFailureAt`、`lastFailureOperation`、`lastFailureRetryable`、`consecutiveFailures`、`nextRetryAt`、`lastRecoveryAt`、`recoveryHint`。
+- [x] 新增 SQLite `0010_channel_recovery_diagnostics.sql` 迁移，并让 store 支持持久化/读取新的恢复诊断字段。
+- [x] 在 Feishu service 中补齐连接生命周期日志：`opening`、`failure`、`retry scheduled`、`ready`、`recovered`，并对 `wsasend ... host machine` 归类为 `transient_network + host_connection_aborted`。
+- [x] 升级 `/bridge doctor`，展示自动恢复状态、最近 ready/失败、失败阶段、连续失败次数、下一次重试与恢复提示，并给出更准确的下一步建议。
+- [x] 扩展 Rust / TypeScript bridge status 类型与控制中心 Bridge Runtime 面板，新增 Feishu 连接恢复状态卡片与“刷新诊断”入口。
+
+## Validation
+
+- [x] 运行 `go test ./internal/adapters/feishu ./internal/store ./internal/app ./internal/admin`。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --nocapture`。
+- [x] 运行 `pnpm build`（`apps/kimi-shell`）。
+
+## Retrospective
+
+- [x] 现在 bridge / doctor / 控制中心会共享同一份 Feishu 恢复事实，不再只能从 `bridge.log` 文本里手工猜测“是否还在自动恢复”。
+- [x] `host_connection_aborted` 被单独提炼成恢复提示后，控制中心可以直接显示“本机连接被中断”，避免把宿主机网络/安全软件问题误导成飞书配置错误。
+- [x] 即使通道已经恢复到 `ready`，最近一次失败时间、失败阶段、恢复时间和恢复提示仍会保留，便于回看“为什么刚才失联过”。

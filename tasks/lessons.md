@@ -44,3 +44,5 @@
 - For Windows sidecar lifecycle management, do not treat `taskkill` as the primary stop path once the sidecar owns queues or approvals. Always provide a cooperative loopback/admin shutdown first, and use force-kill only as a bounded fallback.
 - When a persisted approval is expected to be resumable later, store the runtime correlation identifiers at creation time. For the IM bridge, `approval_requests` must keep `turn_id` and `step_id`, not just user-facing metadata.
 - 控制中心这类“外层固定壳 + 内层滚动正文”的页面，不能只给最内层内容区加 `overflow-y: auto`；必须沿着 `grid/flex` 父链同时补齐 `min-height: 0` 和明确高度约束，否则内容会把容器撑开，表现成“卡片显示不全且没有滚动条”。
+- 排查 bridge 失联时，如果日志里较晚出现 `bridge stopped/start`，必须先确认那是不是用户手动触发的恢复动作；不要把后续人工重启误判成根因，优先追前面的 `long_connection transient_network` 或更早的通道异常。
+- 当用户要求“做成 skill”来执行本地运维动作时，必须先确认这是“说明型 skill”还是“真正由 agent 在命令行里执行脚本的 CLI skill”；如果是后者，就不能停留在适配层原生拦截执行，而要把能力挂进实际 runtime session。

@@ -1,420 +1,166 @@
-# Bridge Ops V2 CLI Skill Todo
+# Bundled Bridge Ops Follow Workdir Todo
+
+## IM Bridge Panel / Binding / Logging
+
+### Implementation
+
+- [x] 重排 workspace 标题栏：移除左侧重复 Skill 入口，左侧保留 chat/code、分栏、左右换位、主题，右侧放 session 目录、Skill 和窗口三键。
+- [x] 收缩标题栏拖拽热区：仅中间 drag zone 可拖动或双击，不再让整条 header 参与拖拽命中。
+- [x] 调整 Skill Center：统一标签文案为“已信任 / 全局 / session”，列表 description 限制三行并补左栏稳定滚动。
+- [x] 修正 Skill Center 目录语义：当前工作区优先使用 active session workdir，并在详情底部展示技能实际已应用目录。
+- [x] 去掉 Skill Center 独立弹窗，统一复用控制中心 `skill_center` tab；标题栏 Skill 按钮改为直接切到控制中心的 Skill Center。
+- [x] 将 Skill Center 的搜索、从 Git 安装、导入本地 Skill 和全局 / session 筛选移到标题栏右侧横向排列，移除左栏重复工具区。
+- [x] 将“从 Git 安装”和“导入本地 Skill”改成应用内统一弹窗；导入本地 Skill 先弹窗选择目录或 ZIP，再打开系统选择器。
+- [x] 修正 Skill Center 左栏和详情页滚动到底部仍被遮挡的问题，增加底部滚动留白并去掉卡片 body 的额外裁切。
+- [x] 新增“重置到 IM 默认目录并新建会话”命令，保持“新建并切换会话”只切 session 不改当前 binding workdir。
+- [x] 调整 IM Bridge 主面板为单主 CTA，移除重复的保存/启动/重启入口，并把高级运行控制收敛到高级区。
+- [x] 将 `app.log` 与 `bridge.log` 落盘时间统一为本地时区并显式时区；确保 UI 展示与之保持一致。
+- [x] 补充后端/前端测试，覆盖 binding 恢复语义、主 CTA 状态机与日志时间格式。
+
+### Validation
+
+- [x] 运行 `pnpm build`（`apps/kimi-shell`），验证标题栏布局、Skill Center props 和样式改动可通过构建。
+- [x] 运行 `pnpm build`（`apps/kimi-shell`），验证移除 Skill Center 独立弹窗后标题栏入口与控制中心 tab 接线仍可通过构建。
+- [x] 运行 `pnpm build`（`apps/kimi-shell`），验证 Skill Center 标题栏工具区、统一弹窗和滚动样式改动可通过构建。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `go test ./internal/logging ./internal/app ./internal/admin ./internal/binding`。
+- [x] 运行 `pnpm build`（`apps/kimi-shell`）。
+
+### Retrospective
+
+- [x] 标题栏拖拽不应通过“整条 header 可拖 + 按钮区排除”来实现；更稳妥的方式是把拖拽事件只绑在中间专用 drag zone 上。
+- [x] Skill Center 里的“当前工作区”不能直接复用 `effectiveWorkDir`，否则会把默认工作目录误显示成当前 active session 所在目录。
+- [x] Skill Center 不该同时维护“标题栏弹窗”和“控制中心 tab”两套入口；同一功能应收敛到单一路由，否则状态刷新、Esc 关闭和导航语义都会分叉。
+- [x] Skill Center 的安装入口不应继续依赖 `window.prompt` 或左栏额外选择框；统一成应用内弹窗后，输入、选择和视觉风格才和控制中心/主窗口弹窗保持一致。
+- [x] 记录本次为什么要把“改默认目录”和“恢复已有 binding 到默认目录”拆成显式动作。
+
+### Notes
+
+- [x] 主面板现在只保留一条面向普通用户的主路径：未配置时“保存并启用 IM Bridge”，未运行时“启动 IM Bridge”，运行中有未应用更改时“应用设置并重启”；危险动作下沉到高级运行面板。
+- [x] “重启 bridge”继续只负责进程级重连，不再暗含“把已有 binding 强制拉回默认目录”；恢复到默认目录改成显式按钮，避免把用户的自定义 workdir 当成脏状态偷偷覆盖。
+- [x] shell `app.log` 与 bridge `bridge.log` 都改为本地时区落盘，原始日志 tail 直接可读；结构化时间在 Bridge Runtime 面板里也统一按本地时区展示并带时区。
+
+## 401 Auth Investigation
+
+### Plan
+
+- [x] 确认当前机器上 `bridge_skill_auth.json` 的候选路径与实际被读取的路径。
+- [x] 核对 auth 文件中的 `admin_base_url`、`admin_token`、`generated_at` 与 bridge 当前运行状态是否一致。
+- [x] 验证 bridge admin 401 是“token 不匹配”还是“调用方读错 auth 文件/旧上下文”。
+- [x] 输出结论，并给出下一步修复或操作建议。
 
 ## Hard Constraints
 
-- [x] Keep Feishu `/bridge` entrypoints hidden; do not re-enable slash commands or card callbacks.
-- [x] Convert bridge ops to a pure CLI-agent skill; remove the Feishu-native bridge-ops executor path instead of keeping a fallback.
-- [x] Do not auto-load the project `skills/` directory; only enable bridge ops skills when `KIMI_BRIDGE_SKILLS_DIR` is explicitly provided.
+- [x] `bridge-ops` 作为安装包内置资源分发，bridge follow 模式不再依赖用户手工拷贝 skill。
+- [x] `--skills-dir` 的 follow 模式固定解析到 `<effectiveBridgeDefaultWorkDir>\.agents\skills`，不再保留手填绝对路径入口。
+- [x] `KIMI_BRIDGE_SKILLS_DIR` 仅作为 `skillsMode=disabled` 时的兼容兜底，不破坏现有环境变量用户。
+
+## Skill Center v1
+
+### Hard Constraints
+
+- [x] Skill 安装必须先进入应用私有目录，不能直接落入任何 Agent 默认扫描目录。
+- [x] v1 只支持 Kimi CLI，不扩展 Claude/Codex 投影。
+- [x] “应用到用户全局”固定指向 `~/.config/agents/skills`，不再复用 IM 默认目录。
+- [x] “仅应用到当前 Session”固定指向 `active_session_work_dir/.agents/skills`，并按 session 生命周期清理受管投影。
+- [x] 手动导入支持本地目录和 ZIP；安装包内置 [skills](/D:/MyProject/kimi-app/skills) 目录下的合法 Skill 首次导入默认已信任。
+
+### Implementation
+
+- [x] 新增 Rust Skill Center 模块，完成私有仓库存储、registry/state 持久化、Git 安装、信任、全局/Session 投影与清理。
+- [x] 扩展 Tauri 命令与 Rust/TypeScript 公共类型，覆盖 installed skills、detail、apply scope、projection state、workspace recent 等模型。
+- [x] 在 `useShellController` 中接入 Skill Center 状态、刷新链路、安装/信任/应用/移除/恢复 handler，以及 active session 切换后的清理刷新。
+- [x] 在标题栏加入 Skill 按钮与当前 Session skill 数量徽标，并在 workspace 场景打开 Skill Center modal。
+- [x] 在控制中心新增 `Skill Center` section，并实现列表、详情、搜索/筛选、安装弹窗、全局/Session 操作和最近使用恢复。
+- [x] 扩展 Skill Center 为多来源模型：`git` / `local_import` / `bundled`，并新增本地导入命令与 ZIP 解压链路。
+- [x] 将整个 `skills` 目录打进安装包，并在 `skill_center::initialize()` 中同步 bundled skills 到私有仓库。
+- [x] 让 bundled skill 刷新时重同步现有 `copy` 投影，避免私有副本更新后受管复制投影内容过期。
+- [x] 调整 Skill Center 前端工具区与详情展示，支持“导入本地 Skill”与多来源元数据渲染。
+- [ ] 补充 Rust 单测，覆盖 registry/state 读写、合法/非法 skill 安装、命名规范化、重复安装、投影冲突、清理与 recent 记录。
+
+### Validation
+
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `pnpm build`（`apps/kimi-shell`）。
+- [x] 再次运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 再次运行 `pnpm build`（`apps/kimi-shell`）。
+- [ ] 手工验证标题栏 modal、控制中心 section、全局目录 `~/.config/agents/skills` 与 session 目录 `.agents/skills` 的应用/移除路径。
+
+### Retrospective
+
+- [x] 记录为什么 Skill Center v1 采用“用户级全局 + 当前 Session”双作用域，而不把 IM 默认目录误称为全局。
+
+### Notes
+
+- [x] Kimi CLI 的用户级全局 skills 目录采用官方推荐的 `~/.config/agents/skills`；`IM 默认目录/.agents/skills` 仍然只表示某个工作目录下的项目级 skills，不能再对外宣称为“全局”。
+- [x] Skill Center 通过“安装到应用私有目录，再投影到用户全局或当前 Session”把安装与生效解耦，既能做信任门槛，也能避免把任意 Git 仓库直接落进 Kimi 的默认扫描路径。
+- [x] Session 作用域会直接写入 `active_session_work_dir/.agents/skills`，因此必须把清理逻辑挂到 session 切换与 runtime clear 上；否则普通用户会把临时 skill 误留在真实工作区里。
 
 ## Implementation
 
-- [x] Rewrite `skills/bridge-ops/SKILL.md` so it instructs the agent to run a deterministic PowerShell helper instead of relying on adapter-native execution.
-- [x] Add `skills/bridge-ops/scripts/bridge_ops.ps1` with JSON-returning `status`, `list-sessions`, `switch-session`, and `restart` commands.
-- [x] Add optional `--skills-dir` bridge startup plumbing and thread it into both Kimi SDK driver paths via `WithSkillsDir(...)`.
-- [x] Generate a bridge-local auth file for CLI skills and expose its path to spawned Kimi CLI sessions via `KIMI_BRIDGE_AUTH_FILE`.
-- [x] Prepend a compact bridge context block to Feishu inbound prompts only when bridge skills are enabled.
-- [x] Remove the Feishu-native `bridge_ops.go` interception / pending-confirmation flow so Feishu messages return to the normal agent prompt path.
-- [x] Add focused regression coverage for skills-dir plumbing, auth-file injection, Feishu prompt behavior, and script-facing bridge admin data flow.
+- [x] 修复 Skill Center 对 `SKILL.md` frontmatter 的 CRLF 兼容性，避免 bundled skill 在 Windows 打包环境下错误回退到 H1 标题作为名称。
+- [x] 为 `parse_skill_manifest` 补充 `\r\n` 回归测试，并运行目标 Rust 测试验证名称解析恢复为 frontmatter `name`。
+- [x] 用 `skillsMode: disabled | follow_default_work_dir` 替换现有 `skillsDir` 持久化字段，并同步 Rust / TypeScript 类型与默认值。
+- [x] 将仓库里的 `skills/bridge-ops` 打进 shell 安装包资源，并实现运行时的 bundled skill 定位与递归复制 helper。
+- [x] 调整 `save_bridge_settings` / `save_work_dir` / `start_bridge` 链路：follow 模式下统一安装 bundled `bridge-ops` 并解析 `--skills-dir <workdir>\.agents\skills`。
+- [x] 在控制中心 IM Bridge 设置区移除手填 skills 目录输入，改为 follow 模式开关、只读预览路径和打开 `.agents\skills` 操作。
+- [x] 补充 Rust 单测，覆盖 `skillsMode` 默认值、legacy `skillsDir` 忽略、bundled skill 安装、follow 模式启动参数与 workdir 联动。
 
 ## Validation
 
-- [x] Run focused Go tests for bridge app/runtime/provider/Feishu adapter changes.
-- [x] Run focused Rust tests for shell bridge startup argument plumbing.
-- [ ] Run a manual PowerShell smoke of `skills/bridge-ops/scripts/bridge_ops.ps1` against the local bridge admin surface when available.
+- [x] 运行 bridge settings / bridge manager 相关 Rust 测试。
+- [x] 运行前端构建或类型检查，确认 Bridge 设置区 follow 模式新字段接线正确。
+- [ ] 手工验证启用 follow 模式后，`<workdir>\.agents\skills\bridge-ops` 会被创建且运行中的 `kimi-im-bridge.exe` 命令行带上 `--skills-dir <workdir>\.agents\skills`。
 
 ## Retrospective
 
-- [x] Capture what changed between v1 native bridge-ops execution and v2 pure CLI skill execution, including the fact that bridge ops are unavailable until `skillsDir` is explicitly enabled.
+- [x] 记录为什么“内置资源 + follow 默认工作目录”比“手填 skills 目录路径”更适合桌面端默认体验。
 
-## Retrospective
+### Notes
 
-- 第二版把 Feishu `bridge-ops` 从适配层原生拦截改成了真正的 CLI skill：消息重新进入正常 agent prompt，只有在 bridge 启动时显式传入 `--skills-dir` 时，Kimi CLI session 才会加载 `D:\MyProject\kimi-app\skills\bridge-ops`。
-- 由于 bridge admin token 只存在宿主内存里，纯 CLI skill 不能直接“猜到” localhost 权限；这次通过 sidecar 生成桥接 auth file，并在拉起 Kimi CLI session 前注入 `KIMI_BRIDGE_AUTH_FILE`，把权限交给脚本而不是写死在 workdir 或日志里。
-- 当前仓库内已完成 `go test ./...`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --nocapture`，并验证脚本在未注入 `KIMI_BRIDGE_AUTH_FILE` 时会安全失败；真正的 live bridge 手工 smoke 仍需在你显式启用 `KIMI_BRIDGE_SKILLS_DIR` 后再做一次。
+- [x] follow 模式要把 skill 安装动作和 `--skills-dir` 解析收敛到 Rust 后端，避免前端只展示路径但实际 bridge 启动没有复制资源或路径来源分叉。
+- [x] 现在安装包内置的 `bridge-ops` 会在 `save_bridge_settings`、`save_work_dir` 和 `start_bridge` 三条链路里按同一规则落到 `<effectiveBridgeDefaultWorkDir>\.agents\skills\bridge-ops`；相比手填路径，这样更像桌面端“开箱即用”的默认体验，也能把“默认工作目录”和 “bridge skills 目录”保持在同一套来源上。
 
----
+## Investigation Notes
 
-# Feishu Bridge Ops Skill Todo
-
-## Hard Constraints
-
-- [x] Keep Feishu `/bridge` entrypoints hidden; do not re-enable slash commands or card callbacks.
-- [x] Reuse existing bridge admin/binding/session control semantics; avoid changing public bridge APIs unless host restart plumbing strictly requires it.
-- [x] Keep bridge ops replies lightweight and text-based so restart/switch flows do not depend on interactive card callbacks.
+- [x] 当前机器存在 `C:\Users\Qian\AppData\Roaming\com.kimi.shell\bridge_skill_auth.json`，但文件内容是旧格式：`admin_base_url=http://localhost:60110`、`admin_token=local-bridge-admin`、无 `generated_at`。
+- [x] 正在运行的 `kimi-im-bridge.exe` 实际命令行参数使用 40 位随机 `--admin-token`，并监听 `127.0.0.1:60110`；用进程真实 token 调 `/api/v1/status` 返回 200。
+- [x] 用旧 auth 文件里的 token 调 `/api/v1/status` 返回 401 `{\"error\":\"unauthorized\"}`，根因不是“重启后没刷新同一 token”，而是“当前 bridge 根本没启用 skills auth 文件写入，却遗留了一份旧 auth 文件被脚本兜底读到了”。
+- [x] 当前 `bridge_settings.json` 为 `skillsMode=disabled`，bridge 启动命令行没有 `--skills-dir`；按现实现状，这种模式不会重写 `bridge_skill_auth.json`，所以旧文件会持续误导依赖默认发现路径的调用方。
 
 ## Implementation
 
-- [x] Add a project-local `skills/bridge-ops/SKILL.md` that defines the supported bridge ops intents, confirmation rules, and concise reply style.
-- [x] Add Feishu bridge-ops intent parsing for explicit prefixes and high-confidence natural language while preserving hidden `/bridge` behavior.
-- [x] Add chat/thread-scoped pending confirmation and session-selection state for `restart` and `switch_session`.
-- [x] Reuse existing doctor/session/binding capabilities to implement `status`, `list_sessions`, and `switch_session` responses without routing through the normal model prompt path.
-- [x] Add a minimal shell host-control endpoint so the bridge sidecar can request `restart_bridge` from the Tauri host.
-- [x] Thread the host-control endpoint/token into bridge startup so Feishu restart confirmations can trigger a real bridge restart.
-- [x] Add focused Go and Rust regression coverage for bridge ops parsing/execution and host-control restart plumbing.
+- [x] 修复 Skill Center 首次启动布局初始化递归：`ensure_layout()` 改为直接写空的 registry/global/workspace 状态文件，不再通过 `save_*` 包装器自调用。
+- [x] 重新构建 `0.0.30` 安装包，确认 release 可执行文件不再启动即崩溃。
 
 ## Validation
 
-- [x] Run focused Go tests for Feishu bridge ops parsing, confirmation, and execution behavior.
-- [x] Run focused Rust tests or cargo test coverage for the new host-control plumbing.
-- [x] Verify the new skill file is present at `D:\MyProject\kimi-app\skills\bridge-ops\SKILL.md`.
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `cargo build --release --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `pnpm tauri build`（`apps/kimi-shell`），产出新的 MSI / NSIS 安装包。
+- [x] 直接启动 `apps/kimi-shell/src-tauri/target/release/appskimi-shell.exe`，确认进程可持续存活，不再立即退出。
 
 ## Retrospective
 
-- `/bridge` 的底层 bridge 管理能力仍然保留；这次没有恢复飞书 slash/card 入口，而是在 Feishu 适配层前置了一层 text-based bridge ops executor。
-- `restart` 之所以不能只在 sidecar 内部做，是因为真正的拉起动作掌握在 shell/Tauri 宿主里；因此这次补了一个最小 localhost host-control 通道来承接重启。
-- session 选择流的编号必须和展示顺序完全一致；实现里最终以“当前绑定 session 优先显示”的顺序生成候选和编号，避免出现用户看到的序号与实际切换目标不一致。
-
----
-
-# Feishu Image/File/Interactive Integration Todo
-
-## Hard Constraints
-
-- [x] Keep the existing Go sidecar architecture and admin API lifecycle unchanged; no new Node/OpenClaw runtime.
-- [x] Use additive SQLite migration only for pending inbound attachments; keep existing bridge settings/secrets backward-compatible.
-- [x] Preserve existing `/bridge` command, approval-card, onboarding-card, and doctor-card behavior while moving normal Feishu replies to renderer-driven delivery.
+- [x] 首次启动初始化函数不能通过会再次调用 `ensure_layout()` 的 `save_*` 包装器创建默认文件，否则打包环境下会递归栈溢出并表现为“应用无法启动”。
 
 ## Implementation
 
-- [x] Add bridge-local attachment/artifact contracts across domain, runtime, bridgecore, and Kimi provider request types.
-- [x] Add pending inbound attachment persistence, expiry cleanup, and capped per-chat/thread caching in the bridge store.
-- [x] Extend Feishu inbound mapping to accept `image` and `file`, stage/download resources locally, and consume cached attachments on the next eligible text prompt.
-- [x] Extend the Feishu gateway/sender to upload and send `image`, `file`, and `interactive` replies with delivery metadata and fallback behavior.
-- [x] Switch bridge settings from `feishuReplyCards` to `feishuReplyRenderer` with backward-compatible normalization in Go, Rust, and TypeScript.
-- [x] Update the shell Bridge Runtime panel to use an explicit Feishu reply renderer selector instead of a boolean checkbox.
+- [x] 修复控制中心 `Skill Center` tab 路由，点击后刷新 Skill Center 状态并切换到 `skill_center` section，不再误跳到运行诊断。
+- [x] 重排 workspace 标题栏右侧工具区：将主题切换和 `Skill` 按钮一起移到右侧独立非拖拽区域，避免按钮点击被窗口拖动热区吞掉。
 
 ## Validation
 
-- [x] Run focused Go tests for store, config, Kimi provider, and Feishu adapter behavior.
-- [x] Run focused Rust tests for bridge settings persistence and normalization.
-- [x] Run a frontend build for the Bridge Runtime panel changes.
-- [ ] Note remaining manual Feishu smoke checks for image/file inbound and interactive reply delivery.
+- [x] 运行 `pnpm build`（`apps/kimi-shell`）。
 
 ## Retrospective
 
-- Normalized Feishu reply rendering onto an explicit renderer enum across Go/Rust/TS while preserving legacy `feishuReplyCards` read compatibility and avoiding config file churn on save.
-- Added staged inbound attachment caching plus multimodal prompt wiring without changing the existing sidecar runtime boundary; bridge-local artifact send now rides the current Feishu gateway/sender path.
-- Remaining validation is external to the repo: live Feishu smoke for image/file inbound, interactive chunking, and artifact upload/send behavior against a real tenant.
+- [x] 控制中心 tab 的 section 分发不能依赖“默认兜底到 runtime”，新增 section 时必须显式补分支，否则 UI 会表现为“tab 存在但点不开”。
+- [x] Markdown/frontmatter 解析不能假设仓库文件永远是 `\n`；桌面端打包后会遇到 `\r\n`，如果不先归一化换行符，就会错误回退到 H1 或正文解析路径。
 
 ---
 
-# Kimi IM Bridge Refactor Todo
-
-## Hard Constraints
-
-- [x] Keep CLI flags and admin API behavior stable.
-- [x] Keep `go test ./...` green after each implementation phase.
-- [x] Use additive SQLite migrations only; no destructive schema rewrites.
-
-## Implementation
-
-- [x] Add `internal/bridgecore` types, interfaces, and orchestrator.
-- [x] Add `internal/providers/kimi` and move provider/session orchestration there.
-- [x] Add `internal/adapterkit` shared inbound/checkpoint/approval contracts.
-- [x] Add `internal/platforms/{telegram,feishu}` and switch app wiring to them.
-- [x] Expand store/domain for turns, events, checkpoints, leases, and delivery metadata.
-- [x] Split `internal/app` into wiring and lifecycle responsibilities.
-- [x] Keep `internal/runtime` as an admin/debug compatibility facade.
-- [x] Add or update tests for bridgecore, provider, migrations, and app wiring.
-- [x] Run full package tests and verify migration coverage.
-
-## Review
-
-- [x] Confirm app startup still initializes channels and reconciles pending approvals.
-- [x] Confirm Telegram and Feishu adapters only advance checkpoints after successful handling.
-- [x] Confirm turn/approval persistence keeps `turn_id` and `step_id`.
-
-## Retrospective
-
-- Introduced `bridgecore` as the orchestration seam without breaking legacy adapter tests by making adapters accept either the old runtime path or the new orchestrator path.
-- Added additive migrations through schema version 7 so old databases can move forward without rebuilds.
-- Kept admin/debug behavior stable by leaving `internal/runtime` in place while production adapter wiring now flows through provider + bridgecore.
-
----
-
-# Kimi Shell Control Center UI Todo
-
-## Hard Constraints
-
-- [x] Keep backend commands, bridge/admin APIs, and Tauri window topology unchanged.
-- [x] Keep lightweight interactions inline in cards; heavy Bridge/API config must use dedicated modals.
-- [x] Keep modal structure consistent: fixed header + fixed footer + scrollable body only.
-
-## Implementation
-
-- [x] Flatten onboarding/settings cards so core fields are visible without accordion expansion.
-- [x] Remove the work-dir detail modal and keep work-dir editing directly in the card.
-- [x] Convert Bridge onboarding/detail flow into a dedicated Bridge config modal for config + secrets only.
-- [x] Add shared control-center modal shell and shared card header / status badge patterns.
-- [x] Update runtime Bridge panel to separate normal actions from danger actions and add clearer grouping labels.
-- [x] Rework install flow modal so only the body scrolls while header/footer remain fixed.
-- [x] Update responsive styles so fullscreen and workspace modal surfaces share one layout language.
-
-## Validation
-
-- [ ] Verify control center works in fullscreen and workspace modal surfaces.
-- [ ] Verify work-dir can be edited and saved inline without opening a modal.
-- [ ] Verify API config and Bridge config only edit sensitive settings through dedicated modals.
-- [ ] Verify modal `Escape` and overlay-close behavior still work with fixed header/footer shells.
-- [x] Run a frontend build and confirm no layout regressions in the touched control-center flows.
-
-## Retrospective
-
-- Shared `ControlCenterModalShell` now enforces one modal rule across config, install, and Bridge setup: fixed header, fixed footer, and body-only vertical scrolling.
-- Onboarding cards no longer mix accordion expansion with detail dialogs; lightweight actions stay inline, while API and Bridge heavy config are isolated in dedicated modals.
-- Bridge runtime actions are easier to parse after splitting normal operations from danger groups, which also keeps destructive actions away from the primary flow.
-- `pnpm build` 已通过；真实窗口的 fullscreen/workspace 双形态和手动交互 smoke 仍需在桌面端实际点检一次。
-
----
-
-# Bridge Status / Feishu Diagnostics Todo
-
-## Hard Constraints
-
-- [x] Keep admin API routes and `BridgeStatus` JSON shape backward-compatible.
-- [x] Keep bridge start/stop lifecycle semantics unchanged: process stays alive if only status probing fails.
-- [x] Prefer root-cause visibility over optimistic UI fallback; degraded state must not masquerade as connecting.
-
-## Implementation
-
-- [x] Make `apps/kimi-im-bridge/internal/app/app.go` return best-effort status snapshots even when some store reads fail.
-- [x] Add Go regression tests covering partial status snapshot failures and `/api/v1/status` returning `200`.
-- [x] Update `apps/kimi-shell/src-tauri/src/bridge_manager.rs` degraded fallback mapping so enabled channels resolve to `degraded`, not `connecting`.
-- [x] Add Rust tests covering local degraded status synthesis after status-probe failure.
-- [x] Add explicit Feishu startup-stage diagnostics for credential probe, endpoint fetch, websocket handshake, and long-connection failures.
-- [x] Adjust control-center Bridge copy so it no longer implies that saving credentials confirms Feishu platform connectivity.
-
-## Validation
-
-- [x] Run `go test ./internal/admin ./internal/app ./internal/store`.
-- [x] Run Rust bridge-manager targeted tests.
-- [x] Verify degraded snapshots now surface `lastError*` and do not report Feishu as `connecting` when status probing fails.
-
-## Retrospective
-
-- Sidecar `Status()` now treats channel listings and counters as independent best-effort reads, so `/api/v1/status` no longer collapses to HTTP 500 when SQLite snapshotting is partially unavailable.
-- Shell local fallback now synthesizes degraded channel states from settings whenever runtime probing fails in a degraded/crashed state, which removes the misleading `Bridge Degraded + Feishu Connecting` combination.
-- Feishu startup diagnostics now separate credential probe, endpoint fetch, and websocket handshake failures in `bridge.log`, and the control-center copy no longer implies that saved credentials alone prove platform connectivity.
-
----
-
-# Feishu IM Bridge UX / Sessions / Startup Diagnostics Todo
-
-## Hard Constraints
-
-- [x] Keep the existing Go bridge architecture and admin shutdown lifecycle; do not introduce a new Node runtime or detached background daemon flow.
-- [x] Keep persisted approval correlation fields (`turn_id`, `step_id`) intact across new approval UX changes.
-- [x] Treat `shell-web` sessions as discoverable/importable only; never bind them as if they were bridge-native sessions.
-
-## Implementation
-
-- [x] Add bridge-native session listing and binding workdir update support to the bridge store/domain/admin API.
-- [x] Add Feishu bridge management commands and card-based responses for help, sessions, cwd, and approvals.
-- [x] Rebuild Feishu approval cards to render structured summaries and expose approve once / approve for session / reject actions.
-- [x] Add session aggregation in shell/runtime so bridge-native and shell/web sessions can be surfaced with clear source labels.
-- [x] Add `defaultWorkDir` to shell bridge settings and preserve it across Rust/TS/JSON round-trips.
-- [x] Capture bridge startup stdout/stderr tails and surface structured startup-failure diagnostics in shell runtime/control center.
-
-## Validation
-
-- [x] Run focused Go tests for store/admin/Feishu adapter/session behavior.
-- [x] Run focused Rust tests for bridge manager/settings/session aggregation behavior.
-- [x] Run targeted frontend validation or build for the touched control-center flow.
-- [ ] Manually verify Feishu command/card flows, approval card readability, and startup-failure surfacing.
-
-## Retrospective
-
-- Feishu bridge 现在先识别 `/bridge ...` 管理命令，再回落到普通 mention prompt 流程；这让 session/cwd/approval 管理不再和模型对话路径耦合。
-- 飞书审批卡片不再被错误降级成 text/post 发送，结合结构化摘要提取和 `Approve for session` 动作后，pending approvals 不再把原始 JSON 直接暴露给用户。
-- 飞书卡片回调更新现在显式返回 `card_json` 而不是 `raw`，避免审批按钮点击后因回调卡片更新载荷不被接受而出现通用错误码。
-- Shell 侧把 `defaultWorkDir`、bridge-native sessions、shell/web sessions 和启动失败日志尾部整合进同一块控制中心面板；其中 shell/web session 目前只允许“导入为新的 bridge session”，避免误绑异构 session id。
-- 已完成 `go test ./...`、`cargo test --manifest-path src-tauri/Cargo.toml`、`pnpm build`；飞书真机卡片交互和桌面端手点 smoke 仍需补一次人工验收。
-
----
-
-# Bridge WorkDir Sync / Feishu Markdown Todo
-
-## Hard Constraints
-
-- [x] Keep bridge runtime lifecycle unchanged unless a work-dir sync fix strictly requires config persistence updates.
-- [x] Preserve existing bridge settings compatibility; explicit bridge-specific work-dir overrides must still win over app defaults.
-- [x] Keep Feishu normal chat replies compatible with current `post/text` fallback while clarifying markdown limitations honestly.
-
-## Implementation
-
-- [x] Make bridge `defaultWorkDir` follow the app `work_dir` when bridge is still inheriting the app default or currently unset.
-- [x] Update shell `save_work_dir` flow so changing the app work directory also persists the bridge default-follow behavior.
-- [x] Add clearer IM bridge work-dir command aliases/help text so Feishu users can directly add/remove per-chat work directories.
-- [x] Add focused tests for work-dir sync and Feishu command parsing aliases.
-
-## Validation
-
-- [x] Run focused Rust tests for bridge settings/work-dir sync.
-- [x] Run focused Go tests for Feishu command parsing/help behavior.
-
-## Retrospective
-
-- Bridge 现在把 app 的 `work_dir` 当作全局默认来源：bridge 默认目录为空时会自动继承它，且只有在 bridge 之前本来就在跟随 app 默认目录时，app 改目录才会继续联动更新。
-- 飞书里已经能直接按聊天“增删工作目录”了；这次把命令别名补成了更直观的 `/bridge cwd add <path>` 和 `/bridge cwd remove`，并在帮助卡片里明确了它们与全局默认目录的关系。
-- 已完成 `go test ./internal/adapters/feishu -v`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm build`。
-
----
-
-# Feishu Reply Card Mode Todo
-
-## Hard Constraints
-
-- [x] Keep Feishu normal replies backward-compatible by making card rendering opt-in.
-- [x] Preserve bridge settings compatibility across Go bridge, Rust store, and TS UI round-trips.
-- [x] Reuse existing Feishu interactive card primitives instead of introducing a new message transport path.
-
-## Implementation
-
-- [x] Add a persisted `feishuReplyCards` bridge setting and expose it in shell control center.
-- [x] Thread the new setting into the Go bridge app wiring and Feishu adapter config.
-- [x] Make normal Feishu model replies optionally send `interactive` cards with `lark_md`, while keeping current `post/text` fallback when disabled.
-- [x] Add focused regression coverage for reply-mode selection and bridge settings normalization.
-
-## Validation
-
-- [x] Run focused Go tests for Feishu sender/config behavior.
-- [x] Run focused Rust tests for bridge settings persistence.
-- [x] Run a frontend build for the updated bridge runtime panel.
-
-## Retrospective
-
-- 普通 Feishu 模型回复现在可以按设置切到 `interactive` 卡片模式，沿用已有 `buildCard + lark_md` 组件，因此命令卡片、审批卡片和普通回复最终都走同一套渲染语义。
-- `feishuReplyCards` 已经贯通到 Go bridge 配置、Rust `bridge_settings.json`、TypeScript UI 类型和控制中心面板，旧配置缺少该字段时会安全回落到 `false`。
-- 卡片模式对长回复会按较小分片大小拆成多张卡片，并带上 `Kimi reply (n/N)` 标题；关闭开关时仍保持原来的 `post/text` fallback，不影响现有聊天。
-- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`。
-
----
-
-# Feishu WorkDir Presets Todo
-
-## Hard Constraints
-
-- [x] Keep bridge settings backward-compatible; missing `workDirPresets` must safely fall back to an empty list.
-- [x] Preserve current `/bridge cwd set|add|clear|remove` text-command behavior while adding preset buttons.
-- [x] Do not add runtime hot-reload for presets; saving while bridge is running should only warn that restart is required for Feishu card freshness.
-
-## Implementation
-
-- [x] Add `workDirPresets` to Go bridge config, Rust settings store, and TypeScript bridge settings types with trim/filter/dedupe normalization.
-- [x] Extend the Bridge Runtime panel with add/remove preset rows and a save-time restart hint for running bridge sessions.
-- [x] Extend Feishu `/bridge cwd` cards to show preset buttons, highlight the active preset, and keep a clear-current-workdir action.
-- [x] Add Feishu card callback handling for preset apply/clear and update the card in place after the click.
-
-## Validation
-
-- [x] Run focused Go tests for config normalization and Feishu cwd card/callback behavior.
-- [x] Run focused Rust tests for bridge settings preset normalization.
-- [x] Run a frontend build for the Bridge Runtime panel changes.
-
-## Retrospective
-
-- `workDirPresets` 现在已经贯通到 Go bridge、Rust `bridge_settings.json` 和 TypeScript 控制中心类型，保存时会统一做 trim、空值过滤和按路径去重，旧配置缺字段时安全回落为空列表。
-- 控制中心 Bridge Runtime 面板新增了可编辑的预设目录列表，支持逐行新增/删除；如果 bridge 正在运行，保存成功后会提示需要重启 bridge，飞书 `/bridge cwd` 卡片才会加载最新预设。
-- 飞书 `/bridge cwd` 现在会同时显示默认目录、当前 binding workdir、选中的 preset，以及可点击的 preset 按钮和 `Clear current workdir` 操作；点按钮后卡片会原地刷新高亮状态。
-- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`；真实飞书点击 smoke 仍需手工补一轮。
-
----
-
-# OpenClaw-Lark Interaction Absorption Todo
-
-## Hard Constraints
-
-- [x] Keep the current Go Feishu adapter architecture and sidecar lifecycle unchanged; no Node runtime or detached daemon work.
-- [x] Keep `/bridge help|sessions|cwd|approvals` backward-compatible while adding `start` and `doctor`.
-- [x] Use additive SQLite migration only for binding onboarding metadata, and keep admin bindings JSON backward-compatible.
-
-## Implementation
-
-- [x] Add binding onboarding persistence fields plus a migration and store/router support for reading/updating onboarding state.
-- [x] Extend Feishu bridge commands with `/bridge start`, `/bridge doctor`, and a shared `bridge_show_panel` card action.
-- [x] Add onboarding cards with DM auto-send, group manual-send behavior, and quick actions into sessions/cwd/approvals/doctor.
-- [x] Add doctor report/card generation that reuses bridge status, binding/session state, pending approvals, and a live Feishu credential probe.
-- [x] Update Rust/TS binding record types if needed so new admin fields round-trip safely.
-
-## Validation
-
-- [x] Run focused Go tests for store migrations, Feishu command parsing/cards, onboarding gating, and doctor behavior.
-- [x] Run targeted Rust tests if binding record shape changes require shell client coverage.
-- [ ] Manually verify DM auto-onboarding, group `/bridge start`, and `/bridge doctor` card refresh in Feishu.
-
-## Retrospective
-
-- 这次没有把 openclaw-lark 的 runtime 搬进来，而是把最有价值的三层模式吸收到现有 Go Feishu adapter：统一 `/bridge` 命令入口、首次 welcome/onboarding 卡片、以及可原地刷新的 doctor 自诊断卡片。
-- onboarding 元数据现在按 binding 持久化在 SQLite 里，采用加法式 `0008` 迁移补了 `onboarded_at` 和 `onboarding_version`，这样 DM 首次自动欢迎和未来版本化重引导都不再依赖内存状态。
-- `bridge_show_panel` 把 help/start/sessions/cwd/approvals/doctor 六类卡片统一到一条 callback 链路，避免每个新面板都要单独发明 action 类型；同时继续沿用现有 `card_json` 原地更新路径。
-- doctor 卡片复用了现有 bridge store + Feishu gateway 轻量 credential probe，默认给安全摘要和下一步建议，详情按按钮展开，不暴露 secrets 或原始日志尾部。
-- 已完成 `go test ./internal/adapters/feishu ./internal/store ./internal/admin`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_manager -- --nocapture`、`pnpm build`；真实 Feishu 会话的 DM/group smoke 仍需手工点一轮。
-
----
-
-# Feishu Tools Doc Todo
-
-## Hard Constraints
-
-- [x] 文档只覆盖仓库里已经落地的飞书 IM Bridge 能力，不预写未来功能。
-- [x] `tools.md` 放在项目根目录，采用“使用者手册 + 开发者附录”的双层结构。
-- [x] 命令、卡片按钮、审批决策值、触发条件必须与当前实现完全一致。
-
-## Implementation
-
-- [x] 新增根目录 `tools.md`，说明飞书侧前置配置、入口规则、普通对话行为和回复模式。
-- [x] 在 `tools.md` 中列出 `/bridge help|start|sessions|use|cwd|approvals|doctor` 及其别名、示例和返回结果。
-- [x] 在 `tools.md` 中写清 onboarding、session 切换、workdir preset、clear workdir、approval resolve、panel switch 等卡片交互。
-- [x] 在 `tools.md` 中补充开发者附录，说明 `mapMessageToInbound`、`parseBridgeCommand`、`stripExplicitSummon`、card actions 和 reply 渲染策略。
-
-## Validation
-
-- [x] 逐项对照 `commands_cards.go`、`approval.go`、`service.go`、`sender.go`，静态核对文档与实现一致。
-- [x] 对照手工测试运行手册，确认文档没有声称支持未验证或不存在的飞书能力。
-
-## Retrospective
-
-- 新增的 `tools.md` 现在把飞书侧“怎么用”和“代码里怎么实现”放在同一份入口文档里，适合同时给使用者和开发者使用。
-- 文档明确限定在当前已实现能力内：文本消息、`/bridge` 命令、交互卡片、审批、workdir、doctor；没有把文件上传、图片输入或未来 OpenClaw/Lark 演进提前写进去。
-- 已完成静态核对，重点对齐了命令解析、群聊显式召唤、card action、审批决策值、reply card 开关，以及手工运行手册中已经定义的 Feishu 验证边界；本次未运行自动化测试，因为改动仅涉及文档与任务记录。
-
----
-
-# IM Bridge Session Switch Investigation Todo
-
-## Hard Constraints
-
-- [x] 先确认问题是否由 web 侧切换 session 直接触发，再决定是否需要代码修复，避免误把网络抖动当作绑定逻辑问题。
-- [x] 排查时优先复用现有日志、binding/session 持久化与 shell/session 聚合实现，不做猜测式结论。
-- [x] 若发现问题，需要给出最小影响面的修复方案，并在验证后再标记完成。
-
-## Investigation
-
-- [x] 梳理用户提供日志中的时间线，确认 bridge 停止/重启前是否已有网络或连接异常信号。
-- [x] 检查 Feishu binding、session 切换、shell/web session 聚合与 bridge dispatch 相关代码路径。
-- [x] 判断 Kimi Code Web 切换 session 是否会影响当前 binding 命中的 bridge-native session 或消息派发门禁。
-- [x] 如发现根因在代码，实施修复并补充最小必要验证；如不是代码问题，整理可复现条件和排查建议。
-
-## Validation
-
-- [x] 运行最小必要的测试或静态验证，证明结论与代码现状一致。
-
-## Retrospective
-
-- [x] 这次日志里真正异常先出现在 Feishu 长连接：`transient_network` + `wsasend: An established connection was aborted by the software in your host machine.`，它比 bridge 重启更早出现，更像宿主机网络/安全软件中断了连接，而不是 web 切 session 直接打断了 binding。
-- [x] shell/web session 与 IM bridge session 在当前实现里是分层的：shell 侧只把 workspace session 聚合展示为 `source = shell/web`，并明确标记 `switchable = false`、`importable = true`；飞书 binding 真正使用的是 bridge-native session，因此单纯在 web 上切 session 不会直接改写 Feishu binding。
-- [x] 用户日志里的 `binding rebound` 与 `binding workdir updated` 更符合 bridge 启动后自动轮换 binding session 的现有设计；`resetBindingSessionOnBridgeStart` 默认值就是 `true`，bridge 成功启动后 shell 会对已有 binding 逐个生成新的 bridge-native session id 并回写 workdir。
-- [x] 本次未改业务代码；完成了静态代码核对，并跑通 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_manager -- --nocapture` 与 `go test ./internal/binding ./internal/store ./internal/adapters/feishu` 作为最小验证。
-
----
-
-# Feishu IM Bridge Recovery Diagnostics Todo
-
-## Hard Constraints
-
-- [x] 不改现有 sidecar 架构，不引入独立 watchdog 或额外后台进程。
-- [x] 保持现有 session / binding / import 语义不变，只增强通道恢复可观测性、doctor 与控制中心状态展示。
-- [x] 诊断文案优先解释“通道异常”和“binding/session 异常”是不同问题，避免误导用户直接重启。
+## Preserved Tail From Previous Todo
 
 ## Implementation
 

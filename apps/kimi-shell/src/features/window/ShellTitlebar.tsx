@@ -8,6 +8,7 @@ import {
   Minus,
   Monitor,
   RefreshCcw,
+  Sparkles,
   Square,
   TerminalSquare,
   X,
@@ -209,10 +210,12 @@ type ShellTitlebarProps = {
   tauriRuntime: boolean;
   isWindowMaximized: boolean;
   canOpenWorkspace: boolean;
+  sessionSkillCount: number;
   activeSessionWorkDir?: string;
   effectiveWorkDir?: string;
   onRetry: () => void;
   onBackToStatus: () => void;
+  onOpenSkillCenter: () => void;
   onOpenFolder: (path: string) => void;
   onToggleWorkspaceView: () => void;
   onToggleWorkspaceSplit: () => void;
@@ -238,10 +241,12 @@ export function ShellTitlebar({
   tauriRuntime,
   isWindowMaximized,
   canOpenWorkspace,
+  sessionSkillCount,
   activeSessionWorkDir,
   effectiveWorkDir,
   onRetry,
   onBackToStatus,
+  onOpenSkillCenter,
   onOpenFolder,
   onToggleWorkspaceView,
   onToggleWorkspaceSplit,
@@ -254,7 +259,8 @@ export function ShellTitlebar({
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
   const workspacePathDisplay = formatWorkspacePath(activeSessionWorkDir, effectiveWorkDir);
-  const canOpenEffectivePath = workspacePathDisplay.fullPath !== "-";
+  const sessionPath = activeSessionWorkDir?.trim() || "";
+  const canOpenSessionPath = sessionPath.length > 0;
   const viewToggleLabel =
     activeWorkspaceView === "code"
       ? "Current: Kimi Code Web. Switch to Kimi Chat"
@@ -268,14 +274,14 @@ export function ShellTitlebar({
       ? "Swap panes: move Kimi Chat to the left"
       : "Swap panes: move Kimi Code Web to the left";
 
-  const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
+  const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
     if (event.button !== 0) return;
     if (!isTitlebarDragTarget(event.target)) return;
     onStartWindowDrag();
   };
 
-  const handleTitlebarDoubleClick = (event: MouseEvent<HTMLElement>) => {
+  const handleDragZoneDoubleClick = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
     if (event.button !== 0) return;
     if (!isTitlebarDragTarget(event.target)) return;
@@ -283,12 +289,8 @@ export function ShellTitlebar({
   };
 
   return (
-    <header
-      className="titlebar"
-      onMouseDown={handleTitlebarMouseDown}
-      onDoubleClick={handleTitlebarDoubleClick}
-    >
-      <div className="titlebar-actions">
+    <header className="titlebar">
+      <div className="titlebar-actions" data-no-drag="true">
         {screen === "control_center" && canOpenWorkspace ? (
           <IconButton
             icon={<Monitor size={14} />}
@@ -324,6 +326,14 @@ export function ShellTitlebar({
             className={`ghost mini titlebar-workspace-toggle ${activeWorkspaceView === "chat" ? "is-chat" : "is-code"}`}
           />
         ) : null}
+        {screen === "workspace" ? (
+          <IconButton
+            icon={<Columns2 size={14} />}
+            label={splitToggleLabel}
+            onClick={onToggleWorkspaceSplit}
+            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
+          />
+        ) : null}
         {screen === "workspace" && workspaceLayoutMode === "split" ? (
           <IconButton
             icon={<ArrowLeftRight size={14} />}
@@ -333,25 +343,22 @@ export function ShellTitlebar({
           />
         ) : null}
         {screen === "workspace" ? (
-          <IconButton
-            icon={<Columns2 size={14} />}
-            label={splitToggleLabel}
-            onClick={onToggleWorkspaceSplit}
-            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
+          <ThemeToggle
+            className="icon-btn mini"
+            theme={themeMode}
+            onToggle={onToggleTheme}
           />
         ) : null}
-        <ThemeToggle
-          className="icon-btn mini"
-          theme={themeMode}
-          onToggle={onToggleTheme}
-        />
       </div>
 
       <div className={`titlebar-identity${screen === "workspace" ? " is-workspace" : ""}`}>
         {screen === "workspace" ? (
           <div className="titlebar-workspace-line">
-            <span className="titlebar-workspace-spacer" aria-hidden />
-            <div className="titlebar-drag titlebar-workspace-main">
+            <div
+              className="titlebar-drag titlebar-workspace-main"
+              onMouseDown={handleDragZoneMouseDown}
+              onDoubleClick={handleDragZoneDoubleClick}
+            >
               <span>Workspace</span>
               <span className="titlebar-workspace-divider" aria-hidden>
                 |
@@ -371,16 +378,13 @@ export function ShellTitlebar({
                 </span>
               </span>
             </div>
-            <IconButton
-              icon={<FolderOpen size={14} />}
-              label="Open current workspace path"
-              onClick={() => onOpenFolder(workspacePathDisplay.fullPath)}
-              className="ghost mini titlebar-path-btn"
-              disabled={!canOpenEffectivePath}
-            />
           </div>
         ) : (
-          <div className="titlebar-drag titlebar-status-wrap">
+          <div
+            className="titlebar-drag titlebar-status-wrap"
+            onMouseDown={handleDragZoneMouseDown}
+            onDoubleClick={handleDragZoneDoubleClick}
+          >
             <KimiCliBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
               {shellScreenLabel} | State: {statusText}
@@ -390,25 +394,60 @@ export function ShellTitlebar({
       </div>
 
       {tauriRuntime && (
-        <div className="titlebar-window-controls">
-          <IconButton
-            icon={<Minus size={14} />}
-            label="Minimize window"
-            onClick={onMinimizeWindow}
-            className="window-control-btn"
-          />
-          <IconButton
-            icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
-            label={isWindowMaximized ? "Restore window" : "Maximize window"}
-            onClick={onToggleMaximizeWindow}
-            className="window-control-btn"
-          />
-          <IconButton
-            icon={<X size={14} />}
-            label="Close window"
-            onClick={onCloseWindow}
-            className="window-control-btn close"
-          />
+        <div className="titlebar-right" data-no-drag="true">
+          <div className="titlebar-utility-actions" data-no-drag="true">
+            {screen !== "workspace" ? (
+              <ThemeToggle
+                className="icon-btn mini"
+                theme={themeMode}
+                onToggle={onToggleTheme}
+              />
+            ) : null}
+            {screen === "workspace" ? (
+              <>
+                <IconButton
+                  icon={<FolderOpen size={14} />}
+                  label="Open current session location"
+                  onClick={() => onOpenFolder(sessionPath)}
+                  className="ghost mini titlebar-path-btn"
+                  disabled={!canOpenSessionPath}
+                />
+                <button
+                  type="button"
+                  className="titlebar-skill-btn"
+                  onClick={onOpenSkillCenter}
+                  aria-label="Open Skill Center"
+                  title="Open Skill Center"
+                >
+                  <Sparkles size={14} />
+                  <span>Skill</span>
+                  {sessionSkillCount > 0 ? (
+                    <span className="titlebar-skill-badge">{sessionSkillCount}</span>
+                  ) : null}
+                </button>
+              </>
+            ) : null}
+          </div>
+          <div className="titlebar-window-controls" data-no-drag="true">
+            <IconButton
+              icon={<Minus size={14} />}
+              label="Minimize window"
+              onClick={onMinimizeWindow}
+              className="window-control-btn"
+            />
+            <IconButton
+              icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
+              label={isWindowMaximized ? "Restore window" : "Maximize window"}
+              onClick={onToggleMaximizeWindow}
+              className="window-control-btn"
+            />
+            <IconButton
+              icon={<X size={14} />}
+              label="Close window"
+              onClick={onCloseWindow}
+              className="window-control-btn close"
+            />
+          </div>
         </div>
       )}
     </header>

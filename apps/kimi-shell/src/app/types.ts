@@ -136,10 +136,13 @@ export interface WorkDirPreset {
   path: string;
 }
 
+export type BridgeSkillsMode = "disabled" | "follow_default_work_dir";
+
 export interface BridgeSettings {
   enabled: boolean;
   autoStart: boolean;
   adminPort: number;
+  skillsMode: BridgeSkillsMode;
   feishuReplyRenderer: FeishuReplyRenderer;
   feishuAutoApprove: boolean;
   resetBindingSessionOnBridgeStart: boolean;
@@ -240,6 +243,67 @@ export interface BridgeApprovalRecord {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+export type SkillApplyScope = "user_global_kimi" | "session_kimi";
+
+export type SkillProjectionMethod = "symlink" | "junction" | "copy";
+
+export type SkillSourceType = "git" | "local_import" | "bundled";
+
+export interface InstalledSkill {
+  id: string;
+  name: string;
+  description: string;
+  sourceType: SkillSourceType;
+  sourceLabel: string;
+  sourceKey: string;
+  sourcePath?: string;
+  repoUrl?: string;
+  gitRef?: string;
+  commit?: string;
+  localPath: string;
+  projectionName: string;
+  trusted: boolean;
+  installedAt: string;
+  updatedAt: string;
+  hasScripts: boolean;
+}
+
+export interface SkillDetail {
+  skill: InstalledSkill;
+  relativePaths: string[];
+  userGlobalApplied: boolean;
+  currentSessionApplied: boolean;
+}
+
+export interface SkillProjectionRecord {
+  skillId: string;
+  scope: SkillApplyScope;
+  targetPath: string;
+  projectionName: string;
+  appliedAt: string;
+  method: SkillProjectionMethod;
+}
+
+export interface SessionSkillState {
+  sessionId?: string;
+  sessionWorkDir?: string;
+  appliedSkillIds: string[];
+  projections: SkillProjectionRecord[];
+}
+
+export interface WorkspaceSkillProfile {
+  workspaceId: string;
+  recentSkillIds: string[];
+  pinnedSkillIds: string[];
+  lastSessionSkillIds: string[];
+}
+
+export interface SkillApplyResult {
+  scope: SkillApplyScope;
+  globalSkills: SkillProjectionRecord[];
+  activeSession: SessionSkillState;
 }
 
 export interface BridgeApprovalResolveInput {
@@ -795,7 +859,8 @@ export type ControlSectionId =
   | "overview"
   | "onboarding"
   | "runtime_center"
-  | "bridge_center";
+  | "bridge_center"
+  | "skill_center";
 
 export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 

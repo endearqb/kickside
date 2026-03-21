@@ -4,7 +4,6 @@ import {
   Download,
   FolderOpen,
   Plus,
-  Play,
   RefreshCcw,
   RefreshCw,
   Square,
@@ -30,6 +29,7 @@ import { ControlCenterCardHeader } from "@/features/control-center/ControlCenter
 
 type BridgeRuntimePanelProps = {
   settings: BridgeSettings;
+  effectiveDefaultWorkDir: string;
   status: BridgeStatus;
   sessions: BridgeSessionRecord[];
   bindings: BindingRecord[];
@@ -39,8 +39,6 @@ type BridgeRuntimePanelProps = {
   secretsMask: BridgeSecretsMaskView;
   busy: boolean;
   onSettingsChange: (next: BridgeSettings) => void;
-  onSave: () => Promise<void>;
-  onStart: () => Promise<void>;
   onStop: () => Promise<void>;
   onRestart: () => Promise<void>;
   onRefreshStatus: () => Promise<BridgeStatus>;
@@ -53,6 +51,7 @@ type BridgeRuntimePanelProps = {
   onImportSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBinding: (bindingId: string) => Promise<void>;
   onResetBindingSession: (bindingId: string) => Promise<void>;
+  onResetBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveApproval: (
     approvalId: string,
     status: BridgeApprovalResolveInput["status"],
@@ -125,7 +124,10 @@ function formatTimestamp(value?: string): string {
   if (!value) return "-";
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return value;
-  return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
+  return new Date(timestamp).toLocaleString("zh-CN", {
+    hour12: false,
+    timeZoneName: "short",
+  });
 }
 
 function renderSecretRow(label: string, value: BridgeSecretsMaskView["telegram"]["botToken"]) {
@@ -267,8 +269,17 @@ function formatFeishuDiagnosis(channel?: BridgeStatus["channels"][number]): stri
   return "Feishu 通道已 ready；若仍感觉没回复，优先检查 binding、session、workdir 和 approvals。";
 }
 
+function normalizeComparablePath(path?: string): string {
+  return (path ?? "")
+    .trim()
+    .replace(/\//g, "\\")
+    .replace(/[\\]+$/, "")
+    .toLowerCase();
+}
+
 export function BridgeRuntimePanel({
   settings,
+  effectiveDefaultWorkDir,
   status,
   sessions,
   bindings,
@@ -278,8 +289,6 @@ export function BridgeRuntimePanel({
   secretsMask,
   busy,
   onSettingsChange,
-  onSave,
-  onStart,
   onStop,
   onRestart,
   onRefreshStatus,
@@ -292,6 +301,7 @@ export function BridgeRuntimePanel({
   onImportSession,
   onClearBinding,
   onResetBindingSession,
+  onResetBindingToDefaultWorkDir,
   onResolveApproval,
 }: BridgeRuntimePanelProps) {
   const [expandedSections, setExpandedSections] = useState<Record<BridgePanelSectionId, boolean>>({
@@ -345,8 +355,8 @@ export function BridgeRuntimePanel({
     <div className="bridge-panel">
       {renderSection(
         "runtime",
-        "Bridge runtime",
-        "管理 sidecar 进程、端口、默认工作目录和渠道状态。",
+        "高级设置",
+        "维护专家级配置；改完后请回到上方主按钮统一应用。",
         formatRuntimeStateLabel(status.state),
         formatRuntimeStateTone(status.state),
         <>
@@ -496,10 +506,7 @@ export function BridgeRuntimePanel({
               {isRunning ? <p className="hint">如果 bridge 正在运行，保存后需要重启 bridge，飞书 `/bridge cwd` 卡片才会加载最新预设。</p> : null}
             </div>
 
-            <div className="bridge-action-row">
-              <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onSave()} disabled={busy}>保存配置</Button>
-              <Button type="button" icon={<Play size={15} />} className="cc-action-btn" onClick={() => void onStart()} disabled={busy || isRunning}>Start</Button>
-            </div>
+            <p className="hint">当前区域只编辑高级设置；请使用上方主按钮统一保存、启动或应用并重启。</p>
           </div>
 
           <div className="bridge-danger-group">
@@ -532,7 +539,7 @@ export function BridgeRuntimePanel({
             <div className="diag-item"><span className="diag-label">Admin Port</span><strong>{status.adminPort}</strong></div>
             <div className="diag-item"><span className="diag-label">Bindings</span><strong>{status.bindings}</strong></div>
             <div className="diag-item"><span className="diag-label">Pending Approvals</span><strong>{status.pendingApprovals}</strong></div>
-            <div className="diag-item"><span className="diag-label">Started At</span><strong>{status.startedAt ?? "-"}</strong></div>
+            <div className="diag-item"><span className="diag-label">Started At</span><strong>{formatTimestamp(status.startedAt)}</strong></div>
           </div>
           {status.lastError || status.lastErrorCode ? <p className="bridge-error-text">{formatErrorLine(status.lastErrorCode, status.lastError)}</p> : null}
           <div className="bridge-channel-statuses">
@@ -670,6 +677,15 @@ export function BridgeRuntimePanel({
               <div className="bridge-binding-list">
                 {bindings.map((binding) => (
                   <div key={binding.bindingId} className="bridge-binding-card">
+                    {(() => {
+                      const followsDefaultWorkDir =
+                        !!effectiveDefaultWorkDir &&
+                        normalizeComparablePath(binding.workDir) ===
+                          normalizeComparablePath(effectiveDefaultWorkDir);
+                      const needsDefaultReset =
+                        !!effectiveDefaultWorkDir && !followsDefaultWorkDir;
+                      return (
+                        <>
                     <div className="bridge-binding-copy">
                       <strong>{binding.bindingId}</strong>
                       <span>
@@ -681,8 +697,22 @@ export function BridgeRuntimePanel({
                         {binding.workDir ? ` | cwd ${binding.workDir}` : ""}
                         {binding.lastInboundMessageId ? ` | last inbound ${binding.lastInboundMessageId}` : ""}
                       </small>
+                      {needsDefaultReset ? (
+                        <p>当前 binding 未跟随 IM 默认目录：{effectiveDefaultWorkDir}</p>
+                      ) : followsDefaultWorkDir ? (
+                        <p>当前 binding 已跟随 IM 默认目录。</p>
+                      ) : null}
                     </div>
                     <div className="bridge-approval-actions">
+                      <Button
+                        type="button"
+                        icon={<Check size={14} />}
+                        className="cc-action-btn"
+                        onClick={() => void onResetBindingToDefaultWorkDir(binding.bindingId)}
+                        disabled={busy || !effectiveDefaultWorkDir}
+                      >
+                        回到 IM 默认目录
+                      </Button>
                       <Button
                         type="button"
                         variant="outline"
@@ -694,6 +724,9 @@ export function BridgeRuntimePanel({
                         新建并切换会话
                       </Button>
                     </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

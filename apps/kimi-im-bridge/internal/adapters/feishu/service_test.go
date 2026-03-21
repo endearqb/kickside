@@ -1111,6 +1111,7 @@ func TestServiceBridgeOpsSkillContextPrependsBindingMetadata(t *testing.T) {
 		AppSecret:             "secret",
 		DefaultWorkDir:        "D:/skill-default",
 		BridgeOpsSkillEnabled: true,
+		BridgeOpsAuthFile:     "D:/bridge/bridge_skill_auth.json",
 	})
 	runtimeExec.responses = []fakeRuntimeResponse{
 		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "skill reply"}}},
@@ -1137,7 +1138,8 @@ func TestServiceBridgeOpsSkillContextPrependsBindingMetadata(t *testing.T) {
 		!strings.Contains(prompt, "platform=feishu") ||
 		!strings.Contains(prompt, "chat_id=chat-skill-1") ||
 		!strings.Contains(prompt, "thread_id=thread-skill-1") ||
-		!strings.Contains(prompt, "current_workdir=D:/skill-default") {
+		!strings.Contains(prompt, "current_workdir=D:/skill-default") ||
+		!strings.Contains(prompt, "bridge_auth_file=D:/bridge/bridge_skill_auth.json") {
 		t.Fatalf("expected bridge skill context block, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "重启") {

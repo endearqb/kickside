@@ -349,10 +349,15 @@ func (s *Service) applyBridgeSkillPromptContext(prompt string, binding domain.Se
 		fmt.Sprintf("binding_id=%s", strings.TrimSpace(binding.BindingID)),
 		fmt.Sprintf("current_session_id=%s", strings.TrimSpace(binding.KimiSessionID)),
 		fmt.Sprintf("current_workdir=%s", strings.TrimSpace(binding.WorkDir)),
+	}
+	if authFile := strings.TrimSpace(s.config.BridgeOpsAuthFile); authFile != "" {
+		lines = append(lines, fmt.Sprintf("bridge_auth_file=%s", authFile))
+	}
+	lines = append(lines,
 		"[/bridge_context]",
 		"",
 		strings.TrimSpace(prompt),
-	}
+	)
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 

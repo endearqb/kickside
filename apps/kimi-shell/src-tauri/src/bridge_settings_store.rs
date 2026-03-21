@@ -8,8 +8,8 @@ use crate::{
     settings_store,
     types::{
         AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgeOnboardingConfigInput,
-        BridgePlatform, BridgeSecrets, BridgeSettings, FeishuReplyRenderer, WorkDirPreset,
-        CURRENT_SETTINGS_SCHEMA_VERSION,
+        BridgePlatform, BridgeSecrets, BridgeSettings, BridgeSkillsMode, FeishuReplyRenderer,
+        WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -81,6 +81,16 @@ pub fn sync_default_work_dir_from_app(
     }
 
     Ok(bridge_settings)
+}
+
+pub fn preview_default_work_dir_after_app_sync(
+    settings: &BridgeSettings,
+    previous_app_work_dir: Option<&str>,
+    next_app_work_dir: Option<&str>,
+) -> Option<String> {
+    let mut preview = normalize_bridge_settings(settings.clone());
+    sync_bridge_default_work_dir_from_app(&mut preview, previous_app_work_dir, next_app_work_dir);
+    preview.default_work_dir
 }
 
 fn load_or_default_files(
@@ -317,6 +327,7 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         admin_port: app_settings
             .bridge_admin_port_override
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
+        skills_mode: BridgeSkillsMode::Disabled,
         feishu_reply_renderer: FeishuReplyRenderer::Interactive,
         feishu_auto_approve: true,
         reset_binding_session_on_bridge_start: true,
@@ -357,6 +368,7 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         } else {
             settings.admin_port
         },
+        skills_mode: settings.skills_mode,
         feishu_reply_renderer,
         feishu_auto_approve: settings.feishu_auto_approve,
         reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
@@ -512,6 +524,7 @@ mod tests {
                 enabled: false,
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
                 feishu_reply_renderer: FeishuReplyRenderer::Interactive,
                 feishu_auto_approve: true,
                 reset_binding_session_on_bridge_start: true,
@@ -558,6 +571,31 @@ mod tests {
     }
 
     #[test]
+    fn load_or_default_ignores_legacy_skills_dir_field() {
+        let temp = TempDirGuard::new("legacy-skills-dir");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+
+        fs::write(
+            &bridge_settings_path,
+            r#"{
+  "enabled": false,
+  "autoStart": false,
+  "adminPort": 60110,
+  "skillsDir": "D:/legacy",
+  "feishuReplyRenderer": "interactive",
+  "channels": []
+}"#,
+        )
+        .expect("seed bridge settings json");
+
+        let (_, bridge_settings) =
+            load_or_default_files(&settings_path, &bridge_settings_path).expect("bridge settings");
+
+        assert_eq!(bridge_settings.skills_mode, BridgeSkillsMode::Disabled);
+    }
+
+    #[test]
     fn save_syncs_mirror_fields_into_settings_json() {
         let temp = TempDirGuard::new("mirror");
         let settings_path = temp.path.join("settings.json");
@@ -567,6 +605,7 @@ mod tests {
             enabled: true,
             auto_start: true,
             admin_port: 60_112,
+            skills_mode: BridgeSkillsMode::FollowDefaultWorkDir,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
@@ -585,6 +624,10 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, 60_112);
+        assert_eq!(
+            bridge_settings.skills_mode,
+            BridgeSkillsMode::FollowDefaultWorkDir
+        );
         assert_eq!(
             bridge_settings.feishu_reply_renderer,
             FeishuReplyRenderer::Interactive
@@ -627,6 +670,7 @@ mod tests {
                 enabled: false,
                 auto_start: false,
                 admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
                 feishu_reply_renderer: FeishuReplyRenderer::Interactive,
                 feishu_auto_approve: true,
                 reset_binding_session_on_bridge_start: true,
@@ -651,6 +695,7 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::Disabled,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
@@ -671,6 +716,7 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::Disabled,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
@@ -692,6 +738,38 @@ mod tests {
     }
 
     #[test]
+    fn preview_default_work_dir_after_app_sync_matches_following_behavior() {
+        let inherited = BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::Disabled,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
+            reset_binding_session_on_bridge_start: true,
+            feishu_reply_cards: None,
+            default_work_dir: Some("D:/old".to_string()),
+            work_dir_presets: vec![],
+            channels: vec![],
+        };
+        assert_eq!(
+            preview_default_work_dir_after_app_sync(&inherited, Some("D:/old"), Some("D:/new"))
+                .as_deref(),
+            Some("D:/new")
+        );
+
+        let explicit = BridgeSettings {
+            default_work_dir: Some("D:/bridge-only".to_string()),
+            ..inherited
+        };
+        assert_eq!(
+            preview_default_work_dir_after_app_sync(&explicit, Some("D:/old"), Some("D:/new"))
+                .as_deref(),
+            Some("D:/bridge-only")
+        );
+    }
+
+    #[test]
     fn load_secrets_creates_empty_file() {
         let temp = TempDirGuard::new("secrets");
         let secrets_path = temp.path.join("bridge_secrets.json");
@@ -708,6 +786,7 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::Disabled,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
@@ -755,6 +834,7 @@ mod tests {
             enabled: false,
             auto_start: false,
             admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::Disabled,
             feishu_reply_renderer: FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
@@ -766,6 +846,28 @@ mod tests {
 
         assert_eq!(normalized.feishu_reply_renderer, FeishuReplyRenderer::Post);
         assert!(normalized.feishu_reply_cards.is_none());
+    }
+
+    #[test]
+    fn normalize_bridge_settings_keeps_skills_mode() {
+        let normalized = normalize_bridge_settings(BridgeSettings {
+            enabled: false,
+            auto_start: false,
+            admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+            skills_mode: BridgeSkillsMode::FollowDefaultWorkDir,
+            feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
+            reset_binding_session_on_bridge_start: true,
+            feishu_reply_cards: None,
+            default_work_dir: None,
+            work_dir_presets: vec![],
+            channels: vec![],
+        });
+
+        assert_eq!(
+            normalized.skills_mode,
+            BridgeSkillsMode::FollowDefaultWorkDir
+        );
     }
 
     #[test]

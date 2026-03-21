@@ -3,6 +3,8 @@ import { Check, Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { formatBackendState } from "@/app/types";
 import { IconButton } from "@/components/common/IconButton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
@@ -92,10 +94,12 @@ function App() {
         tauriRuntime={shell.tauriRuntime}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
+        sessionSkillCount={shell.sessionSkillCount}
         activeSessionWorkDir={shell.status?.activeSessionWorkDir}
         effectiveWorkDir={shell.status?.effectiveWorkDir}
         onRetry={shell.handleRuntimeOnlyRetry}
         onBackToStatus={shell.backToStatus}
+        onOpenSkillCenter={shell.openSkillCenter}
         onOpenFolder={(path) => {
           void shell.handleOpenFolder(path);
         }}
@@ -179,6 +183,7 @@ function App() {
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
               bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
               bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
+              bridgeSettingsDirty={shell.bridgeSettingsDirty}
               bridgeSessions={shell.bridgeSessions}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
@@ -186,6 +191,15 @@ function App() {
               bridgeRecentErrors={shell.bridgeRecentErrors}
               bridgeSecretsMask={shell.bridgeSecretsMask}
               bridgeBusy={shell.bridgeBusy}
+              installedSkills={shell.installedSkills}
+              skillCenterBusy={shell.skillCenterBusy}
+              skillCenterSearch={shell.skillCenterSearch}
+              skillCenterFilter={shell.skillCenterFilter}
+              selectedSkillId={shell.selectedSkillId}
+              selectedSkillDetail={shell.selectedSkillDetail}
+              globalSkillProjections={shell.globalSkillProjections}
+              activeSessionSkillState={shell.activeSessionSkillState}
+              workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
               setActiveControlSection={shell.setActiveControlSection}
@@ -221,6 +235,9 @@ function App() {
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
               onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
+              onRefreshSkillCenterState={() =>
+                shell.refreshSkillCenterState(shell.selectedSkillId)
+              }
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -239,14 +256,25 @@ function App() {
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
               onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
               onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
-              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
-              onStartBridge={shell.handleStartBridge}
+              onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
               onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
               onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
+              onResetBridgeBindingToDefaultWorkDir={
+                shell.handleResetBridgeBindingToDefaultWorkDir
+              }
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
+              onSkillCenterSearchChange={shell.setSkillCenterSearch}
+              onSkillCenterFilterChange={shell.setSkillCenterFilter}
+              onSelectSkill={shell.handleSelectSkill}
+              onInstallSkillFromGit={shell.handleInstallSkillFromGit}
+              onImportSkillFromPath={shell.handleImportSkillFromPath}
+              onSetSkillTrust={shell.handleSetSkillTrust}
+              onApplySkill={shell.handleApplySkill}
+              onRemoveSkill={shell.handleRemoveSkill}
+              onRecoverWorkspaceSkill={shell.handleRecoverWorkspaceSkill}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
@@ -304,6 +332,7 @@ function App() {
               bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
               bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
               bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
+              bridgeSettingsDirty={shell.bridgeSettingsDirty}
               bridgeSessions={shell.bridgeSessions}
               bridgeBindings={shell.bridgeBindings}
               bridgeApprovals={shell.bridgeApprovals}
@@ -311,6 +340,15 @@ function App() {
               bridgeRecentErrors={shell.bridgeRecentErrors}
               bridgeSecretsMask={shell.bridgeSecretsMask}
               bridgeBusy={shell.bridgeBusy}
+              installedSkills={shell.installedSkills}
+              skillCenterBusy={shell.skillCenterBusy}
+              skillCenterSearch={shell.skillCenterSearch}
+              skillCenterFilter={shell.skillCenterFilter}
+              selectedSkillId={shell.selectedSkillId}
+              selectedSkillDetail={shell.selectedSkillDetail}
+              globalSkillProjections={shell.globalSkillProjections}
+              activeSessionSkillState={shell.activeSessionSkillState}
+              workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
               setActiveControlSection={shell.setActiveControlSection}
@@ -346,6 +384,9 @@ function App() {
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
               onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
+              onRefreshSkillCenterState={() =>
+                shell.refreshSkillCenterState(shell.selectedSkillId)
+              }
               onRefreshInstallProbe={shell.refreshInstallProbe}
               onRefreshOnboarding={shell.refreshOnboarding}
               onRetry={shell.handleRuntimeOnlyRetry}
@@ -364,14 +405,25 @@ function App() {
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
               onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
               onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
-              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
-              onStartBridge={shell.handleStartBridge}
+              onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
               onImportBridgeSession={shell.handleImportBridgeSession}
               onClearBridgeBinding={shell.handleClearBridgeBinding}
               onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
+              onResetBridgeBindingToDefaultWorkDir={
+                shell.handleResetBridgeBindingToDefaultWorkDir
+              }
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
+              onSkillCenterSearchChange={shell.setSkillCenterSearch}
+              onSkillCenterFilterChange={shell.setSkillCenterFilter}
+              onSelectSkill={shell.handleSelectSkill}
+              onInstallSkillFromGit={shell.handleInstallSkillFromGit}
+              onImportSkillFromPath={shell.handleImportSkillFromPath}
+              onSetSkillTrust={shell.handleSetSkillTrust}
+              onApplySkill={shell.handleApplySkill}
+              onRemoveSkill={shell.handleRemoveSkill}
+              onRecoverWorkspaceSkill={shell.handleRecoverWorkspaceSkill}
               onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
               onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
               onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
@@ -395,6 +447,106 @@ function App() {
               onSkipOnboarding={shell.handleSkipOnboarding}
               onOpenExternalUrl={shell.handleOpenExternalUrl}
             />
+          </div>
+        </div>
+      ) : null}
+
+      {shell.skillCenterGitDialogOpen ? (
+        <div className="skill-center-dialog-overlay" role="presentation">
+          <div
+            className="skill-center-dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="从 Git 安装 Skill"
+          >
+            <h3>从 Git 安装 Skill</h3>
+            <p>输入仓库地址；Ref 可选，支持分支、tag 或 commit。</p>
+            <div className="skill-center-dialog-fields">
+              <label className="skill-center-dialog-field">
+                <span>仓库地址</span>
+                <Input
+                  value={shell.skillCenterGitRepoUrl}
+                  onChange={(event) => shell.setSkillCenterGitRepoUrl(event.target.value)}
+                  placeholder="https://github.com/owner/repo.git"
+                  autoFocus
+                />
+              </label>
+              <label className="skill-center-dialog-field">
+                <span>Ref（可选）</span>
+                <Input
+                  value={shell.skillCenterGitRef}
+                  onChange={(event) => shell.setSkillCenterGitRef(event.target.value)}
+                  placeholder="main / v1.0.0 / commit sha"
+                />
+              </label>
+            </div>
+            <div className="skill-center-dialog-actions">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={shell.handleCloseSkillCenterGitDialog}
+                disabled={shell.skillCenterBusy}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  void shell.handleConfirmInstallSkillFromGit();
+                }}
+                disabled={shell.skillCenterBusy}
+              >
+                从 Git 安装
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {shell.skillCenterImportDialogOpen ? (
+        <div className="skill-center-dialog-overlay" role="presentation">
+          <div
+            className="skill-center-dialog-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="导入本地 Skill"
+          >
+            <h3>导入本地 Skill</h3>
+            <p>选择要导入的来源类型，然后继续选择目录或 ZIP 文件。</p>
+            <div className="skill-center-import-choice-grid">
+              <button
+                type="button"
+                className="skill-center-import-choice"
+                onClick={() => {
+                  void shell.handleConfirmImportSkillFromPath("directory");
+                }}
+                disabled={shell.skillCenterBusy}
+              >
+                <strong>导入目录</strong>
+                <span>选择包含 `SKILL.md` 的本地 Skill 目录。</span>
+              </button>
+              <button
+                type="button"
+                className="skill-center-import-choice"
+                onClick={() => {
+                  void shell.handleConfirmImportSkillFromPath("zip");
+                }}
+                disabled={shell.skillCenterBusy}
+              >
+                <strong>导入 ZIP</strong>
+                <span>选择本地 Skill ZIP 压缩包并导入。</span>
+              </button>
+            </div>
+            <div className="skill-center-dialog-actions">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={shell.handleCloseSkillCenterImportDialog}
+                disabled={shell.skillCenterBusy}
+              >
+                取消
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

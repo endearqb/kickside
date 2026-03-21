@@ -175,7 +175,7 @@ func (s *Service) Start() error {
 	s.mu.Lock()
 	s.listener = listener
 	s.server = server
-	s.startedAt = time.Now().UTC().Format(time.RFC3339)
+	s.startedAt = time.Now().Format(time.RFC3339)
 	s.lastErrorCode = ""
 	s.lastError = ""
 	s.state = domain.BridgeStateRunning
@@ -568,6 +568,7 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 				ReplyRenderer:         s.settings.FeishuReplyRenderer,
 				AttachmentsDir:        filepath.Join(filepath.Dir(s.options.DBPath), "attachments", "feishu"),
 				BridgeOpsSkillEnabled: strings.TrimSpace(s.options.SkillsDir) != "",
+				BridgeOpsAuthFile:     s.skillsAuthFilePath,
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,

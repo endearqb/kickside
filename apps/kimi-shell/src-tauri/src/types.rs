@@ -366,6 +366,8 @@ pub struct BridgeSettings {
     pub auto_start: bool,
     pub admin_port: u16,
     #[serde(default)]
+    pub skills_mode: BridgeSkillsMode,
+    #[serde(default)]
     pub feishu_reply_renderer: FeishuReplyRenderer,
     #[serde(default = "default_feishu_auto_approve")]
     pub feishu_auto_approve: bool,
@@ -378,6 +380,14 @@ pub struct BridgeSettings {
     pub work_dir_presets: Vec<WorkDirPreset>,
     #[serde(default)]
     pub channels: Vec<BridgeChannelConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSkillsMode {
+    #[default]
+    Disabled,
+    FollowDefaultWorkDir,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -532,6 +542,107 @@ pub struct BridgeApprovalRecord {
     pub created_at: String,
     pub updated_at: String,
     pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillApplyScope {
+    UserGlobalKimi,
+    SessionKimi,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillProjectionMethod {
+    Symlink,
+    Junction,
+    Copy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSourceType {
+    #[default]
+    Git,
+    LocalImport,
+    Bundled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub source_type: SkillSourceType,
+    #[serde(default)]
+    pub source_label: String,
+    #[serde(default)]
+    pub source_key: String,
+    pub source_path: Option<String>,
+    pub repo_url: Option<String>,
+    pub git_ref: Option<String>,
+    pub commit: Option<String>,
+    pub local_path: String,
+    pub projection_name: String,
+    pub trusted: bool,
+    pub installed_at: String,
+    pub updated_at: String,
+    pub has_scripts: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDetail {
+    pub skill: InstalledSkill,
+    #[serde(default)]
+    pub relative_paths: Vec<String>,
+    pub user_global_applied: bool,
+    pub current_session_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillProjectionRecord {
+    pub skill_id: String,
+    pub scope: SkillApplyScope,
+    pub target_path: String,
+    pub projection_name: String,
+    pub applied_at: String,
+    pub method: SkillProjectionMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSkillState {
+    pub session_id: Option<String>,
+    pub session_work_dir: Option<String>,
+    #[serde(default)]
+    pub applied_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub projections: Vec<SkillProjectionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillProfile {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub recent_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub pinned_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub last_session_skill_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillApplyResult {
+    pub scope: SkillApplyScope,
+    #[serde(default)]
+    pub global_skills: Vec<SkillProjectionRecord>,
+    pub active_session: SessionSkillState,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

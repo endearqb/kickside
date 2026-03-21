@@ -21,13 +21,16 @@ use crate::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
         BridgeChannelStatus, BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue,
         BridgeRuntimeState, BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
-        BridgeSettings, BridgeStatus, BridgeTelegramSecretsMaskView,
+        BridgeSettings, BridgeSkillsMode, BridgeStatus, BridgeTelegramSecretsMaskView,
     },
 };
 
 const BRIDGE_START_TIMEOUT: Duration = Duration::from_secs(20);
 const BRIDGE_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(120);
+const BUNDLED_BRIDGE_OPS_DIR_NAME: &str = "bridge-ops";
+const BRIDGE_SKILLS_DIR_SEGMENT: &str = ".agents";
+const BRIDGE_SKILLS_SUBDIR_SEGMENT: &str = "skills";
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -385,6 +388,66 @@ pub fn reset_bridge_binding_session(app: &AppHandle, binding_id: &str) -> anyhow
     Ok(())
 }
 
+pub fn reset_bridge_binding_to_default_work_dir(
+    app: &AppHandle,
+    binding_id: &str,
+) -> anyhow::Result<()> {
+    refresh_child_state(app)?;
+    let settings = bridge_settings_store::load_or_default(app)?;
+    let default_work_dir = settings
+        .default_work_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("IM bridge default work directory is not configured"))?;
+
+    let (runtime_state, admin_port, admin_token) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+
+    if !matches!(
+        runtime_state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Err(anyhow::anyhow!("bridge is not running"));
+    }
+
+    let client = BridgeHttpClient::for_local_admin_port(admin_port, admin_token)?;
+    let binding = client
+        .list_bindings()?
+        .into_iter()
+        .find(|item| item.binding_id == binding_id)
+        .ok_or_else(|| anyhow::anyhow!("bridge binding not found: {binding_id}"))?;
+    let next_session_id = generate_bridge_session_id();
+    client.update_binding(
+        binding_id,
+        &BindingUpdateInput {
+            kimi_session_id: next_session_id,
+            work_dir: Some(default_work_dir.clone()),
+        },
+    )?;
+    log_manager::append_line(
+        app,
+        format!(
+            "bridge binding reset to default workdir requested (binding_id={}, previous_work_dir={}, next_work_dir={})",
+            binding_id,
+            binding.work_dir.as_deref().unwrap_or("<none>"),
+            default_work_dir
+        ),
+    );
+    Ok(())
+}
+
 pub fn list_bridge_approvals(
     app: &AppHandle,
     status: Option<&str>,
@@ -553,7 +616,7 @@ fn build_bridge_command(
         }
     }
 
-    if let Some(skills_dir) = resolve_bridge_skills_dir_from_env() {
+    if let Some(skills_dir) = resolve_bridge_skills_dir(app, settings)? {
         command.arg("--skills-dir").arg(skills_dir);
     }
 
@@ -916,6 +979,53 @@ fn settings_channels(
         .collect()
 }
 
+pub fn ensure_bundled_bridge_ops_installed(
+    app: &AppHandle,
+    effective_bridge_work_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    let source_dir = resolve_bundled_bridge_ops_dir(app)?;
+    ensure_bundled_bridge_ops_installed_from_source(&source_dir, effective_bridge_work_dir)
+}
+
+fn ensure_bundled_bridge_ops_installed_from_source(
+    source_dir: &Path,
+    effective_bridge_work_dir: &Path,
+) -> anyhow::Result<PathBuf> {
+    if !effective_bridge_work_dir.exists() {
+        return Err(anyhow::anyhow!(
+            "bridge default work directory does not exist: {}",
+            effective_bridge_work_dir.display()
+        ));
+    }
+    if !effective_bridge_work_dir.is_dir() {
+        return Err(anyhow::anyhow!(
+            "bridge default work directory is not a directory: {}",
+            effective_bridge_work_dir.display()
+        ));
+    }
+
+    let skills_dir = follow_default_work_dir_skills_dir(effective_bridge_work_dir);
+    let target_dir = skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
+    if target_dir.exists() {
+        if target_dir.is_dir() {
+            return Ok(skills_dir);
+        }
+        return Err(anyhow::anyhow!(
+            "bundled bridge-ops target exists but is not a directory: {}",
+            target_dir.display()
+        ));
+    }
+
+    fs::create_dir_all(&skills_dir).with_context(|| {
+        format!(
+            "failed to create bundled bridge skill parent directory: {}",
+            skills_dir.display()
+        )
+    })?;
+    copy_directory_recursive(&source_dir, &target_dir)?;
+    Ok(skills_dir)
+}
+
 fn resolve_bridge_skills_dir_from_env() -> Option<PathBuf> {
     let raw = env::var_os("KIMI_BRIDGE_SKILLS_DIR")?;
     let path = PathBuf::from(raw);
@@ -926,6 +1036,135 @@ fn resolve_bridge_skills_dir_from_env() -> Option<PathBuf> {
         return Some(path);
     }
     None
+}
+
+fn resolve_bridge_skills_dir(
+    app: &AppHandle,
+    settings: &BridgeSettings,
+) -> anyhow::Result<Option<PathBuf>> {
+    resolve_bridge_skills_dir_with_follow(settings, |effective_work_dir| {
+        ensure_bundled_bridge_ops_installed(app, effective_work_dir)
+    })
+}
+
+fn resolve_bridge_skills_dir_with_follow<F>(
+    settings: &BridgeSettings,
+    follow_resolver: F,
+) -> anyhow::Result<Option<PathBuf>>
+where
+    F: FnOnce(&Path) -> anyhow::Result<PathBuf>,
+{
+    match settings.skills_mode {
+        BridgeSkillsMode::Disabled => Ok(resolve_bridge_skills_dir_from_env()),
+        BridgeSkillsMode::FollowDefaultWorkDir => {
+            let effective_work_dir = settings
+                .default_work_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Bridge skills follow mode requires an effective default work directory."
+                    )
+                })?;
+            let skills_dir = follow_resolver(&effective_work_dir)?;
+            Ok(Some(skills_dir))
+        }
+    }
+}
+
+fn resolve_bundled_bridge_ops_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    let mut checked = Vec::new();
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let resource_candidates = vec![
+            resource_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME),
+            resource_dir
+                .join("skills")
+                .join(BUNDLED_BRIDGE_OPS_DIR_NAME),
+        ];
+        for candidate in resource_candidates {
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+            checked.push(candidate);
+        }
+    }
+
+    let development_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("skills")
+        .join(BUNDLED_BRIDGE_OPS_DIR_NAME);
+    if development_dir.is_dir() {
+        return Ok(development_dir);
+    }
+    checked.push(development_dir);
+
+    let checked_paths = checked
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
+    Err(anyhow::anyhow!(
+        "bundled bridge-ops skill not found; checked {checked_paths}"
+    ))
+}
+
+fn follow_default_work_dir_skills_dir(work_dir: &Path) -> PathBuf {
+    work_dir
+        .join(BRIDGE_SKILLS_DIR_SEGMENT)
+        .join(BRIDGE_SKILLS_SUBDIR_SEGMENT)
+}
+
+fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> anyhow::Result<()> {
+    if !source_dir.is_dir() {
+        return Err(anyhow::anyhow!(
+            "bundled bridge-ops source is not a directory: {}",
+            source_dir.display()
+        ));
+    }
+    fs::create_dir_all(target_dir).with_context(|| {
+        format!(
+            "failed to create bundled bridge-ops target directory: {}",
+            target_dir.display()
+        )
+    })?;
+
+    for entry in fs::read_dir(source_dir).with_context(|| {
+        format!(
+            "failed to read bundled bridge-ops source directory: {}",
+            source_dir.display()
+        )
+    })? {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read entry under bundled bridge-ops source directory: {}",
+                source_dir.display()
+            )
+        })?;
+        let source_path = entry.path();
+        let target_path = target_dir.join(entry.file_name());
+        let metadata = entry.metadata().with_context(|| {
+            format!(
+                "failed to read metadata for bundled bridge-ops entry: {}",
+                source_path.display()
+            )
+        })?;
+        if metadata.is_dir() {
+            copy_directory_recursive(&source_path, &target_path)?;
+            continue;
+        }
+        fs::copy(&source_path, &target_path).with_context(|| {
+            format!(
+                "failed to copy bundled bridge-ops file from {} to {}",
+                source_path.display(),
+                target_path.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn default_channel_state(enabled: bool, runtime_state: BridgeRuntimeState) -> BridgeChannelState {
@@ -1218,7 +1457,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use crate::types::{BridgeChannelConfig, BridgeChannelMode, BridgePlatform};
+    use crate::types::{BridgeChannelConfig, BridgeChannelMode, BridgePlatform, BridgeSkillsMode};
 
     struct TempDirGuard {
         path: PathBuf,
@@ -1319,6 +1558,108 @@ mod tests {
     }
 
     #[test]
+    fn resolve_bridge_skills_dir_uses_follow_default_work_dir_mode() {
+        let temp = TempDirGuard::new("skills-dir-follow");
+        let work_dir = temp.path.join("workspace");
+        fs::create_dir_all(&work_dir).expect("work dir");
+
+        let settings = BridgeSettings {
+            enabled: true,
+            auto_start: false,
+            admin_port: 60_110,
+            skills_mode: BridgeSkillsMode::FollowDefaultWorkDir,
+            feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
+            reset_binding_session_on_bridge_start: true,
+            feishu_reply_cards: None,
+            default_work_dir: Some(work_dir.to_string_lossy().to_string()),
+            work_dir_presets: vec![],
+            channels: vec![],
+        };
+
+        let resolved = resolve_bridge_skills_dir_with_follow(&settings, |effective_work_dir| {
+            Ok(follow_default_work_dir_skills_dir(effective_work_dir))
+        })
+        .expect("skills dir should resolve");
+
+        assert_eq!(resolved, Some(work_dir.join(".agents").join("skills")));
+    }
+
+    #[test]
+    fn resolve_bridge_skills_dir_disabled_mode_falls_back_to_env() {
+        let temp = TempDirGuard::new("skills-dir-fallback");
+        let env_dir = temp.path.join("env");
+        fs::create_dir_all(&env_dir).expect("env dir");
+
+        let key = "KIMI_BRIDGE_SKILLS_DIR";
+        let original = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, env_dir.as_os_str());
+        }
+
+        let settings = BridgeSettings {
+            enabled: true,
+            auto_start: false,
+            admin_port: 60_110,
+            skills_mode: BridgeSkillsMode::Disabled,
+            feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
+            feishu_auto_approve: true,
+            reset_binding_session_on_bridge_start: true,
+            feishu_reply_cards: None,
+            default_work_dir: None,
+            work_dir_presets: vec![],
+            channels: vec![],
+        };
+        let resolved = resolve_bridge_skills_dir_with_follow(&settings, |_effective_work_dir| {
+            unreachable!("disabled mode should not invoke follow resolver")
+        })
+        .expect("env fallback should resolve");
+        assert_eq!(resolved, Some(env_dir.clone()));
+
+        match original {
+            Some(value) => unsafe {
+                std::env::set_var(key, value);
+            },
+            None => unsafe {
+                std::env::remove_var(key);
+            },
+        }
+    }
+
+    #[test]
+    fn ensure_bundled_bridge_ops_installed_copies_skill_and_skips_existing_target() {
+        let temp = TempDirGuard::new("bundled-bridge-ops");
+        let source_dir = temp.path.join("source").join("bridge-ops");
+        let work_dir = temp.path.join("workspace");
+        let script_dir = source_dir.join("scripts");
+        fs::create_dir_all(&script_dir).expect("script dir");
+        fs::create_dir_all(&work_dir).expect("work dir");
+        fs::write(source_dir.join("SKILL.md"), b"# bundled bridge ops").expect("skill file");
+        fs::write(script_dir.join("bridge_ops.ps1"), b"Write-Host bundled").expect("script file");
+
+        let first_skills_dir =
+            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &work_dir)
+                .expect("bundled skill should install");
+        let installed_skill_dir = first_skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
+        assert!(installed_skill_dir.join("SKILL.md").exists());
+        assert!(installed_skill_dir
+            .join("scripts")
+            .join("bridge_ops.ps1")
+            .exists());
+
+        fs::write(installed_skill_dir.join("SKILL.md"), b"# user modified").expect("overwrite");
+
+        let second_skills_dir =
+            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &work_dir)
+                .expect("existing target should be preserved");
+        assert_eq!(second_skills_dir, first_skills_dir);
+        assert_eq!(
+            fs::read_to_string(installed_skill_dir.join("SKILL.md")).expect("read installed skill"),
+            "# user modified"
+        );
+    }
+
+    #[test]
     fn lifecycle_transition_helpers_update_bridge_runtime_state() {
         let mut runtime = BridgeProcessState::new("token".to_string());
         begin_start_transition(&mut runtime, 60_110, PathBuf::from("bridge.exe"), 4242);
@@ -1375,6 +1716,7 @@ mod tests {
             enabled: true,
             auto_start: false,
             admin_port: 60_110,
+            skills_mode: BridgeSkillsMode::Disabled,
             feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,

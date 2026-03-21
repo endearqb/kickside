@@ -76,6 +76,7 @@ type Config struct {
 	ReplyRenderer         string
 	AttachmentsDir        string
 	BridgeOpsSkillEnabled bool
+	BridgeOpsAuthFile     string
 }
 
 type Options struct {

@@ -15,7 +15,7 @@ import {
   RefreshCcw,
   RefreshCw,
   SlidersHorizontal,
-  Square,
+  Sparkles,
   X,
 } from "lucide-react";
 import type {
@@ -40,12 +40,17 @@ import type {
   InstallProbeStatus,
   InstallSessionSnapshot,
   InstallTaskId,
+  InstalledSkill,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   MainWindowCloseBehavior,
   OnboardingStatus,
   PowerShellPreflightSummary,
   RuntimePanelId,
+  SessionSkillState,
+  SkillApplyScope,
+  SkillDetail,
+  SkillProjectionRecord,
 } from "@/app/types";
 import { formatLoginState } from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
@@ -56,9 +61,11 @@ import { ControlCenterCardHeader } from "@/features/control-center/ControlCenter
 import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
 import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
 import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
+import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
+type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type OnboardingCardId =
   | "install"
   | "context_menu"
@@ -86,6 +93,7 @@ type ControlCenterViewProps = {
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
   bridgeOnboardingDirty: boolean;
   bridgeOnboardingValidation: BridgeOnboardingValidation;
+  bridgeSettingsDirty: boolean;
   bridgeSessions: BridgeSessionRecord[];
   bridgeBindings: BindingRecord[];
   bridgeApprovals: BridgeApprovalRecord[];
@@ -93,6 +101,15 @@ type ControlCenterViewProps = {
   bridgeRecentErrors: string[];
   bridgeSecretsMask: BridgeSecretsMaskView;
   bridgeBusy: boolean;
+  installedSkills: InstalledSkill[];
+  skillCenterBusy: boolean;
+  skillCenterSearch: string;
+  skillCenterFilter: "all" | "session" | "global" | "untrusted";
+  selectedSkillId: string | null;
+  selectedSkillDetail: SkillDetail | null;
+  globalSkillProjections: SkillProjectionRecord[];
+  activeSessionSkillState: SessionSkillState;
+  workspaceRecentSkillIds: string[];
   kimiPathInput: string;
   workDirInput: string;
   configCenterView: KimiCliConfigCenterView | null;
@@ -124,6 +141,7 @@ type ControlCenterViewProps = {
   onRefreshBridgeApprovals: () => Promise<BridgeApprovalRecord[]>;
   onRefreshBridgeLogTail: () => Promise<string[]>;
   onRefreshBridgeSecretsMask: () => Promise<BridgeSecretsMaskView>;
+  onRefreshSkillCenterState: () => Promise<unknown>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
   onClose: () => void;
@@ -143,14 +161,23 @@ type ControlCenterViewProps = {
   onBridgeSettingsChange: (next: BridgeSettings) => void;
   onBridgeOnboardingDraftChange: (next: BridgeOnboardingConfigInput) => void;
   onSaveBridgeOnboarding: () => Promise<void>;
-  onSaveBridgeSettings: () => Promise<void>;
-  onStartBridge: () => Promise<void>;
+  onRunBridgePrimaryAction: (mode: BridgePrimaryActionMode) => Promise<void>;
   onStopBridge: () => Promise<void>;
   onRestartBridge: () => Promise<void>;
   onImportBridgeSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
   onResetBridgeBindingSession: (bindingId: string) => Promise<void>;
+  onResetBridgeBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
+  onSkillCenterSearchChange: (value: string) => void;
+  onSkillCenterFilterChange: (value: "all" | "session" | "global" | "untrusted") => void;
+  onSelectSkill: (skillId: string) => Promise<void>;
+  onInstallSkillFromGit: () => Promise<void>;
+  onImportSkillFromPath: () => Promise<void>;
+  onSetSkillTrust: (skillId: string, trusted: boolean) => Promise<void>;
+  onApplySkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
+  onRemoveSkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
+  onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
   onOpenConfigCenterModal: () => Promise<void>;
   onCloseConfigCenterModal: () => void;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
@@ -203,6 +230,11 @@ const controlSections: Array<{
     label: "IM Bridge",
     icon: <Play size={15} />,
   },
+  {
+    id: "skill_center",
+    label: "Skill Center",
+    icon: <Sparkles size={15} />,
+  },
 ];
 
 function BridgeConfigModal({
@@ -217,7 +249,6 @@ function BridgeConfigModal({
   onClose,
   onDraftChange,
   onSave,
-  onStartBridge,
   onRefreshStatus,
   onRefreshSecretsMask,
 }: {
@@ -232,7 +263,6 @@ function BridgeConfigModal({
   onClose: () => void;
   onDraftChange: (next: BridgeOnboardingConfigInput) => void;
   onSave: () => Promise<void>;
-  onStartBridge: () => Promise<void>;
   onRefreshStatus: () => Promise<BridgeStatus>;
   onRefreshSecretsMask: () => Promise<BridgeSecretsMaskView>;
 }) {
@@ -245,12 +275,6 @@ function BridgeConfigModal({
 
   const feishuStatus =
     status.channels.find((channel) => channel.platform === "feishu")?.state ?? "idle";
-
-  async function handleSaveAndStartBridge() {
-    await onSave();
-    await onStartBridge();
-    await onRefreshStatus();
-  }
 
   return (
     <ControlCenterModalShell
@@ -300,15 +324,6 @@ function BridgeConfigModal({
               disabled={busy || !dirty || !validation.canSave}
             >
               保存配置（Save）
-            </Button>
-            <Button
-              type="button"
-              icon={<Play size={15} />}
-              className="cc-action-btn"
-              onClick={() => void handleSaveAndStartBridge()}
-              disabled={busy || !validation.canSave}
-            >
-              保存并启动（Save & Start）
             </Button>
           </div>
         </>
@@ -468,11 +483,7 @@ function BridgeConfigModal({
       <p className="hint cc-step-meta">
         当前 Feishu 通道使用长连接模式。`verificationToken` 和 `encryptKey` 仅在你同时接入事件订阅回调时需要，不决定当前长连接能否建连。
       </p>
-      {status.state === "stopped" ? (
-        <p className="hint cc-step-meta">
-          当前 Bridge 为停止态（Stopped）。请点击“保存并启动（Save & Start）”启动服务。
-        </p>
-      ) : null}
+      {status.state === "stopped" ? <p className="hint cc-step-meta">保存后请回到主面板使用主按钮启动 IM Bridge。</p> : null}
     </ControlCenterModalShell>
   );
 }
@@ -570,10 +581,19 @@ function formatOpenBridgeDisplayName(displayName: string): string {
   return hasLatinLetters(displayName) ? `打开 ${displayName}` : `打开${displayName}`;
 }
 
-function formatOpenBridgeDisplayNameLabel(displayName: string, suffix: string): string {
-  return hasLatinLetters(displayName)
-    ? `打开 ${displayName} ${suffix}`
-    : `打开${displayName}${suffix}`;
+function joinPathSegments(base: string, ...segments: string[]): string {
+  if (!base) return "";
+  const separator = base.includes("\\") ? "\\" : "/";
+  const normalizedBase = base.replace(/[\\/]+$/, "");
+  return `${normalizedBase}${separator}${segments.join(separator)}`;
+}
+
+function normalizeComparablePath(path?: string): string {
+  return (path ?? "")
+    .trim()
+    .replace(/\//g, "\\")
+    .replace(/[\\]+$/, "")
+    .toLowerCase();
 }
 
 function renderBridgeOnboardingSecretRow(
@@ -614,6 +634,7 @@ export function ControlCenterView({
   bridgeOnboardingDraft,
   bridgeOnboardingDirty,
   bridgeOnboardingValidation,
+  bridgeSettingsDirty,
   bridgeSessions,
   bridgeBindings,
   bridgeApprovals,
@@ -621,6 +642,15 @@ export function ControlCenterView({
   bridgeRecentErrors,
   bridgeSecretsMask,
   bridgeBusy,
+  installedSkills,
+  skillCenterBusy,
+  skillCenterSearch,
+  skillCenterFilter,
+  selectedSkillId,
+  selectedSkillDetail,
+  globalSkillProjections,
+  activeSessionSkillState,
+  workspaceRecentSkillIds,
   kimiPathInput,
   workDirInput,
   configCenterView,
@@ -652,6 +682,7 @@ export function ControlCenterView({
   onRefreshBridgeApprovals,
   onRefreshBridgeLogTail,
   onRefreshBridgeSecretsMask,
+  onRefreshSkillCenterState,
   onRefreshInstallProbe,
   onRefreshOnboarding,
   onClose,
@@ -671,14 +702,23 @@ export function ControlCenterView({
   onBridgeSettingsChange,
   onBridgeOnboardingDraftChange,
   onSaveBridgeOnboarding,
-  onSaveBridgeSettings,
-  onStartBridge,
+  onRunBridgePrimaryAction,
   onStopBridge,
   onRestartBridge,
   onImportBridgeSession,
   onClearBridgeBinding,
   onResetBridgeBindingSession,
+  onResetBridgeBindingToDefaultWorkDir,
   onResolveBridgeApproval,
+  onSkillCenterSearchChange,
+  onSkillCenterFilterChange,
+  onSelectSkill,
+  onInstallSkillFromGit,
+  onImportSkillFromPath,
+  onSetSkillTrust,
+  onApplySkill,
+  onRemoveSkill,
+  onRecoverWorkspaceSkill,
   onOpenConfigCenterModal,
   onCloseConfigCenterModal,
   onConfigCenterDraftChange,
@@ -724,6 +764,7 @@ export function ControlCenterView({
   void onInstallNodejs;
   void onOpenInstallCommands;
   void onCloseInstallCommands;
+  void onRefreshSkillCenterState;
   const installPathDisplay =
     onboarding?.detectedKimiPath?.trim() ?? kimiPathInput.trim();
   const installSummary = onboarding?.kimiInstalled
@@ -735,6 +776,8 @@ export function ControlCenterView({
     ? `${installSessionSnapshot.title}: ${installSessionSnapshot.message ?? installSessionSnapshot.status}`
     : null;
   const effectiveWorkDir = status?.effectiveWorkDir ?? onboarding?.workDir ?? "";
+  const effectiveBridgeDefaultWorkDir =
+    bridgeSettings.defaultWorkDir?.trim() || onboarding?.workDir?.trim() || "";
   const runtimeContextMenuSupported =
     contextMenuStatus?.supported ?? onboarding?.contextMenuSupported ?? false;
   const runtimeContextMenuEnabled =
@@ -754,7 +797,6 @@ export function ControlCenterView({
   const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
   const bridgeRuntimePanelTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "运行面板");
   const bridgeConfigTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "配置");
-  const openBridgeConfigTitle = formatOpenBridgeDisplayNameLabel(bridgeDisplayName, "配置");
   const mainWindowCloseBehaviorOptions: Array<{
     value: MainWindowCloseBehavior;
     label: string;
@@ -763,8 +805,6 @@ export function ControlCenterView({
     { value: "exit", label: "直接退出应用" },
     { value: "minimize_to_tray", label: "最小化到系统托盘" },
   ];
-  const bridgeOnboardingStartDisabled =
-    bridgeBusy || isBridgeRunning || !bridgeOnboardingValidation.canStart;
   const installStatusLabel = onboarding?.kimiInstalled ? "就绪" : "待办";
   const installStatusTone = onboarding?.kimiInstalled ? "success" : "warning";
   const contextMenuStatusLabel = !runtimeContextMenuSupported
@@ -1094,6 +1134,14 @@ export function ControlCenterView({
     }
   }
 
+  async function handleSelectSkillCenterSection() {
+    try {
+      await onRefreshSkillCenterState();
+    } finally {
+      setActiveControlSection("skill_center");
+    }
+  }
+
   async function handleSelectControlSection(section: ControlSectionId) {
     if (section === "overview") {
       setActiveControlSection("overview");
@@ -1105,6 +1153,10 @@ export function ControlCenterView({
     }
     if (section === "bridge_center") {
       await handleSelectBridgeSection();
+      return;
+    }
+    if (section === "skill_center") {
+      await handleSelectSkillCenterSection();
       return;
     }
     await handleSelectRuntimePanel("core");
@@ -1189,7 +1241,51 @@ export function ControlCenterView({
 
   function renderBridgeStepContent() {
     const bridgeDefaultWorkDir = bridgeSettings.defaultWorkDir?.trim() ?? "";
+    const bridgeSkillsPreviewDir = effectiveBridgeDefaultWorkDir
+      ? joinPathSegments(effectiveBridgeDefaultWorkDir, ".agents", "skills")
+      : "";
+    const followSkillsEnabled = bridgeSettings.skillsMode === "follow_default_work_dir";
+    const followSkillsToggleDisabled =
+      !effectiveBridgeDefaultWorkDir && !followSkillsEnabled;
     const hasBridgeBindings = bridgeBindings.length > 0;
+    const selectedBinding =
+      bridgeBindings.find((binding) => binding.bindingId === selectedBindingId) ?? null;
+    const selectedBindingUsesDefaultWorkDir =
+      !!selectedBinding &&
+      !!effectiveBridgeDefaultWorkDir &&
+      normalizeComparablePath(selectedBinding.workDir) ===
+        normalizeComparablePath(effectiveBridgeDefaultWorkDir);
+    const selectedBindingNeedsDefaultReset =
+      !!selectedBinding &&
+      !!effectiveBridgeDefaultWorkDir &&
+      !selectedBindingUsesDefaultWorkDir;
+    const bridgePrimaryAction = (() => {
+      if (!bridgeOnboardingValidation.canStart) {
+        return {
+          label: "保存并启用 IM Bridge",
+          mode: "save_enable" as BridgePrimaryActionMode,
+          disabled: !bridgeOnboardingValidation.canSave,
+        };
+      }
+      if (!isBridgeRunning) {
+        return {
+          label: "启动 IM Bridge",
+          mode: "start" as BridgePrimaryActionMode,
+          disabled: bridgeBusy,
+        };
+      }
+      if (bridgeOnboardingDirty || bridgeSettingsDirty) {
+        return {
+          label: "应用设置并重启",
+          mode: "apply_restart" as BridgePrimaryActionMode,
+          disabled: bridgeBusy,
+        };
+      }
+      return null;
+    })();
+    const bridgeSecondaryActionLabel = bridgeRuntimePanelExpanded
+      ? "收起高级运行面板"
+      : "打开高级运行面板";
     const bridgeReadyLongHint =
       "现在只能说明 sidecar 可以尝试建立飞书长连接，是否被平台识别为已连接仍取决于长连接和应用权限。";
     return (
@@ -1300,7 +1396,33 @@ export function ControlCenterView({
                 新建并切换会话
               </Button>
             </div>
-            <small>仅重置当前绑定会话，保持绑定与工作目录不变。</small>
+            {selectedBinding ? (
+              <small>
+                {selectedBindingNeedsDefaultReset
+                  ? `当前 binding 工作目录为 ${selectedBinding.workDir || "-"}，尚未跟随 IM 默认目录 ${effectiveBridgeDefaultWorkDir}。`
+                  : selectedBindingUsesDefaultWorkDir
+                    ? "当前 binding 已跟随 IM 默认目录。"
+                    : "当前 binding 仍保留自己的工作目录。"}
+              </small>
+            ) : (
+              <small>当前没有可操作的 binding。</small>
+            )}
+            <div className="cc-step-secondary-actions">
+              <Button
+                type="button"
+                icon={<Check size={15} />}
+                className="cc-action-btn"
+                onClick={() => {
+                  if (!selectedBindingId) {
+                    return;
+                  }
+                  void onResetBridgeBindingToDefaultWorkDir(selectedBindingId);
+                }}
+                disabled={bridgeBusy || !selectedBindingId || !effectiveBridgeDefaultWorkDir}
+              >
+                重置到 IM 默认目录并新建会话
+              </Button>
+            </div>
           </div>
 
           <div className="bridge-port-card cc-bridge-default-workdir-card">
@@ -1339,6 +1461,50 @@ export function ControlCenterView({
             </div>
             <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
           </div>
+
+          <div className="bridge-port-card cc-bridge-default-workdir-card">
+            <span>Bridge skills follow 模式</span>
+            <label className="bridge-switch-card">
+              <span className="bridge-switch-copy">
+                <strong>将内置 bridge-ops 安装到默认工作目录的 `.agents/skills`</strong>
+                <small>启用后，bridge 会固定跟随默认工作目录生成 `--skills-dir`。</small>
+              </span>
+              <input
+                type="checkbox"
+                className="cc-switch-input"
+                checked={followSkillsEnabled}
+                disabled={bridgeBusy || followSkillsToggleDisabled}
+                onChange={(event) =>
+                  onBridgeSettingsChange({
+                    ...bridgeSettings,
+                    skillsMode: event.currentTarget.checked
+                      ? "follow_default_work_dir"
+                      : "disabled",
+                  })
+                }
+              />
+              <span className="cc-switch-track" aria-hidden />
+            </label>
+            <div className="bridge-inline-path-row">
+              <Input value={bridgeSkillsPreviewDir || "需先设置 IM 默认工作目录"} readOnly />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                icon={<FolderOpen size={14} />}
+                className="cc-inline-icon-btn"
+                onClick={() => void onOpenFolder(bridgeSkillsPreviewDir)}
+                disabled={bridgeBusy || !bridgeSkillsPreviewDir}
+                aria-label="打开 Bridge skills 目录"
+                title="打开 Bridge skills 目录"
+              />
+            </div>
+            <small>
+              {bridgeSkillsPreviewDir
+                ? "保存后会把安装包内置的 bridge-ops 放进这个目录，并让 bridge 跟随该目录生成 `--skills-dir`；关闭 follow 模式时才回退到环境变量兼容链路。"
+                : "需先设置有效的 IM 默认工作目录，follow 模式才能保存并安装内置 bridge-ops。"}
+            </small>
+          </div>
         </div>
 
         {bridgeOnboardingValidation.canStart ? (
@@ -1366,29 +1532,30 @@ export function ControlCenterView({
         ) : (
           <p className="hint cc-step-meta cc-bridge-onboarding-message is-error">
             {bridgeOnboardingValidation.message ??
-              "配置保存后，可直接在这里启动或停止 bridge。"}
+              "配置保存后，可直接在这里启动 IM Bridge。"}
           </p>
         )}
 
         <div className="cc-step-secondary-actions">
-          <Button
-            type="button"
-            icon={<Check size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onSaveBridgeOnboarding()}
-            disabled={bridgeBusy || !bridgeOnboardingValidation.canSave}
-          >
-            保存并启用
-          </Button>
-          <Button
-            type="button"
-            icon={<Play size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onStartBridge()}
-            disabled={bridgeOnboardingStartDisabled}
-          >
-            启动（Start）
-          </Button>
+          {bridgePrimaryAction ? (
+            <Button
+              type="button"
+              icon={
+                bridgePrimaryAction.mode === "apply_restart" ? (
+                  <RefreshCcw size={15} />
+                ) : bridgePrimaryAction.mode === "start" ? (
+                  <Play size={15} />
+                ) : (
+                  <Check size={15} />
+                )
+              }
+              className="cc-action-btn"
+              onClick={() => void onRunBridgePrimaryAction(bridgePrimaryAction.mode)}
+              disabled={bridgeBusy || bridgePrimaryAction.disabled}
+            >
+              {bridgePrimaryAction.label}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -1409,54 +1576,31 @@ export function ControlCenterView({
             type="button"
             variant="outline"
             className="cc-action-btn"
-            onClick={() => void onSaveBridgeSettings()}
-            disabled={bridgeBusy}
-          >
-            保存 IM 目录
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="cc-action-btn"
             onClick={() => setBridgeConfigOpen(true)}
             disabled={bridgeBusy}
           >
-            {openBridgeConfigTitle}
+            连接与凭据
           </Button>
-        </div>
-        <div className="cc-danger-group">
-          <div className="cc-danger-group-label">
-            <span>危险操作</span>
-          </div>
-          <div className="cc-step-secondary-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              icon={<Square size={15} />}
-              className="cc-action-btn"
-              onClick={() => void onStopBridge()}
-              disabled={bridgeBusy || !isBridgeRunning}
-            >
-              停止（Stop）
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              icon={<RefreshCcw size={15} />}
-              className="cc-action-btn"
-              onClick={() => void onRestartBridge()}
-              disabled={bridgeBusy}
-            >
-              重启（Restart）
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="cc-action-btn"
+            onClick={() => setBridgeRuntimePanelExpanded((current) => !current)}
+            disabled={bridgeBusy}
+          >
+            {bridgeSecondaryActionLabel}
+          </Button>
         </div>
         {bridgeStatus.state === "stopped" ? (
           <p className="hint cc-step-meta">
-            Bridge 仍为停止态（Stopped）。请先确认“Bridge 开关”已启用，再点击“启动（Start）”。
+            Bridge 当前处于停止态；完成基础配置后，用上方主按钮启动即可。
           </p>
         ) : null}
-        {bridgeOnboardingDirty ? <p className="hint cc-step-meta">存在未保存配置，请先保存并启用。</p> : null}
+        {bridgeOnboardingDirty || bridgeSettingsDirty ? (
+          <p className="hint cc-step-meta">
+            当前存在未应用的 IM Bridge 配置变更。
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -2244,6 +2388,7 @@ export function ControlCenterView({
             <div className="cc-card-body">
               <BridgeRuntimePanel
                 settings={bridgeSettings}
+                effectiveDefaultWorkDir={effectiveBridgeDefaultWorkDir}
                 status={bridgeStatus}
                 sessions={bridgeSessions}
                 bindings={bridgeBindings}
@@ -2253,8 +2398,6 @@ export function ControlCenterView({
                 secretsMask={bridgeSecretsMask}
                 busy={bridgeBusy}
                 onSettingsChange={onBridgeSettingsChange}
-                onSave={onSaveBridgeSettings}
-                onStart={onStartBridge}
                 onStop={onStopBridge}
                 onRestart={onRestartBridge}
                 onRefreshStatus={onRefreshBridgeStatus}
@@ -2267,12 +2410,109 @@ export function ControlCenterView({
                 onImportSession={onImportBridgeSession}
                 onClearBinding={onClearBridgeBinding}
                 onResetBindingSession={onResetBridgeBindingSession}
+                onResetBindingToDefaultWorkDir={onResetBridgeBindingToDefaultWorkDir}
                 onResolveApproval={onResolveBridgeApproval}
               />
             </div>
           ) : null}
         </section>
       </div>
+    );
+  }
+
+  function renderSkillCenterSection() {
+    const skillCenterActions = (
+      <div className="skill-center-header-actions">
+        <Input
+          value={skillCenterSearch}
+          onChange={(event) => onSkillCenterSearchChange(event.target.value)}
+          placeholder="搜索已安装 Skills"
+          className="skill-center-header-search"
+        />
+        <Button
+          type="button"
+          variant={skillCenterFilter === "global" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "global" ? "all" : "global")
+          }
+        >
+          全局
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "session" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "session" ? "all" : "session")
+          }
+        >
+          session
+        </Button>
+        <Button
+          type="button"
+          icon={<Plus size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onInstallSkillFromGit();
+          }}
+          disabled={skillCenterBusy}
+        >
+          从 Git 安装
+        </Button>
+        <Button
+          type="button"
+          icon={<FolderOpen size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onImportSkillFromPath();
+          }}
+          disabled={skillCenterBusy}
+        >
+          导入本地 Skill
+        </Button>
+      </div>
+    );
+
+    return (
+      <section className="cc-card skill-center-card">
+        <ControlCenterCardHeader
+          title="Skill Center"
+          description="先安装到应用私有目录，再按需应用到用户全局或当前 Session。"
+          statusLabel={`${activeSessionSkillState.appliedSkillIds.length} 个 Session Skill`}
+          primaryAction={skillCenterActions}
+        />
+        <div className="cc-card-body cc-skill-center-body">
+          <SkillCenterPanel
+            surface="page"
+            busy={skillCenterBusy}
+            installedSkills={installedSkills}
+            selectedSkillId={selectedSkillId}
+            selectedSkillDetail={selectedSkillDetail}
+            globalSkillProjections={globalSkillProjections}
+            activeSessionSkillState={activeSessionSkillState}
+            workspaceRecentSkillIds={workspaceRecentSkillIds}
+            currentWorkspaceLabel={status?.activeSessionWorkDir || effectiveWorkDir}
+            onSelectSkill={(skillId) => {
+              void onSelectSkill(skillId);
+            }}
+            onSetTrust={(skillId, trusted) => {
+              void onSetSkillTrust(skillId, trusted);
+            }}
+            onApplySkill={(skillId, scope) => {
+              void onApplySkill(skillId, scope);
+            }}
+            onRemoveSkill={(skillId, scope) => {
+              void onRemoveSkill(skillId, scope);
+            }}
+            onRecoverWorkspaceSkill={(skillId) => {
+              void onRecoverWorkspaceSkill(skillId);
+            }}
+            search={skillCenterSearch}
+            filter={skillCenterFilter}
+          />
+        </div>
+      </section>
     );
   }
 
@@ -2325,6 +2565,7 @@ export function ControlCenterView({
           {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
           {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
           {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
+          {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
         </div>
       </div>
       <BridgeConfigModal
@@ -2339,7 +2580,6 @@ export function ControlCenterView({
         onClose={() => setBridgeConfigOpen(false)}
         onDraftChange={onBridgeOnboardingDraftChange}
         onSave={onSaveBridgeOnboarding}
-        onStartBridge={onStartBridge}
         onRefreshStatus={onRefreshBridgeStatus}
         onRefreshSecretsMask={onRefreshBridgeSecretsMask}
       />

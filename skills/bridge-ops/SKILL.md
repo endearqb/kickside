@@ -23,14 +23,14 @@ description: 处理 Feishu IM bridge 运维请求。读取当用户提到的让�
 
 典型触发语句：
 
-- `桥接：查看状态`
-- `桥接：列出 sessions`
+- `桥接：查看对话状态`
+- `桥接：列出 sessions/对话`
 - `桥接：切到 <session-id>`
 - `桥接：重启`
-- `查看当前 session`
-- `列一下 sessions`
-- `切到 <session-id>`
-- `重启`
+- `查看当前 session/对话`
+- `列一下 sessions/对话`
+- `切到 <session/对话-id>`
+- `重启对话`
 
 ## Supported Actions
 
@@ -53,6 +53,7 @@ thread_id=...
 binding_id=...
 current_session_id=...
 current_workdir=...
+bridge_auth_file=...
 [/bridge_context]
 ```
 
@@ -62,6 +63,7 @@ current_workdir=...
 - `list_sessions` 仍可执行。
 - `switch_session` 不能执行，必须先说明缺少当前聊天上下文。
 - `restart` 仍可执行，但需要先确认。
+- 如果存在 `bridge_auth_file`，调用脚本时优先通过 `--auth-file` 显式传入，不要只依赖环境变量。
 
 ## Execution Rules
 
@@ -71,19 +73,30 @@ current_workdir=...
 - 不要编造 bridge 状态；必须以脚本返回的 JSON 为准。
 - 不要调用 `/bridge` slash 命令。
 - 不要依赖 Feishu 卡片按钮或回调。
+- `KIMI_BRIDGE_AUTH_FILE` 只作为兼容兜底；真实执行时优先用上下文中的 `bridge_auth_file`。
 
 ## Commands
 
 从当前 skill 目录运行下面的 PowerShell：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 status --platform <platform> --chat-id <chat_id> --thread-id <thread_id>
-powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 list-sessions
-powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 switch-session --platform <platform> --chat-id <chat_id> --thread-id <thread_id> --target <session-id-or-query>
-powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 restart
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 status --auth-file <bridge_auth_file> --platform <platform> --chat-id <chat_id> --thread-id <thread_id>
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 list-sessions --auth-file <bridge_auth_file>
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 switch-session --auth-file <bridge_auth_file> --platform <platform> --chat-id <chat_id> --thread-id <thread_id> --target <session-id-or-query>
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/bridge_ops.ps1 restart --auth-file <bridge_auth_file>
 ```
 
-脚本会从 `KIMI_BRIDGE_AUTH_FILE` 读取 localhost bridge admin / host-control 信息。
+脚本会优先读取 `--auth-file`，其次读取 `KIMI_BRIDGE_AUTH_FILE`，最后尝试从本机默认 `com.kimi.shell` 配置目录发现 auth file。
+
+## Diagnostics
+
+如果需要在当前机器上确认实际 `bridge_auth_file` 路径，可先运行：
+
+```powershell
+powershell -NoProfile -Command "$candidates = @(); if ($env:KIMI_BRIDGE_AUTH_FILE) { $candidates += $env:KIMI_BRIDGE_AUTH_FILE }; if ($env:APPDATA) { $candidates += (Join-Path $env:APPDATA 'com.kimi.shell\bridge_skill_auth.json') }; if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'com.kimi.shell\bridge_skill_auth.json') }; $candidates | Where-Object { $_ } | Select-Object -Unique | ForEach-Object { [pscustomobject]@{ path = $_; exists = Test-Path -LiteralPath $_ } } | ConvertTo-Json"
+```
+
+如果返回里有 `exists: true`，优先使用那条路径作为 `--auth-file`。
 
 ## Reply Style
 

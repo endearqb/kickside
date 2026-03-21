@@ -5,12 +5,18 @@ param(
     [string]$Action,
 
     [Parameter()]
+    [Alias('auth-file')]
+    [string]$AuthFile,
+
+    [Parameter()]
     [string]$Platform,
 
     [Parameter()]
+    [Alias('chat-id')]
     [string]$ChatId,
 
     [Parameter()]
+    [Alias('thread-id')]
     [string]$ThreadId,
 
     [Parameter()]
@@ -40,11 +46,52 @@ function Normalize-Text {
     return $Value.Trim()
 }
 
-function Read-BridgeAuth {
-    $authPath = Normalize-Text $env:KIMI_BRIDGE_AUTH_FILE
-    if ([string]::IsNullOrWhiteSpace($authPath)) {
-        throw 'KIMI_BRIDGE_AUTH_FILE is not set.'
+function Get-DefaultBridgeAuthCandidates {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA)) {
+        $root = Normalize-Text $base
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+        $candidates.Add((Join-Path $root 'com.kimi.shell\bridge_skill_auth.json'))
     }
+    return @($candidates | Select-Object -Unique)
+}
+
+function Resolve-BridgeAuthPath {
+    $explicitPath = Normalize-Text $AuthFile
+    if (-not [string]::IsNullOrWhiteSpace($explicitPath)) {
+        if (-not (Test-Path -LiteralPath $explicitPath)) {
+            throw "Bridge auth file does not exist: $explicitPath"
+        }
+        return $explicitPath
+    }
+
+    $envPath = Normalize-Text $env:KIMI_BRIDGE_AUTH_FILE
+    if (-not [string]::IsNullOrWhiteSpace($envPath) -and (Test-Path -LiteralPath $envPath)) {
+        return $envPath
+    }
+
+    foreach ($candidate in Get-DefaultBridgeAuthCandidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+
+    $checked = @()
+    if (-not [string]::IsNullOrWhiteSpace($envPath)) {
+        $checked += $envPath
+    }
+    $checked += @(Get-DefaultBridgeAuthCandidates)
+    $checked = @($checked | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($checked.Count -gt 0) {
+        throw ('Bridge auth file was not found. Provide --auth-file, set KIMI_BRIDGE_AUTH_FILE, or ensure one of these paths exists: {0}' -f ($checked -join ', '))
+    }
+    throw 'Bridge auth file was not found. Provide --auth-file or set KIMI_BRIDGE_AUTH_FILE.'
+}
+
+function Read-BridgeAuth {
+    $authPath = Resolve-BridgeAuthPath
     if (-not (Test-Path -LiteralPath $authPath)) {
         throw "Bridge auth file does not exist: $authPath"
     }
@@ -189,6 +236,7 @@ try {
                 ok = $true
                 message = 'bridge status loaded'
                 bridge_state = $status.state
+                bridge_started_at = $status.startedAt
                 binding = $binding
                 session = $currentSession
                 channels = @($status.channels)

@@ -14,12 +14,15 @@ mod open_request;
 mod port_manager;
 mod settings_store;
 mod shortcut_manager;
+mod skill_center;
+mod skill_center_store;
+mod skill_projection;
 mod tray_manager;
 mod types;
 mod window_manager;
 mod workspace_session;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Instant;
@@ -32,13 +35,15 @@ use types::{
     AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
     BridgeApprovalResolveInput, BridgeOnboardingConfigInput, BridgeSecretsMaskView,
     BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource, BridgeSettings,
-    BridgeStatus, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog,
-    InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
-    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
+    BridgeSkillsMode, BridgeStatus, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
+    InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
+    InstallSettingsView, InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
     KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
-    PowerShellPreflightSummary, ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    InstalledSkill, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
+    SkillApplyResult, SkillApplyScope, SkillDetail, SkillProjectionRecord,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
+    StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
     CURRENT_ONBOARDING_VERSION,
 };
 
@@ -369,8 +374,8 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
 
     let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
     let previous_work_dir = settings.work_dir.clone();
-    if trimmed.is_empty() {
-        settings.work_dir = None;
+    let next_work_dir = if trimmed.is_empty() {
+        None
     } else {
         let work_dir = PathBuf::from(trimmed);
         if !work_dir.exists() {
@@ -385,8 +390,29 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
                 work_dir.display()
             ));
         }
-        settings.work_dir = Some(work_dir.to_string_lossy().to_string());
+        Some(work_dir.to_string_lossy().to_string())
+    };
+
+    let bridge_settings =
+        bridge_settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    if bridge_settings.skills_mode == BridgeSkillsMode::FollowDefaultWorkDir {
+        let effective_bridge_work_dir = bridge_settings_store::preview_default_work_dir_after_app_sync(
+            &bridge_settings,
+            previous_work_dir.as_deref(),
+            next_work_dir.as_deref(),
+        )
+        .ok_or_else(|| {
+            "Bridge follow 模式需要有效的 IM 默认工作目录；请先设置 Bridge 默认工作目录或保留应用默认工作目录。"
+                .to_string()
+        })?;
+        bridge_manager::ensure_bundled_bridge_ops_installed(
+            &app,
+            Path::new(&effective_bridge_work_dir),
+        )
+        .map_err(|error| error.to_string())?;
     }
+
+    settings.work_dir = next_work_dir;
 
     settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
     bridge_settings_store::sync_default_work_dir_from_app(&app, previous_work_dir)
@@ -402,6 +428,24 @@ fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
 
 #[tauri::command]
 fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
+    let app_settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    if input.skills_mode == BridgeSkillsMode::FollowDefaultWorkDir {
+        let effective_bridge_work_dir = bridge_settings_store::preview_default_work_dir_after_app_sync(
+            &input,
+            None,
+            app_settings.work_dir.as_deref(),
+        )
+        .ok_or_else(|| {
+            "Bridge follow 模式需要有效的 IM 默认工作目录；请先设置 Bridge 默认工作目录或保留应用默认工作目录。"
+                .to_string()
+        })?;
+        bridge_manager::ensure_bundled_bridge_ops_installed(
+            &app,
+            Path::new(&effective_bridge_work_dir),
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
     let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
     sync_idle_bridge_runtime(&app, &saved)?;
     Ok(saved)
@@ -501,6 +545,15 @@ fn reset_bridge_binding_session(app: AppHandle, binding_id: String) -> Result<()
 }
 
 #[tauri::command]
+fn reset_bridge_binding_to_default_work_dir(
+    app: AppHandle,
+    binding_id: String,
+) -> Result<(), String> {
+    bridge_manager::reset_bridge_binding_to_default_work_dir(&app, &binding_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_bridge_approvals(
     app: AppHandle,
     status: Option<String>,
@@ -565,6 +618,83 @@ fn get_bridge_log_tail(app: AppHandle, max_lines: Option<usize>) -> Result<Vec<S
 #[tauri::command]
 fn get_bridge_secrets_mask_view(app: AppHandle) -> Result<BridgeSecretsMaskView, String> {
     bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn install_skill_from_git(
+    app: AppHandle,
+    repo_url: String,
+    git_ref: Option<String>,
+) -> Result<InstalledSkill, String> {
+    skill_center::install_skill_from_git(&app, &repo_url, git_ref.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_skill_from_path(app: AppHandle, path: String) -> Result<InstalledSkill, String> {
+    skill_center::import_skill_from_path(&app, &path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_installed_skills(app: AppHandle) -> Result<Vec<InstalledSkill>, String> {
+    skill_center::list_installed_skills(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_skill_detail(app: AppHandle, skill_id: String) -> Result<SkillDetail, String> {
+    skill_center::get_skill_detail(&app, &skill_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_skill_trust(
+    app: AppHandle,
+    skill_id: String,
+    trusted: bool,
+) -> Result<(), String> {
+    skill_center::set_skill_trust(&app, &skill_id, trusted).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn apply_skill(
+    app: AppHandle,
+    skill_id: String,
+    scope: SkillApplyScope,
+) -> Result<SkillApplyResult, String> {
+    skill_center::apply_skill(&app, &skill_id, scope).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_skill(
+    app: AppHandle,
+    skill_id: String,
+    scope: SkillApplyScope,
+) -> Result<SkillApplyResult, String> {
+    skill_center::remove_skill(&app, &skill_id, scope).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_active_session_skills(app: AppHandle) -> Result<SessionSkillState, String> {
+    skill_center::list_active_session_skills(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_global_skills(app: AppHandle) -> Result<Vec<SkillProjectionRecord>, String> {
+    skill_center::list_global_skills(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_workspace_recent_skills(
+    app: AppHandle,
+    workspace_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    skill_center::list_workspace_recent_skills(&app, workspace_key.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cleanup_session_skill_projections(app: AppHandle, session_id: String) -> Result<(), String> {
+    skill_center::cleanup_session_skill_projections(&app, &session_id)
+        .map_err(|error| error.to_string())
 }
 
 fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(), String> {
@@ -1027,6 +1157,12 @@ pub fn run() {
                     format!("failed to initialize bridge settings files: {error:#}"),
                 );
             }
+            if let Err(error) = skill_center::initialize(app.handle()) {
+                log_manager::append_line(
+                    app.handle(),
+                    format!("failed to initialize skill center: {error:#}"),
+                );
+            }
 
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
@@ -1111,11 +1247,23 @@ pub fn run() {
             list_bridge_sessions,
             clear_bridge_binding,
             reset_bridge_binding_session,
+            reset_bridge_binding_to_default_work_dir,
             list_bridge_approvals,
             resolve_bridge_approval,
             import_bridge_session,
-            get_bridge_log_tail,
-            get_bridge_secrets_mask_view,
+              get_bridge_log_tail,
+              get_bridge_secrets_mask_view,
+              install_skill_from_git,
+              import_skill_from_path,
+              list_installed_skills,
+              get_skill_detail,
+            set_skill_trust,
+            apply_skill,
+            remove_skill,
+            list_active_session_skills,
+            list_global_skills,
+            list_workspace_recent_skills,
+            cleanup_session_skill_projections,
             get_diagnostics,
             open_logs_folder,
             open_external_url,

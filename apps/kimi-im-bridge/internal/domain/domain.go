@@ -76,6 +76,7 @@ type RuntimeArtifact struct {
 
 type PendingInboundAttachment struct {
 	AttachmentID    string                  `json:"attachmentId"`
+	ConnectorID     string                  `json:"connectorId,omitempty"`
 	Platform        string                  `json:"platform"`
 	ChatID          string                  `json:"chatId"`
 	ThreadID        string                  `json:"threadId,omitempty"`
@@ -93,6 +94,7 @@ type PendingInboundAttachment struct {
 }
 
 type InboundMessage struct {
+	ConnectorID string              `json:"connectorId"`
 	Platform    string              `json:"platform"`
 	AccountID   string              `json:"accountId,omitempty"`
 	MessageID   string              `json:"messageId"`
@@ -108,10 +110,11 @@ type InboundMessage struct {
 }
 
 type BindingKey struct {
-	Platform  string `json:"platform"`
-	AccountID string `json:"accountId,omitempty"`
-	ChatID    string `json:"chatId"`
-	ThreadID  string `json:"threadId,omitempty"`
+	ConnectorID string `json:"connectorId"`
+	Platform    string `json:"platform"`
+	AccountID   string `json:"accountId,omitempty"`
+	ChatID      string `json:"chatId"`
+	ThreadID    string `json:"threadId,omitempty"`
 }
 
 type SessionBinding struct {
@@ -130,6 +133,8 @@ type SessionBinding struct {
 
 type BindingRecord struct {
 	BindingID            string `json:"bindingId"`
+	ConnectorID          string `json:"connectorId"`
+	ConnectorLabel       string `json:"connectorLabel,omitempty"`
 	Platform             string `json:"platform"`
 	AccountID            string `json:"accountId,omitempty"`
 	ChatID               string `json:"chatId"`
@@ -151,6 +156,8 @@ type BindingUpdate struct {
 
 type ApprovalTicket struct {
 	ApprovalID            string `json:"approvalId"`
+	ConnectorID           string `json:"connectorId"`
+	ConnectorLabel        string `json:"connectorLabel,omitempty"`
 	KimiSessionID         string `json:"kimiSessionId"`
 	TurnID                string `json:"turnId,omitempty"`
 	StepID                string `json:"stepId,omitempty"`
@@ -174,6 +181,7 @@ type ApprovalTicket struct {
 }
 
 type OutboundMessage struct {
+	ConnectorID      string               `json:"connectorId,omitempty"`
 	Platform         string               `json:"platform"`
 	ChatID           string               `json:"chatId"`
 	ThreadID         string               `json:"threadId,omitempty"`
@@ -185,6 +193,8 @@ type OutboundMessage struct {
 }
 
 type ChannelStatus struct {
+	ConnectorID          string              `json:"connectorId"`
+	ConnectorLabel       string              `json:"connectorLabel,omitempty"`
 	Platform             string              `json:"platform"`
 	Enabled              bool                `json:"enabled"`
 	State                ChannelRuntimeState `json:"state"`
@@ -256,6 +266,7 @@ type SessionImportRequest struct {
 
 type DeliveryEvent struct {
 	EventID           string `json:"eventId"`
+	ConnectorID       string `json:"connectorId,omitempty"`
 	Platform          string `json:"platform"`
 	ChatID            string `json:"chatId"`
 	ThreadID          string `json:"threadId,omitempty"`
@@ -279,6 +290,7 @@ type DeliveryEvent struct {
 
 type BridgeTurn struct {
 	TurnID           string `json:"turnId"`
+	ConnectorID      string `json:"connectorId,omitempty"`
 	KimiSessionID    string `json:"kimiSessionId"`
 	BindingID        string `json:"bindingId,omitempty"`
 	Platform         string `json:"platform"`
@@ -298,6 +310,7 @@ type BridgeTurn struct {
 
 type TurnEventRecord struct {
 	EventID        string  `json:"eventId"`
+	ConnectorID    string  `json:"connectorId,omitempty"`
 	TurnID         string  `json:"turnId"`
 	KimiSessionID  string  `json:"kimiSessionId"`
 	Platform       string  `json:"platform"`
@@ -320,7 +333,7 @@ type TurnEventRecord struct {
 }
 
 type ChannelCheckpoint struct {
-	Platform       string `json:"platform"`
+	ConnectorID    string `json:"connectorId"`
 	CheckpointKind string `json:"checkpointKind"`
 	FetchedValue   string `json:"fetchedValue,omitempty"`
 	CommittedValue string `json:"committedValue,omitempty"`

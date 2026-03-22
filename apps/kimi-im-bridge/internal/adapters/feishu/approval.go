@@ -46,7 +46,7 @@ func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *Message
 }
 
 func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
-	if err := s.store.TouchChannelInbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 
@@ -77,9 +77,10 @@ func (s *Service) processShowPanelCardAction(ctx context.Context, event *CardAct
 	}
 
 	key := domain.BindingKey{
-		Platform: platformID,
-		ChatID:   strings.TrimSpace(event.ChatID),
-		ThreadID: strings.TrimSpace(value.ThreadID),
+		ConnectorID: s.connectorID(),
+		Platform:    platformID,
+		ChatID:      strings.TrimSpace(event.ChatID),
+		ThreadID:    strings.TrimSpace(value.ThreadID),
 	}
 	card, shouldMarkOnboarding, err := s.buildPanelCard(ctx, key, value.Panel, value.ShowDetails)
 	if err != nil {
@@ -96,7 +97,7 @@ func (s *Service) processShowPanelCardAction(ctx context.Context, event *CardAct
 			}
 		}
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 	return &CardActionResult{
@@ -120,7 +121,7 @@ func (s *Service) processApprovalCardAction(ctx context.Context, event *CardActi
 	if ticket.Status != "pending" {
 		return &CardActionResult{Toast: "already resolved"}, nil
 	}
-	if !approvalContextMatches(ticket, event, value.ChatID, value.ThreadID) {
+	if !approvalContextMatches(ticket, event, value.ChatID, value.ThreadID, s.connectorID()) {
 		return &CardActionResult{Toast: "invalid approval context"}, nil
 	}
 
@@ -132,7 +133,7 @@ func (s *Service) processApprovalCardAction(ctx context.Context, event *CardActi
 		"eventId":      strings.TrimSpace(event.EventID),
 		"approvalId":   value.ApprovalID,
 		"decision":     value.Decision,
-		"resolutionBy": platformID,
+		"resolutionBy": s.connectorID(),
 	})
 	if err != nil {
 		return nil, reliability.Wrap("payload_invalid", err)
@@ -162,7 +163,7 @@ func (s *Service) processApprovalCardAction(ctx context.Context, event *CardActi
 		}
 		return &CardActionResult{Toast: callbackAckText(value.Decision)}, nil
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 	return &CardActionResult{
@@ -184,15 +185,16 @@ func (s *Service) processSessionCardAction(ctx context.Context, event *CardActio
 	}
 
 	key := domain.BindingKey{
-		Platform: platformID,
-		ChatID:   strings.TrimSpace(event.ChatID),
-		ThreadID: strings.TrimSpace(value.ThreadID),
+		ConnectorID: s.connectorID(),
+		Platform:    platformID,
+		ChatID:      strings.TrimSpace(event.ChatID),
+		ThreadID:    strings.TrimSpace(value.ThreadID),
 	}
 	card, err := s.useSessionForBinding(ctx, key, value.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 	return &CardActionResult{
@@ -214,9 +216,10 @@ func (s *Service) processSetPresetWorkDirCardAction(ctx context.Context, event *
 	}
 
 	key := domain.BindingKey{
-		Platform: platformID,
-		ChatID:   strings.TrimSpace(event.ChatID),
-		ThreadID: strings.TrimSpace(value.ThreadID),
+		ConnectorID: s.connectorID(),
+		Platform:    platformID,
+		ChatID:      strings.TrimSpace(event.ChatID),
+		ThreadID:    strings.TrimSpace(value.ThreadID),
 	}
 	binding, err := s.resolveOrCreateBinding(ctx, key)
 	if err != nil {
@@ -226,7 +229,7 @@ func (s *Service) processSetPresetWorkDirCardAction(ctx context.Context, event *
 		return nil, reliability.Wrap("unknown", err)
 	}
 	binding.WorkDir = strings.TrimSpace(value.PresetPath)
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 	toast := "workdir updated"
@@ -254,9 +257,10 @@ func (s *Service) processClearWorkDirCardAction(ctx context.Context, event *Card
 	}
 
 	key := domain.BindingKey{
-		Platform: platformID,
-		ChatID:   strings.TrimSpace(event.ChatID),
-		ThreadID: strings.TrimSpace(value.ThreadID),
+		ConnectorID: s.connectorID(),
+		Platform:    platformID,
+		ChatID:      strings.TrimSpace(event.ChatID),
+		ThreadID:    strings.TrimSpace(value.ThreadID),
 	}
 	binding, err := s.bindings.ResolveBinding(ctx, key)
 	if err != nil {
@@ -268,7 +272,7 @@ func (s *Service) processClearWorkDirCardAction(ctx context.Context, event *Card
 		}
 		binding.WorkDir = ""
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)
 	}
 	return &CardActionResult{
@@ -430,11 +434,14 @@ func mergeActionValue(base map[string]string, decision string) map[string]string
 	return merged
 }
 
-func approvalContextMatches(ticket *domain.ApprovalTicket, event *CardActionEvent, chatID string, threadID string) bool {
+func approvalContextMatches(ticket *domain.ApprovalTicket, event *CardActionEvent, chatID string, threadID string, connectorID string) bool {
 	if ticket == nil || event == nil {
 		return false
 	}
 	if ticket.Platform != platformID {
+		return false
+	}
+	if ticket.ConnectorID != "" && strings.TrimSpace(ticket.ConnectorID) != strings.TrimSpace(connectorID) {
 		return false
 	}
 	if strings.TrimSpace(ticket.ChatID) != strings.TrimSpace(event.ChatID) {

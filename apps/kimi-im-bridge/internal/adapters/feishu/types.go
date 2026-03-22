@@ -40,7 +40,7 @@ type ChannelStore interface {
 	ListChannelStatuses(context.Context) ([]domain.ChannelStatus, error)
 	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
 	UpdateChannelDiagnostics(context.Context, string, domain.ChannelDiagnosticsUpdate) error
-	UpdateChannelOffset(context.Context, string, string) error
+	UpdateChannelOffset(context.Context, string, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
 	ListSessions(context.Context) ([]domain.BridgeSession, error)
@@ -68,8 +68,12 @@ type WorkDirPreset struct {
 }
 
 type Config struct {
+	ConnectorID           string
+	ConnectorLabel        string
 	AppID                 string
 	AppSecret             string
+	VerificationToken     string
+	EncryptKey            string
 	AutoApprove           bool
 	DefaultWorkDir        string
 	WorkDirPresets        []WorkDirPreset

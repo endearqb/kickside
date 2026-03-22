@@ -42,6 +42,7 @@ func (s *Service) cacheInboundAttachments(ctx context.Context, inbound domain.In
 
 		item := domain.PendingInboundAttachment{
 			AttachmentID:    uuid.NewString(),
+			ConnectorID:     s.connectorID(),
 			Platform:        platformID,
 			ChatID:          inbound.ChatID,
 			ThreadID:        inbound.ThreadID,
@@ -65,7 +66,7 @@ func (s *Service) cacheInboundAttachments(ctx context.Context, inbound domain.In
 }
 
 func (s *Service) loadPendingPromptAttachments(ctx context.Context, chatID string, threadID string) ([]domain.PromptAttachment, []string, error) {
-	items, err := s.store.ListPendingInboundAttachments(ctx, platformID, chatID, threadID, time.Now().UTC().Format(time.RFC3339), maxPendingAttachmentsPerChat)
+	items, err := s.store.ListPendingInboundAttachments(ctx, s.connectorID(), chatID, threadID, time.Now().UTC().Format(time.RFC3339), maxPendingAttachmentsPerChat)
 	if err != nil {
 		return nil, nil, reliability.Wrap("unknown", err)
 	}

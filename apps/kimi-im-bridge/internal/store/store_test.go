@@ -11,6 +11,13 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
+func testConnectors() []config.ConnectorConfig {
+	return []config.ConnectorConfig{
+		{ID: "telegram-default", Platform: "telegram", Label: "Telegram", Enabled: true, Mode: "polling"},
+		{ID: "feishu-default", Platform: "feishu", Label: "Feishu", Enabled: true, Mode: "websocket", FeishuAutoApprove: true, FeishuReplyRenderer: config.FeishuReplyRendererInteractive},
+	}
+}
+
 func TestOpenInitializesUserVersionAndWAL(t *testing.T) {
 	t.Parallel()
 
@@ -79,7 +86,7 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if err := store.UpsertOffset(ctx, "telegram", "telegram_update", "42"); err != nil {
@@ -145,7 +152,7 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 	}
 	defer reopened.Close()
 
-	offset, ok, err := reopened.GetOffset(ctx, "telegram", "telegram_update")
+	offset, ok, err := reopened.GetOffset(ctx, "telegram-default", "telegram_update")
 	if err != nil {
 		t.Fatalf("GetOffset returned error: %v", err)
 	}
@@ -323,10 +330,10 @@ func TestOpenMigratesV3DatabaseToLatestSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendTurnEvent returned error after migration: %v", err)
 	}
-	if err := store.CommitCheckpoint(ctx, "telegram", "telegram_update", "101", "101"); err != nil {
+	if err := store.CommitCheckpoint(ctx, "telegram-default", "telegram_update", "101", "101"); err != nil {
 		t.Fatalf("CommitCheckpoint returned error after migration: %v", err)
 	}
-	checkpoint, err := store.GetCheckpoint(ctx, "telegram", "telegram_update")
+	checkpoint, err := store.GetCheckpoint(ctx, "telegram-default", "telegram_update")
 	if err != nil {
 		t.Fatalf("GetCheckpoint returned error after migration: %v", err)
 	}
@@ -345,7 +352,7 @@ func TestListChannelStatusesHandlesNullHeartbeatColumn(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if _, err := store.db.ExecContext(
@@ -375,19 +382,19 @@ func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
-	if err := store.UpdateChannelState(ctx, "telegram", domain.ChannelStateReady, "", ""); err != nil {
+	if err := store.UpdateChannelState(ctx, "telegram-default", domain.ChannelStateReady, "", ""); err != nil {
 		t.Fatalf("UpdateChannelState returned error: %v", err)
 	}
-	if err := store.UpdateChannelOffset(ctx, "telegram", "100"); err != nil {
+	if err := store.UpdateChannelOffset(ctx, "telegram-default", "telegram_update", "100"); err != nil {
 		t.Fatalf("UpdateChannelOffset returned error: %v", err)
 	}
-	if err := store.TouchChannelInbound(ctx, "telegram", "2026-03-13T10:00:00Z"); err != nil {
+	if err := store.TouchChannelInbound(ctx, "telegram-default", "2026-03-13T10:00:00Z"); err != nil {
 		t.Fatalf("TouchChannelInbound returned error: %v", err)
 	}
-	if err := store.TouchChannelOutbound(ctx, "telegram", "2026-03-13T10:01:00Z"); err != nil {
+	if err := store.TouchChannelOutbound(ctx, "telegram-default", "2026-03-13T10:01:00Z"); err != nil {
 		t.Fatalf("TouchChannelOutbound returned error: %v", err)
 	}
 
@@ -473,15 +480,18 @@ func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) 
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, []config.ChannelConfig{{
+	if err := store.SyncConfiguredChannels(ctx, []config.ConnectorConfig{{
+		ID:       "telegram-default",
 		Platform: "telegram",
+		Label:    "Telegram",
 		Enabled:  true,
+		Mode:     "polling",
 	}}); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if err := store.UpdateChannelState(
 		ctx,
-		"telegram",
+		"telegram-default",
 		domain.ChannelStateError,
 		"invalid_credentials",
 		"telegram getMe failed (401): Unauthorized",
@@ -514,9 +524,14 @@ func TestChannelDiagnosticsPersistRecoveryFields(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, []config.ChannelConfig{{
-		Platform: "feishu",
-		Enabled:  true,
+	if err := store.SyncConfiguredChannels(ctx, []config.ConnectorConfig{{
+		ID:                  "feishu-default",
+		Platform:            "feishu",
+		Label:               "Feishu",
+		Enabled:             true,
+		Mode:                "websocket",
+		FeishuAutoApprove:   true,
+		FeishuReplyRenderer: config.FeishuReplyRendererInteractive,
 	}}); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
@@ -529,7 +544,7 @@ func TestChannelDiagnosticsPersistRecoveryFields(t *testing.T) {
 	nextRetryAt := "2026-03-20T01:25:43Z"
 	lastRecoveryAt := "2026-03-20T01:26:10Z"
 	recoveryHint := "host_connection_aborted"
-	if err := store.UpdateChannelDiagnostics(ctx, "feishu", domain.ChannelDiagnosticsUpdate{
+	if err := store.UpdateChannelDiagnostics(ctx, "feishu-default", domain.ChannelDiagnosticsUpdate{
 		State:                domain.ChannelStateDegraded,
 		LastErrorCode:        "transient_network",
 		LastError:            "wsasend aborted by host machine",

@@ -241,8 +241,11 @@ func (s *Service) handleBridgeCommand(
 	key domain.BindingKey,
 	command bridgeCommand,
 ) error {
-	if err := s.store.TouchChannelInbound(ctx, platformID, event.ReceivedAt); err != nil {
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), event.ReceivedAt); err != nil {
 		return reliability.Wrap("unknown", err)
+	}
+	if key.ConnectorID == "" {
+		key.ConnectorID = s.connectorID()
 	}
 
 	switch command.Kind {

@@ -861,7 +861,7 @@ func TestServiceStartSkipsPersistedCheckpoint(t *testing.T) {
 	runtimeExec.responses = []fakeRuntimeResponse{
 		{events: []runtime.PromptEvent{{Type: runtime.EventTypeContentDelta, Text: "fresh reply"}}},
 	}
-	if err := storeHandle.UpdateChannelOffset(context.Background(), platformID, "evt-1"); err != nil {
+	if err := storeHandle.UpdateChannelOffset(context.Background(), platformID, feishuOffsetKind, "evt-1"); err != nil {
 		t.Fatalf("UpdateChannelOffset returned error: %v", err)
 	}
 

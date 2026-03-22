@@ -62,6 +62,12 @@ func NewService(options Options) *Service {
 }
 
 func (s *Service) Name() string {
+	if value := strings.TrimSpace(s.config.ConnectorLabel); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
 	return platformID
 }
 
@@ -91,7 +97,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.done = make(chan struct{})
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, "", ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateConnecting, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 	s.logConnectionOpening("credential_probe", 1)
@@ -186,7 +192,7 @@ func (s *Service) OnReady(ctx context.Context) {
 			logValue(lastReadyAt),
 		)
 	}
-	_ = s.store.UpdateChannelDiagnostics(ctx, platformID, update)
+	_ = s.store.UpdateChannelDiagnostics(ctx, s.connectorID(), update)
 	s.logf(
 		"feishu connection ready platform=%s operation=long_connection attempt=1 lastReadyAt=%s",
 		platformID,
@@ -225,6 +231,7 @@ func (s *Service) OnCardAction(ctx context.Context, event *CardActionEvent) (*Ca
 
 func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) (bool, error) {
 	if command, key, ok := parseBridgeCommand(event); ok {
+		key.ConnectorID = s.connectorID()
 		if err := s.handleBridgeCommand(ctx, event, key, command); err != nil {
 			return false, err
 		}
@@ -235,7 +242,9 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if !ok {
 		return true, nil
 	}
-	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
+	inbound.ConnectorID = s.connectorID()
+	key.ConnectorID = s.connectorID()
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), inbound.ReceivedAt); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
 	if strings.TrimSpace(inbound.Text) == "" && len(inbound.Attachments) > 0 {
@@ -466,7 +475,7 @@ func (s *Service) collectDoctorReport(ctx context.Context, key domain.BindingKey
 	}
 	var feishuStatus *domain.ChannelStatus
 	for index := range channelStatuses {
-		if strings.EqualFold(strings.TrimSpace(channelStatuses[index].Platform), platformID) {
+		if channelStatuses[index].ConnectorID == s.connectorID() {
 			status := channelStatuses[index]
 			feishuStatus = &status
 			break
@@ -632,7 +641,7 @@ func hasRecoveryHint(channel *domain.ChannelStatus, hint string) bool {
 }
 
 func (s *Service) loadCheckpoint(ctx context.Context) (string, error) {
-	value, ok, err := s.store.GetOffset(ctx, platformID, feishuOffsetKind)
+	value, ok, err := s.store.GetOffset(ctx, s.connectorID(), feishuOffsetKind)
 	if err != nil {
 		return "", fmt.Errorf("read feishu checkpoint: %w", err)
 	}
@@ -647,7 +656,7 @@ func (s *Service) advanceCheckpoint(ctx context.Context, eventID string) error {
 	if eventID == "" {
 		return nil
 	}
-	if err := s.store.UpdateChannelOffset(ctx, platformID, eventID); err != nil {
+	if err := s.store.UpdateChannelOffset(ctx, s.connectorID(), feishuOffsetKind, eventID); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	s.setCheckpoint(eventID)
@@ -715,6 +724,13 @@ func (s *Service) logf(format string, args ...any) {
 	}
 }
 
+func (s *Service) connectorID() string {
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
+	return platformID
+}
+
 func (s *Service) logConnectionOpening(operation string, attempt int) {
 	s.logf(
 		"feishu connection opening platform=%s operation=%s attempt=%d lastReadyAt=%s",
@@ -759,7 +775,7 @@ func (s *Service) recordConnectionFailure(
 		NextRetryAt:          &nextRetryAt,
 		RecoveryHint:         &recoveryHint,
 	}
-	_ = s.store.UpdateChannelDiagnostics(ctx, platformID, update)
+	_ = s.store.UpdateChannelDiagnostics(ctx, s.connectorID(), update)
 	s.logf(
 		"feishu connection failure platform=%s operation=%s errorCode=%s retryable=%t attempt=%d backoffMs=%d nextRetryAt=%s lastReadyAt=%s failureFingerprint=%s err=%q",
 		platformID,

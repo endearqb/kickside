@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 10
+const userVersion = 11
 
 type Store struct {
 	db *sql.DB
@@ -95,10 +95,14 @@ func (s *Store) JournalMode(ctx context.Context) (string, error) {
 	return strings.ToLower(mode), nil
 }
 
-func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.ChannelConfig) error {
+func (s *Store) SyncConfiguredChannels(ctx context.Context, connectors []config.ConnectorConfig) error {
 	now := nowRFC3339()
-	for _, channel := range channels {
-		if channel.Platform == "" {
+	for _, connector := range connectors {
+		connectorID := strings.TrimSpace(connector.ID)
+		if connectorID == "" {
+			connectorID = strings.TrimSpace(connector.Platform)
+		}
+		if connector.Platform == "" || connectorID == "" {
 			continue
 		}
 		_, err := s.db.ExecContext(
@@ -108,18 +112,19 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 				last_inbound_at, last_outbound_at, created_at, updated_at
 			) VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)
 			ON CONFLICT(channel_id) DO UPDATE SET
+				platform=excluded.platform,
 				enabled=excluded.enabled,
 				state=excluded.state,
 				updated_at=excluded.updated_at`,
-			channel.Platform,
-			channel.Platform,
-			boolToInt(channel.Enabled),
+			connectorID,
+			connector.Platform,
+			boolToInt(connector.Enabled),
 			domain.ChannelStateIdle,
 			now,
 			now,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to upsert channel %s: %w", channel.Platform, err)
+			return fmt.Errorf("failed to upsert channel %s: %w", connectorID, err)
 		}
 	}
 	return nil
@@ -128,12 +133,12 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, channels []config.Ch
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT platform, enabled, state, last_heartbeat_at, last_inbound_at, last_outbound_at, last_offset, last_error,
+		`SELECT channel_id, platform, enabled, state, last_heartbeat_at, last_inbound_at, last_outbound_at, last_offset, last_error,
 		        ifnull(last_ready_at, ''), ifnull(last_failure_at, ''), ifnull(last_failure_operation, ''),
 		        ifnull(last_failure_retryable, 0), ifnull(consecutive_failures, 0), ifnull(next_retry_at, ''),
 		        ifnull(last_recovery_at, ''), ifnull(recovery_hint, '')
 		 FROM bridge_channels
-		 ORDER BY platform`,
+		 ORDER BY platform, channel_id`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list channel statuses: %w", err)
@@ -158,6 +163,7 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 		var lastRecoveryAt sql.NullString
 		var recoveryHint sql.NullString
 		if err := rows.Scan(
+			&status.ConnectorID,
 			&status.Platform,
 			&enabled,
 			&status.State,
@@ -202,12 +208,12 @@ func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus
 
 func (s *Store) UpdateChannelState(
 	ctx context.Context,
-	platform string,
+	connectorID string,
 	state domain.ChannelRuntimeState,
 	lastErrorCode string,
 	lastError string,
 ) error {
-	return s.UpdateChannelDiagnostics(ctx, platform, domain.ChannelDiagnosticsUpdate{
+	return s.UpdateChannelDiagnostics(ctx, connectorID, domain.ChannelDiagnosticsUpdate{
 		State:         state,
 		LastErrorCode: lastErrorCode,
 		LastError:     lastError,
@@ -216,9 +222,10 @@ func (s *Store) UpdateChannelState(
 
 func (s *Store) UpdateChannelDiagnostics(
 	ctx context.Context,
-	platform string,
+	connectorID string,
 	update domain.ChannelDiagnosticsUpdate,
 ) error {
+	connectorID = s.resolveChannelID(ctx, connectorID)
 	now := nowRFC3339()
 	setClauses := []string{
 		"state = ?",
@@ -264,7 +271,7 @@ func (s *Store) UpdateChannelDiagnostics(
 		args = append(args, nullIfEmpty(strings.TrimSpace(*update.RecoveryHint)))
 	}
 
-	args = append(args, platform)
+	args = append(args, connectorID)
 	query := fmt.Sprintf(
 		`UPDATE bridge_channels
 		 SET %s
@@ -273,13 +280,14 @@ func (s *Store) UpdateChannelDiagnostics(
 	)
 	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("failed to update channel state for %s: %w", platform, err)
+		return fmt.Errorf("failed to update channel state for %s: %w", connectorID, err)
 	}
 	return nil
 }
 
-func (s *Store) UpdateChannelOffset(ctx context.Context, platform string, offsetValue string) error {
-	if err := s.UpsertOffset(ctx, platform, offsetKindForPlatform(platform), offsetValue); err != nil {
+func (s *Store) UpdateChannelOffset(ctx context.Context, connectorID string, offsetKind string, offsetValue string) error {
+	connectorID = s.resolveChannelID(ctx, connectorID)
+	if err := s.UpsertOffset(ctx, connectorID, offsetKind, offsetValue); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(
@@ -289,15 +297,16 @@ func (s *Store) UpdateChannelOffset(ctx context.Context, platform string, offset
 		 WHERE channel_id = ?`,
 		nullIfEmpty(offsetValue),
 		nowRFC3339(),
-		platform,
+		connectorID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to update channel status offset for %s: %w", platform, err)
+		return fmt.Errorf("failed to update channel status offset for %s: %w", connectorID, err)
 	}
 	return nil
 }
 
-func (s *Store) TouchChannelInbound(ctx context.Context, platform string, at string) error {
+func (s *Store) TouchChannelInbound(ctx context.Context, connectorID string, at string) error {
+	connectorID = s.resolveChannelID(ctx, connectorID)
 	if at == "" {
 		at = nowRFC3339()
 	}
@@ -308,15 +317,16 @@ func (s *Store) TouchChannelInbound(ctx context.Context, platform string, at str
 		 WHERE channel_id = ?`,
 		at,
 		nowRFC3339(),
-		platform,
+		connectorID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to touch inbound channel activity for %s: %w", platform, err)
+		return fmt.Errorf("failed to touch inbound channel activity for %s: %w", connectorID, err)
 	}
 	return nil
 }
 
-func (s *Store) TouchChannelOutbound(ctx context.Context, platform string, at string) error {
+func (s *Store) TouchChannelOutbound(ctx context.Context, connectorID string, at string) error {
+	connectorID = s.resolveChannelID(ctx, connectorID)
 	if at == "" {
 		at = nowRFC3339()
 	}
@@ -327,15 +337,16 @@ func (s *Store) TouchChannelOutbound(ctx context.Context, platform string, at st
 		 WHERE channel_id = ?`,
 		at,
 		nowRFC3339(),
-		platform,
+		connectorID,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to touch outbound channel activity for %s: %w", platform, err)
+		return fmt.Errorf("failed to touch outbound channel activity for %s: %w", connectorID, err)
 	}
 	return nil
 }
 
 func (s *Store) UpsertOffset(ctx context.Context, channelID string, offsetKind string, offsetValue string) error {
+	channelID = s.resolveChannelID(ctx, channelID)
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO channel_offsets (channel_id, offset_kind, offset_value, updated_at)
@@ -355,6 +366,7 @@ func (s *Store) UpsertOffset(ctx context.Context, channelID string, offsetKind s
 }
 
 func (s *Store) GetOffset(ctx context.Context, channelID string, offsetKind string) (string, bool, error) {
+	channelID = s.resolveChannelID(ctx, channelID)
 	var value string
 	err := s.db.QueryRowContext(
 		ctx,
@@ -501,14 +513,13 @@ func (s *Store) GetSessionByID(ctx context.Context, kimiSessionID string) (*doma
 func (s *Store) ResolveBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
+		`SELECT binding_id, ifnull(connector_id, ''), platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
 		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
 		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
 		 FROM channel_bindings
-		 WHERE platform = ? AND ifnull(account_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
-		key.Platform,
-		key.AccountID,
+		 WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
+		key.ConnectorID,
 		key.ChatID,
 		key.ThreadID,
 	)
@@ -536,10 +547,11 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO channel_bindings (
-			binding_id, platform, account_id, chat_id, thread_id, kimi_session_id, work_dir, source,
+			binding_id, connector_id, platform, account_id, chat_id, thread_id, kimi_session_id, work_dir, source,
 			onboarded_at, onboarding_version, last_inbound_message_id, last_outbound_message_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		binding.BindingID,
+		binding.Key.ConnectorID,
 		binding.Key.Platform,
 		nullIfEmpty(binding.Key.AccountID),
 		binding.Key.ChatID,
@@ -563,7 +575,7 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 func (s *Store) GetBindingByID(ctx context.Context, bindingID string) (*domain.SessionBinding, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
+		`SELECT binding_id, ifnull(connector_id, ''), platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
 		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
 		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
@@ -584,7 +596,7 @@ func (s *Store) GetBindingByID(ctx context.Context, bindingID string) (*domain.S
 func (s *Store) ListBindings(ctx context.Context) ([]domain.BindingRecord, error) {
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT binding_id, platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
+		`SELECT binding_id, ifnull(connector_id, ''), platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
 		        ifnull(work_dir, ''), ifnull(onboarded_at, ''), ifnull(onboarding_version, ''), created_at, updated_at, ifnull(last_inbound_message_id, '')
 		 FROM channel_bindings
 		 ORDER BY updated_at DESC, binding_id DESC`,
@@ -599,6 +611,7 @@ func (s *Store) ListBindings(ctx context.Context) ([]domain.BindingRecord, error
 		var record domain.BindingRecord
 		if err := rows.Scan(
 			&record.BindingID,
+			&record.ConnectorID,
 			&record.Platform,
 			&record.AccountID,
 			&record.ChatID,
@@ -792,11 +805,12 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO approval_requests (
-			approval_id, kimi_session_id, turn_id, step_id, platform, chat_id, thread_id, request_kind, prompt, status,
+			approval_id, connector_id, kimi_session_id, turn_id, step_id, platform, chat_id, thread_id, request_kind, prompt, status,
 			request_payload_json, resolution_payload_json, dedupe_key, claimed_by_actor_id, claimed_at,
 			platform_message_id, resolution_by, request_hash, created_at, updated_at, resolved_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ticket.ApprovalID,
+		nullIfEmpty(ticket.ConnectorID),
 		ticket.KimiSessionID,
 		nullIfEmpty(ticket.TurnID),
 		nullIfEmpty(ticket.StepID),
@@ -825,7 +839,7 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 }
 
 func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
-	query := `SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+	query := `SELECT approval_id, ifnull(connector_id, ''), kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
 	          prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
 	          ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
 	          ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
@@ -849,6 +863,7 @@ func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.Appr
 		var ticket domain.ApprovalTicket
 		if err := rows.Scan(
 			&ticket.ApprovalID,
+			&ticket.ConnectorID,
 			&ticket.KimiSessionID,
 			&ticket.TurnID,
 			&ticket.StepID,
@@ -883,7 +898,7 @@ func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.Appr
 func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain.ApprovalTicket, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT approval_id, kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+		`SELECT approval_id, ifnull(connector_id, ''), kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
 		        prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
 		        ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
 		        ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
@@ -896,6 +911,7 @@ func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain
 	var ticket domain.ApprovalTicket
 	if err := row.Scan(
 		&ticket.ApprovalID,
+		&ticket.ConnectorID,
 		&ticket.KimiSessionID,
 		&ticket.TurnID,
 		&ticket.StepID,
@@ -976,11 +992,12 @@ func (s *Store) RecordDeliveryEventIfAbsent(ctx context.Context, event domain.De
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO delivery_events (
-			event_id, platform, chat_id, thread_id, direction, delivery_key, source_message_id,
+			event_id, connector_id, platform, chat_id, thread_id, direction, delivery_key, source_message_id,
 			turn_id, step_index, delivery_kind, renderer, attempt_count, target_message_id, retry_after_at,
 			supersedes_event_id, payload_json, status, error_message, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.EventID,
+		nullIfEmpty(event.ConnectorID),
 		event.Platform,
 		event.ChatID,
 		nullIfEmpty(event.ThreadID),
@@ -1013,7 +1030,7 @@ func (s *Store) RecordDeliveryEventIfAbsent(ctx context.Context, event domain.De
 func (s *Store) GetDeliveryEventByKey(ctx context.Context, deliveryKey string) (*domain.DeliveryEvent, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT event_id, platform, chat_id, ifnull(thread_id, ''), direction, delivery_key,
+		`SELECT event_id, ifnull(connector_id, ''), platform, chat_id, ifnull(thread_id, ''), direction, delivery_key,
 		        ifnull(source_message_id, ''), ifnull(turn_id, ''), ifnull(step_index, 0), ifnull(delivery_kind, ''),
 		        ifnull(renderer, ''), ifnull(attempt_count, 0), ifnull(target_message_id, ''), ifnull(retry_after_at, ''),
 		        ifnull(supersedes_event_id, ''), payload_json, status, ifnull(error_message, ''), created_at, updated_at
@@ -1025,6 +1042,7 @@ func (s *Store) GetDeliveryEventByKey(ctx context.Context, deliveryKey string) (
 	var event domain.DeliveryEvent
 	if err := row.Scan(
 		&event.EventID,
+		&event.ConnectorID,
 		&event.Platform,
 		&event.ChatID,
 		&event.ThreadID,
@@ -1103,8 +1121,8 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 	if strings.TrimSpace(attachment.AttachmentID) == "" {
 		return fmt.Errorf("attachment id is required")
 	}
-	if strings.TrimSpace(attachment.Platform) == "" || strings.TrimSpace(attachment.ChatID) == "" {
-		return fmt.Errorf("platform and chat id are required")
+	if strings.TrimSpace(attachment.ConnectorID) == "" || strings.TrimSpace(attachment.Platform) == "" || strings.TrimSpace(attachment.ChatID) == "" {
+		return fmt.Errorf("connector id, platform, and chat id are required")
 	}
 	now := nowRFC3339()
 	if attachment.CreatedAt == "" {
@@ -1130,10 +1148,11 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 	if _, execErr := tx.ExecContext(
 		ctx,
 		`INSERT INTO pending_inbound_attachments (
-			attachment_id, platform, chat_id, thread_id, kind, file_name, mime_type, size_bytes,
+			attachment_id, connector_id, platform, chat_id, thread_id, kind, file_name, mime_type, size_bytes,
 			platform_key, local_path, source_message_id, download_state, expires_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		attachment.AttachmentID,
+		attachment.ConnectorID,
 		attachment.Platform,
 		attachment.ChatID,
 		nullIfEmpty(attachment.ThreadID),
@@ -1157,7 +1176,7 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 			ctx,
 			`UPDATE pending_inbound_attachments
 			 SET file_name = ?, mime_type = ?, size_bytes = ?, local_path = ?, download_state = ?, expires_at = ?, updated_at = ?
-			 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ? AND ifnull(platform_key, '') = ? AND ifnull(source_message_id, '') = ?`,
+			 WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ? AND ifnull(platform_key, '') = ? AND ifnull(source_message_id, '') = ?`,
 			nullIfEmpty(strings.TrimSpace(attachment.FileName)),
 			nullIfEmpty(strings.TrimSpace(attachment.MimeType)),
 			attachment.SizeBytes,
@@ -1165,7 +1184,7 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 			nullIfEmpty(string(attachment.DownloadState)),
 			nullIfEmpty(strings.TrimSpace(attachment.ExpiresAt)),
 			attachment.UpdatedAt,
-			attachment.Platform,
+			attachment.ConnectorID,
 			attachment.ChatID,
 			attachment.ThreadID,
 			attachment.PlatformKey,
@@ -1182,11 +1201,11 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 		 WHERE attachment_id IN (
 		    SELECT attachment_id
 		    FROM pending_inbound_attachments
-		    WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		    WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
 		    ORDER BY created_at DESC, attachment_id DESC
 		    LIMIT -1 OFFSET ?
 		 )`,
-		attachment.Platform,
+		attachment.ConnectorID,
 		attachment.ChatID,
 		attachment.ThreadID,
 		maxPerContext,
@@ -1201,7 +1220,7 @@ func (s *Store) StorePendingInboundAttachment(ctx context.Context, attachment do
 	return nil
 }
 
-func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
+func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, connectorID string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1231,15 +1250,15 @@ func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, platform s
 
 	rows, queryErr := tx.QueryContext(
 		ctx,
-		`SELECT attachment_id, platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
+		`SELECT attachment_id, ifnull(connector_id, ''), platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
 		        ifnull(mime_type, ''), ifnull(size_bytes, 0), ifnull(platform_key, ''), ifnull(local_path, ''),
 		        ifnull(source_message_id, ''), ifnull(download_state, ''), ifnull(expires_at, ''),
 		        created_at, updated_at
 		 FROM pending_inbound_attachments
-		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		 WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
 		 ORDER BY created_at ASC, attachment_id ASC
 		 LIMIT ?`,
-		platform,
+		connectorID,
 		chatID,
 		threadID,
 		limit,
@@ -1258,6 +1277,7 @@ func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, platform s
 		var downloadState string
 		if scanErr := rows.Scan(
 			&item.AttachmentID,
+			&item.ConnectorID,
 			&item.Platform,
 			&item.ChatID,
 			&item.ThreadID,
@@ -1308,7 +1328,7 @@ func (s *Store) ConsumePendingInboundAttachments(ctx context.Context, platform s
 	return items, nil
 }
 
-func (s *Store) ListPendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
+func (s *Store) ListPendingInboundAttachments(ctx context.Context, connectorID string, chatID string, threadID string, now string, limit int) ([]domain.PendingInboundAttachment, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -1326,15 +1346,15 @@ func (s *Store) ListPendingInboundAttachments(ctx context.Context, platform stri
 
 	rows, err := s.db.QueryContext(
 		ctx,
-		`SELECT attachment_id, platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
+		`SELECT attachment_id, ifnull(connector_id, ''), platform, chat_id, ifnull(thread_id, ''), kind, ifnull(file_name, ''),
 		        ifnull(mime_type, ''), ifnull(size_bytes, 0), ifnull(platform_key, ''), ifnull(local_path, ''),
 		        ifnull(source_message_id, ''), ifnull(download_state, ''), ifnull(expires_at, ''),
 		        created_at, updated_at
 		 FROM pending_inbound_attachments
-		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
+		 WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?
 		 ORDER BY created_at ASC, attachment_id ASC
 		 LIMIT ?`,
-		platform,
+		connectorID,
 		chatID,
 		threadID,
 		limit,
@@ -1351,6 +1371,7 @@ func (s *Store) ListPendingInboundAttachments(ctx context.Context, platform stri
 		var downloadState string
 		if scanErr := rows.Scan(
 			&item.AttachmentID,
+			&item.ConnectorID,
 			&item.Platform,
 			&item.ChatID,
 			&item.ThreadID,
@@ -1393,13 +1414,13 @@ func (s *Store) DeletePendingInboundAttachments(ctx context.Context, attachmentI
 	return nil
 }
 
-func (s *Store) CountPendingInboundAttachments(ctx context.Context, platform string, chatID string, threadID string) (int, error) {
+func (s *Store) CountPendingInboundAttachments(ctx context.Context, connectorID string, chatID string, threadID string) (int, error) {
 	var count int
 	if err := s.db.QueryRowContext(
 		ctx,
 		`SELECT COUNT(*) FROM pending_inbound_attachments
-		 WHERE platform = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
-		platform,
+		 WHERE ifnull(connector_id, '') = ? AND chat_id = ? AND ifnull(thread_id, '') = ?`,
+		connectorID,
 		chatID,
 		threadID,
 	).Scan(&count); err != nil {
@@ -1428,11 +1449,12 @@ func (s *Store) CreateTurn(ctx context.Context, turn domain.BridgeTurn) error {
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO bridge_turns (
-			turn_id, kimi_session_id, binding_id, platform, chat_id, thread_id, inbound_message_id,
+			turn_id, connector_id, kimi_session_id, binding_id, platform, chat_id, thread_id, inbound_message_id,
 			prompt_text, status, provider_name, started_at, completed_at, error_code, error_message,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		turn.TurnID,
+		nullIfEmpty(turn.ConnectorID),
 		turn.KimiSessionID,
 		nullIfEmpty(turn.BindingID),
 		turn.Platform,
@@ -1459,10 +1481,11 @@ func (s *Store) UpdateTurn(ctx context.Context, turn domain.BridgeTurn) error {
 	_, err := s.db.ExecContext(
 		ctx,
 		`UPDATE bridge_turns
-		 SET kimi_session_id = ?, binding_id = ?, platform = ?, chat_id = ?, thread_id = ?, inbound_message_id = ?,
+		 SET connector_id = ?, kimi_session_id = ?, binding_id = ?, platform = ?, chat_id = ?, thread_id = ?, inbound_message_id = ?,
 		     prompt_text = ?, status = ?, provider_name = ?, started_at = ?, completed_at = ?, error_code = ?,
 		     error_message = ?, updated_at = ?
 		 WHERE turn_id = ?`,
+		nullIfEmpty(turn.ConnectorID),
 		turn.KimiSessionID,
 		nullIfEmpty(turn.BindingID),
 		turn.Platform,
@@ -1489,11 +1512,12 @@ func (s *Store) AppendTurnEvent(ctx context.Context, event domain.TurnEventRecor
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO turn_events (
-			event_id, turn_id, kimi_session_id, platform, chat_id, thread_id, kind, step_index, message_id,
+			event_id, connector_id, turn_id, kimi_session_id, platform, chat_id, thread_id, kind, step_index, message_id,
 			approval_id, request_kind, text_delta, thinking_delta, status_text, payload_json, error_code,
 			error_message, context_usage, token_usage_json, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.EventID,
+		nullIfEmpty(event.ConnectorID),
 		event.TurnID,
 		event.KimiSessionID,
 		event.Platform,
@@ -1520,19 +1544,20 @@ func (s *Store) AppendTurnEvent(ctx context.Context, event domain.TurnEventRecor
 	return nil
 }
 
-func (s *Store) GetCheckpoint(ctx context.Context, platform string, checkpointKind string) (*domain.ChannelCheckpoint, error) {
+func (s *Store) GetCheckpoint(ctx context.Context, connectorID string, checkpointKind string) (*domain.ChannelCheckpoint, error) {
+	connectorID = s.resolveChannelID(ctx, connectorID)
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT platform, checkpoint_kind, ifnull(fetched_value, ''), ifnull(committed_value, ''),
+		`SELECT channel_id, checkpoint_kind, ifnull(fetched_value, ''), ifnull(committed_value, ''),
 		        ifnull(last_seen_at, ''), ifnull(committed_at, ''), updated_at
 		 FROM channel_checkpoints
-		 WHERE platform = ? AND checkpoint_kind = ?`,
-		platform,
+		 WHERE channel_id = ? AND checkpoint_kind = ?`,
+		connectorID,
 		checkpointKind,
 	)
 	var checkpoint domain.ChannelCheckpoint
 	if err := row.Scan(
-		&checkpoint.Platform,
+		&checkpoint.ConnectorID,
 		&checkpoint.CheckpointKind,
 		&checkpoint.FetchedValue,
 		&checkpoint.CommittedValue,
@@ -1542,25 +1567,26 @@ func (s *Store) GetCheckpoint(ctx context.Context, platform string, checkpointKi
 	); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
-		return nil, fmt.Errorf("failed to get checkpoint %s/%s: %w", platform, checkpointKind, err)
+		return nil, fmt.Errorf("failed to get checkpoint %s/%s: %w", connectorID, checkpointKind, err)
 	}
 	return &checkpoint, nil
 }
 
-func (s *Store) CommitCheckpoint(ctx context.Context, platform string, checkpointKind string, fetched string, committed string) error {
+func (s *Store) CommitCheckpoint(ctx context.Context, connectorID string, checkpointKind string, fetched string, committed string) error {
+	connectorID = s.resolveChannelID(ctx, connectorID)
 	now := nowRFC3339()
 	_, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO channel_checkpoints (
-			platform, checkpoint_kind, fetched_value, committed_value, last_seen_at, committed_at, updated_at
+			channel_id, checkpoint_kind, fetched_value, committed_value, last_seen_at, committed_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(platform, checkpoint_kind) DO UPDATE SET
+		ON CONFLICT(channel_id, checkpoint_kind) DO UPDATE SET
 			fetched_value=excluded.fetched_value,
 			committed_value=excluded.committed_value,
 			last_seen_at=excluded.last_seen_at,
 			committed_at=excluded.committed_at,
 			updated_at=excluded.updated_at`,
-		platform,
+		connectorID,
 		checkpointKind,
 		nullIfEmpty(fetched),
 		nullIfEmpty(committed),
@@ -1569,7 +1595,7 @@ func (s *Store) CommitCheckpoint(ctx context.Context, platform string, checkpoin
 		now,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to commit checkpoint %s/%s: %w", platform, checkpointKind, err)
+		return fmt.Errorf("failed to commit checkpoint %s/%s: %w", connectorID, checkpointKind, err)
 	}
 	return nil
 }
@@ -1580,6 +1606,7 @@ func scanBinding(scanner interface {
 	var binding domain.SessionBinding
 	if err := scanner.Scan(
 		&binding.BindingID,
+		&binding.Key.ConnectorID,
 		&binding.Key.Platform,
 		&binding.Key.AccountID,
 		&binding.Key.ChatID,
@@ -1627,6 +1654,40 @@ func committedAt(value string, now string) string {
 	return now
 }
 
+func (s *Store) resolveChannelID(ctx context.Context, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	var channelID string
+	if err := s.db.QueryRowContext(ctx, `SELECT channel_id FROM bridge_channels WHERE channel_id = ?`, value).Scan(&channelID); err == nil {
+		return channelID
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT channel_id FROM bridge_channels WHERE platform = ? ORDER BY channel_id`, value)
+	if err != nil {
+		return value
+	}
+	defer rows.Close()
+
+	matches := []string{}
+	for rows.Next() {
+		var item string
+		if scanErr := rows.Scan(&item); scanErr != nil {
+			return value
+		}
+		matches = append(matches, item)
+		if len(matches) > 1 {
+			return value
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0]
+	}
+	return value
+}
+
 func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
@@ -1636,17 +1697,6 @@ func isUniqueConstraint(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
-}
-
-func offsetKindForPlatform(platform string) string {
-	switch strings.TrimSpace(strings.ToLower(platform)) {
-	case "feishu":
-		return "feishu_checkpoint"
-	case "telegram":
-		fallthrough
-	default:
-		return "telegram_update"
-	}
 }
 
 type channelErrorPayload struct {

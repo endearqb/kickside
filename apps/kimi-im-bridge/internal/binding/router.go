@@ -134,7 +134,7 @@ func (r *Router) IsDuplicateApproval(ctx context.Context, dedupeKey string) (boo
 }
 
 func makeBindingID(key domain.BindingKey) string {
-	sum := sha1.Sum([]byte(key.Platform + "|" + key.AccountID + "|" + key.ChatID + "|" + key.ThreadID))
+	sum := sha1.Sum([]byte(key.ConnectorID + "|" + key.Platform + "|" + key.AccountID + "|" + key.ChatID + "|" + key.ThreadID))
 	return "binding-" + hex.EncodeToString(sum[:8])
 }
 

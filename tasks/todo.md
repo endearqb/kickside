@@ -299,3 +299,27 @@
 ### Notes
 
 - [x] 配置中心和技能中心都属于“左选右看”的桌面工作流：即使宽度收窄，也应优先收紧左栏宽度与内边距，保住信息架构稳定；主容器退回单列会让定位、比较和批量操作都变慢。
+
+---
+
+## Implementation
+
+- [x] 将 `apps/kimi-im-bridge` 的配置、领域模型、store 和 admin payload 从单平台单实例升级为多 connector，并补齐 legacy 配置迁移。
+- [ ] 将 `apps/kimi-shell/src-tauri` 的 bridge 类型、设置存储、命令和状态拼装升级为 connector 模型，并新增 connector CRUD / secret mask 命令。
+- [ ] 将 `apps/kimi-shell` 前端控制器和控制中心 Bridge UI 改成完整 connector 管理：列表、详情、凭证、运行态、bindings / approvals 展示 connector 归属。
+- [ ] 为多 connector 补充 Go / Rust / 前端构建级验证与关键回归测试。
+
+## Validation
+
+- [x] 运行 `go test ./...`（`apps/kimi-im-bridge`，至少覆盖 config/store/app/admin/adapters 相关多 connector 场景）。
+- [ ] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+## Retrospective
+
+- [x] 记录为什么 bridge 的运行时主身份必须从 `platform` 提升为稳定 `connectorId`，以及哪些 legacy 字段继续保留作兼容。
+
+### Notes
+
+- [x] sidecar 里 `platform` 只适合表达“平台语义”，一旦进入 checkpoint、binding、approval、delivery、turn 这些需要长期追踪和持久化的链路，主键必须升级成稳定 `connectorId`，否则同平台多机器人会串线。
+- [x] 为了不打断现有 shell/Tauri 侧的单实例路径，这一轮在 Go 侧保留了少量兼容入口：legacy `channels` / 顶层 secrets 仍可读，store 也允许“单 connector 场景下用 platform 名命中默认 connector”。

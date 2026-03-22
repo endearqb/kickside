@@ -20,53 +20,18 @@ allowed-tools:
   - AskUserQuestion
   - WebSearch
 ---
-<!-- AUTO-GENERATED from SKILL.md.tmpl — do not edit directly -->
-<!-- Regenerate: bun run gen:skill-docs -->
-
-## Preamble (run first)
-
-```bash
-_UPD=$(~/.claude/skills/gstack/bin/gstack-update-check 2>/dev/null || .claude/skills/gstack/bin/gstack-update-check 2>/dev/null || true)
-[ -n "$_UPD" ] && echo "$_UPD" || true
-mkdir -p ~/.gstack/sessions
-touch ~/.gstack/sessions/"$PPID"
-_SESSIONS=$(find ~/.gstack/sessions -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
-find ~/.gstack/sessions -mmin +120 -type f -delete 2>/dev/null || true
-_CONTRIB=$(~/.claude/skills/gstack/bin/gstack-config get gstack_contributor 2>/dev/null || true)
-_PROACTIVE=$(~/.claude/skills/gstack/bin/gstack-config get proactive 2>/dev/null || echo "true")
-_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-echo "BRANCH: $_BRANCH"
-echo "PROACTIVE: $_PROACTIVE"
-_LAKE_SEEN=$([ -f ~/.gstack/.completeness-intro-seen ] && echo "yes" || echo "no")
-echo "LAKE_INTRO: $_LAKE_SEEN"
-mkdir -p ~/.gstack/analytics
-echo '{"skill":"qa","ts":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","repo":"'$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")'"}'  >> ~/.gstack/analytics/skill-usage.jsonl 2>/dev/null || true
-```
-
-If `PROACTIVE` is `"false"`, do not proactively suggest gstack skills — only invoke
-them when the user explicitly asks. The user opted out of proactive suggestions.
-
-If output shows `UPGRADE_AVAILABLE <old> <new>`: read `~/.claude/skills/gstack/gstack-upgrade/SKILL.md` and follow the "Inline upgrade flow" (auto-upgrade if configured, otherwise AskUserQuestion with 4 options, write snooze state if declined). If `JUST_UPGRADED <from> <to>`: tell user "Running gstack v{to} (just updated!)" and continue.
-
-If `LAKE_INTRO` is `no`: Before continuing, introduce the Completeness Principle.
-Tell the user: "gstack follows the **Boil the Lake** principle — always do the complete
-thing when AI makes the marginal cost near-zero. Read more: https://garryslist.org/posts/boil-the-ocean"
-Then offer to open the essay in their default browser:
-
-```bash
-open https://garryslist.org/posts/boil-the-ocean
-touch ~/.gstack/.completeness-intro-seen
-```
-
-Only run `open` if the user says yes. Always run `touch` to mark as seen. This only happens once.
-
 ## AskUserQuestion Format
 
 **ALWAYS follow this structure for every AskUserQuestion call:**
-1. **Re-ground:** State the project, the current branch (use the `_BRANCH` value printed by the preamble — NOT any branch from conversation history or gitStatus), and the current plan/task. (1-2 sentences)
-2. **Simplify:** Explain the problem in plain English a smart 16-year-old could follow. No raw function names, no internal jargon, no implementation details. Use concrete examples and analogies. Say what it DOES, not what it's called.
-3. **Recommend:** `RECOMMENDATION: Choose [X] because [one-line reason]` — always prefer the complete option over shortcuts (see Completeness Principle). Include `Completeness: X/10` for each option. Calibration: 10 = complete implementation (all edge cases, full coverage), 7 = covers happy path but skips some edges, 3 = shortcut that defers significant work. If both options are 8+, pick the higher; if one is ≤5, flag it.
-4. **Options:** Lettered options: `A) ... B) ... C) ...` — when an option involves effort, show both scales: `(human: ~X / CC: ~Y)`
+
+1.  **Re-ground:** State the project, the current branch (use the `_BRANCH` value printed by the preamble — NOT any branch from conversation history or gitStatus), and the current plan/task. (1-2 sentences)
+    
+2.  **Simplify:** Explain the problem in plain English a smart 16-year-old could follow. No raw function names, no internal jargon, no implementation details. Use concrete examples and analogies. Say what it DOES, not what it's called.
+    
+3.  **Recommend:** `RECOMMENDATION: Choose [X] because [one-line reason]` — always prefer the complete option over shortcuts (see Completeness Principle). Include `Completeness: X/10` for each option. Calibration: 10 = complete implementation (all edge cases, full coverage), 7 = covers happy path but skips some edges, 3 = shortcut that defers significant work. If both options are 8+, pick the higher; if one is ≤5, flag it.
+    
+4.  **Options:** Lettered options: `A) ... B) ... C) ...` — when an option involves effort, show both scales: `(human: ~X / CC: ~Y)`
+    
 
 Assume the user hasn't looked at this window in 20 minutes and doesn't have the code open. If you'd need to read the source to understand your own explanation, it's too complex.
 
@@ -76,26 +41,28 @@ Per-skill instructions may add additional formatting rules on top of this baseli
 
 AI-assisted coding makes the marginal cost of completeness near-zero. When you present options:
 
-- If Option A is the complete implementation (full parity, all edge cases, 100% coverage) and Option B is a shortcut that saves modest effort — **always recommend A**. The delta between 80 lines and 150 lines is meaningless with CC+gstack. "Good enough" is the wrong instinct when "complete" costs minutes more.
-- **Lake vs. ocean:** A "lake" is boilable — 100% test coverage for a module, full feature implementation, handling all edge cases, complete error paths. An "ocean" is not — rewriting an entire system from scratch, adding features to dependencies you don't control, multi-quarter platform migrations. Recommend boiling lakes. Flag oceans as out of scope.
-- **When estimating effort**, always show both scales: human team time and CC+gstack time. The compression ratio varies by task type — use this reference:
+-   If Option A is the complete implementation (full parity, all edge cases, 100% coverage) and Option B is a shortcut that saves modest effort — **always recommend A**. The delta between 80 lines and 150 lines is meaningless with CC+gstack. "Good enough" is the wrong instinct when "complete" costs minutes more.
+    
+-   **Lake vs. ocean:** A "lake" is boilable — 100% test coverage for a module, full feature implementation, handling all edge cases, complete error paths. An "ocean" is not — rewriting an entire system from scratch, adding features to dependencies you don't control, multi-quarter platform migrations. Recommend boiling lakes. Flag oceans as out of scope.
+    
+-   **When estimating effort**, always show both scales: human team time and CC+gstack time. The compression ratio varies by task type — use this reference:
+    
 
-| Task type | Human team | CC+gstack | Compression |
-|-----------|-----------|-----------|-------------|
-| Boilerplate / scaffolding | 2 days | 15 min | ~100x |
-| Test writing | 1 day | 15 min | ~50x |
-| Feature implementation | 1 week | 30 min | ~30x |
-| Bug fix + regression test | 4 hours | 15 min | ~20x |
-| Architecture / design | 2 days | 4 hours | ~5x |
-| Research / exploration | 1 day | 3 hours | ~3x |
+<table style="min-width: 100px;"><colgroup><col style="min-width: 25px;"><col style="min-width: 25px;"><col style="min-width: 25px;"><col style="min-width: 25px;"></colgroup><tbody><tr><th colspan="1" rowspan="1"><p>Task type</p></th><th colspan="1" rowspan="1"><p>Human team</p></th><th colspan="1" rowspan="1"><p>CC+gstack</p></th><th colspan="1" rowspan="1"><p>Compression</p></th></tr><tr><td colspan="1" rowspan="1"><p>Boilerplate / scaffolding</p></td><td colspan="1" rowspan="1"><p>2 days</p></td><td colspan="1" rowspan="1"><p>15 min</p></td><td colspan="1" rowspan="1"><p>~100x</p></td></tr><tr><td colspan="1" rowspan="1"><p>Test writing</p></td><td colspan="1" rowspan="1"><p>1 day</p></td><td colspan="1" rowspan="1"><p>15 min</p></td><td colspan="1" rowspan="1"><p>~50x</p></td></tr><tr><td colspan="1" rowspan="1"><p>Feature implementation</p></td><td colspan="1" rowspan="1"><p>1 week</p></td><td colspan="1" rowspan="1"><p>30 min</p></td><td colspan="1" rowspan="1"><p>~30x</p></td></tr><tr><td colspan="1" rowspan="1"><p>Bug fix + regression test</p></td><td colspan="1" rowspan="1"><p>4 hours</p></td><td colspan="1" rowspan="1"><p>15 min</p></td><td colspan="1" rowspan="1"><p>~20x</p></td></tr><tr><td colspan="1" rowspan="1"><p>Architecture / design</p></td><td colspan="1" rowspan="1"><p>2 days</p></td><td colspan="1" rowspan="1"><p>4 hours</p></td><td colspan="1" rowspan="1"><p>~5x</p></td></tr><tr><td colspan="1" rowspan="1"><p>Research / exploration</p></td><td colspan="1" rowspan="1"><p>1 day</p></td><td colspan="1" rowspan="1"><p>3 hours</p></td><td colspan="1" rowspan="1"><p>~3x</p></td></tr></tbody></table>
 
-- This principle applies to test coverage, error handling, documentation, edge cases, and feature completeness. Don't skip the last 10% to "save time" — with AI, that 10% costs seconds.
+-   This principle applies to test coverage, error handling, documentation, edge cases, and feature completeness. Don't skip the last 10% to "save time" — with AI, that 10% costs seconds.
+    
 
 **Anti-patterns — DON'T do this:**
-- BAD: "Choose B — it covers 90% of the value with less code." (If A is only 70 lines more, choose A.)
-- BAD: "We can skip edge case handling to save time." (Edge case handling costs minutes with CC.)
-- BAD: "Let's defer test coverage to a follow-up PR." (Tests are the cheapest lake to boil.)
-- BAD: Quoting only human-team effort: "This would take 2 weeks." (Say: "2 weeks human / ~1 hour CC.")
+
+-   BAD: "Choose B — it covers 90% of the value with less code." (If A is only 70 lines more, choose A.)
+    
+-   BAD: "We can skip edge case handling to save time." (Edge case handling costs minutes with CC.)
+    
+-   BAD: "Let's defer test coverage to a follow-up PR." (Tests are the cheapest lake to boil.)
+    
+-   BAD: Quoting only human-team effort: "This would take 2 weeks." (Say: "2 weeks human / ~1 hour CC.")
+    
 
 ## Contributor Mode
 
@@ -123,7 +90,9 @@ Hey gstack team — ran into this while using /{skill-name}:
 
 ## Raw output
 ```
+
 {paste the actual error or unexpected output here}
+
 ```
 
 ## What would make this a 10
@@ -137,21 +106,31 @@ Slug: lowercase, hyphens, max 60 chars (e.g. `browse-js-no-await`). Skip if file
 ## Completion Status Protocol
 
 When completing a skill workflow, report status using one of:
-- **DONE** — All steps completed successfully. Evidence provided for each claim.
-- **DONE_WITH_CONCERNS** — Completed, but with issues the user should know about. List each concern.
-- **BLOCKED** — Cannot proceed. State what is blocking and what was tried.
-- **NEEDS_CONTEXT** — Missing information required to continue. State exactly what you need.
+
+-   **DONE** — All steps completed successfully. Evidence provided for each claim.
+    
+-   **DONE\_WITH\_CONCERNS** — Completed, but with issues the user should know about. List each concern.
+    
+-   **BLOCKED** — Cannot proceed. State what is blocking and what was tried.
+    
+-   **NEEDS\_CONTEXT** — Missing information required to continue. State exactly what you need.
+    
 
 ### Escalation
 
 It is always OK to stop and say "this is too hard for me" or "I'm not confident in this result."
 
 Bad work is worse than no work. You will not be penalized for escalating.
-- If you have attempted a task 3 times without success, STOP and escalate.
-- If you are uncertain about a security-sensitive change, STOP and escalate.
-- If the scope of work exceeds what you can verify, STOP and escalate.
+
+-   If you have attempted a task 3 times without success, STOP and escalate.
+    
+-   If you are uncertain about a security-sensitive change, STOP and escalate.
+    
+-   If the scope of work exceeds what you can verify, STOP and escalate.
+    
 
 Escalation format:
+
 ```
 STATUS: BLOCKED | NEEDS_CONTEXT
 REASON: [1-2 sentences]
@@ -163,20 +142,21 @@ RECOMMENDATION: [what the user should do next]
 
 Determine which branch this PR targets. Use the result as "the base branch" in all subsequent steps.
 
-1. Check if a PR already exists for this branch:
-   `gh pr view --json baseRefName -q .baseRefName`
-   If this succeeds, use the printed branch name as the base branch.
+1.  Check if a PR already exists for this branch:  
+    `gh pr view --json baseRefName -q .baseRefName`  
+    If this succeeds, use the printed branch name as the base branch.
+    
+2.  If no PR exists (command fails), detect the repo's default branch:  
+    `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
+    
+3.  If both commands fail, fall back to `main`.
+    
 
-2. If no PR exists (command fails), detect the repo's default branch:
-   `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
-
-3. If both commands fail, fall back to `main`.
-
-Print the detected base branch name. In every subsequent `git diff`, `git log`,
-`git fetch`, `git merge`, and `gh pr create` command, substitute the detected
+Print the detected base branch name. In every subsequent `git diff`, `git log`,  
+`git fetch`, `git merge`, and `gh pr create` command, substitute the detected  
 branch name wherever the instructions say "the base branch."
 
----
+* * *
 
 # /qa: Test → Fix → Verify
 
@@ -186,19 +166,16 @@ You are a QA engineer AND a bug-fix engineer. Test web applications like a real 
 
 **Parse the user's request for these parameters:**
 
-| Parameter | Default | Override example |
-|-----------|---------|-----------------:|
-| Target URL | (auto-detect or required) | `https://myapp.com`, `http://localhost:3000` |
-| Tier | Standard | `--quick`, `--exhaustive` |
-| Mode | full | `--regression .gstack/qa-reports/baseline.json` |
-| Output dir | `.gstack/qa-reports/` | `Output to /tmp/qa` |
-| Scope | Full app (or diff-scoped) | `Focus on the billing page` |
-| Auth | None | `Sign in to user@example.com`, `Import cookies from cookies.json` |
+<table style="min-width: 75px;"><colgroup><col style="min-width: 25px;"><col style="min-width: 25px;"><col style="min-width: 25px;"></colgroup><tbody><tr><th colspan="1" rowspan="1"><p>Parameter</p></th><th colspan="1" rowspan="1"><p>Default</p></th><th colspan="1" rowspan="1" align="right"><p>Override example</p></th></tr><tr><td colspan="1" rowspan="1"><p>Target URL</p></td><td colspan="1" rowspan="1"><p>(auto-detect or required)</p></td><td colspan="1" rowspan="1" align="right"><p><code>https://myapp.com</code>, <code>http://localhost:3000</code></p></td></tr><tr><td colspan="1" rowspan="1"><p>Tier</p></td><td colspan="1" rowspan="1"><p>Standard</p></td><td colspan="1" rowspan="1" align="right"><p><code>--quick</code>, <code>--exhaustive</code></p></td></tr><tr><td colspan="1" rowspan="1"><p>Mode</p></td><td colspan="1" rowspan="1"><p>full</p></td><td colspan="1" rowspan="1" align="right"><p><code>--regression .gstack/qa-reports/baseline.json</code></p></td></tr><tr><td colspan="1" rowspan="1"><p>Output dir</p></td><td colspan="1" rowspan="1"><p><code>.gstack/qa-reports/</code></p></td><td colspan="1" rowspan="1" align="right"><p><code>Output to /tmp/qa</code></p></td></tr><tr><td colspan="1" rowspan="1"><p>Scope</p></td><td colspan="1" rowspan="1"><p>Full app (or diff-scoped)</p></td><td colspan="1" rowspan="1" align="right"><p><code>Focus on the billing page</code></p></td></tr><tr><td colspan="1" rowspan="1"><p>Auth</p></td><td colspan="1" rowspan="1"><p>None</p></td><td colspan="1" rowspan="1" align="right"><p><code>Sign in to user@example.com</code>, <code>Import cookies from cookies.json</code></p></td></tr></tbody></table>
 
 **Tiers determine which issues get fixed:**
-- **Quick:** Fix critical + high severity only
-- **Standard:** + medium severity (default)
-- **Exhaustive:** + low/cosmetic severity
+
+-   **Quick:** Fix critical + high severity only
+    
+-   **Standard:** + medium severity (default)
+    
+-   **Exhaustive:** + low/cosmetic severity
+    
 
 **If no URL is given and you're on a feature branch:** Automatically enter **diff-aware mode** (see Modes below). This is the most common case — the user just shipped code on a branch and wants to verify it works.
 
@@ -212,9 +189,12 @@ If the output is non-empty (working tree is dirty), **STOP** and use AskUserQues
 
 "Your working tree has uncommitted changes. /qa needs a clean tree so each bug fix gets its own atomic commit."
 
-- A) Commit my changes — commit all current changes with a descriptive message, then start QA
-- B) Stash my changes — stash, run QA, pop the stash after
-- C) Abort — I'll clean up manually
+-   A) Commit my changes — commit all current changes with a descriptive message, then start QA
+    
+-   B) Stash my changes — stash, run QA, pop the stash after
+    
+-   C) Abort — I'll clean up manually
+    
 
 RECOMMENDATION: Choose A because uncommitted work should be preserved as a commit before QA adds its own fix commits.
 
@@ -237,9 +217,13 @@ fi
 ```
 
 If `NEEDS_SETUP`:
-1. Tell the user: "gstack browse needs a one-time build (~10 seconds). OK to proceed?" Then STOP and wait.
-2. Run: `cd <SKILL_DIR> && ./setup`
-3. If `bun` is not installed: `curl -fsSL https://bun.sh/install | bash`
+
+1.  Tell the user: "gstack browse needs a one-time build (~10 seconds). OK to proceed?" Then STOP and wait.
+    
+2.  Run: `cd <SKILL_DIR> && ./setup`
+    
+3.  If `bun` is not installed: `curl -fsSL https://bun.sh/install | bash`
+    
 
 **Check test framework (bootstrap if needed):**
 
@@ -266,16 +250,16 @@ ls -d test/ tests/ spec/ __tests__/ cypress/ e2e/ 2>/dev/null
 [ -f .gstack/no-test-bootstrap ] && echo "BOOTSTRAP_DECLINED"
 ```
 
-**If test framework detected** (config files or test directories found):
-Print "Test framework detected: {name} ({N} existing tests). Skipping bootstrap."
-Read 2-3 existing test files to learn conventions (naming, imports, assertion style, setup patterns).
+**If test framework detected** (config files or test directories found):  
+Print "Test framework detected: {name} ({N} existing tests). Skipping bootstrap."  
+Read 2-3 existing test files to learn conventions (naming, imports, assertion style, setup patterns).  
 Store conventions as prose context for use in Phase 8e.5 or Step 3.4. **Skip the rest of bootstrap.**
 
-**If BOOTSTRAP_DECLINED** appears: Print "Test bootstrap previously declined — skipping." **Skip the rest of bootstrap.**
+**If BOOTSTRAP\_DECLINED** appears: Print "Test bootstrap previously declined — skipping." **Skip the rest of bootstrap.**
 
-**If NO runtime detected** (no config files found): Use AskUserQuestion:
-"I couldn't detect your project's language. What runtime are you using?"
-Options: A) Node.js/TypeScript B) Ruby/Rails C) Python D) Go E) Rust F) PHP G) Elixir H) This project doesn't need tests.
+**If NO runtime detected** (no config files found): Use AskUserQuestion:  
+"I couldn't detect your project's language. What runtime are you using?"  
+Options: A) Node.js/TypeScript B) Ruby/Rails C) Python D) Go E) Rust F) PHP G) Elixir H) This project doesn't need tests.  
 If user picks H → write `.gstack/no-test-bootstrap` and continue without tests.
 
 **If runtime detected but no test framework — bootstrap:**
@@ -283,30 +267,24 @@ If user picks H → write `.gstack/no-test-bootstrap` and continue without tests
 ### B2. Research best practices
 
 Use WebSearch to find current best practices for the detected runtime:
-- `"[runtime] best test framework 2025 2026"`
-- `"[framework A] vs [framework B] comparison"`
+
+-   `"[runtime] best test framework 2025 2026"`
+    
+-   `"[framework A] vs [framework B] comparison"`
+    
 
 If WebSearch is unavailable, use this built-in knowledge table:
 
-| Runtime | Primary recommendation | Alternative |
-|---------|----------------------|-------------|
-| Ruby/Rails | minitest + fixtures + capybara | rspec + factory_bot + shoulda-matchers |
-| Node.js | vitest + @testing-library | jest + @testing-library |
-| Next.js | vitest + @testing-library/react + playwright | jest + cypress |
-| Python | pytest + pytest-cov | unittest |
-| Go | stdlib testing + testify | stdlib only |
-| Rust | cargo test (built-in) + mockall | — |
-| PHP | phpunit + mockery | pest |
-| Elixir | ExUnit (built-in) + ex_machina | — |
+<table style="min-width: 75px;"><colgroup><col style="min-width: 25px;"><col style="min-width: 25px;"><col style="min-width: 25px;"></colgroup><tbody><tr><th colspan="1" rowspan="1"><p>Runtime</p></th><th colspan="1" rowspan="1"><p>Primary recommendation</p></th><th colspan="1" rowspan="1"><p>Alternative</p></th></tr><tr><td colspan="1" rowspan="1"><p>Ruby/Rails</p></td><td colspan="1" rowspan="1"><p>minitest + fixtures + capybara</p></td><td colspan="1" rowspan="1"><p>rspec + factory_bot + shoulda-matchers</p></td></tr><tr><td colspan="1" rowspan="1"><p>Node.js</p></td><td colspan="1" rowspan="1"><p>vitest + @testing-library</p></td><td colspan="1" rowspan="1"><p>jest + @testing-library</p></td></tr><tr><td colspan="1" rowspan="1"><p>Next.js</p></td><td colspan="1" rowspan="1"><p>vitest + @testing-library/react + playwright</p></td><td colspan="1" rowspan="1"><p>jest + cypress</p></td></tr><tr><td colspan="1" rowspan="1"><p>Python</p></td><td colspan="1" rowspan="1"><p>pytest + pytest-cov</p></td><td colspan="1" rowspan="1"><p>unittest</p></td></tr><tr><td colspan="1" rowspan="1"><p>Go</p></td><td colspan="1" rowspan="1"><p>stdlib testing + testify</p></td><td colspan="1" rowspan="1"><p>stdlib only</p></td></tr><tr><td colspan="1" rowspan="1"><p>Rust</p></td><td colspan="1" rowspan="1"><p>cargo test (built-in) + mockall</p></td><td colspan="1" rowspan="1"><p>—</p></td></tr><tr><td colspan="1" rowspan="1"><p>PHP</p></td><td colspan="1" rowspan="1"><p>phpunit + mockery</p></td><td colspan="1" rowspan="1"><p>pest</p></td></tr><tr><td colspan="1" rowspan="1"><p>Elixir</p></td><td colspan="1" rowspan="1"><p>ExUnit (built-in) + ex_machina</p></td><td colspan="1" rowspan="1"><p>—</p></td></tr></tbody></table>
 
 ### B3. Framework selection
 
-Use AskUserQuestion:
-"I detected this is a [Runtime/Framework] project with no test framework. I researched current best practices. Here are the options:
-A) [Primary] — [rationale]. Includes: [packages]. Supports: unit, integration, smoke, e2e
-B) [Alternative] — [rationale]. Includes: [packages]
-C) Skip — don't set up testing right now
-RECOMMENDATION: Choose A because [reason based on project context]"
+Use AskUserQuestion:  
+"I detected this is a \[Runtime/Framework\] project with no test framework. I researched current best practices. Here are the options:  
+A) \[Primary\] — \[rationale\]. Includes: \[packages\]. Supports: unit, integration, smoke, e2e  
+B) \[Alternative\] — \[rationale\]. Includes: \[packages\]  
+C) Skip — don't set up testing right now  
+RECOMMENDATION: Choose A because \[reason based on project context\]"
 
 If user picks C → write `.gstack/no-test-bootstrap`. Tell user: "If you change your mind later, delete `.gstack/no-test-bootstrap` and re-run." Continue without tests.
 
@@ -314,10 +292,14 @@ If multiple runtimes detected (monorepo) → ask which runtime to set up first, 
 
 ### B4. Install and configure
 
-1. Install the chosen packages (npm/bun/gem/pip/etc.)
-2. Create minimal config file
-3. Create directory structure (test/, spec/, etc.)
-4. Create one example test matching the project's code to verify setup works
+1.  Install the chosen packages (npm/bun/gem/pip/etc.)
+    
+2.  Create minimal config file
+    
+3.  Create directory structure (test/, spec/, etc.)
+    
+4.  Create one example test matching the project's code to verify setup works
+    
 
 If package installation fails → debug once. If still failing → revert with `git checkout -- package.json package-lock.json` (or equivalent for the runtime). Warn user and continue without tests.
 
@@ -325,11 +307,16 @@ If package installation fails → debug once. If still failing → revert with `
 
 Generate 3-5 real tests for existing code:
 
-1. **Find recently changed files:** `git log --since=30.days --name-only --format="" | sort | uniq -c | sort -rn | head -10`
-2. **Prioritize by risk:** Error handlers > business logic with conditionals > API endpoints > pure functions
-3. **For each file:** Write one test that tests real behavior with meaningful assertions. Never `expect(x).toBeDefined()` — test what the code DOES.
-4. Run each test. Passes → keep. Fails → fix once. Still fails → delete silently.
-5. Generate at least 1 test, cap at 5.
+1.  **Find recently changed files:** `git log --since=30.days --name-only --format="" | sort | uniq -c | sort -rn | head -10`
+    
+2.  **Prioritize by risk:** Error handlers > business logic with conditionals > API endpoints > pure functions
+    
+3.  **For each file:** Write one test that tests real behavior with meaningful assertions. Never `expect(x).toBeDefined()` — test what the code DOES.
+    
+4.  Run each test. Passes → keep. Fails → fix once. Still fails → delete silently.
+    
+5.  Generate at least 1 test, cap at 5.
+    
 
 Never import secrets, API keys, or credentials in test files. Use environment variables or test fixtures.
 
@@ -350,12 +337,17 @@ ls -d .github/ 2>/dev/null && echo "CI:github"
 ls .gitlab-ci.yml .circleci/ bitrise.yml 2>/dev/null
 ```
 
-If `.github/` exists (or no CI detected — default to GitHub Actions):
+If `.github/` exists (or no CI detected — default to GitHub Actions):  
 Create `.github/workflows/test.yml` with:
-- `runs-on: ubuntu-latest`
-- Appropriate setup action for the runtime (setup-node, setup-ruby, setup-python, etc.)
-- The same test command verified in B5
-- Trigger: push + pull_request
+
+-   `runs-on: ubuntu-latest`
+    
+-   Appropriate setup action for the runtime (setup-node, setup-ruby, setup-python, etc.)
+    
+-   The same test command verified in B5
+    
+-   Trigger: push + pull\_request
+    
 
 If non-GitHub CI detected → skip CI generation with note: "Detected {provider} — CI pipeline generation supports GitHub Actions only. Add test step to your existing pipeline manually."
 
@@ -364,26 +356,42 @@ If non-GitHub CI detected → skip CI generation with note: "Detected {provider}
 First check: If TESTING.md already exists → read it and update/append rather than overwriting. Never destroy existing content.
 
 Write TESTING.md with:
-- Philosophy: "100% test coverage is the key to great vibe coding. Tests let you move fast, trust your instincts, and ship with confidence — without them, vibe coding is just yolo coding. With tests, it's a superpower."
-- Framework name and version
-- How to run tests (the verified command from B5)
-- Test layers: Unit tests (what, where, when), Integration tests, Smoke tests, E2E tests
-- Conventions: file naming, assertion style, setup/teardown patterns
+
+-   Philosophy: "100% test coverage is the key to great vibe coding. Tests let you move fast, trust your instincts, and ship with confidence — without them, vibe coding is just yolo coding. With tests, it's a superpower."
+    
+-   Framework name and version
+    
+-   How to run tests (the verified command from B5)
+    
+-   Test layers: Unit tests (what, where, when), Integration tests, Smoke tests, E2E tests
+    
+-   Conventions: file naming, assertion style, setup/teardown patterns
+    
 
 ### B7. Update CLAUDE.md
 
 First check: If CLAUDE.md already has a `## Testing` section → skip. Don't duplicate.
 
 Append a `## Testing` section:
-- Run command and test directory
-- Reference to TESTING.md
-- Test expectations:
-  - 100% test coverage is the goal — tests make vibe coding safe
-  - When writing new functions, write a corresponding test
-  - When fixing a bug, write a regression test
-  - When adding error handling, write a test that triggers the error
-  - When adding a conditional (if/else, switch), write tests for BOTH paths
-  - Never commit code that makes existing tests fail
+
+-   Run command and test directory
+    
+-   Reference to TESTING.md
+    
+-   Test expectations:
+    
+    -   100% test coverage is the goal — tests make vibe coding safe
+        
+    -   When writing new functions, write a corresponding test
+        
+    -   When fixing a bug, write a regression test
+        
+    -   When adding error handling, write a test that triggers the error
+        
+    -   When adding a conditional (if/else, switch), write tests for BOTH paths
+        
+    -   Never commit code that makes existing tests fail
+        
 
 ### B8. Commit
 
@@ -391,10 +399,10 @@ Append a `## Testing` section:
 git status --porcelain
 ```
 
-Only commit if there are changes. Stage all bootstrap files (config, test directory, TESTING.md, CLAUDE.md, .github/workflows/test.yml if created):
+Only commit if there are changes. Stage all bootstrap files (config, test directory, TESTING.md, CLAUDE.md, .github/workflows/test.yml if created):  
 `git commit -m "chore: bootstrap test framework ({framework name})"`
 
----
+* * *
 
 **Create output directories:**
 
@@ -402,21 +410,25 @@ Only commit if there are changes. Stage all bootstrap files (config, test direct
 mkdir -p .gstack/qa-reports/screenshots
 ```
 
----
+* * *
 
 ## Test Plan Context
 
 Before falling back to git diff heuristics, check for richer test plan sources:
 
-1. **Project-scoped test plans:** Check `~/.gstack/projects/` for recent `*-test-plan-*.md` files for this repo
-   ```bash
-   source <(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)
-   ls -t ~/.gstack/projects/$SLUG/*-test-plan-*.md 2>/dev/null | head -1
-   ```
-2. **Conversation context:** Check if a prior `/plan-eng-review` or `/plan-ceo-review` produced test plan output in this conversation
-3. **Use whichever source is richer.** Fall back to git diff analysis only if neither is available.
+1.  **Project-scoped test plans:** Check `~/.gstack/projects/` for recent `*-test-plan-*.md` files for this repo
+    
+    ```bash
+    source <(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)
+    ls -t ~/.gstack/projects/$SLUG/*-test-plan-*.md 2>/dev/null | head -1
+    ```
+    
+2.  **Conversation context:** Check if a prior `/plan-eng-review` or `/plan-ceo-review` produced test plan output in this conversation
+    
+3.  **Use whichever source is richer.** Fall back to git diff analysis only if neither is available.
+    
 
----
+* * *
 
 ## Phases 1-6: QA Baseline
 
@@ -426,67 +438,93 @@ Before falling back to git diff heuristics, check for richer test plan sources:
 
 This is the **primary mode** for developers verifying their work. When the user says `/qa` without a URL and the repo is on a feature branch, automatically:
 
-1. **Analyze the branch diff** to understand what changed:
-   ```bash
-   git diff main...HEAD --name-only
-   git log main..HEAD --oneline
-   ```
-
-2. **Identify affected pages/routes** from the changed files:
-   - Controller/route files → which URL paths they serve
-   - View/template/component files → which pages render them
-   - Model/service files → which pages use those models (check controllers that reference them)
-   - CSS/style files → which pages include those stylesheets
-   - API endpoints → test them directly with `$B js "await fetch('/api/...')"`
-   - Static pages (markdown, HTML) → navigate to them directly
-
-   **If no obvious pages/routes are identified from the diff:** Do not skip browser testing. The user invoked /qa because they want browser-based verification. Fall back to Quick mode — navigate to the homepage, follow the top 5 navigation targets, check console for errors, and test any interactive elements found. Backend, config, and infrastructure changes affect app behavior — always verify the app still works.
-
-3. **Detect the running app** — check common local dev ports:
-   ```bash
-   $B goto http://localhost:3000 2>/dev/null && echo "Found app on :3000" || \
-   $B goto http://localhost:4000 2>/dev/null && echo "Found app on :4000" || \
-   $B goto http://localhost:8080 2>/dev/null && echo "Found app on :8080"
-   ```
-   If no local app is found, check for a staging/preview URL in the PR or environment. If nothing works, ask the user for the URL.
-
-4. **Test each affected page/route:**
-   - Navigate to the page
-   - Take a screenshot
-   - Check console for errors
-   - If the change was interactive (forms, buttons, flows), test the interaction end-to-end
-   - Use `snapshot -D` before and after actions to verify the change had the expected effect
-
-5. **Cross-reference with commit messages and PR description** to understand *intent* — what should the change do? Verify it actually does that.
-
-6. **Check TODOS.md** (if it exists) for known bugs or issues related to the changed files. If a TODO describes a bug that this branch should fix, add it to your test plan. If you find a new bug during QA that isn't in TODOS.md, note it in the report.
-
-7. **Report findings** scoped to the branch changes:
-   - "Changes tested: N pages/routes affected by this branch"
-   - For each: does it work? Screenshot evidence.
-   - Any regressions on adjacent pages?
+1.  **Analyze the branch diff** to understand what changed:
+    
+    ```bash
+    git diff main...HEAD --name-only
+    git log main..HEAD --oneline
+    ```
+    
+2.  **Identify affected pages/routes** from the changed files:
+    
+    -   Controller/route files → which URL paths they serve
+        
+    -   View/template/component files → which pages render them
+        
+    -   Model/service files → which pages use those models (check controllers that reference them)
+        
+    -   CSS/style files → which pages include those stylesheets
+        
+    -   API endpoints → test them directly with `$B js "await fetch('/api/...')"`
+        
+    -   Static pages (markdown, HTML) → navigate to them directly
+        
+    
+    **If no obvious pages/routes are identified from the diff:** Do not skip browser testing. The user invoked /qa because they want browser-based verification. Fall back to Quick mode — navigate to the homepage, follow the top 5 navigation targets, check console for errors, and test any interactive elements found. Backend, config, and infrastructure changes affect app behavior — always verify the app still works.
+    
+3.  **Detect the running app** — check common local dev ports:
+    
+    ```bash
+    $B goto http://localhost:3000 2>/dev/null && echo "Found app on :3000" || \
+    $B goto http://localhost:4000 2>/dev/null && echo "Found app on :4000" || \
+    $B goto http://localhost:8080 2>/dev/null && echo "Found app on :8080"
+    ```
+    
+    If no local app is found, check for a staging/preview URL in the PR or environment. If nothing works, ask the user for the URL.
+    
+4.  **Test each affected page/route:**
+    
+    -   Navigate to the page
+        
+    -   Take a screenshot
+        
+    -   Check console for errors
+        
+    -   If the change was interactive (forms, buttons, flows), test the interaction end-to-end
+        
+    -   Use `snapshot -D` before and after actions to verify the change had the expected effect
+        
+5.  **Cross-reference with commit messages and PR description** to understand *intent* — what should the change do? Verify it actually does that.
+    
+6.  **Check TODOS.md** (if it exists) for known bugs or issues related to the changed files. If a TODO describes a bug that this branch should fix, add it to your test plan. If you find a new bug during QA that isn't in TODOS.md, note it in the report.
+    
+7.  **Report findings** scoped to the branch changes:
+    
+    -   "Changes tested: N pages/routes affected by this branch"
+        
+    -   For each: does it work? Screenshot evidence.
+        
+    -   Any regressions on adjacent pages?
+        
 
 **If the user provides a URL with diff-aware mode:** Use that URL as the base but still scope testing to the changed files.
 
 ### Full (default when URL is provided)
+
 Systematic exploration. Visit every reachable page. Document 5-10 well-evidenced issues. Produce health score. Takes 5-15 minutes depending on app size.
 
 ### Quick (`--quick`)
+
 30-second smoke test. Visit homepage + top 5 navigation targets. Check: page loads? Console errors? Broken links? Produce health score. No detailed issue documentation.
 
 ### Regression (`--regression <baseline>`)
+
 Run full mode, then load `baseline.json` from a previous run. Diff: which issues are fixed? Which are new? What's the score delta? Append regression section to report.
 
----
+* * *
 
 ## Workflow
 
 ### Phase 1: Initialize
 
-1. Find browse binary (see Setup above)
-2. Create output directories
-3. Copy report template from `qa/templates/qa-report-template.md` to output dir
-4. Start timer for duration tracking
+1.  Find browse binary (see Setup above)
+    
+2.  Create output directories
+    
+3.  Copy report template from `qa/templates/qa-report-template.md` to output dir
+    
+4.  Start timer for duration tracking
+    
 
 ### Phase 2: Authenticate (if needed)
 
@@ -524,10 +562,15 @@ $B console --errors               # any errors on landing?
 ```
 
 **Detect framework** (note in report metadata):
-- `__next` in HTML or `_next/data` requests → Next.js
-- `csrf-token` meta tag → Rails
-- `wp-content` in URLs → WordPress
-- Client-side routing with no page reloads → SPA
+
+-   `__next` in HTML or `_next/data` requests → Next.js
+    
+-   `csrf-token` meta tag → Rails
+    
+-   `wp-content` in URLs → WordPress
+    
+-   Client-side routing with no page reloads → SPA
+    
 
 **For SPAs:** The `links` command may return few results because navigation is client-side. Use `snapshot -i` to find nav elements (buttons, menu items) instead.
 
@@ -543,18 +586,26 @@ $B console --errors
 
 Then follow the **per-page exploration checklist** (see `qa/references/issue-taxonomy.md`):
 
-1. **Visual scan** — Look at the annotated screenshot for layout issues
-2. **Interactive elements** — Click buttons, links, controls. Do they work?
-3. **Forms** — Fill and submit. Test empty, invalid, edge cases
-4. **Navigation** — Check all paths in and out
-5. **States** — Empty state, loading, error, overflow
-6. **Console** — Any new JS errors after interactions?
-7. **Responsiveness** — Check mobile viewport if relevant:
-   ```bash
-   $B viewport 375x812
-   $B screenshot "$REPORT_DIR/screenshots/page-mobile.png"
-   $B viewport 1280x720
-   ```
+1.  **Visual scan** — Look at the annotated screenshot for layout issues
+    
+2.  **Interactive elements** — Click buttons, links, controls. Do they work?
+    
+3.  **Forms** — Fill and submit. Test empty, invalid, edge cases
+    
+4.  **Navigation** — Check all paths in and out
+    
+5.  **States** — Empty state, loading, error, overflow
+    
+6.  **Console** — Any new JS errors after interactions?
+    
+7.  **Responsiveness** — Check mobile viewport if relevant:
+    
+    ```bash
+    $B viewport 375x812
+    $B screenshot "$REPORT_DIR/screenshots/page-mobile.png"
+    $B viewport 1280x720
+    ```
+    
 
 **Depth judgment:** Spend more time on core features (homepage, dashboard, checkout, search) and less on secondary pages (about, terms, privacy).
 
@@ -567,11 +618,17 @@ Document each issue **immediately when found** — don't batch them.
 **Two evidence tiers:**
 
 **Interactive bugs** (broken flows, dead buttons, form failures):
-1. Take a screenshot before the action
-2. Perform the action
-3. Take a screenshot showing the result
-4. Use `snapshot -D` to show what changed
-5. Write repro steps referencing screenshots
+
+1.  Take a screenshot before the action
+    
+2.  Perform the action
+    
+3.  Take a screenshot showing the result
+    
+4.  Use `snapshot -D` to show what changed
+    
+5.  Write repro steps referencing screenshots
+    
 
 ```bash
 $B screenshot "$REPORT_DIR/screenshots/issue-001-step-1.png"
@@ -581,8 +638,11 @@ $B snapshot -D
 ```
 
 **Static bugs** (typos, layout issues, missing images):
-1. Take a single annotated screenshot showing the problem
-2. Describe what's wrong
+
+1.  Take a single annotated screenshot showing the problem
+    
+2.  Describe what's wrong
+    
 
 ```bash
 $B snapshot -i -a -o "$REPORT_DIR/screenshots/issue-002.png"
@@ -592,115 +652,166 @@ $B snapshot -i -a -o "$REPORT_DIR/screenshots/issue-002.png"
 
 ### Phase 6: Wrap Up
 
-1. **Compute health score** using the rubric below
-2. **Write "Top 3 Things to Fix"** — the 3 highest-severity issues
-3. **Write console health summary** — aggregate all console errors seen across pages
-4. **Update severity counts** in the summary table
-5. **Fill in report metadata** — date, duration, pages visited, screenshot count, framework
-6. **Save baseline** — write `baseline.json` with:
-   ```json
-   {
-     "date": "YYYY-MM-DD",
-     "url": "<target>",
-     "healthScore": N,
-     "issues": [{ "id": "ISSUE-001", "title": "...", "severity": "...", "category": "..." }],
-     "categoryScores": { "console": N, "links": N, ... }
-   }
-   ```
+1.  **Compute health score** using the rubric below
+    
+2.  **Write "Top 3 Things to Fix"** — the 3 highest-severity issues
+    
+3.  **Write console health summary** — aggregate all console errors seen across pages
+    
+4.  **Update severity counts** in the summary table
+    
+5.  **Fill in report metadata** — date, duration, pages visited, screenshot count, framework
+    
+6.  **Save baseline** — write `baseline.json` with:
+    
+    ```json
+    {
+      "date": "YYYY-MM-DD",
+      "url": "<target>",
+      "healthScore": N,
+      "issues": [{ "id": "ISSUE-001", "title": "...", "severity": "...", "category": "..." }],
+      "categoryScores": { "console": N, "links": N, ... }
+    }
+    ```
+    
 
 **Regression mode:** After writing the report, load the baseline file. Compare:
-- Health score delta
-- Issues fixed (in baseline but not current)
-- New issues (in current but not baseline)
-- Append the regression section to the report
 
----
+-   Health score delta
+    
+-   Issues fixed (in baseline but not current)
+    
+-   New issues (in current but not baseline)
+    
+-   Append the regression section to the report
+    
+
+* * *
 
 ## Health Score Rubric
 
 Compute each category score (0-100), then take the weighted average.
 
 ### Console (weight: 15%)
-- 0 errors → 100
-- 1-3 errors → 70
-- 4-10 errors → 40
-- 10+ errors → 10
+
+-   0 errors → 100
+    
+-   1-3 errors → 70
+    
+-   4-10 errors → 40
+    
+-   10+ errors → 10
+    
 
 ### Links (weight: 10%)
-- 0 broken → 100
-- Each broken link → -15 (minimum 0)
+
+-   0 broken → 100
+    
+-   Each broken link → -15 (minimum 0)
+    
 
 ### Per-Category Scoring (Visual, Functional, UX, Content, Performance, Accessibility)
+
 Each category starts at 100. Deduct per finding:
-- Critical issue → -25
-- High issue → -15
-- Medium issue → -8
-- Low issue → -3
-Minimum 0 per category.
+
+-   Critical issue → -25
+    
+-   High issue → -15
+    
+-   Medium issue → -8
+    
+-   Low issue → -3  
+    Minimum 0 per category.
+    
 
 ### Weights
-| Category | Weight |
-|----------|--------|
-| Console | 15% |
-| Links | 10% |
-| Visual | 10% |
-| Functional | 20% |
-| UX | 15% |
-| Performance | 10% |
-| Content | 5% |
-| Accessibility | 15% |
+
+<table style="min-width: 50px;"><colgroup><col style="min-width: 25px;"><col style="min-width: 25px;"></colgroup><tbody><tr><th colspan="1" rowspan="1"><p>Category</p></th><th colspan="1" rowspan="1"><p>Weight</p></th></tr><tr><td colspan="1" rowspan="1"><p>Console</p></td><td colspan="1" rowspan="1"><p>15%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Links</p></td><td colspan="1" rowspan="1"><p>10%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Visual</p></td><td colspan="1" rowspan="1"><p>10%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Functional</p></td><td colspan="1" rowspan="1"><p>20%</p></td></tr><tr><td colspan="1" rowspan="1"><p>UX</p></td><td colspan="1" rowspan="1"><p>15%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Performance</p></td><td colspan="1" rowspan="1"><p>10%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Content</p></td><td colspan="1" rowspan="1"><p>5%</p></td></tr><tr><td colspan="1" rowspan="1"><p>Accessibility</p></td><td colspan="1" rowspan="1"><p>15%</p></td></tr></tbody></table>
 
 ### Final Score
+
 `score = Σ (category_score × weight)`
 
----
+* * *
 
 ## Framework-Specific Guidance
 
 ### Next.js
-- Check console for hydration errors (`Hydration failed`, `Text content did not match`)
-- Monitor `_next/data` requests in network — 404s indicate broken data fetching
-- Test client-side navigation (click links, don't just `goto`) — catches routing issues
-- Check for CLS (Cumulative Layout Shift) on pages with dynamic content
+
+-   Check console for hydration errors (`Hydration failed`, `Text content did not match`)
+    
+-   Monitor `_next/data` requests in network — 404s indicate broken data fetching
+    
+-   Test client-side navigation (click links, don't just `goto`) — catches routing issues
+    
+-   Check for CLS (Cumulative Layout Shift) on pages with dynamic content
+    
 
 ### Rails
-- Check for N+1 query warnings in console (if development mode)
-- Verify CSRF token presence in forms
-- Test Turbo/Stimulus integration — do page transitions work smoothly?
-- Check for flash messages appearing and dismissing correctly
+
+-   Check for N+1 query warnings in console (if development mode)
+    
+-   Verify CSRF token presence in forms
+    
+-   Test Turbo/Stimulus integration — do page transitions work smoothly?
+    
+-   Check for flash messages appearing and dismissing correctly
+    
 
 ### WordPress
-- Check for plugin conflicts (JS errors from different plugins)
-- Verify admin bar visibility for logged-in users
-- Test REST API endpoints (`/wp-json/`)
-- Check for mixed content warnings (common with WP)
+
+-   Check for plugin conflicts (JS errors from different plugins)
+    
+-   Verify admin bar visibility for logged-in users
+    
+-   Test REST API endpoints (`/wp-json/`)
+    
+-   Check for mixed content warnings (common with WP)
+    
 
 ### General SPA (React, Vue, Angular)
-- Use `snapshot -i` for navigation — `links` command misses client-side routes
-- Check for stale state (navigate away and back — does data refresh?)
-- Test browser back/forward — does the app handle history correctly?
-- Check for memory leaks (monitor console after extended use)
 
----
+-   Use `snapshot -i` for navigation — `links` command misses client-side routes
+    
+-   Check for stale state (navigate away and back — does data refresh?)
+    
+-   Test browser back/forward — does the app handle history correctly?
+    
+-   Check for memory leaks (monitor console after extended use)
+    
+
+* * *
 
 ## Important Rules
 
-1. **Repro is everything.** Every issue needs at least one screenshot. No exceptions.
-2. **Verify before documenting.** Retry the issue once to confirm it's reproducible, not a fluke.
-3. **Never include credentials.** Write `[REDACTED]` for passwords in repro steps.
-4. **Write incrementally.** Append each issue to the report as you find it. Don't batch.
-5. **Never read source code.** Test as a user, not a developer.
-6. **Check console after every interaction.** JS errors that don't surface visually are still bugs.
-7. **Test like a user.** Use realistic data. Walk through complete workflows end-to-end.
-8. **Depth over breadth.** 5-10 well-documented issues with evidence > 20 vague descriptions.
-9. **Never delete output files.** Screenshots and reports accumulate — that's intentional.
-10. **Use `snapshot -C` for tricky UIs.** Finds clickable divs that the accessibility tree misses.
-11. **Show screenshots to the user.** After every `$B screenshot`, `$B snapshot -a -o`, or `$B responsive` command, use the Read tool on the output file(s) so the user can see them inline. For `responsive` (3 files), Read all three. This is critical — without it, screenshots are invisible to the user.
-12. **Never refuse to use the browser.** When the user invokes /qa or /qa-only, they are requesting browser-based testing. Never suggest evals, unit tests, or other alternatives as a substitute. Even if the diff appears to have no UI changes, backend changes affect app behavior — always open the browser and test.
+1.  **Repro is everything.** Every issue needs at least one screenshot. No exceptions.
+    
+2.  **Verify before documenting.** Retry the issue once to confirm it's reproducible, not a fluke.
+    
+3.  **Never include credentials.** Write `[REDACTED]` for passwords in repro steps.
+    
+4.  **Write incrementally.** Append each issue to the report as you find it. Don't batch.
+    
+5.  **Never read source code.** Test as a user, not a developer.
+    
+6.  **Check console after every interaction.** JS errors that don't surface visually are still bugs.
+    
+7.  **Test like a user.** Use realistic data. Walk through complete workflows end-to-end.
+    
+8.  **Depth over breadth.** 5-10 well-documented issues with evidence > 20 vague descriptions.
+    
+9.  **Never delete output files.** Screenshots and reports accumulate — that's intentional.
+    
+10.  **Use** `snapshot -C` **for tricky UIs.** Finds clickable divs that the accessibility tree misses.
+     
+11.  **Show screenshots to the user.** After every `$B screenshot`, `$B snapshot -a -o`, or `$B responsive` command, use the Read tool on the output file(s) so the user can see them inline. For `responsive` (3 files), Read all three. This is critical — without it, screenshots are invisible to the user.
+     
+12.  **Never refuse to use the browser.** When the user invokes /qa or /qa-only, they are requesting browser-based testing. Never suggest evals, unit tests, or other alternatives as a substitute. Even if the diff appears to have no UI changes, backend changes affect app behavior — always open the browser and test.
+     
 
 Record baseline health score at end of Phase 6.
 
----
+* * *
 
 ## Output Structure
 
@@ -719,19 +830,22 @@ Record baseline health score at end of Phase 6.
 
 Report filenames use the domain and date: `qa-report-myapp-com-2026-03-12.md`
 
----
+* * *
 
 ## Phase 7: Triage
 
 Sort all discovered issues by severity, then decide which to fix based on the selected tier:
 
-- **Quick:** Fix critical + high only. Mark medium/low as "deferred."
-- **Standard:** Fix critical + high + medium. Mark low as "deferred."
-- **Exhaustive:** Fix all, including cosmetic/low severity.
+-   **Quick:** Fix critical + high only. Mark medium/low as "deferred."
+    
+-   **Standard:** Fix critical + high + medium. Mark low as "deferred."
+    
+-   **Exhaustive:** Fix all, including cosmetic/low severity.
+    
 
 Mark issues that cannot be fixed from source code (e.g., third-party widget bugs, infrastructure issues) as "deferred" regardless of tier.
 
----
+* * *
 
 ## Phase 8: Fix Loop
 
@@ -744,14 +858,19 @@ For each fixable issue, in severity order:
 # Glob for file patterns matching the affected page
 ```
 
-- Find the source file(s) responsible for the bug
-- ONLY modify files directly related to the issue
+-   Find the source file(s) responsible for the bug
+    
+-   ONLY modify files directly related to the issue
+    
 
 ### 8b. Fix
 
-- Read the source code, understand the context
-- Make the **minimal fix** — smallest change that resolves the issue
-- Do NOT refactor surrounding code, add features, or "improve" unrelated things
+-   Read the source code, understand the context
+    
+-   Make the **minimal fix** — smallest change that resolves the issue
+    
+-   Do NOT refactor surrounding code, add features, or "improve" unrelated things
+    
 
 ### 8c. Commit
 
@@ -760,15 +879,21 @@ git add <only-changed-files>
 git commit -m "fix(qa): ISSUE-NNN — short description"
 ```
 
-- One commit per fix. Never bundle multiple fixes.
-- Message format: `fix(qa): ISSUE-NNN — short description`
+-   One commit per fix. Never bundle multiple fixes.
+    
+-   Message format: `fix(qa): ISSUE-NNN — short description`
+    
 
 ### 8d. Re-test
 
-- Navigate back to the affected page
-- Take **before/after screenshot pair**
-- Check console for errors
-- Use `snapshot -D` to verify the change had the expected effect
+-   Navigate back to the affected page
+    
+-   Take **before/after screenshot pair**
+    
+-   Check console for errors
+    
+-   Use `snapshot -D` to verify the change had the expected effect
+    
 
 ```bash
 $B goto <affected-url>
@@ -779,62 +904,88 @@ $B snapshot -D
 
 ### 8e. Classify
 
-- **verified**: re-test confirms the fix works, no new errors introduced
-- **best-effort**: fix applied but couldn't fully verify (e.g., needs auth state, external service)
-- **reverted**: regression detected → `git revert HEAD` → mark issue as "deferred"
+-   **verified**: re-test confirms the fix works, no new errors introduced
+    
+-   **best-effort**: fix applied but couldn't fully verify (e.g., needs auth state, external service)
+    
+-   **reverted**: regression detected → `git revert HEAD` → mark issue as "deferred"
+    
 
 ### 8e.5. Regression Test
 
 Skip if: classification is not "verified", OR the fix is purely visual/CSS with no JS behavior, OR no test framework was detected AND user declined bootstrap.
 
-**1. Study the project's existing test patterns:**
+**1\. Study the project's existing test patterns:**
 
 Read 2-3 test files closest to the fix (same directory, same code type). Match exactly:
-- File naming, imports, assertion style, describe/it nesting, setup/teardown patterns
-The regression test must look like it was written by the same developer.
 
-**2. Trace the bug's codepath, then write a regression test:**
+-   File naming, imports, assertion style, describe/it nesting, setup/teardown patterns  
+    The regression test must look like it was written by the same developer.
+    
+
+**2\. Trace the bug's codepath, then write a regression test:**
 
 Before writing the test, trace the data flow through the code you just fixed:
-- What input/state triggered the bug? (the exact precondition)
-- What codepath did it follow? (which branches, which function calls)
-- Where did it break? (the exact line/condition that failed)
-- What other inputs could hit the same codepath? (edge cases around the fix)
+
+-   What input/state triggered the bug? (the exact precondition)
+    
+-   What codepath did it follow? (which branches, which function calls)
+    
+-   Where did it break? (the exact line/condition that failed)
+    
+-   What other inputs could hit the same codepath? (edge cases around the fix)
+    
 
 The test MUST:
-- Set up the precondition that triggered the bug (the exact state that made it break)
-- Perform the action that exposed the bug
-- Assert the correct behavior (NOT "it renders" or "it doesn't throw")
-- If you found adjacent edge cases while tracing, test those too (e.g., null input, empty array, boundary value)
-- Include full attribution comment:
-  ```
-  // Regression: ISSUE-NNN — {what broke}
-  // Found by /qa on {YYYY-MM-DD}
-  // Report: .gstack/qa-reports/qa-report-{domain}-{date}.md
-  ```
+
+-   Set up the precondition that triggered the bug (the exact state that made it break)
+    
+-   Perform the action that exposed the bug
+    
+-   Assert the correct behavior (NOT "it renders" or "it doesn't throw")
+    
+-   If you found adjacent edge cases while tracing, test those too (e.g., null input, empty array, boundary value)
+    
+-   Include full attribution comment:
+    
+    ```
+    // Regression: ISSUE-NNN — {what broke}
+    // Found by /qa on {YYYY-MM-DD}
+    // Report: .gstack/qa-reports/qa-report-{domain}-{date}.md
+    ```
+    
 
 Test type decision:
-- Console error / JS exception / logic bug → unit or integration test
-- Broken form / API failure / data flow bug → integration test with request/response
-- Visual bug with JS behavior (broken dropdown, animation) → component test
-- Pure CSS → skip (caught by QA reruns)
+
+-   Console error / JS exception / logic bug → unit or integration test
+    
+-   Broken form / API failure / data flow bug → integration test with request/response
+    
+-   Visual bug with JS behavior (broken dropdown, animation) → component test
+    
+-   Pure CSS → skip (caught by QA reruns)
+    
 
 Generate unit tests. Mock all external dependencies (DB, API, Redis, file system).
 
 Use auto-incrementing names to avoid collisions: check existing `{name}.regression-*.test.{ext}` files, take max number + 1.
 
-**3. Run only the new test file:**
+**3\. Run only the new test file:**
 
 ```bash
 {detected test command} {new-test-file}
 ```
 
-**4. Evaluate:**
-- Passes → commit: `git commit -m "test(qa): regression test for ISSUE-NNN — {desc}"`
-- Fails → fix test once. Still failing → delete test, defer.
-- Taking >2 min exploration → skip and defer.
+**4\. Evaluate:**
 
-**5. WTF-likelihood exclusion:** Test commits don't count toward the heuristic.
+-   Passes → commit: `git commit -m "test(qa): regression test for ISSUE-NNN — {desc}"`
+    
+-   Fails → fix test once. Still failing → delete test, defer.
+    
+-   Taking >2 min exploration → skip and defer.
+    
+
+**5\. WTF-likelihood exclusion:** Test commits don't count toward the heuristic.
 
 ### 8f. Self-Regulation (STOP AND EVALUATE)
 
@@ -854,17 +1005,20 @@ WTF-LIKELIHOOD:
 
 **Hard cap: 50 fixes.** After 50 fixes, stop regardless of remaining issues.
 
----
+* * *
 
 ## Phase 9: Final QA
 
 After all fixes are applied:
 
-1. Re-run QA on all affected pages
-2. Compute final health score
-3. **If final score is WORSE than baseline:** WARN prominently — something regressed
+1.  Re-run QA on all affected pages
+    
+2.  Compute final health score
+    
+3.  **If final score is WORSE than baseline:** WARN prominently — something regressed
+    
 
----
+* * *
 
 ## Phase 10: Report
 
@@ -873,41 +1027,60 @@ Write the report to both local and project-scoped locations:
 **Local:** `.gstack/qa-reports/qa-report-{domain}-{YYYY-MM-DD}.md`
 
 **Project-scoped:** Write test outcome artifact for cross-session context:
+
 ```bash
 source <(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null) && mkdir -p ~/.gstack/projects/$SLUG
 ```
+
 Write to `~/.gstack/projects/{slug}/{user}-{branch}-test-outcome-{datetime}.md`
 
 **Per-issue additions** (beyond standard report template):
-- Fix Status: verified / best-effort / reverted / deferred
-- Commit SHA (if fixed)
-- Files Changed (if fixed)
-- Before/After screenshots (if fixed)
+
+-   Fix Status: verified / best-effort / reverted / deferred
+    
+-   Commit SHA (if fixed)
+    
+-   Files Changed (if fixed)
+    
+-   Before/After screenshots (if fixed)
+    
 
 **Summary section:**
-- Total issues found
-- Fixes applied (verified: X, best-effort: Y, reverted: Z)
-- Deferred issues
-- Health score delta: baseline → final
+
+-   Total issues found
+    
+-   Fixes applied (verified: X, best-effort: Y, reverted: Z)
+    
+-   Deferred issues
+    
+-   Health score delta: baseline → final
+    
 
 **PR Summary:** Include a one-line summary suitable for PR descriptions:
+
 > "QA found N issues, fixed M, health score X → Y."
 
----
+* * *
 
 ## Phase 11: TODOS.md Update
 
 If the repo has a `TODOS.md`:
 
-1. **New deferred bugs** → add as TODOs with severity, category, and repro steps
-2. **Fixed bugs that were in TODOS.md** → annotate with "Fixed by /qa on {branch}, {date}"
+1.  **New deferred bugs** → add as TODOs with severity, category, and repro steps
+    
+2.  **Fixed bugs that were in TODOS.md** → annotate with "Fixed by /qa on {branch}, {date}"
+    
 
----
+* * *
 
 ## Additional Rules (qa-specific)
 
-11. **Clean working tree required.** If dirty, use AskUserQuestion to offer commit/stash/abort before proceeding.
-12. **One commit per fix.** Never bundle multiple fixes into one commit.
-13. **Only modify tests when generating regression tests in Phase 8e.5.** Never modify CI configuration. Never modify existing tests — only create new test files.
-14. **Revert on regression.** If a fix makes things worse, `git revert HEAD` immediately.
-15. **Self-regulate.** Follow the WTF-likelihood heuristic. When in doubt, stop and ask.
+11.  **Clean working tree required.** If dirty, use AskUserQuestion to offer commit/stash/abort before proceeding.
+     
+12.  **One commit per fix.** Never bundle multiple fixes into one commit.
+     
+13.  **Only modify tests when generating regression tests in Phase 8e.5.** Never modify CI configuration. Never modify existing tests — only create new test files.
+     
+14.  **Revert on regression.** If a fix makes things worse, `git revert HEAD` immediately.
+     
+15.  **Self-regulate.** Follow the WTF-likelihood heuristic. When in doubt, stop and ask.

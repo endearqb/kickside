@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Shield, ShieldOff, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronRight, Shield, ShieldOff, Sparkles } from "lucide-react";
 import type {
   InstalledSkill,
   SessionSkillState,
@@ -8,6 +8,7 @@ import type {
   SkillProjectionRecord,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 type SkillCenterFilter = "all" | "session" | "global" | "untrusted";
 
@@ -28,6 +29,7 @@ type SkillCenterPanelProps = {
   onRecoverWorkspaceSkill: (skillId: string) => void;
   search: string;
   filter: SkillCenterFilter;
+  onSearchChange: (value: string) => void;
 };
 
 function statusForSkill(
@@ -76,7 +78,16 @@ export function SkillCenterPanel({
   onRecoverWorkspaceSkill,
   search,
   filter,
+  onSearchChange,
 }: SkillCenterPanelProps) {
+  const [metaExpanded, setMetaExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(false);
+
+  useEffect(() => {
+    setMetaExpanded(false);
+    setFilesExpanded(false);
+  }, [selectedSkillId]);
+
   const recentSkills = useMemo(
     () =>
       workspaceRecentSkillIds
@@ -130,14 +141,46 @@ export function SkillCenterPanel({
     ? projectionForSkill(selectedSkill.id, activeSessionSkillState.projections)
     : null;
 
+  const renderCollapsibleSection = (
+    title: string,
+    expanded: boolean,
+    onToggle: () => void,
+    content: ReactNode,
+  ) => (
+    <section className={`skill-center-collapsible ${expanded ? "is-open" : ""}`}>
+      <button
+        type="button"
+        className="skill-center-section-toggle"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <div className="skill-center-section-toggle-copy">
+          <h4>{title}</h4>
+        </div>
+        <ChevronRight
+          size={16}
+          className={`skill-center-section-toggle-icon ${expanded ? "is-open" : ""}`}
+        />
+      </button>
+      {expanded ? <div className="skill-center-section-body">{content}</div> : null}
+    </section>
+  );
+
   return (
     <div className={`skill-center skill-center-${surface}`}>
       <div className="skill-center-sidebar">
+        <div className="skill-center-toolbar">
+          <Input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="搜索已安装技能"
+          />
+        </div>
         <div className="skill-center-list">
           {filteredSkills.length === 0 ? (
             <div className="skill-center-empty">
               <Sparkles size={16} />
-              <p>还没有匹配的 Skill。</p>
+              <p>还没有匹配的技能。</p>
             </div>
           ) : null}
           {filteredSkills.map((skill) => {
@@ -156,13 +199,9 @@ export function SkillCenterPanel({
                       ? renderStatusChip("已信任", "ready")
                       : renderStatusChip("未信任", "warning")}
                     {state.globalApplied ? renderStatusChip("全局", "muted") : null}
-                    {state.sessionApplied ? renderStatusChip("session", "muted") : null}
+                    {state.sessionApplied ? renderStatusChip("当前工作区", "muted") : null}
                   </div>
                 </div>
-                <span className="skill-center-list-projection">{skill.projectionName}</span>
-                {skill.description ? (
-                  <p className="skill-center-list-description">{skill.description}</p>
-                ) : null}
               </button>
             );
           })}
@@ -181,40 +220,44 @@ export function SkillCenterPanel({
                   ? renderStatusChip("已信任", "ready")
                   : renderStatusChip("未信任", "warning")}
                 {selectedState.globalApplied ? renderStatusChip("全局", "muted") : null}
-                {selectedState.sessionApplied ? renderStatusChip("session", "muted") : null}
+                {selectedState.sessionApplied ? renderStatusChip("当前工作区", "muted") : null}
               </div>
             </div>
             <p className="skill-center-detail-description">
-              {selectedSkill.description || "这个 Skill 没有提供描述。"}
+              {selectedSkill.description || "这个技能没有提供描述。"}
             </p>
 
-            <div className="skill-center-actions">
-              <Button
-                type="button"
-                variant={selectedSkill.trusted ? "outline" : "default"}
-                icon={selectedSkill.trusted ? <ShieldOff size={14} /> : <Shield size={14} />}
-                onClick={() => onSetTrust(selectedSkill.id, !selectedSkill.trusted)}
-                disabled={busy}
-              >
-                {selectedSkill.trusted ? "取消信任" : "信任"}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => onApplySkill(selectedSkill.id, "user_global_kimi")}
-                disabled={busy || selectedState.globalApplied}
-              >
-                应用到用户全局
-              </Button>
+            <div className="skill-center-actions skill-center-actions-primary">
               <Button
                 type="button"
                 onClick={() => onApplySkill(selectedSkill.id, "session_kimi")}
                 disabled={busy || selectedState.sessionApplied}
               >
-                仅应用到当前 Session
+                应用到当前工作区
               </Button>
               <Button
                 type="button"
                 variant="outline"
+                onClick={() => onApplySkill(selectedSkill.id, "user_global_kimi")}
+                disabled={busy || selectedState.globalApplied}
+              >
+                应用到用户全局
+              </Button>
+            </div>
+
+            <div className="skill-center-actions skill-center-actions-secondary">
+              <Button
+                type="button"
+                variant="outline"
+                icon={selectedSkill.trusted ? <ShieldOff size={14} /> : <Shield size={14} />}
+                onClick={() => onSetTrust(selectedSkill.id, !selectedSkill.trusted)}
+                disabled={busy}
+              >
+                {selectedSkill.trusted ? "取消信任" : "信任技能"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
                 onClick={() => onRemoveSkill(selectedSkill.id, "user_global_kimi")}
                 disabled={busy || !selectedState.globalApplied}
               >
@@ -222,53 +265,62 @@ export function SkillCenterPanel({
               </Button>
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={() => onRemoveSkill(selectedSkill.id, "session_kimi")}
                 disabled={busy || !selectedState.sessionApplied}
               >
-                从当前 Session 移除
+                从当前工作区移除
               </Button>
             </div>
 
-            <dl className="skill-center-meta">
-              <div>
-                <dt>投影名</dt>
-                <dd>{selectedSkill.projectionName}</dd>
-              </div>
-              <div>
-                <dt>来源</dt>
-                <dd>{formatSkillSource(selectedSkill)}</dd>
-              </div>
-              {selectedSkill.sourceType === "git" ? (
+            {renderCollapsibleSection(
+              "基础信息",
+              metaExpanded,
+              () => setMetaExpanded((current) => !current),
+              <dl className="skill-center-meta">
                 <div>
-                  <dt>Ref</dt>
-                  <dd>{selectedSkill.gitRef || "默认 HEAD"}</dd>
+                  <dt>投影名</dt>
+                  <dd>{selectedSkill.projectionName}</dd>
                 </div>
-              ) : null}
-              {selectedSkill.sourceType === "git" && selectedSkill.commit ? (
                 <div>
-                  <dt>Commit</dt>
-                  <dd>{selectedSkill.commit}</dd>
+                  <dt>来源</dt>
+                  <dd>{formatSkillSource(selectedSkill)}</dd>
                 </div>
-              ) : null}
-              <div>
-                <dt>本地路径</dt>
-                <dd>{selectedSkill.localPath}</dd>
-              </div>
-              <div>
-                <dt>脚本</dt>
-                <dd>{selectedSkill.hasScripts ? "包含 scripts/" : "无 scripts/"}</dd>
-              </div>
-            </dl>
+                {selectedSkill.sourceType === "git" ? (
+                  <div>
+                    <dt>Ref</dt>
+                    <dd>{selectedSkill.gitRef || "默认 HEAD"}</dd>
+                  </div>
+                ) : null}
+                {selectedSkill.sourceType === "git" && selectedSkill.commit ? (
+                  <div>
+                    <dt>Commit</dt>
+                    <dd>{selectedSkill.commit}</dd>
+                  </div>
+                ) : null}
+                <div>
+                  <dt>本地路径</dt>
+                  <dd>{selectedSkill.localPath}</dd>
+                </div>
+                <div>
+                  <dt>脚本</dt>
+                  <dd>{selectedSkill.hasScripts ? "包含 scripts/" : "无 scripts/"}</dd>
+                </div>
+              </dl>,
+            )}
 
-            <div className="skill-center-files">
-              <h4>Skill 内容预览</h4>
-              <div className="skill-center-file-list">
-                {(selectedSkillDetail?.relativePaths ?? []).slice(0, 48).map((item) => (
-                  <code key={item}>{item}</code>
-                ))}
-              </div>
-            </div>
+            {renderCollapsibleSection(
+              "技能内容预览",
+              filesExpanded,
+              () => setFilesExpanded((current) => !current),
+              <div className="skill-center-files">
+                <div className="skill-center-file-list">
+                  {(selectedSkillDetail?.relativePaths ?? []).slice(0, 48).map((item) => (
+                    <code key={item}>{item}</code>
+                  ))}
+                </div>
+              </div>,
+            )}
 
             <div className="skill-center-recent">
               <div className="skill-center-section-header">
@@ -291,7 +343,7 @@ export function SkillCenterPanel({
                         onClick={() => onRecoverWorkspaceSkill(skill.id)}
                         disabled={busy}
                       >
-                        恢复到当前 Session
+                        应用到当前工作区
                       </Button>
                     </div>
                   ))}
@@ -304,7 +356,7 @@ export function SkillCenterPanel({
                 <h4>已应用目录</h4>
               </div>
               {!selectedGlobalProjection && !selectedSessionProjection ? (
-                <p className="skill-center-muted">这个 Skill 当前还没有应用到任何目录。</p>
+                <p className="skill-center-muted">这个技能当前还没有应用到任何目录。</p>
               ) : (
                 <div className="skill-center-path-list">
                   {selectedGlobalProjection ? (
@@ -315,7 +367,7 @@ export function SkillCenterPanel({
                   ) : null}
                   {selectedSessionProjection ? (
                     <div className="skill-center-path-item">
-                      <strong>session</strong>
+                      <strong>当前工作区</strong>
                       <code>{selectedSessionProjection.targetPath}</code>
                     </div>
                   ) : null}
@@ -326,7 +378,7 @@ export function SkillCenterPanel({
         ) : (
           <div className="skill-center-empty skill-center-empty-detail">
             <Sparkles size={18} />
-            <p>选择一个已安装 Skill 查看详情和应用状态。</p>
+            <p>选择一个已安装技能，查看详情和应用状态。</p>
           </div>
         )}
       </div>

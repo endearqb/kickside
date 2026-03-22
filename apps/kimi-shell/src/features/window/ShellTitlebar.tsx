@@ -263,16 +263,16 @@ export function ShellTitlebar({
   const canOpenSessionPath = sessionPath.length > 0;
   const viewToggleLabel =
     activeWorkspaceView === "code"
-      ? "Current: Kimi Code Web. Switch to Kimi Chat"
-      : "Current: Kimi Chat. Switch to Kimi Code Web";
+      ? "当前显示 Kimi Code Web，切换到 Kimi Chat"
+      : "当前显示 Kimi Chat，切换到 Kimi Code Web";
   const splitToggleLabel =
     workspaceLayoutMode === "split"
-      ? "Return to single-pane view"
-      : "Show code and chat side by side";
+      ? "切回单栏视图"
+      : "同时显示 Kimi Code Web 与 Kimi Chat";
   const swapSplitOrderLabel =
     workspaceSplitOrder === "code_left"
-      ? "Swap panes: move Kimi Chat to the left"
-      : "Swap panes: move Kimi Code Web to the left";
+      ? "切换分栏顺序，将 Kimi Chat 移到左侧"
+      : "切换分栏顺序，将 Kimi Code Web 移到左侧";
 
   const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
@@ -294,7 +294,7 @@ export function ShellTitlebar({
         {screen === "control_center" && canOpenWorkspace ? (
           <IconButton
             icon={<Monitor size={14} />}
-            label="Back to workspace"
+            label="返回工作区"
             onClick={onBackToStatus}
             className="ghost mini titlebar-nav-btn"
           />
@@ -308,8 +308,8 @@ export function ShellTitlebar({
             className="icon-btn mini titlebar-retry-btn"
             onClick={onRetry}
             disabled={actionBusy}
-            aria-label="Retry backend startup"
-            title="Retry backend startup"
+            aria-label="重试后端启动"
+            title="重试后端启动"
           />
         ) : null}
         {screen === "workspace" && workspaceLayoutMode !== "split" ? (
@@ -359,7 +359,7 @@ export function ShellTitlebar({
               onMouseDown={handleDragZoneMouseDown}
               onDoubleClick={handleDragZoneDoubleClick}
             >
-              <span>Workspace</span>
+              <span>工作区</span>
               <span className="titlebar-workspace-divider" aria-hidden>
                 |
               </span>
@@ -387,7 +387,7 @@ export function ShellTitlebar({
           >
             <KimiCliBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
-              {shellScreenLabel} | State: {statusText}
+              {shellScreenLabel} | 状态：{statusText}
             </span>
           </div>
         )}
@@ -407,7 +407,7 @@ export function ShellTitlebar({
               <>
                 <IconButton
                   icon={<FolderOpen size={14} />}
-                  label="Open current session location"
+                  label="打开当前会话目录"
                   onClick={() => onOpenFolder(sessionPath)}
                   className="ghost mini titlebar-path-btn"
                   disabled={!canOpenSessionPath}
@@ -416,11 +416,11 @@ export function ShellTitlebar({
                   type="button"
                   className="titlebar-skill-btn"
                   onClick={onOpenSkillCenter}
-                  aria-label="Open Skill Center"
-                  title="Open Skill Center"
+                  aria-label="打开技能中心"
+                  title="打开技能中心"
                 >
                   <Sparkles size={14} />
-                  <span>Skill</span>
+                  <span>技能</span>
                   {sessionSkillCount > 0 ? (
                     <span className="titlebar-skill-badge">{sessionSkillCount}</span>
                   ) : null}
@@ -431,19 +431,19 @@ export function ShellTitlebar({
           <div className="titlebar-window-controls" data-no-drag="true">
             <IconButton
               icon={<Minus size={14} />}
-              label="Minimize window"
+              label="最小化窗口"
               onClick={onMinimizeWindow}
               className="window-control-btn"
             />
             <IconButton
               icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
-              label={isWindowMaximized ? "Restore window" : "Maximize window"}
+              label={isWindowMaximized ? "还原窗口" : "最大化窗口"}
               onClick={onToggleMaximizeWindow}
               className="window-control-btn"
             />
             <IconButton
               icon={<X size={14} />}
-              label="Close window"
+              label="关闭窗口"
               onClick={onCloseWindow}
               className="window-control-btn close"
             />

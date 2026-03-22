@@ -1046,13 +1046,15 @@ export function useShellController() {
     }
   }
 
-  async function refreshBridgeSessions() {
+  async function refreshBridgeSessions(options?: { silent?: boolean }) {
     try {
       const data = await invoke<BridgeSessionRecord[]>("list_bridge_sessions");
       setBridgeSessions(data);
       return data;
     } catch (error) {
-      setActionError(String(error));
+      if (!options?.silent) {
+        setActionError(String(error));
+      }
       return bridgeSessions;
     }
   }

@@ -62,7 +62,6 @@ import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
 import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
 import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
-import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
@@ -136,7 +135,7 @@ type ControlCenterViewProps = {
   onRefreshContextMenuStatus: () => Promise<void>;
   onRefreshBridgeSettings: () => Promise<BridgeSettings>;
   onRefreshBridgeStatus: () => Promise<BridgeStatus>;
-  onRefreshBridgeSessions: () => Promise<BridgeSessionRecord[]>;
+  onRefreshBridgeSessions: (options?: { silent?: boolean }) => Promise<BridgeSessionRecord[]>;
   onRefreshBridgeBindings: () => Promise<BindingRecord[]>;
   onRefreshBridgeApprovals: () => Promise<BridgeApprovalRecord[]>;
   onRefreshBridgeLogTail: () => Promise<string[]>;
@@ -232,7 +231,7 @@ const controlSections: Array<{
   },
   {
     id: "skill_center",
-    label: "Skill Center",
+    label: "技能中心",
     icon: <Sparkles size={15} />,
   },
 ];
@@ -280,7 +279,7 @@ function BridgeConfigModal({
     <ControlCenterModalShell
       open={open}
       title={titleLabel}
-      description="在这里维护 Bridge 与 Feishu 长连接配置；保存凭据只代表 sidecar 可以尝试连接，平台是否检测到应用连接仍要看长连接和权限是否真正建立。"
+      description="在这里维护 Bridge 和飞书长连接配置。保存凭据只表示 sidecar 可以尝试连接，平台是否识别为已连接仍取决于长连接和应用权限是否真正建立。"
       ariaLabel={titleLabel}
       className="cc-bridge-config-modal"
       bodyClassName="cc-bridge-config-body"
@@ -303,7 +302,7 @@ function BridgeConfigModal({
         <>
           <div className="cc-config-footer-meta">
             <span>Bridge（网关）: {formatBridgeRuntimeStateLabel(status.state)}</span>
-            <span>Feishu（飞书通道）: {formatBridgeChannelStateLabel(feishuStatus)}</span>
+            <span>飞书通道: {formatBridgeChannelStateLabel(feishuStatus)}</span>
             {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
           </div>
           <div className="cc-actions">
@@ -323,7 +322,7 @@ function BridgeConfigModal({
               onClick={() => void onSave()}
               disabled={busy || !dirty || !validation.canSave}
             >
-              保存配置（Save）
+              保存配置
             </Button>
           </div>
         </>
@@ -331,19 +330,19 @@ function BridgeConfigModal({
     >
       <div className="diagnostics-grid cc-bridge-onboarding-status-grid">
         <div className="diag-item">
-          <span className="diag-label">Bridge 状态（Bridge State）</span>
+          <span className="diag-label">Bridge 状态</span>
           <strong>{formatBridgeRuntimeStateLabel(status.state)}</strong>
         </div>
         <div className="diag-item">
-          <span className="diag-label">Feishu 通道（Feishu Channel）</span>
+          <span className="diag-label">飞书通道</span>
           <strong>{formatBridgeChannelStateLabel(feishuStatus)}</strong>
         </div>
         <div className="diag-item">
-          <span className="diag-label">Bridge 开关（Bridge Enabled）</span>
+          <span className="diag-label">Bridge 开关</span>
           <strong>{draft.enabled ? "就绪" : "待办"}</strong>
         </div>
         <div className="diag-item">
-          <span className="diag-label">Feishu 开关（Feishu Enabled）</span>
+          <span className="diag-label">飞书开关</span>
           <strong>{draft.feishuEnabled ? "就绪" : "待办"}</strong>
         </div>
       </div>
@@ -351,7 +350,7 @@ function BridgeConfigModal({
       <div className="cc-bridge-onboarding-switches">
         <label className="bridge-switch-card">
           <span className="bridge-switch-copy">
-            <strong>启用 Bridge（Enable Bridge）</strong>
+            <strong>启用 Bridge</strong>
             <small>保存后写入总开关，启动需点击“保存并启动”。</small>
           </span>
           <input
@@ -370,7 +369,7 @@ function BridgeConfigModal({
 
         <label className="bridge-switch-card">
           <span className="bridge-switch-copy">
-            <strong>启用 Feishu（Enable Feishu）</strong>
+            <strong>启用飞书通道</strong>
             <small>启用时需要有效的 appId 和 appSecret；飞书后台显示已连接还取决于长连接和应用权限。</small>
           </span>
           <input
@@ -460,16 +459,13 @@ function BridgeConfigModal({
 
       <div className="bridge-panel-subsection">
         <div className="bridge-panel-subheader">
-          <h5>密钥掩码视图（Secrets Mask View）</h5>
+          <h5>密钥掩码视图</h5>
         </div>
         <div className="bridge-secret-list">
-          {renderBridgeOnboardingSecretRow("Feishu appId（应用 ID）", secretsMask.feishu.appId)}
-          {renderBridgeOnboardingSecretRow("Feishu appSecret（应用密钥）", secretsMask.feishu.appSecret)}
-          {renderBridgeOnboardingSecretRow(
-            "Feishu verificationToken（校验令牌）",
-            secretsMask.feishu.verificationToken,
-          )}
-          {renderBridgeOnboardingSecretRow("Feishu encryptKey（加密密钥）", secretsMask.feishu.encryptKey)}
+          {renderBridgeOnboardingSecretRow("飞书 appId", secretsMask.feishu.appId)}
+          {renderBridgeOnboardingSecretRow("飞书 appSecret", secretsMask.feishu.appSecret)}
+          {renderBridgeOnboardingSecretRow("飞书 verificationToken", secretsMask.feishu.verificationToken)}
+          {renderBridgeOnboardingSecretRow("飞书 encryptKey", secretsMask.feishu.encryptKey)}
         </div>
       </div>
 
@@ -481,7 +477,7 @@ function BridgeConfigModal({
         {validation.message ?? "保存后可回到卡片直接启动或停止 bridge。"}
       </p>
       <p className="hint cc-step-meta">
-        当前 Feishu 通道使用长连接模式。`verificationToken` 和 `encryptKey` 仅在你同时接入事件订阅回调时需要，不决定当前长连接能否建连。
+        当前飞书通道使用长连接模式。`verificationToken` 和 `encryptKey` 仅在你同时接入事件订阅回调时需要，不决定当前长连接能否建连。
       </p>
       {status.state === "stopped" ? <p className="hint cc-step-meta">保存后请回到主面板使用主按钮启动 IM Bridge。</p> : null}
     </ControlCenterModalShell>
@@ -753,7 +749,6 @@ export function ControlCenterView({
   const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
   const [bridgeRuntimePanelExpanded, setBridgeRuntimePanelExpanded] = useState(false);
   const [mainCloseBehaviorSaving, setMainCloseBehaviorSaving] = useState(false);
-  const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
   const bridgeReadyHintRef = useRef<HTMLDivElement | null>(null);
   void installCommandsOpen;
   void installCommandsBusy;
@@ -1120,10 +1115,9 @@ export function ControlCenterView({
 
   async function handleSelectBridgeSection() {
     try {
+      await Promise.all([onRefreshBridgeSettings(), onRefreshBridgeStatus()]);
       await Promise.all([
-        onRefreshBridgeSettings(),
-        onRefreshBridgeStatus(),
-        onRefreshBridgeSessions(),
+        onRefreshBridgeSessions({ silent: true }),
         onRefreshBridgeBindings(),
         onRefreshBridgeApprovals(),
         onRefreshBridgeLogTail(),
@@ -1307,7 +1301,7 @@ export function ControlCenterView({
         <div className="cc-bridge-onboarding-switches">
           <label className="bridge-switch-card">
             <span className="bridge-switch-copy">
-              <strong>自动启动（Auto Start）</strong>
+              <strong>自动启动</strong>
             </span>
             <input
               type="checkbox"
@@ -1463,7 +1457,7 @@ export function ControlCenterView({
           </div>
 
           <div className="bridge-port-card cc-bridge-default-workdir-card">
-            <span>Bridge skills follow 模式</span>
+            <span>技能跟随模式</span>
             <label className="bridge-switch-card">
               <span className="bridge-switch-copy">
                 <strong>将内置 bridge-ops 安装到默认工作目录的 `.agents/skills`</strong>
@@ -1558,7 +1552,7 @@ export function ControlCenterView({
           ) : null}
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             icon={<RefreshCw size={15} />}
             className="cc-action-btn"
             onClick={() => {
@@ -1697,6 +1691,9 @@ export function ControlCenterView({
     configCenterDirty ? "配置中心存在未保存修改。" : null,
     bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
   ].filter((item): item is string => Boolean(item));
+  const pendingOverviewCount = overviewBriefs.length;
+  const overviewPrimaryMessage =
+    overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、IM Bridge 和技能应用。";
 
   function renderOverviewSection() {
     return (
@@ -1704,7 +1701,9 @@ export function ControlCenterView({
         <section className="cc-card cc-hero-card">
           <div className="cc-hero-layout">
             <div className="cc-hero-main">
-              <span className="cc-kicker">Control Center</span>
+              <span className="cc-kicker">状态总览</span>
+              <h2>控制中心当前状态</h2>
+              <p className="cc-hero-copy">{overviewPrimaryMessage}</p>
               <div className="cc-hero-status-strip">
                 <article className="cc-signal-card">
                   <span>后端状态</span>
@@ -1713,6 +1712,16 @@ export function ControlCenterView({
                 <article className="cc-signal-card">
                   <span>{bridgeFinalStatusTitle}</span>
                   <strong>{imFinalStatusLabel}</strong>
+                </article>
+                <article className="cc-signal-card">
+                  <span>快速设置进度</span>
+                  <strong>
+                    {completedOnboardingCards}/{onboardingSteps.length}
+                  </strong>
+                </article>
+                <article className="cc-signal-card">
+                  <span>待处理项</span>
+                  <strong>{pendingOverviewCount === 0 ? "无" : `${pendingOverviewCount} 项`}</strong>
                 </article>
               </div>
               <div className="cc-actions cc-hero-actions">
@@ -1754,9 +1763,9 @@ export function ControlCenterView({
 
             <aside className="cc-hero-aside">
               <div className="cc-editorial-note">
-                <span className="cc-kicker">Priority Deck</span>
+                <span className="cc-kicker">当前重点</span>
                 <h3>{activeOnboardingStep.title}</h3>
-                <p>{overviewBriefs[0] ?? "当前无阻塞项"}</p>
+                <p>{overviewPrimaryMessage}</p>
                 <div className="cc-chip-row">
                   <span className={`cc-status-badge tone-${activeOnboardingStep.statusTone}`}>
                     {activeOnboardingStep.statusLabel}
@@ -1770,7 +1779,7 @@ export function ControlCenterView({
                     void handleOpenOnboardingEntry();
                   }}
                 >
-                  继续当前设置
+                  处理当前重点
                 </Button>
               </div>
             </aside>
@@ -1842,7 +1851,7 @@ export function ControlCenterView({
                     <span className="cc-task-card-copy">
                       <strong>查看最近日志</strong>
                     </span>
-                    <span className="cc-task-card-meta">Tail</span>
+                    <span className="cc-task-card-meta">最近两行</span>
                   </button>
                 </div>
               </div>
@@ -1852,7 +1861,7 @@ export function ControlCenterView({
           <aside className="cc-overview-side-column">
             <section className="cc-card">
               <header className="cc-card-header">
-                <h3>简报</h3>
+                <h3>待处理与提醒</h3>
               </header>
               <div className="cc-card-body">
                 {overviewBriefs.length > 0 ? (
@@ -1867,21 +1876,13 @@ export function ControlCenterView({
                   <article className="cc-brief-tip-card">
                     <div className="cc-brief-tip-head">
                       <div className="cc-brief-tip-meta">
-                        <span className="cc-brief-tip-badge">随机提示</span>
-                        <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
+                        <span className="cc-brief-tip-badge">运行建议</span>
                       </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        icon={<RefreshCw size={13} />}
-                        className="cc-brief-tip-refresh"
-                        onClick={() => setBriefTip(pickRandomAgentTip())}
-                        aria-label="刷新提示卡片"
-                      />
                     </div>
-                    <strong className="cc-brief-tip-title">{briefTip.title}</strong>
-                    <p className="cc-brief-tip-body">{briefTip.body}</p>
+                    <strong className="cc-brief-tip-title">当前没有阻塞项</strong>
+                    <p className="cc-brief-tip-body">
+                      可以继续检查运行诊断、IM Bridge 或技能中心，确认路径、日志和应用状态都已同步。
+                    </p>
                   </article>
                 )}
               </div>
@@ -1899,7 +1900,7 @@ export function ControlCenterView({
       <div className="cc-onboarding-editorial">
         <aside className="cc-card cc-onboarding-rail">
           <div className="cc-onboarding-rail-head">
-            <span className="cc-kicker">Quick Setup</span>
+            <span className="cc-kicker">设置流程</span>
             <h3>快速设置</h3>
           </div>
 
@@ -1998,7 +1999,7 @@ export function ControlCenterView({
         <section className="cc-card cc-onboarding-detail-shell">
           <div className="cc-onboarding-detail-intro">
             <div>
-              <span className="cc-kicker">Now Editing</span>
+              <span className="cc-kicker">当前步骤</span>
               <h2>{activeOnboardingStep.title}</h2>
             </div>
             <div className="cc-chip-row">
@@ -2263,7 +2264,7 @@ export function ControlCenterView({
         <section className="cc-card runtime-accordion cc-runtime-deep-dive">
           <div className="cc-runtime-deep-dive-head">
             <div>
-              <span className="cc-kicker">Deep Dive</span>
+              <span className="cc-kicker">详细面板</span>
               <h3>运行面板</h3>
             </div>
           </div>
@@ -2377,7 +2378,7 @@ export function ControlCenterView({
         <section className="cc-card">
           <ControlCenterCardHeader
             title={bridgeRuntimePanelTitle}
-            description="展开后查看运行配置、sessions、bindings、审批和日志。"
+            description="展开后查看运行配置、会话、绑定、审批和日志。"
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
             collapsible
@@ -2423,12 +2424,6 @@ export function ControlCenterView({
   function renderSkillCenterSection() {
     const skillCenterActions = (
       <div className="skill-center-header-actions">
-        <Input
-          value={skillCenterSearch}
-          onChange={(event) => onSkillCenterSearchChange(event.target.value)}
-          placeholder="搜索已安装 Skills"
-          className="skill-center-header-search"
-        />
         <Button
           type="button"
           variant={skillCenterFilter === "global" ? "default" : "outline"}
@@ -2447,7 +2442,7 @@ export function ControlCenterView({
             onSkillCenterFilterChange(skillCenterFilter === "session" ? "all" : "session")
           }
         >
-          session
+          当前工作区
         </Button>
         <Button
           type="button"
@@ -2477,9 +2472,10 @@ export function ControlCenterView({
     return (
       <section className="cc-card skill-center-card">
         <ControlCenterCardHeader
-          title="Skill Center"
-          description="先安装到应用私有目录，再按需应用到用户全局或当前 Session。"
-          statusLabel={`${activeSessionSkillState.appliedSkillIds.length} 个 Session Skill`}
+          title="技能中心"
+          titleMeta="Skill Center"
+          description="先安装到应用私有目录，再按需应用到当前工作区或用户全局。"
+          statusLabel={`${activeSessionSkillState.appliedSkillIds.length} 个当前工作区技能`}
           primaryAction={skillCenterActions}
         />
         <div className="cc-card-body cc-skill-center-body">
@@ -2510,6 +2506,7 @@ export function ControlCenterView({
             }}
             search={skillCenterSearch}
             filter={skillCenterFilter}
+            onSearchChange={onSkillCenterSearchChange}
           />
         </div>
       </section>

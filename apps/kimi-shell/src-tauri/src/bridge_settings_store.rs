@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
@@ -7,9 +11,10 @@ use crate::{
     app_state::AppState,
     settings_store,
     types::{
-        AppSettings, BridgeChannelConfig, BridgeChannelMode, BridgeOnboardingConfigInput,
-        BridgePlatform, BridgeSecrets, BridgeSettings, BridgeSkillsMode, FeishuReplyRenderer,
-        WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
+        AppSettings, BridgeChannelMode, BridgeConnectorConfig, BridgeConnectorSecrets,
+        BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgeOnboardingConfigInput,
+        BridgePlatform, BridgeSecrets, BridgeSettings, BridgeSkillsMode, BridgeTelegramSecrets,
+        FeishuReplyRenderer, WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -30,6 +35,45 @@ pub fn save(app: &AppHandle, input: &BridgeSettings) -> anyhow::Result<BridgeSet
 pub fn load_secrets_or_default(app: &AppHandle) -> anyhow::Result<BridgeSecrets> {
     let state = app.state::<AppState>();
     load_secrets_at(&state.bridge_secrets_path)
+}
+
+pub fn save_connector_secrets(
+    app: &AppHandle,
+    input: &BridgeConnectorSecretsInput,
+) -> anyhow::Result<BridgeSecrets> {
+    let state = app.state::<AppState>();
+    let mut secrets = load_secrets_at(&state.bridge_secrets_path)?;
+    let connector_id = input.connector_id.trim();
+    if connector_id.is_empty() {
+        anyhow::bail!("connector id is required")
+    }
+
+    let entry = secrets
+        .connectors
+        .entry(connector_id.to_string())
+        .or_insert_with(BridgeConnectorSecrets::default);
+
+    entry.telegram = input.telegram.bot_token.as_ref().map(|_| BridgeTelegramSecrets {
+        bot_token: trim_optional_string(input.telegram.bot_token.clone()),
+    });
+    entry.feishu = if input.feishu.app_id.is_some()
+        || input.feishu.app_secret.is_some()
+        || input.feishu.verification_token.is_some()
+        || input.feishu.encrypt_key.is_some()
+    {
+        Some(BridgeFeishuSecrets {
+            app_id: trim_optional_string(input.feishu.app_id.clone()),
+            app_secret: trim_optional_string(input.feishu.app_secret.clone()),
+            verification_token: trim_optional_string(input.feishu.verification_token.clone()),
+            encrypt_key: trim_optional_string(input.feishu.encrypt_key.clone()),
+        })
+    } else {
+        None
+    };
+
+    secrets = normalize_bridge_secrets(secrets);
+    write_json(&state.bridge_secrets_path, &secrets)?;
+    Ok(secrets)
 }
 
 pub fn save_onboarding_config(
@@ -195,9 +239,9 @@ fn save_app_settings_at(path: &Path, settings: &AppSettings) -> anyhow::Result<(
 
 fn load_secrets_at(path: &Path) -> anyhow::Result<BridgeSecrets> {
     if path.exists() {
-        return read_json(path);
+        return read_json(path).map(normalize_bridge_secrets);
     }
-    let secrets = BridgeSecrets::default();
+    let secrets = normalize_bridge_secrets(BridgeSecrets::default());
     write_json(path, &secrets)?;
     Ok(secrets)
 }
@@ -267,33 +311,55 @@ fn apply_onboarding_input(
     bridge_secrets: &mut BridgeSecrets,
     input: &BridgeOnboardingConfigInput,
 ) -> anyhow::Result<()> {
+    *bridge_secrets = normalize_bridge_secrets(bridge_secrets.clone());
+    ensure_default_feishu_connector(bridge_settings);
+    let feishu_connector_id = bridge_settings
+        .connectors
+        .iter()
+        .find(|connector| connector.platform == BridgePlatform::Feishu)
+        .map(|connector| connector.id.clone())
+        .unwrap_or_else(|| default_connector_id(BridgePlatform::Feishu, 1));
+    let connector_secrets = bridge_secrets
+        .connectors
+        .entry(feishu_connector_id)
+        .or_insert_with(|| BridgeConnectorSecrets {
+            feishu: Some(BridgeFeishuSecrets::default()),
+            telegram: None,
+        });
+    let feishu_secrets = connector_secrets
+        .feishu
+        .get_or_insert_with(BridgeFeishuSecrets::default);
+
     if let Some(value) = trim_optional_string(input.feishu.app_id.clone()) {
-        bridge_secrets.feishu.app_id = Some(value);
+        feishu_secrets.app_id = Some(value);
     }
     if let Some(value) = trim_optional_string(input.feishu.app_secret.clone()) {
-        bridge_secrets.feishu.app_secret = Some(value);
+        feishu_secrets.app_secret = Some(value);
     }
     if let Some(value) = trim_optional_string(input.feishu.verification_token.clone()) {
-        bridge_secrets.feishu.verification_token = Some(value);
+        feishu_secrets.verification_token = Some(value);
     }
     if let Some(value) = trim_optional_string(input.feishu.encrypt_key.clone()) {
-        bridge_secrets.feishu.encrypt_key = Some(value);
+        feishu_secrets.encrypt_key = Some(value);
     }
 
     if input.feishu_enabled
-        && (bridge_secrets.feishu.app_id.is_none() || bridge_secrets.feishu.app_secret.is_none())
+        && (feishu_secrets.app_id.is_none() || feishu_secrets.app_secret.is_none())
     {
         anyhow::bail!("feishu appId and appSecret are required before enabling Feishu bridge")
     }
 
     bridge_settings.enabled = input.enabled || input.feishu_enabled;
     bridge_settings.auto_start = input.auto_start;
-    for channel in &mut bridge_settings.channels {
-        if channel.platform == BridgePlatform::Feishu {
-            channel.enabled = input.feishu_enabled;
+    for connector in &mut bridge_settings.connectors {
+        if connector.platform == BridgePlatform::Feishu {
+            connector.enabled = input.feishu_enabled;
+            connector.feishu_auto_approve = Some(bridge_settings.feishu_auto_approve);
+            connector.feishu_reply_renderer = Some(bridge_settings.feishu_reply_renderer);
         }
     }
 
+    *bridge_secrets = normalize_bridge_secrets(bridge_secrets.clone());
     *bridge_settings = normalize_bridge_settings(bridge_settings.clone());
     Ok(())
 }
@@ -334,9 +400,9 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
         work_dir_presets: vec![],
-        channels: vec![
-            default_channel(BridgePlatform::Telegram),
-            default_channel(BridgePlatform::Feishu),
+        connectors: vec![
+            default_connector(BridgePlatform::Telegram, 1),
+            default_connector(BridgePlatform::Feishu, 1),
         ],
     }
 }
@@ -347,18 +413,16 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         Some(false) => FeishuReplyRenderer::Post,
         None => settings.feishu_reply_renderer,
     };
-    let telegram = settings
-        .channels
+    let connectors = normalize_connectors(
+        settings.connectors,
+        settings.default_work_dir.clone(),
+        settings.reset_binding_session_on_bridge_start,
+        settings.feishu_auto_approve,
+        feishu_reply_renderer,
+    );
+    let derived_feishu = connectors
         .iter()
-        .find(|channel| channel.platform == BridgePlatform::Telegram)
-        .cloned()
-        .unwrap_or_else(|| default_channel(BridgePlatform::Telegram));
-    let feishu = settings
-        .channels
-        .iter()
-        .find(|channel| channel.platform == BridgePlatform::Feishu)
-        .cloned()
-        .unwrap_or_else(|| default_channel(BridgePlatform::Feishu));
+        .find(|connector| connector.platform == BridgePlatform::Feishu);
 
     BridgeSettings {
         enabled: settings.enabled,
@@ -368,53 +432,227 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         } else {
             settings.admin_port
         },
-        skills_mode: settings.skills_mode,
-        feishu_reply_renderer,
-        feishu_auto_approve: settings.feishu_auto_approve,
+        skills_mode: BridgeSkillsMode::Disabled,
+        feishu_reply_renderer: derived_feishu
+            .and_then(|connector| connector.feishu_reply_renderer)
+            .unwrap_or(feishu_reply_renderer),
+        feishu_auto_approve: derived_feishu
+            .and_then(|connector| connector.feishu_auto_approve)
+            .unwrap_or(settings.feishu_auto_approve),
         reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
         feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
         work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
-        channels: vec![
-            normalize_channel(telegram, BridgePlatform::Telegram),
-            normalize_channel(feishu, BridgePlatform::Feishu),
-        ],
+        connectors,
     }
 }
 
-fn normalize_channel(
-    mut channel: BridgeChannelConfig,
-    platform: BridgePlatform,
-) -> BridgeChannelConfig {
-    channel.platform = platform;
-    if channel.account_label.trim().is_empty() {
-        channel.account_label = match platform {
-            BridgePlatform::Telegram => "Telegram".to_string(),
-            BridgePlatform::Feishu => "Feishu".to_string(),
+fn normalize_connectors(
+    connectors: Vec<BridgeConnectorConfig>,
+    legacy_default_work_dir: Option<String>,
+    legacy_reset_binding_session_on_start: bool,
+    default_feishu_auto_approve: bool,
+    default_feishu_reply_renderer: FeishuReplyRenderer,
+) -> Vec<BridgeConnectorConfig> {
+    let mut normalized = Vec::with_capacity(connectors.len());
+    let mut seen_ids = HashSet::new();
+    let mut platform_counts = HashMap::new();
+    for connector in connectors {
+        let platform = connector.platform;
+        let count = platform_counts.entry(platform).or_insert(0usize);
+        *count += 1;
+        let fallback = default_connector(platform, *count);
+        let mut item = connector;
+        item.platform = platform;
+        item.id = normalize_connector_id(item.id, platform, *count, &seen_ids);
+        seen_ids.insert(item.id.clone());
+        if item.label.trim().is_empty() {
+            item.label = fallback.label;
+        } else {
+            item.label = item.label.trim().to_string();
+        }
+        item.default_work_dir = normalize_work_dir_value(item.default_work_dir.as_deref())
+            .or_else(|| legacy_default_work_dir.clone());
+        item.reset_binding_session_on_start = Some(
+            item.reset_binding_session_on_start
+                .unwrap_or(legacy_reset_binding_session_on_start),
+        );
+        item.mode = match platform {
+            BridgePlatform::Telegram => BridgeChannelMode::Polling,
+            BridgePlatform::Feishu => BridgeChannelMode::Websocket,
         };
+        if platform == BridgePlatform::Feishu {
+            item.feishu_auto_approve =
+                Some(item.feishu_auto_approve.unwrap_or(default_feishu_auto_approve));
+            item.feishu_reply_renderer =
+                Some(item.feishu_reply_renderer.unwrap_or(default_feishu_reply_renderer));
+        } else {
+            item.feishu_auto_approve = None;
+            item.feishu_reply_renderer = None;
+        }
+        normalized.push(item);
     }
-    channel.mode = match platform {
-        BridgePlatform::Telegram => BridgeChannelMode::Polling,
-        BridgePlatform::Feishu => BridgeChannelMode::Websocket,
-    };
-    channel
+    normalized
 }
 
-fn default_channel(platform: BridgePlatform) -> BridgeChannelConfig {
-    match platform {
-        BridgePlatform::Telegram => BridgeChannelConfig {
-            platform,
-            enabled: false,
-            mode: BridgeChannelMode::Polling,
-            account_label: "Telegram".to_string(),
-        },
-        BridgePlatform::Feishu => BridgeChannelConfig {
-            platform,
-            enabled: false,
-            mode: BridgeChannelMode::Websocket,
-            account_label: "Feishu".to_string(),
-        },
+fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
+    let mut connectors = BTreeMap::new();
+    for (connector_id, connector) in secrets.connectors {
+        let normalized_id = connector_id.trim().to_string();
+        if normalized_id.is_empty() {
+            continue;
+        }
+        let normalized = normalize_connector_secrets(connector);
+        if normalized.telegram.is_none() && normalized.feishu.is_none() {
+            continue;
+        }
+        connectors.insert(normalized_id, normalized);
     }
+
+    if let Some(bot_token) = trim_optional_string(secrets.telegram.bot_token.take()) {
+        connectors
+            .entry(default_connector_id(BridgePlatform::Telegram, 1))
+            .or_insert_with(BridgeConnectorSecrets::default)
+            .telegram = Some(BridgeTelegramSecrets {
+            bot_token: Some(bot_token),
+        });
+    }
+
+    let app_id = trim_optional_string(secrets.feishu.app_id.take());
+    let app_secret = trim_optional_string(secrets.feishu.app_secret.take());
+    let verification_token = trim_optional_string(secrets.feishu.verification_token.take());
+    let encrypt_key = trim_optional_string(secrets.feishu.encrypt_key.take());
+    if app_id.is_some()
+        || app_secret.is_some()
+        || verification_token.is_some()
+        || encrypt_key.is_some()
+    {
+        connectors
+            .entry(default_connector_id(BridgePlatform::Feishu, 1))
+            .or_insert_with(BridgeConnectorSecrets::default)
+            .feishu = Some(BridgeFeishuSecrets {
+            app_id,
+            app_secret,
+            verification_token,
+            encrypt_key,
+        });
+    }
+
+    let mut normalized = BridgeSecrets {
+        connectors,
+        telegram: BridgeTelegramSecrets::default(),
+        feishu: BridgeFeishuSecrets::default(),
+    };
+
+    for connector in normalized.connectors.values() {
+        if normalized.telegram.bot_token.is_none() {
+            if let Some(telegram) = &connector.telegram {
+                normalized.telegram = telegram.clone();
+            }
+        }
+        if normalized.feishu.app_id.is_none() && normalized.feishu.app_secret.is_none() {
+            if let Some(feishu) = &connector.feishu {
+                normalized.feishu = feishu.clone();
+            }
+        }
+    }
+
+    normalized
+}
+
+fn normalize_connector_secrets(mut secrets: BridgeConnectorSecrets) -> BridgeConnectorSecrets {
+    secrets.telegram = secrets.telegram.and_then(|telegram| {
+        trim_optional_string(telegram.bot_token).map(|bot_token| BridgeTelegramSecrets {
+            bot_token: Some(bot_token),
+        })
+    });
+    secrets.feishu = secrets.feishu.and_then(|feishu| {
+        let normalized = BridgeFeishuSecrets {
+            app_id: trim_optional_string(feishu.app_id),
+            app_secret: trim_optional_string(feishu.app_secret),
+            verification_token: trim_optional_string(feishu.verification_token),
+            encrypt_key: trim_optional_string(feishu.encrypt_key),
+        };
+        if normalized.app_id.is_none()
+            && normalized.app_secret.is_none()
+            && normalized.verification_token.is_none()
+            && normalized.encrypt_key.is_none()
+        {
+            None
+        } else {
+            Some(normalized)
+        }
+    });
+    secrets
+}
+
+fn normalize_connector_id(
+    id: String,
+    platform: BridgePlatform,
+    index: usize,
+    seen_ids: &HashSet<String>,
+) -> String {
+    let trimmed = id.trim();
+    if !trimmed.is_empty() && !seen_ids.contains(trimmed) {
+        return trimmed.to_string();
+    }
+    let mut candidate = default_connector_id(platform, index);
+    let mut suffix = index.max(1);
+    while seen_ids.contains(&candidate) {
+        suffix += 1;
+        candidate = default_connector_id(platform, suffix);
+    }
+    candidate
+}
+
+fn default_connector_id(platform: BridgePlatform, index: usize) -> String {
+    let base = match platform {
+        BridgePlatform::Telegram => "telegram",
+        BridgePlatform::Feishu => "feishu",
+    };
+    if index <= 1 {
+        format!("{base}-default")
+    } else {
+        format!("{base}-{index}")
+    }
+}
+
+fn default_connector_label(platform: BridgePlatform) -> String {
+    match platform {
+        BridgePlatform::Telegram => "Telegram".to_string(),
+        BridgePlatform::Feishu => "Feishu".to_string(),
+    }
+}
+
+fn default_connector(platform: BridgePlatform, index: usize) -> BridgeConnectorConfig {
+    BridgeConnectorConfig {
+        id: default_connector_id(platform, index),
+        platform,
+        enabled: false,
+        mode: match platform {
+            BridgePlatform::Telegram => BridgeChannelMode::Polling,
+            BridgePlatform::Feishu => BridgeChannelMode::Websocket,
+        },
+        label: default_connector_label(platform),
+        default_work_dir: None,
+        reset_binding_session_on_start: None,
+        feishu_auto_approve: (platform == BridgePlatform::Feishu).then_some(true),
+        feishu_reply_renderer: (platform == BridgePlatform::Feishu)
+            .then_some(FeishuReplyRenderer::Interactive),
+    }
+}
+
+fn ensure_default_feishu_connector(bridge_settings: &mut BridgeSettings) {
+    if bridge_settings
+        .connectors
+        .iter()
+        .any(|connector| connector.platform == BridgePlatform::Feishu)
+    {
+        return;
+    }
+    bridge_settings
+        .connectors
+        .push(default_connector(BridgePlatform::Feishu, 1));
 }
 
 fn sync_bridge_mirror(bridge_settings: &BridgeSettings, app_settings: &mut AppSettings) -> bool {
@@ -497,7 +735,7 @@ mod tests {
         assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
-        assert_eq!(bridge_settings.channels.len(), 2);
+        assert_eq!(bridge_settings.connectors.len(), 2);
         assert!(!app_settings.bridge_enabled);
         assert!(!app_settings.bridge_auto_start);
         assert!(bridge_settings_path.exists());
@@ -531,7 +769,7 @@ mod tests {
                 feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
-                channels: vec![],
+                connectors: vec![],
             },
         )
         .expect("seed bridge settings");
@@ -615,7 +853,7 @@ mod tests {
                 name: " Repo ".to_string(),
                 path: " D:/repo ".to_string(),
             }],
-            channels: vec![default_channel(BridgePlatform::Telegram)],
+            connectors: vec![default_connector(BridgePlatform::Telegram, 1)],
         };
 
         let (app_settings, bridge_settings) =
@@ -624,10 +862,7 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert_eq!(bridge_settings.admin_port, 60_112);
-        assert_eq!(
-            bridge_settings.skills_mode,
-            BridgeSkillsMode::FollowDefaultWorkDir
-        );
+        assert_eq!(bridge_settings.skills_mode, BridgeSkillsMode::Disabled);
         assert_eq!(
             bridge_settings.feishu_reply_renderer,
             FeishuReplyRenderer::Interactive
@@ -642,10 +877,13 @@ mod tests {
                 path: "D:/repo".to_string(),
             }]
         );
-        assert_eq!(bridge_settings.channels.len(), 2);
+        assert_eq!(bridge_settings.connectors.len(), 1);
         assert!(app_settings.bridge_enabled);
         assert!(app_settings.bridge_auto_start);
         assert_eq!(app_settings.bridge_admin_port_override, Some(60_112));
+        let saved_json =
+            fs::read_to_string(&bridge_settings_path).expect("read normalized bridge settings");
+        assert!(!saved_json.contains("\"skills_mode\""));
     }
 
     #[test]
@@ -677,7 +915,7 @@ mod tests {
                 feishu_reply_cards: None,
                 default_work_dir: None,
                 work_dir_presets: vec![],
-                channels: vec![],
+                connectors: vec![],
             },
         )
         .expect("save bridge files");
@@ -702,7 +940,7 @@ mod tests {
             feishu_reply_cards: None,
             default_work_dir: Some("D:/old".to_string()),
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![],
         };
 
         assert!(sync_bridge_default_work_dir_from_app(
@@ -723,7 +961,7 @@ mod tests {
             feishu_reply_cards: None,
             default_work_dir: Some("D:/bridge-only".to_string()),
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![],
         };
 
         assert!(!sync_bridge_default_work_dir_from_app(
@@ -750,7 +988,7 @@ mod tests {
             feishu_reply_cards: None,
             default_work_dir: Some("D:/old".to_string()),
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![],
         };
         assert_eq!(
             preview_default_work_dir_after_app_sync(&inherited, Some("D:/old"), Some("D:/new"))
@@ -810,7 +1048,7 @@ mod tests {
                     path: "D:/docs".to_string(),
                 },
             ],
-            channels: vec![],
+            connectors: vec![],
         });
 
         assert_eq!(
@@ -841,7 +1079,7 @@ mod tests {
             feishu_reply_cards: Some(false),
             default_work_dir: None,
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![],
         });
 
         assert_eq!(normalized.feishu_reply_renderer, FeishuReplyRenderer::Post);
@@ -849,7 +1087,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_bridge_settings_keeps_skills_mode() {
+    fn normalize_bridge_settings_disables_legacy_skills_mode() {
         let normalized = normalize_bridge_settings(BridgeSettings {
             enabled: false,
             auto_start: false,
@@ -861,13 +1099,10 @@ mod tests {
             feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![],
         });
 
-        assert_eq!(
-            normalized.skills_mode,
-            BridgeSkillsMode::FollowDefaultWorkDir
-        );
+        assert_eq!(normalized.skills_mode, BridgeSkillsMode::Disabled);
     }
 
     #[test]
@@ -900,13 +1135,13 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert!(app_settings.bridge_auto_start);
-        assert_eq!(bridge_settings.channels.len(), 2);
+        assert_eq!(bridge_settings.connectors.len(), 2);
         assert!(
             bridge_settings
-                .channels
+                .connectors
                 .iter()
-                .find(|channel| channel.platform == BridgePlatform::Feishu)
-                .expect("feishu channel")
+                .find(|connector| connector.platform == BridgePlatform::Feishu)
+                .expect("feishu connector")
                 .enabled
         );
         assert_eq!(bridge_secrets.feishu.app_id.as_deref(), Some("cli-app-id"));
@@ -940,6 +1175,7 @@ mod tests {
         write_json(
             &bridge_secrets_path,
             &BridgeSecrets {
+                connectors: Default::default(),
                 telegram: Default::default(),
                 feishu: crate::types::BridgeFeishuSecrets {
                     app_id: Some("existing-app-id".to_string()),
@@ -969,10 +1205,10 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(
             bridge_settings
-                .channels
+                .connectors
                 .iter()
-                .find(|channel| channel.platform == BridgePlatform::Feishu)
-                .expect("feishu channel")
+                .find(|connector| connector.platform == BridgePlatform::Feishu)
+                .expect("feishu connector")
                 .enabled
         );
         assert_eq!(

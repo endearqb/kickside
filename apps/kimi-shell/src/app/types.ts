@@ -124,34 +124,40 @@ export interface AppStatus {
   hotkey: string;
 }
 
-export interface BridgeChannelConfig {
+export interface BridgeConnectorConfig {
+  id: string;
   platform: BridgePlatform;
   enabled: boolean;
   mode: BridgeChannelMode;
-  accountLabel: string;
+  label: string;
+  defaultWorkDir?: string;
+  resetBindingSessionOnStart?: boolean;
+  feishuAutoApprove?: boolean;
+  feishuReplyRenderer?: FeishuReplyRenderer;
 }
+
+export type BridgeChannelConfig = BridgeConnectorConfig;
 
 export interface WorkDirPreset {
   name: string;
   path: string;
 }
 
-export type BridgeSkillsMode = "disabled" | "follow_default_work_dir";
-
 export interface BridgeSettings {
   enabled: boolean;
   autoStart: boolean;
   adminPort: number;
-  skillsMode: BridgeSkillsMode;
   feishuReplyRenderer: FeishuReplyRenderer;
   feishuAutoApprove: boolean;
   resetBindingSessionOnBridgeStart: boolean;
   defaultWorkDir?: string;
   workDirPresets: WorkDirPreset[];
-  channels: BridgeChannelConfig[];
+  connectors: BridgeConnectorConfig[];
 }
 
-export interface BridgeChannelStatus {
+export interface BridgeConnectorStatus {
+  connectorId: string;
+  connectorLabel: string;
   platform: BridgePlatform;
   enabled: boolean;
   state: BridgeChannelState;
@@ -171,13 +177,15 @@ export interface BridgeChannelStatus {
   recoveryHint?: string;
 }
 
+export type BridgeChannelStatus = BridgeConnectorStatus;
+
 export interface BridgeStatus {
   state: BridgeRuntimeState;
   startedAt?: string;
   pid?: number;
   adminPort: number;
   version?: string;
-  channels: BridgeChannelStatus[];
+  connectors: BridgeConnectorStatus[];
   pendingApprovals: number;
   bindings: number;
   lastErrorCode?: string;
@@ -186,6 +194,8 @@ export interface BridgeStatus {
 
 export interface BindingRecord {
   bindingId: string;
+  connectorId: string;
+  connectorLabel: string;
   platform: BridgePlatform;
   accountId?: string;
   chatId: string;
@@ -228,6 +238,8 @@ export interface BridgeSessionImportInput {
 
 export interface BridgeApprovalRecord {
   approvalId: string;
+  connectorId: string;
+  connectorLabel: string;
   kimiSessionId: string;
   turnId?: string;
   stepId?: string;
@@ -300,6 +312,8 @@ export interface WorkspaceSkillProfile {
   lastSessionSkillIds: string[];
 }
 
+export type SkillCenterSectionId = "manage" | "workspace_insights";
+
 export interface SkillApplyResult {
   scope: SkillApplyScope;
   globalSkills: SkillProjectionRecord[];
@@ -329,8 +343,30 @@ export interface BridgeFeishuSecretsMaskView {
 }
 
 export interface BridgeSecretsMaskView {
+  connectors: BridgeConnectorSecretsMaskView[];
   telegram: BridgeTelegramSecretsMaskView;
   feishu: BridgeFeishuSecretsMaskView;
+}
+
+export interface BridgeConnectorSecretsMaskView {
+  connectorId: string;
+  connectorLabel: string;
+  platform: BridgePlatform;
+  telegram?: BridgeTelegramSecretsMaskView;
+  feishu?: BridgeFeishuSecretsMaskView;
+}
+
+export interface BridgeConnectorSecretsInput {
+  connectorId: string;
+  telegram: {
+    botToken?: string;
+  };
+  feishu: {
+    appId?: string;
+    appSecret?: string;
+    verificationToken?: string;
+    encryptKey?: string;
+  };
 }
 
 export interface BridgeOnboardingFeishuInput {

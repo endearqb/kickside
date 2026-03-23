@@ -277,7 +277,7 @@ mod tests {
         let status = client.get_status().expect("status should decode");
 
         assert_eq!(status.state, crate::types::BridgeRuntimeState::Running);
-        assert!(status.channels.is_empty());
+        assert!(status.connectors.is_empty());
         assert_eq!(
             receiver
                 .recv()

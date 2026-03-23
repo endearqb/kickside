@@ -387,7 +387,7 @@
 
 .cc-modal-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
@@ -1031,14 +1031,16 @@
   gap: 8px;
 }
 
-.cc-auth-switch {
+.cc-auth-switch,
+.cc-inline-switch {
   display: inline-flex;
   border: 1px solid var(--chrome-border);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.cc-auth-switch-btn {
+.cc-auth-switch-btn,
+.cc-inline-switch-btn {
   height: 28px;
   min-width: 96px;
   border: 0;
@@ -1050,11 +1052,13 @@
   cursor: pointer;
 }
 
-.cc-auth-switch-btn:last-child {
+.cc-auth-switch-btn:last-child,
+.cc-inline-switch-btn:last-child {
   border-right: 0;
 }
 
-.cc-auth-switch-btn.active {
+.cc-auth-switch-btn.active,
+.cc-inline-switch-btn.active {
   background: color-mix(in srgb, var(--text-primary) 8%, var(--surface));
   color: var(--text-primary);
 }
@@ -3978,10 +3982,6 @@ input:focus {
     gap: 6px;
   }
 
-  .cc-header-tab {
-    min-width: 136px;
-  }
-
   .statusbar-right {
     display: none;
   }
@@ -4162,10 +4162,6 @@ input:focus {
     grid-template-columns: 1fr;
   }
 
-  .cc-header-tab {
-    min-width: 124px;
-  }
-
   .bridge-action-row,
   .bridge-danger-action-list,
   .cc-install-footer-meta {
@@ -4323,7 +4319,7 @@ input:focus {
 
 .control-center-shell .cc-modal-header {
   align-items: center;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .control-center-shell .cc-modal-title {
@@ -4433,7 +4429,7 @@ input:focus {
 .cc-card-header-title-row {
   min-width: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -4443,6 +4439,11 @@ input:focus {
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.cc-card-header-title-controls {
+  display: inline-flex;
+  align-items: center;
 }
 
 .control-center-shell .cc-card-header-eyebrow {
@@ -4742,7 +4743,7 @@ input:focus {
 .cc-brief-tip-head {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: 8px;
 }
 
@@ -4776,6 +4777,19 @@ input:focus {
 .cc-brief-tip-title {
   margin: 0;
   font-size: 13px;
+}
+
+.cc-brief-tip-article {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--cc-line) 76%, transparent);
+}
+
+.cc-brief-tip-article-title {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .cc-brief-tip-body {
@@ -4970,6 +4984,7 @@ input:focus {
 }
 
 .control-center-shell .cc-auth-switch,
+.control-center-shell .cc-inline-switch,
 .control-center-shell .cc-source-switch {
   border-radius: 999px;
   border-color: var(--cc-line);
@@ -4977,12 +4992,14 @@ input:focus {
 }
 
 .control-center-shell .cc-auth-switch-btn,
+.control-center-shell .cc-inline-switch-btn,
 .control-center-shell .cc-source-switch-btn {
   min-height: 34px;
   border-color: var(--cc-line);
 }
 
 .control-center-shell .cc-auth-switch-btn.active,
+.control-center-shell .cc-inline-switch-btn.active,
 .control-center-shell .cc-source-switch-btn.active {
   background: color-mix(in srgb, var(--primary) 14%, transparent);
 }
@@ -5029,7 +5046,8 @@ input:focus {
 .skill-center {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .skill-center-modal {
@@ -5041,6 +5059,8 @@ input:focus {
   height: 100%;
 }
 
+.skill-center-content,
+.skill-center-manage,
 .skill-center-sidebar,
 .skill-center-detail {
   min-height: 0;
@@ -5048,6 +5068,17 @@ input:focus {
 
 .skill-center {
   height: 100%;
+}
+
+.skill-center-content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.skill-center-manage {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
 }
 
 .skill-center-sidebar {
@@ -5364,6 +5395,12 @@ input:focus {
   min-height: 100%;
 }
 
+.skill-center-insights {
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+}
+
 @media (max-width: 1180px) {
   .control-center-shell .cc-layout {
     grid-template-columns: 1fr;
@@ -5381,8 +5418,7 @@ input:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .skill-center,
-  .skill-center-page {
+  .skill-center-manage {
     grid-template-columns: minmax(248px, 320px) minmax(0, 1fr);
   }
 }
@@ -5395,10 +5431,6 @@ input:focus {
 
   .control-center-shell .cc-modal-header {
     padding: 14px 16px;
-  }
-
-  .control-center-shell .cc-header-tab {
-    min-width: 120px;
   }
 
   .cc-task-grid,
@@ -5446,8 +5478,7 @@ input:focus {
     height: calc(100dvh - 16px);
   }
 
-  .skill-center,
-  .skill-center-page {
+  .skill-center-manage {
     grid-template-columns: minmax(220px, 32vw) minmax(0, 1fr);
   }
 
@@ -5473,16 +5504,98 @@ input:focus {
   }
 }
 
+.bridge-robot-list {
+  display: grid;
+  gap: 14px;
+}
+
+.bridge-robot-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--cc-line) 88%, transparent);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 94%, rgba(255, 255, 255, 0.28)) 0%,
+      color-mix(in srgb, var(--surface-muted) 92%, transparent) 100%
+    );
+  box-shadow: var(--shadow-card);
+}
+
+.bridge-robot-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-robot-card-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.bridge-robot-card-copy strong {
+  font-family: var(--cc-display-font);
+  font-size: 1rem;
+}
+
+.bridge-robot-card-copy span,
+.bridge-robot-card-copy small {
+  color: var(--text-secondary);
+}
+
+.bridge-robot-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bridge-robot-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--cc-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: color-mix(in srgb, var(--text-primary) 88%, var(--warning));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.bridge-robot-workdir-card {
+  gap: 10px;
+}
+
+.bridge-robot-empty {
+  padding: 22px 18px;
+  border: 1px dashed color-mix(in srgb, var(--cc-line) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.bridge-robot-empty p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cc-bridge-connector-modal,
+.cc-bridge-runtime-modal {
+  width: min(1120px, calc(100vw - 32px));
+}
+
+.cc-bridge-connector-body,
+.cc-bridge-runtime-body {
+  display: grid;
+  gap: 16px;
+}
+
 @media (max-width: 640px) {
   .control-center-shell .cc-modal-header {
     align-items: center;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
-  }
-
-  .control-center-shell .cc-header-tab {
-    min-width: 96px;
-    padding: 0 10px;
   }
 
   .cc-shell-modal {
@@ -5554,8 +5667,7 @@ input:focus {
     min-width: 0;
   }
 
-  .skill-center,
-  .skill-center-page {
+  .skill-center-manage {
     grid-template-columns: minmax(176px, 34vw) minmax(0, 1fr);
   }
 

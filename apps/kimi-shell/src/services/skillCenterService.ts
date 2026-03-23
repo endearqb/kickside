@@ -6,6 +6,7 @@ import type {
   SkillApplyScope,
   SkillDetail,
   SkillProjectionRecord,
+  WorkspaceSkillProfile,
 } from "@/app/types";
 
 export function installSkillFromGit(repoUrl: string, gitRef?: string) {
@@ -49,4 +50,10 @@ export function listGlobalSkills() {
 
 export function listWorkspaceRecentSkills(workspaceKey?: string) {
   return invoke<string[]>("list_workspace_recent_skills", { workspaceKey });
+}
+
+export function getWorkspaceSkillProfile(workspaceKey?: string) {
+  return invoke<WorkspaceSkillProfile | null>("get_workspace_skill_profile", {
+    workspaceKey,
+  });
 }

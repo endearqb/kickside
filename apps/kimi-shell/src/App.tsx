@@ -195,10 +195,12 @@ function App() {
               skillCenterBusy={shell.skillCenterBusy}
               skillCenterSearch={shell.skillCenterSearch}
               skillCenterFilter={shell.skillCenterFilter}
+              skillCenterSection={shell.skillCenterSection}
               selectedSkillId={shell.selectedSkillId}
               selectedSkillDetail={shell.selectedSkillDetail}
               globalSkillProjections={shell.globalSkillProjections}
               activeSessionSkillState={shell.activeSessionSkillState}
+              workspaceSkillProfile={shell.workspaceSkillProfile}
               workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
@@ -235,6 +237,7 @@ function App() {
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
               onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
+              onSaveBridgeConnectorSecrets={shell.handleSaveBridgeConnectorSecrets}
               onRefreshSkillCenterState={() =>
                 shell.refreshSkillCenterState(shell.selectedSkillId)
               }
@@ -250,12 +253,14 @@ function App() {
               onDisableContextMenu={shell.handleDisableContextMenu}
               onProbeLogin={shell.handleProbeLogin}
               onPickWorkDir={shell.handlePickWorkDir}
-              onPickBridgeDefaultWorkDir={shell.handlePickBridgeDefaultWorkDir}
+              onPickBridgeConnectorDefaultWorkDir={
+                shell.handlePickBridgeConnectorDefaultWorkDir
+              }
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
               onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
-              onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
+              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
               onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
@@ -268,7 +273,9 @@ function App() {
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onSkillCenterSearchChange={shell.setSkillCenterSearch}
               onSkillCenterFilterChange={shell.setSkillCenterFilter}
+              onSkillCenterSectionChange={shell.setSkillCenterSection}
               onSelectSkill={shell.handleSelectSkill}
+              onOpenSkillFromInsights={shell.handleOpenSkillFromInsights}
               onInstallSkillFromGit={shell.handleInstallSkillFromGit}
               onImportSkillFromPath={shell.handleImportSkillFromPath}
               onSetSkillTrust={shell.handleSetSkillTrust}
@@ -344,10 +351,12 @@ function App() {
               skillCenterBusy={shell.skillCenterBusy}
               skillCenterSearch={shell.skillCenterSearch}
               skillCenterFilter={shell.skillCenterFilter}
+              skillCenterSection={shell.skillCenterSection}
               selectedSkillId={shell.selectedSkillId}
               selectedSkillDetail={shell.selectedSkillDetail}
               globalSkillProjections={shell.globalSkillProjections}
               activeSessionSkillState={shell.activeSessionSkillState}
+              workspaceSkillProfile={shell.workspaceSkillProfile}
               workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
               kimiPathInput={shell.kimiPathInput}
               workDirInput={shell.workDirInput}
@@ -384,6 +393,7 @@ function App() {
               onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
               onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
               onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
+              onSaveBridgeConnectorSecrets={shell.handleSaveBridgeConnectorSecrets}
               onRefreshSkillCenterState={() =>
                 shell.refreshSkillCenterState(shell.selectedSkillId)
               }
@@ -399,12 +409,14 @@ function App() {
               onDisableContextMenu={shell.handleDisableContextMenu}
               onProbeLogin={shell.handleProbeLogin}
               onPickWorkDir={shell.handlePickWorkDir}
-              onPickBridgeDefaultWorkDir={shell.handlePickBridgeDefaultWorkDir}
+              onPickBridgeConnectorDefaultWorkDir={
+                shell.handlePickBridgeConnectorDefaultWorkDir
+              }
               onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
               onClearWorkDir={shell.handleClearWorkDir}
               onBridgeSettingsChange={shell.handleBridgeSettingsChange}
               onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
-              onSaveBridgeOnboarding={shell.handleSaveBridgeOnboarding}
+              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
               onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
               onStopBridge={shell.handleStopBridge}
               onRestartBridge={shell.handleRestartBridge}
@@ -417,7 +429,9 @@ function App() {
               onResolveBridgeApproval={shell.handleResolveBridgeApproval}
               onSkillCenterSearchChange={shell.setSkillCenterSearch}
               onSkillCenterFilterChange={shell.setSkillCenterFilter}
+              onSkillCenterSectionChange={shell.setSkillCenterSection}
               onSelectSkill={shell.handleSelectSkill}
+              onOpenSkillFromInsights={shell.handleOpenSkillFromInsights}
               onInstallSkillFromGit={shell.handleInstallSkillFromGit}
               onImportSkillFromPath={shell.handleImportSkillFromPath}
               onSetSkillTrust={shell.handleSetSkillTrust}

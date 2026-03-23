@@ -7,6 +7,7 @@ type ControlCenterCardHeaderProps = {
   eyebrow?: string;
   title: string;
   titleMeta?: ReactNode;
+  titleControls?: ReactNode;
   description?: string;
   statusLabel: string;
   statusTone?: CardStatusTone;
@@ -20,6 +21,7 @@ export function ControlCenterCardHeader({
   eyebrow,
   title,
   titleMeta,
+  titleControls,
   description,
   statusLabel,
   statusTone = "neutral",
@@ -44,6 +46,9 @@ export function ControlCenterCardHeader({
               <span className="cc-card-header-title-row">
                 <h3 className="cc-step-title-line">{title}</h3>
                 {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
+                {titleControls ? (
+                  <span className="cc-card-header-title-controls">{titleControls}</span>
+                ) : null}
               </span>
               {description ? <p className="cc-step-inline-summary">{description}</p> : null}
             </span>
@@ -58,6 +63,9 @@ export function ControlCenterCardHeader({
             <div className="cc-card-header-title-row">
               <h3>{title}</h3>
               {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
+              {titleControls ? (
+                <span className="cc-card-header-title-controls">{titleControls}</span>
+              ) : null}
             </div>
             {description ? <p>{description}</p> : null}
           </div>

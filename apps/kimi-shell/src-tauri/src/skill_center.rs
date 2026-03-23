@@ -257,6 +257,26 @@ pub fn list_workspace_recent_skills(
         .unwrap_or_default())
 }
 
+pub fn get_workspace_skill_profile(
+    app: &AppHandle,
+    workspace_key: Option<&str>,
+) -> anyhow::Result<Option<WorkspaceSkillProfile>> {
+    let key = workspace_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(skill_center_store::normalize_workspace_key)
+        .or_else(|| {
+            effective_work_dir(app).map(|path| skill_center_store::normalize_workspace_key(&path))
+        });
+    let Some(key) = key else {
+        return Ok(None);
+    };
+    Ok(resolve_workspace_skill_profile(
+        skill_center_store::load_workspace_profiles(app)?,
+        &key,
+    ))
+}
+
 pub fn cleanup_session_skill_projections(app: &AppHandle, session_id: &str) -> anyhow::Result<()> {
     let Some(state) = skill_center_store::load_session_state(app, session_id)? else {
         return Ok(());
@@ -780,6 +800,15 @@ fn record_recent_skill(
     skill_center_store::save_workspace_profiles(app, &profiles)
 }
 
+fn resolve_workspace_skill_profile(
+    profiles: Vec<WorkspaceSkillProfile>,
+    workspace_key: &str,
+) -> Option<WorkspaceSkillProfile> {
+    profiles
+        .into_iter()
+        .find(|profile| profile.workspace_id == workspace_key.trim())
+}
+
 fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -901,5 +930,41 @@ mod tests {
         let dir = user_global_skills_dir().expect("global dir");
         assert!(dir.starts_with(home));
         assert!(dir.to_string_lossy().contains(".config"));
+    }
+
+    #[test]
+    fn resolve_workspace_skill_profile_returns_matching_profile() {
+        let profile = resolve_workspace_skill_profile(
+            vec![WorkspaceSkillProfile {
+                workspace_id: "d:\\repo".to_string(),
+                recent_skill_ids: vec!["skill-a".to_string()],
+                pinned_skill_ids: vec![],
+                last_session_skill_ids: vec!["skill-b".to_string()],
+            }],
+            "d:\\repo",
+        )
+        .expect("profile should exist");
+
+        assert_eq!(profile.workspace_id, "d:\\repo");
+        assert_eq!(profile.recent_skill_ids, vec!["skill-a".to_string()]);
+        assert_eq!(
+            profile.last_session_skill_ids,
+            vec!["skill-b".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_skill_profile_returns_none_when_missing() {
+        let profile = resolve_workspace_skill_profile(
+            vec![WorkspaceSkillProfile {
+                workspace_id: "d:\\repo".to_string(),
+                recent_skill_ids: vec!["skill-a".to_string()],
+                pinned_skill_ids: vec![],
+                last_session_skill_ids: vec![],
+            }],
+            "d:\\other",
+        );
+
+        assert!(profile.is_none());
     }
 }

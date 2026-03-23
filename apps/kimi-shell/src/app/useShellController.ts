@@ -37,6 +37,8 @@ import type {
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
+  BridgeConnectorConfig,
+  BridgeConnectorSecretsInput,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
@@ -75,11 +77,13 @@ import type {
   Screen,
   ShellRoutePayload,
   PowerShellPreflightSummary,
+  SkillCenterSectionId,
   Theme,
   SessionSkillState,
   SkillApplyScope,
   SkillDetail,
   SkillProjectionRecord,
+  WorkspaceSkillProfile,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
   WorkspaceLayoutMode,
@@ -90,13 +94,13 @@ import type {
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 import {
   applySkill,
+  getWorkspaceSkillProfile,
   getSkillDetail,
   importSkillFromPath,
   installSkillFromGit,
   listActiveSessionSkills,
   listGlobalSkills,
   listInstalledSkills,
-  listWorkspaceRecentSkills,
   removeSkill,
   setSkillTrust,
 } from "@/services/skillCenterService";
@@ -126,6 +130,31 @@ type BootHint = Pick<
   FrontendReadyAck,
   "backendState" | "workspaceUrl" | "startCycleId"
 >;
+
+function createDefaultBridgeConnector(
+  platform: "telegram" | "feishu",
+  index = 1,
+): BridgeConnectorConfig {
+  const base = platform === "telegram" ? "telegram" : "feishu";
+  return {
+    id: index <= 1 ? `${base}-default` : `${base}-${index}`,
+    platform,
+    enabled: false,
+    mode: platform === "telegram" ? "polling" : "websocket",
+    label: platform === "telegram" ? "Telegram" : "Feishu",
+    defaultWorkDir: undefined,
+    resetBindingSessionOnStart: true,
+    feishuAutoApprove: platform === "feishu" ? true : undefined,
+    feishuReplyRenderer: platform === "feishu" ? "interactive" : undefined,
+  };
+}
+
+function getBridgePlatformConnectors(
+  settings: BridgeSettings,
+  platform: "telegram" | "feishu",
+): BridgeConnectorConfig[] {
+  return settings.connectors.filter((connector) => connector.platform === platform);
+}
 
 function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
   return {
@@ -205,25 +234,14 @@ function createDefaultBridgeSettings(): BridgeSettings {
     enabled: false,
     autoStart: false,
     adminPort: 60110,
-    skillsMode: "disabled",
     feishuReplyRenderer: "interactive",
     feishuAutoApprove: true,
     resetBindingSessionOnBridgeStart: true,
     defaultWorkDir: "",
     workDirPresets: [],
-    channels: [
-      {
-        platform: "telegram",
-        enabled: false,
-        mode: "polling",
-        accountLabel: "Telegram",
-      },
-      {
-        platform: "feishu",
-        enabled: false,
-        mode: "websocket",
-        accountLabel: "Feishu",
-      },
+    connectors: [
+      createDefaultBridgeConnector("telegram"),
+      createDefaultBridgeConnector("feishu"),
     ],
   };
 }
@@ -233,7 +251,7 @@ function createDefaultBridgeStatus(): BridgeStatus {
     state: "stopped",
     adminPort: 60110,
     version: undefined,
-    channels: [],
+    connectors: [],
     pendingApprovals: 0,
     bindings: 0,
     lastErrorCode: undefined,
@@ -246,6 +264,10 @@ function createEmptySessionSkillState(): SessionSkillState {
     appliedSkillIds: [],
     projections: [],
   };
+}
+
+function createEmptyWorkspaceSkillProfile(): WorkspaceSkillProfile | null {
+  return null;
 }
 
 function formatBridgeErrorEntry(
@@ -274,6 +296,7 @@ function formatBridgeErrorEntry(
 
 function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
   return {
+    connectors: [],
     telegram: {
       botToken: {
         configured: false,
@@ -300,7 +323,7 @@ function getBridgeChannelEnabled(
   settings: BridgeSettings,
   platform: "telegram" | "feishu",
 ): boolean {
-  return settings.channels.find((channel) => channel.platform === platform)?.enabled ?? false;
+  return getBridgePlatformConnectors(settings, platform).some((connector) => connector.enabled);
 }
 
 function createDefaultBridgeOnboardingConfigInput(
@@ -415,6 +438,8 @@ export function useShellController() {
   const [skillCenterFilter, setSkillCenterFilter] = useState<
     "all" | "session" | "global" | "untrusted"
   >("all");
+  const [skillCenterSection, setSkillCenterSection] =
+    useState<SkillCenterSectionId>("manage");
   const [skillCenterGitDialogOpen, setSkillCenterGitDialogOpen] = useState(false);
   const [skillCenterGitRepoUrl, setSkillCenterGitRepoUrl] = useState("");
   const [skillCenterGitRef, setSkillCenterGitRef] = useState("");
@@ -428,6 +453,8 @@ export function useShellController() {
   >([]);
   const [activeSessionSkillState, setActiveSessionSkillState] =
     useState<SessionSkillState>(() => createEmptySessionSkillState());
+  const [workspaceSkillProfile, setWorkspaceSkillProfile] =
+    useState<WorkspaceSkillProfile | null>(() => createEmptyWorkspaceSkillProfile());
   const [workspaceRecentSkillIds, setWorkspaceRecentSkillIds] = useState<string[]>([]);
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
@@ -1142,15 +1169,32 @@ export function useShellController() {
     }
   }
 
-  async function refreshWorkspaceRecentSkillState(workspaceKey?: string) {
+  async function refreshWorkspaceSkillProfileState(workspaceKey?: string) {
     try {
-      const data = await listWorkspaceRecentSkills(workspaceKey);
-      setWorkspaceRecentSkillIds(data);
-      return data;
+      const profile = await getWorkspaceSkillProfile(workspaceKey);
+      setWorkspaceSkillProfile(profile);
+      setWorkspaceRecentSkillIds(profile?.recentSkillIds ?? []);
+      return profile;
     } catch (error) {
       setActionError(String(error));
+      setWorkspaceSkillProfile(null);
       setWorkspaceRecentSkillIds([]);
-      return [];
+      return null;
+    }
+  }
+
+  async function handleSaveBridgeConnectorSecrets(input: BridgeConnectorSecretsInput) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeSecretsMaskView>("save_bridge_connector_secrets", {
+        input,
+      });
+      setBridgeSecretsMask(data);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
     }
   }
 
@@ -1164,7 +1208,7 @@ export function useShellController() {
         ]);
       await Promise.all([
         refreshSelectedSkillDetail(nextSelectedId),
-        refreshWorkspaceRecentSkillState(),
+        refreshWorkspaceSkillProfileState(),
       ]);
       return {
         selectedSkillId: nextSelectedId,
@@ -2266,6 +2310,32 @@ export function useShellController() {
     }
   }
 
+  async function handlePickBridgeConnectorDefaultWorkDir(connectorId: string) {
+    try {
+      const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
+      const selected = await open({
+        title: `Select default work directory for ${connector?.label ?? connectorId}`,
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        setBridgeSettings((current) => ({
+          ...current,
+          connectors: current.connectors.map((item) =>
+            item.id === connectorId
+              ? {
+                  ...item,
+                  defaultWorkDir: selected,
+                }
+              : item,
+          ),
+        }));
+      }
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
   async function handleSaveWorkDirAndRestart() {
     setActionBusy(true);
     setActionError(null);
@@ -2348,7 +2418,6 @@ export function useShellController() {
       JSON.stringify(bridgeSettings.workDirPresets ?? []);
     const feishuAutoApproveChanged =
       bridgeSettingsSnapshot.feishuAutoApprove !== bridgeSettings.feishuAutoApprove;
-    const skillsModeChanged = bridgeSettingsSnapshot.skillsMode !== bridgeSettings.skillsMode;
     const saved = await invoke<BridgeSettings>("save_bridge_settings", {
       input: bridgeSettings,
     });
@@ -2358,10 +2427,10 @@ export function useShellController() {
     if (
       showRestartNotice &&
       bridgeIsRunning &&
-      (presetsChanged || feishuAutoApproveChanged || skillsModeChanged)
+      (presetsChanged || feishuAutoApproveChanged)
     ) {
       window.alert(
-        "Bridge 配置已保存。重启 bridge 后，飞书工作目录预设、Auto Approve 和 follow skills 模式变更才会生效。",
+        "Bridge 配置已保存。重启 bridge 后，飞书工作目录预设和 Auto Approve 变更才会生效。",
       );
     }
     return saved;
@@ -3033,7 +3102,13 @@ export function useShellController() {
   }
 
   async function handleRecoverWorkspaceSkill(skillId: string) {
+    setSkillCenterSection("workspace_insights");
     await handleApplySkill(skillId, "session_kimi");
+  }
+
+  async function handleOpenSkillFromInsights(skillId: string) {
+    setSkillCenterSection("manage");
+    await handleSelectSkill(skillId);
   }
 
   function openControlCenter() {
@@ -3045,6 +3120,10 @@ export function useShellController() {
     }
     window.location.hash = "/control-center";
     setRouteHash(window.location.hash);
+  }
+
+  function handleSkillCenterSectionChange(section: SkillCenterSectionId) {
+    setSkillCenterSection(section);
   }
 
   function backToStatus() {
@@ -3214,7 +3293,7 @@ export function useShellController() {
     };
 
     push(formatBridgeErrorEntry(bridgeStatus.lastErrorCode, bridgeStatus.lastError));
-    for (const channel of bridgeStatus.channels) {
+    for (const channel of bridgeStatus.connectors) {
       push(
         formatBridgeErrorEntry(
           channel.lastErrorCode,
@@ -3236,7 +3315,7 @@ export function useShellController() {
     return items;
   }, [
     bridgeLogTail,
-    bridgeStatus.channels,
+    bridgeStatus.connectors,
     bridgeStatus.lastError,
     bridgeStatus.lastErrorCode,
   ]);
@@ -3305,6 +3384,8 @@ export function useShellController() {
     bridgeSecretsMask,
     installedSkills,
     skillCenterBusy,
+    skillCenterSection,
+    setSkillCenterSection: handleSkillCenterSectionChange,
     skillCenterGitDialogOpen,
     skillCenterGitRepoUrl,
     setSkillCenterGitRepoUrl,
@@ -3319,6 +3400,7 @@ export function useShellController() {
     selectedSkillDetail,
     globalSkillProjections,
     activeSessionSkillState,
+    workspaceSkillProfile,
     workspaceRecentSkillIds,
     sessionSkillCount,
     bridgeOnboardingDraft,
@@ -3412,12 +3494,14 @@ export function useShellController() {
     handleSavePathAndRetry,
     handlePickWorkDir,
     handlePickBridgeDefaultWorkDir,
+    handlePickBridgeConnectorDefaultWorkDir,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleBridgeSettingsChange,
     handleBridgeOnboardingDraftChange,
     handleSaveBridgeOnboarding,
     handleSaveBridgeSettings,
+    handleSaveBridgeConnectorSecrets,
     handleRunBridgePrimaryAction,
     handleStartBridge,
     handleStopBridge,
@@ -3443,6 +3527,7 @@ export function useShellController() {
     handleDisableContextMenu,
     handleProbeLogin,
     handleSelectSkill,
+    handleOpenSkillFromInsights,
     handleInstallSkillFromGit,
     handleCloseSkillCenterGitDialog,
     handleConfirmInstallSkillFromGit,

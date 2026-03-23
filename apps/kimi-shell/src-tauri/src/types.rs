@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
@@ -42,6 +44,10 @@ fn default_feishu_auto_approve() -> bool {
 
 fn default_reset_binding_session_on_bridge_start() -> bool {
     true
+}
+
+fn bridge_skills_mode_is_disabled(value: &BridgeSkillsMode) -> bool {
+    matches!(value, BridgeSkillsMode::Disabled)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -345,11 +351,22 @@ pub struct MainWindowCloseDecisionRequestPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeChannelConfig {
+pub struct BridgeConnectorConfig {
+    #[serde(default)]
+    pub id: String,
     pub platform: BridgePlatform,
     pub enabled: bool,
     pub mode: BridgeChannelMode,
-    pub account_label: String,
+    #[serde(default, alias = "accountLabel")]
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_work_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_binding_session_on_start: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_reply_renderer: Option<FeishuReplyRenderer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -365,7 +382,7 @@ pub struct BridgeSettings {
     pub enabled: bool,
     pub auto_start: bool,
     pub admin_port: u16,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "bridge_skills_mode_is_disabled")]
     pub skills_mode: BridgeSkillsMode,
     #[serde(default)]
     pub feishu_reply_renderer: FeishuReplyRenderer,
@@ -378,8 +395,8 @@ pub struct BridgeSettings {
     pub default_work_dir: Option<String>,
     #[serde(default)]
     pub work_dir_presets: Vec<WorkDirPreset>,
-    #[serde(default)]
-    pub channels: Vec<BridgeChannelConfig>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorConfig>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -445,7 +462,26 @@ pub struct BridgeFeishuSecrets {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecrets {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecrets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecrets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
 pub struct BridgeSecrets {
+    #[serde(default)]
+    pub connectors: BTreeMap<String, BridgeConnectorSecrets>,
+    pub telegram: BridgeTelegramSecrets,
+    pub feishu: BridgeFeishuSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecretsInput {
+    pub connector_id: String,
     pub telegram: BridgeTelegramSecrets,
     pub feishu: BridgeFeishuSecrets,
 }
@@ -470,7 +506,11 @@ pub struct BridgeOnboardingConfigInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeChannelStatus {
+pub struct BridgeConnectorStatus {
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub platform: BridgePlatform,
     pub enabled: bool,
     pub state: BridgeChannelState,
@@ -498,8 +538,8 @@ pub struct BridgeStatus {
     pub pid: Option<u32>,
     pub admin_port: u16,
     pub version: Option<String>,
-    #[serde(default)]
-    pub channels: Vec<BridgeChannelStatus>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorStatus>,
     pub pending_approvals: usize,
     pub bindings: usize,
     pub last_error_code: Option<String>,
@@ -510,6 +550,10 @@ pub struct BridgeStatus {
 #[serde(rename_all = "camelCase")]
 pub struct BindingRecord {
     pub binding_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub platform: BridgePlatform,
     pub account_id: Option<String>,
     pub chat_id: String,
@@ -527,6 +571,10 @@ pub struct BindingRecord {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeApprovalRecord {
     pub approval_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub kimi_session_id: String,
     pub turn_id: Option<String>,
     pub step_id: Option<String>,
@@ -679,8 +727,25 @@ pub struct BridgeFeishuSecretsMaskView {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeSecretsMaskView {
+    #[serde(default)]
+    pub connectors: Vec<BridgeConnectorSecretsMaskView>,
     pub telegram: BridgeTelegramSecretsMaskView,
     pub feishu: BridgeFeishuSecretsMaskView,
+}
+
+pub type BridgeChannelStatus = BridgeConnectorStatus;
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConnectorSecretsMaskView {
+    pub connector_id: String,
+    pub connector_label: String,
+    pub platform: BridgePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecretsMaskView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecretsMaskView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

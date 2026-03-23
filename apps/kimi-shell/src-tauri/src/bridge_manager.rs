@@ -19,9 +19,10 @@ use crate::{
     log_manager,
     types::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
-        BridgeChannelStatus, BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue,
-        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
-        BridgeSettings, BridgeSkillsMode, BridgeStatus, BridgeTelegramSecretsMaskView,
+        BridgeChannelStatus, BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView,
+        BridgeMaskedSecretValue, BridgeRuntimeState, BridgeSecretsMaskView,
+        BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings, BridgeStatus,
+        BridgeTelegramSecretsMaskView,
     },
 };
 
@@ -196,16 +197,14 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
         }
     };
     apply_status_snapshot(app, &status)?;
-    if settings.reset_binding_session_on_bridge_start {
-        let rotated_count = rotate_binding_sessions_on_bridge_start(app, &client)?;
-        if rotated_count > 0 {
-            log_manager::append_line(
-                app,
-                format!(
-                    "bridge session rotation completed on start (bindings_rotated={rotated_count})"
-                ),
-            );
-        }
+    let rotated_count = rotate_binding_sessions_on_bridge_start(app, &settings, &client)?;
+    if rotated_count > 0 {
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge session rotation completed on start (bindings_rotated={rotated_count})"
+            ),
+        );
     }
     log_manager::append_line(
         app,
@@ -394,14 +393,6 @@ pub fn reset_bridge_binding_to_default_work_dir(
 ) -> anyhow::Result<()> {
     refresh_child_state(app)?;
     let settings = bridge_settings_store::load_or_default(app)?;
-    let default_work_dir = settings
-        .default_work_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("IM bridge default work directory is not configured"))?;
-
     let (runtime_state, admin_port, admin_token) = {
         let state = app.state::<AppState>();
         let runtime = state
@@ -428,6 +419,8 @@ pub fn reset_bridge_binding_to_default_work_dir(
         .into_iter()
         .find(|item| item.binding_id == binding_id)
         .ok_or_else(|| anyhow::anyhow!("bridge binding not found: {binding_id}"))?;
+    let default_work_dir = resolve_connector_default_work_dir(&settings, &binding.connector_id)
+        .ok_or_else(|| anyhow::anyhow!("IM bridge default work directory is not configured"))?;
     let next_session_id = generate_bridge_session_id();
     client.update_binding(
         binding_id,
@@ -547,7 +540,43 @@ pub fn get_bridge_log_tail(
 
 pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSecretsMaskView> {
     let secrets = bridge_settings_store::load_secrets_or_default(app)?;
+    let settings = bridge_settings_store::load_or_default(app)?;
     Ok(BridgeSecretsMaskView {
+        connectors: settings
+            .connectors
+            .iter()
+            .map(|connector| {
+                let connector_secrets = secrets.connectors.get(&connector.id);
+                BridgeConnectorSecretsMaskView {
+                    connector_id: connector.id.clone(),
+                    connector_label: connector.label.clone(),
+                    platform: connector.platform,
+                    telegram: connector_secrets
+                        .and_then(|item| item.telegram.as_ref())
+                        .map(|telegram| BridgeTelegramSecretsMaskView {
+                            bot_token: mask_optional_secret(Some(
+                                telegram.bot_token.as_deref().unwrap_or_default(),
+                            )),
+                        }),
+                    feishu: connector_secrets
+                        .and_then(|item| item.feishu.as_ref())
+                        .map(|feishu| BridgeFeishuSecretsMaskView {
+                            app_id: mask_optional_secret(Some(
+                                feishu.app_id.as_deref().unwrap_or_default(),
+                            )),
+                            app_secret: mask_optional_secret(Some(
+                                feishu.app_secret.as_deref().unwrap_or_default(),
+                            )),
+                            verification_token: mask_optional_secret(Some(
+                                feishu.verification_token.as_deref().unwrap_or_default(),
+                            )),
+                            encrypt_key: mask_optional_secret(Some(
+                                feishu.encrypt_key.as_deref().unwrap_or_default(),
+                            )),
+                        }),
+                }
+            })
+            .collect(),
         telegram: BridgeTelegramSecretsMaskView {
             bot_token: mask_optional_secret(Some(
                 secrets.telegram.bot_token.as_deref().unwrap_or_default(),
@@ -723,6 +752,7 @@ fn binary_name() -> OsString {
 
 fn rotate_binding_sessions_on_bridge_start(
     app: &AppHandle,
+    settings: &BridgeSettings,
     client: &BridgeHttpClient,
 ) -> anyhow::Result<usize> {
     let bindings = client.list_bindings()?;
@@ -730,7 +760,17 @@ fn rotate_binding_sessions_on_bridge_start(
         return Ok(0);
     }
 
+    let mut rotated = 0usize;
     for binding in &bindings {
+        let should_rotate = settings
+            .connectors
+            .iter()
+            .find(|connector| connector.id == binding.connector_id)
+            .and_then(|connector| connector.reset_binding_session_on_start)
+            .unwrap_or(settings.reset_binding_session_on_bridge_start);
+        if !should_rotate {
+            continue;
+        }
         let next_session_id = generate_bridge_session_id();
         client
             .update_binding(
@@ -746,16 +786,19 @@ fn rotate_binding_sessions_on_bridge_start(
                     binding.binding_id
                 )
             })?;
+        rotated += 1;
     }
 
-    log_manager::append_line(
-        app,
-        format!(
-            "bridge session rotation requested on start (bindings_found={})",
-            bindings.len()
-        ),
-    );
-    Ok(bindings.len())
+    if rotated > 0 {
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge session rotation requested on start (bindings_rotated={rotated}, bindings_found={})",
+                bindings.len()
+            ),
+        );
+    }
+    Ok(rotated)
 }
 
 fn generate_bridge_session_id() -> String {
@@ -877,7 +920,7 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         .lock()
         .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
 
-    let channels = local_status_channels(settings, &runtime.channels, runtime.state);
+    let connectors = local_status_channels(settings, &runtime.channels, runtime.state);
 
     Ok(BridgeStatus {
         state: runtime.state,
@@ -889,7 +932,7 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
             runtime.admin_port
         },
         version: runtime.version.clone(),
-        channels,
+        connectors,
         pending_approvals: runtime.pending_approvals,
         bindings: runtime.bindings,
         last_error_code: runtime.last_error_code.clone(),
@@ -920,17 +963,19 @@ fn merge_channels(
     runtime_state: BridgeRuntimeState,
 ) -> Vec<BridgeChannelStatus> {
     settings
-        .channels
+        .connectors
         .iter()
-        .map(|channel| {
+        .map(|connector| {
             runtime_channels
                 .iter()
-                .find(|item| item.platform == channel.platform)
+                .find(|item| item.connector_id == connector.id)
                 .cloned()
                 .unwrap_or_else(|| BridgeChannelStatus {
-                    platform: channel.platform,
-                    enabled: channel.enabled,
-                    state: default_channel_state(channel.enabled, runtime_state),
+                    connector_id: connector.id.clone(),
+                    connector_label: connector.label.clone(),
+                    platform: connector.platform,
+                    enabled: connector.enabled,
+                    state: default_channel_state(connector.enabled, runtime_state),
                     last_heartbeat_at: None,
                     last_inbound_at: None,
                     last_outbound_at: None,
@@ -955,12 +1000,14 @@ fn settings_channels(
     runtime_state: BridgeRuntimeState,
 ) -> Vec<BridgeChannelStatus> {
     settings
-        .channels
+        .connectors
         .iter()
-        .map(|channel| BridgeChannelStatus {
-            platform: channel.platform,
-            enabled: channel.enabled,
-            state: default_channel_state(channel.enabled, runtime_state),
+        .map(|connector| BridgeChannelStatus {
+            connector_id: connector.id.clone(),
+            connector_label: connector.label.clone(),
+            platform: connector.platform,
+            enabled: connector.enabled,
+            state: default_channel_state(connector.enabled, runtime_state),
             last_heartbeat_at: None,
             last_inbound_at: None,
             last_outbound_at: None,
@@ -979,36 +1026,20 @@ fn settings_channels(
         .collect()
 }
 
-pub fn ensure_bundled_bridge_ops_installed(
-    app: &AppHandle,
-    effective_bridge_work_dir: &Path,
-) -> anyhow::Result<PathBuf> {
+pub fn ensure_bundled_bridge_ops_installed(app: &AppHandle) -> anyhow::Result<PathBuf> {
     let source_dir = resolve_bundled_bridge_ops_dir(app)?;
-    ensure_bundled_bridge_ops_installed_from_source(&source_dir, effective_bridge_work_dir)
+    let skills_dir = user_global_skills_dir()?;
+    ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
 }
 
 fn ensure_bundled_bridge_ops_installed_from_source(
     source_dir: &Path,
-    effective_bridge_work_dir: &Path,
+    skills_dir: &Path,
 ) -> anyhow::Result<PathBuf> {
-    if !effective_bridge_work_dir.exists() {
-        return Err(anyhow::anyhow!(
-            "bridge default work directory does not exist: {}",
-            effective_bridge_work_dir.display()
-        ));
-    }
-    if !effective_bridge_work_dir.is_dir() {
-        return Err(anyhow::anyhow!(
-            "bridge default work directory is not a directory: {}",
-            effective_bridge_work_dir.display()
-        ));
-    }
-
-    let skills_dir = follow_default_work_dir_skills_dir(effective_bridge_work_dir);
     let target_dir = skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
     if target_dir.exists() {
         if target_dir.is_dir() {
-            return Ok(skills_dir);
+            return Ok(skills_dir.to_path_buf());
         }
         return Err(anyhow::anyhow!(
             "bundled bridge-ops target exists but is not a directory: {}",
@@ -1023,55 +1054,14 @@ fn ensure_bundled_bridge_ops_installed_from_source(
         )
     })?;
     copy_directory_recursive(&source_dir, &target_dir)?;
-    Ok(skills_dir)
-}
-
-fn resolve_bridge_skills_dir_from_env() -> Option<PathBuf> {
-    let raw = env::var_os("KIMI_BRIDGE_SKILLS_DIR")?;
-    let path = PathBuf::from(raw);
-    if path.as_os_str().is_empty() {
-        return None;
-    }
-    if path.is_dir() {
-        return Some(path);
-    }
-    None
+    Ok(skills_dir.to_path_buf())
 }
 
 fn resolve_bridge_skills_dir(
     app: &AppHandle,
-    settings: &BridgeSettings,
+    _settings: &BridgeSettings,
 ) -> anyhow::Result<Option<PathBuf>> {
-    resolve_bridge_skills_dir_with_follow(settings, |effective_work_dir| {
-        ensure_bundled_bridge_ops_installed(app, effective_work_dir)
-    })
-}
-
-fn resolve_bridge_skills_dir_with_follow<F>(
-    settings: &BridgeSettings,
-    follow_resolver: F,
-) -> anyhow::Result<Option<PathBuf>>
-where
-    F: FnOnce(&Path) -> anyhow::Result<PathBuf>,
-{
-    match settings.skills_mode {
-        BridgeSkillsMode::Disabled => Ok(resolve_bridge_skills_dir_from_env()),
-        BridgeSkillsMode::FollowDefaultWorkDir => {
-            let effective_work_dir = settings
-                .default_work_dir
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Bridge skills follow mode requires an effective default work directory."
-                    )
-                })?;
-            let skills_dir = follow_resolver(&effective_work_dir)?;
-            Ok(Some(skills_dir))
-        }
-    }
+    Ok(Some(ensure_bundled_bridge_ops_installed(app)?))
 }
 
 fn resolve_bundled_bridge_ops_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -1112,10 +1102,39 @@ fn resolve_bundled_bridge_ops_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     ))
 }
 
-fn follow_default_work_dir_skills_dir(work_dir: &Path) -> PathBuf {
-    work_dir
-        .join(BRIDGE_SKILLS_DIR_SEGMENT)
-        .join(BRIDGE_SKILLS_SUBDIR_SEGMENT)
+fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            Some(PathBuf::from(drive).join(path).into_os_string())
+        })
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))?;
+    Ok(home.join(BRIDGE_SKILLS_DIR_SEGMENT).join(BRIDGE_SKILLS_SUBDIR_SEGMENT))
+}
+
+fn resolve_connector_default_work_dir(
+    settings: &BridgeSettings,
+    connector_id: &str,
+) -> Option<String> {
+    settings
+        .connectors
+        .iter()
+        .find(|connector| connector.id == connector_id)
+        .and_then(|connector| connector.default_work_dir.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            settings
+                .default_work_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> anyhow::Result<()> {
@@ -1306,7 +1325,7 @@ fn apply_status_transition(runtime: &mut BridgeProcessState, status: &BridgeStat
     runtime.version = status.version.clone();
     runtime.last_error_code = status.last_error_code.clone();
     runtime.last_error = status.last_error.clone();
-    runtime.channels = status.channels.clone();
+    runtime.channels = status.connectors.clone();
     runtime.bindings = status.bindings;
     runtime.pending_approvals = status.pending_approvals;
 }
@@ -1457,7 +1476,7 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use crate::types::{BridgeChannelConfig, BridgeChannelMode, BridgePlatform, BridgeSkillsMode};
+    use crate::types::{BridgeChannelMode, BridgeConnectorConfig, BridgePlatform, BridgeSkillsMode};
 
     struct TempDirGuard {
         path: PathBuf,
@@ -1530,73 +1549,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_bridge_skills_dir_from_env_returns_existing_directory_only() {
-        let temp = TempDirGuard::new("skills-dir-env");
-        let key = "KIMI_BRIDGE_SKILLS_DIR";
-        let original = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, temp.path.as_os_str());
-        }
-        assert_eq!(
-            resolve_bridge_skills_dir_from_env(),
-            Some(temp.path.clone())
-        );
-
-        unsafe {
-            std::env::set_var(key, temp.path.join("missing").as_os_str());
-        }
-        assert_eq!(resolve_bridge_skills_dir_from_env(), None);
-
-        match original {
-            Some(value) => unsafe {
-                std::env::set_var(key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(key);
-            },
-        }
-    }
-
-    #[test]
-    fn resolve_bridge_skills_dir_uses_follow_default_work_dir_mode() {
-        let temp = TempDirGuard::new("skills-dir-follow");
-        let work_dir = temp.path.join("workspace");
-        fs::create_dir_all(&work_dir).expect("work dir");
-
-        let settings = BridgeSettings {
-            enabled: true,
-            auto_start: false,
-            admin_port: 60_110,
-            skills_mode: BridgeSkillsMode::FollowDefaultWorkDir,
-            feishu_reply_renderer: crate::types::FeishuReplyRenderer::Interactive,
-            feishu_auto_approve: true,
-            reset_binding_session_on_bridge_start: true,
-            feishu_reply_cards: None,
-            default_work_dir: Some(work_dir.to_string_lossy().to_string()),
-            work_dir_presets: vec![],
-            channels: vec![],
-        };
-
-        let resolved = resolve_bridge_skills_dir_with_follow(&settings, |effective_work_dir| {
-            Ok(follow_default_work_dir_skills_dir(effective_work_dir))
-        })
-        .expect("skills dir should resolve");
-
-        assert_eq!(resolved, Some(work_dir.join(".agents").join("skills")));
-    }
-
-    #[test]
-    fn resolve_bridge_skills_dir_disabled_mode_falls_back_to_env() {
-        let temp = TempDirGuard::new("skills-dir-fallback");
-        let env_dir = temp.path.join("env");
-        fs::create_dir_all(&env_dir).expect("env dir");
-
-        let key = "KIMI_BRIDGE_SKILLS_DIR";
-        let original = std::env::var_os(key);
-        unsafe {
-            std::env::set_var(key, env_dir.as_os_str());
-        }
-
+    fn resolve_connector_default_work_dir_prefers_connector_override_then_legacy_default() {
         let settings = BridgeSettings {
             enabled: true,
             auto_start: false,
@@ -1606,40 +1559,63 @@ mod tests {
             feishu_auto_approve: true,
             reset_binding_session_on_bridge_start: true,
             feishu_reply_cards: None,
-            default_work_dir: None,
+            default_work_dir: Some("D:/global-default".to_string()),
             work_dir_presets: vec![],
-            channels: vec![],
+            connectors: vec![
+                BridgeConnectorConfig {
+                    id: "telegram-default".to_string(),
+                    platform: BridgePlatform::Telegram,
+                    enabled: true,
+                    mode: BridgeChannelMode::Polling,
+                    label: "Telegram".to_string(),
+                    default_work_dir: Some("D:/telegram".to_string()),
+                    reset_binding_session_on_start: Some(true),
+                    feishu_auto_approve: None,
+                    feishu_reply_renderer: None,
+                },
+                BridgeConnectorConfig {
+                    id: "feishu-default".to_string(),
+                    platform: BridgePlatform::Feishu,
+                    enabled: true,
+                    mode: BridgeChannelMode::Websocket,
+                    label: "Feishu".to_string(),
+                    default_work_dir: None,
+                    reset_binding_session_on_start: Some(false),
+                    feishu_auto_approve: Some(true),
+                    feishu_reply_renderer: Some(crate::types::FeishuReplyRenderer::Interactive),
+                },
+            ],
         };
-        let resolved = resolve_bridge_skills_dir_with_follow(&settings, |_effective_work_dir| {
-            unreachable!("disabled mode should not invoke follow resolver")
-        })
-        .expect("env fallback should resolve");
-        assert_eq!(resolved, Some(env_dir.clone()));
 
-        match original {
-            Some(value) => unsafe {
-                std::env::set_var(key, value);
-            },
-            None => unsafe {
-                std::env::remove_var(key);
-            },
-        }
+        assert_eq!(
+            resolve_connector_default_work_dir(&settings, "telegram-default").as_deref(),
+            Some("D:/telegram")
+        );
+        assert_eq!(
+            resolve_connector_default_work_dir(&settings, "feishu-default").as_deref(),
+            Some("D:/global-default")
+        );
+        assert_eq!(
+            resolve_connector_default_work_dir(&settings, "missing").as_deref(),
+            Some("D:/global-default")
+        );
     }
 
     #[test]
     fn ensure_bundled_bridge_ops_installed_copies_skill_and_skips_existing_target() {
         let temp = TempDirGuard::new("bundled-bridge-ops");
         let source_dir = temp.path.join("source").join("bridge-ops");
-        let work_dir = temp.path.join("workspace");
+        let skills_dir = temp.path.join("global-skills");
         let script_dir = source_dir.join("scripts");
         fs::create_dir_all(&script_dir).expect("script dir");
-        fs::create_dir_all(&work_dir).expect("work dir");
+        fs::create_dir_all(&skills_dir).expect("skills dir");
         fs::write(source_dir.join("SKILL.md"), b"# bundled bridge ops").expect("skill file");
         fs::write(script_dir.join("bridge_ops.ps1"), b"Write-Host bundled").expect("script file");
 
         let first_skills_dir =
-            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &work_dir)
+            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
                 .expect("bundled skill should install");
+        assert_eq!(first_skills_dir, skills_dir);
         let installed_skill_dir = first_skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
         assert!(installed_skill_dir.join("SKILL.md").exists());
         assert!(installed_skill_dir
@@ -1650,7 +1626,7 @@ mod tests {
         fs::write(installed_skill_dir.join("SKILL.md"), b"# user modified").expect("overwrite");
 
         let second_skills_dir =
-            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &work_dir)
+            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
                 .expect("existing target should be preserved");
         assert_eq!(second_skills_dir, first_skills_dir);
         assert_eq!(
@@ -1674,7 +1650,9 @@ mod tests {
             pid: Some(4242),
             admin_port: 60_110,
             version: Some("0.1.0".to_string()),
-            channels: vec![BridgeChannelStatus {
+            connectors: vec![BridgeChannelStatus {
+                connector_id: "telegram-default".to_string(),
+                connector_label: "Telegram".to_string(),
                 platform: BridgePlatform::Telegram,
                 enabled: true,
                 state: BridgeChannelState::Ready,
@@ -1723,22 +1701,34 @@ mod tests {
             feishu_reply_cards: None,
             default_work_dir: None,
             work_dir_presets: vec![],
-            channels: vec![
-                BridgeChannelConfig {
+            connectors: vec![
+                BridgeConnectorConfig {
+                    id: "telegram-default".to_string(),
                     platform: BridgePlatform::Telegram,
                     enabled: false,
                     mode: BridgeChannelMode::Polling,
-                    account_label: "Telegram".to_string(),
+                    label: "Telegram".to_string(),
+                    default_work_dir: None,
+                    reset_binding_session_on_start: Some(true),
+                    feishu_auto_approve: None,
+                    feishu_reply_renderer: None,
                 },
-                BridgeChannelConfig {
+                BridgeConnectorConfig {
+                    id: "feishu-default".to_string(),
                     platform: BridgePlatform::Feishu,
                     enabled: true,
                     mode: BridgeChannelMode::Websocket,
-                    account_label: "Feishu".to_string(),
+                    label: "Feishu".to_string(),
+                    default_work_dir: None,
+                    reset_binding_session_on_start: Some(true),
+                    feishu_auto_approve: Some(true),
+                    feishu_reply_renderer: Some(crate::types::FeishuReplyRenderer::Interactive),
                 },
             ],
         };
         let runtime_channels = vec![BridgeChannelStatus {
+            connector_id: "feishu-default".to_string(),
+            connector_label: "Feishu".to_string(),
             platform: BridgePlatform::Feishu,
             enabled: true,
             state: BridgeChannelState::Connecting,

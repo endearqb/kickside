@@ -22,7 +22,7 @@ mod types;
 mod window_manager;
 mod workspace_session;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Instant;
@@ -33,18 +33,18 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
-    BridgeApprovalResolveInput, BridgeOnboardingConfigInput, BridgeSecretsMaskView,
-    BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource, BridgeSettings,
-    BridgeSkillsMode, BridgeStatus, ContextMenuStatus, DiagnosticsInfo, FrontendReadyAck,
-    InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
-    InstallSettingsView, InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
-    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    InstalledSkill, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
-    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
-    SkillApplyResult, SkillApplyScope, SkillDetail, SkillProjectionRecord,
-    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
-    StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
-    CURRENT_ONBOARDING_VERSION,
+    BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
+    BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
+    BridgeSessionSource, BridgeSettings, BridgeStatus, ContextMenuStatus,
+    DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
+    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource,
+    InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
+    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, InstalledSkill,
+    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
+    PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
+    SkillApplyScope, SkillDetail, SkillProjectionRecord, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
+    WebviewRuntimeKind, WorkspaceSkillProfile, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -393,24 +393,8 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
         Some(work_dir.to_string_lossy().to_string())
     };
 
-    let bridge_settings =
+    let _bridge_settings =
         bridge_settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
-    if bridge_settings.skills_mode == BridgeSkillsMode::FollowDefaultWorkDir {
-        let effective_bridge_work_dir = bridge_settings_store::preview_default_work_dir_after_app_sync(
-            &bridge_settings,
-            previous_work_dir.as_deref(),
-            next_work_dir.as_deref(),
-        )
-        .ok_or_else(|| {
-            "Bridge follow 模式需要有效的 IM 默认工作目录；请先设置 Bridge 默认工作目录或保留应用默认工作目录。"
-                .to_string()
-        })?;
-        bridge_manager::ensure_bundled_bridge_ops_installed(
-            &app,
-            Path::new(&effective_bridge_work_dir),
-        )
-        .map_err(|error| error.to_string())?;
-    }
 
     settings.work_dir = next_work_dir;
 
@@ -428,23 +412,8 @@ fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
 
 #[tauri::command]
 fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
-    let app_settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
-    if input.skills_mode == BridgeSkillsMode::FollowDefaultWorkDir {
-        let effective_bridge_work_dir = bridge_settings_store::preview_default_work_dir_after_app_sync(
-            &input,
-            None,
-            app_settings.work_dir.as_deref(),
-        )
-        .ok_or_else(|| {
-            "Bridge follow 模式需要有效的 IM 默认工作目录；请先设置 Bridge 默认工作目录或保留应用默认工作目录。"
-                .to_string()
-        })?;
-        bridge_manager::ensure_bundled_bridge_ops_installed(
-            &app,
-            Path::new(&effective_bridge_work_dir),
-        )
+    bridge_manager::ensure_bundled_bridge_ops_installed(&app)
         .map_err(|error| error.to_string())?;
-    }
 
     let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
     sync_idle_bridge_runtime(&app, &saved)?;
@@ -621,6 +590,16 @@ fn get_bridge_secrets_mask_view(app: AppHandle) -> Result<BridgeSecretsMaskView,
 }
 
 #[tauri::command]
+fn save_bridge_connector_secrets(
+    app: AppHandle,
+    input: BridgeConnectorSecretsInput,
+) -> Result<BridgeSecretsMaskView, String> {
+    bridge_settings_store::save_connector_secrets(&app, &input)
+        .map_err(|error| error.to_string())?;
+    bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn install_skill_from_git(
     app: AppHandle,
     repo_url: String,
@@ -692,6 +671,15 @@ fn list_workspace_recent_skills(
 }
 
 #[tauri::command]
+fn get_workspace_skill_profile(
+    app: AppHandle,
+    workspace_key: Option<String>,
+) -> Result<Option<WorkspaceSkillProfile>, String> {
+    skill_center::get_workspace_skill_profile(&app, workspace_key.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn cleanup_session_skill_projections(app: AppHandle, session_id: String) -> Result<(), String> {
     skill_center::cleanup_session_skill_projections(&app, &session_id)
         .map_err(|error| error.to_string())
@@ -711,11 +699,13 @@ fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(
     ) {
         runtime.admin_port = saved.admin_port;
         runtime.channels = saved
-            .channels
+            .connectors
             .iter()
-            .map(|channel| crate::types::BridgeChannelStatus {
-                platform: channel.platform,
-                enabled: channel.enabled,
+            .map(|connector| crate::types::BridgeChannelStatus {
+                connector_id: connector.id.clone(),
+                connector_label: connector.label.clone(),
+                platform: connector.platform,
+                enabled: connector.enabled,
                 state: crate::types::BridgeChannelState::Idle,
                 last_heartbeat_at: None,
                 last_inbound_at: None,
@@ -1253,6 +1243,7 @@ pub fn run() {
             import_bridge_session,
               get_bridge_log_tail,
               get_bridge_secrets_mask_view,
+              save_bridge_connector_secrets,
               install_skill_from_git,
               import_skill_from_path,
               list_installed_skills,
@@ -1263,6 +1254,7 @@ pub fn run() {
             list_active_session_skills,
             list_global_skills,
             list_workspace_recent_skills,
+            get_workspace_skill_profile,
             cleanup_session_skill_projections,
             get_diagnostics,
             open_logs_folder,

@@ -140,12 +140,16 @@ function createDefaultBridgeConnector(
   index = 1,
 ): BridgeConnectorConfig {
   const base = platform === "telegram" ? "telegram" : "feishu";
+  const label =
+    platform === "telegram"
+      ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
+      : `飞书机器人 ${String(index).padStart(2, "0")}`;
   return {
     id: index <= 1 ? `${base}-default` : `${base}-${index}`,
     platform,
     enabled: false,
     mode: platform === "telegram" ? "polling" : "websocket",
-    label: platform === "telegram" ? "Telegram" : "Feishu",
+    label,
     defaultWorkDir: undefined,
     resetBindingSessionOnStart: true,
     feishuAutoApprove: platform === "feishu" ? true : undefined,
@@ -783,10 +787,6 @@ export function useShellController() {
       }
     }
 
-    if (activeControlTask === "install_flow" && installBusy) {
-      return false;
-    }
-
     if (
       (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
       skillCenterBusy
@@ -821,10 +821,6 @@ export function useShellController() {
       if (!confirmed) {
         return false;
       }
-    }
-
-    if (activeControlTask === "install_flow" && installBusy) {
-      return false;
     }
 
     if (
@@ -1883,18 +1879,6 @@ export function useShellController() {
     const catalog = await invoke<InstallFlowCatalog>("get_install_flow_catalog");
     setInstallFlowCatalog(catalog);
     return catalog;
-  }
-
-  async function refreshInstallSessionSnapshot() {
-    const snapshot = await invoke<InstallSessionSnapshot>("get_install_session_snapshot");
-    setInstallSessionSnapshot(snapshot);
-    if (snapshot.probe) {
-      setInstallProbe(snapshot.probe);
-    }
-    if (snapshot.powershellDiagnostic) {
-      setPowershellPreflight(snapshot.powershellDiagnostic);
-    }
-    return snapshot;
   }
 
   useEffect(() => {
@@ -2958,7 +2942,6 @@ export function useShellController() {
       if (snapshot.powershellDiagnostic) {
         setPowershellPreflight(snapshot.powershellDiagnostic);
       }
-      setControlCenterTask("install_flow");
       await refreshOnboarding();
     } catch (error) {
       setActionError(String(error));
@@ -2976,22 +2959,6 @@ export function useShellController() {
       if (snapshot.powershellDiagnostic) {
         setPowershellPreflight(snapshot.powershellDiagnostic);
       }
-    } catch (error) {
-      setActionError(String(error));
-    }
-  }
-
-  async function handleOpenInstallFlow() {
-    setActionError(null);
-    try {
-      await Promise.all([
-        refreshInstallProbe(),
-        refreshInstallSettings(),
-        refreshInstallFlowCatalog(),
-        refreshInstallSessionSnapshot(),
-        refreshPowerShellPreflight(),
-      ]);
-      setControlCenterTask("install_flow");
     } catch (error) {
       setActionError(String(error));
     }
@@ -3260,9 +3227,6 @@ export function useShellController() {
     switch (task) {
       case "config_center":
         await handleOpenConfigCenterModal();
-        return;
-      case "install_flow":
-        await handleOpenInstallFlow();
         return;
       case "skill_git_import":
         await handleInstallSkillFromGit();
@@ -3710,7 +3674,7 @@ export function useShellController() {
     installMessage,
     installFlowCatalog,
     installSessionSnapshot,
-    installCommandsOpen: activeControlTask === "install_flow",
+    installCommandsOpen,
     installCommandsBusy: false,
     installCommandCatalog,
     refreshCoreState: async () => {

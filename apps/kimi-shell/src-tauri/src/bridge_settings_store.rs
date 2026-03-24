@@ -644,10 +644,11 @@ fn default_connector_id(platform: BridgePlatform, index: usize) -> String {
     }
 }
 
-fn default_connector_label(platform: BridgePlatform) -> String {
+fn default_connector_label(platform: BridgePlatform, index: usize) -> String {
+    let suffix = format!("{index:02}");
     match platform {
-        BridgePlatform::Telegram => "Telegram".to_string(),
-        BridgePlatform::Feishu => "Feishu".to_string(),
+        BridgePlatform::Telegram => format!("Telegram 机器人 {suffix}"),
+        BridgePlatform::Feishu => format!("飞书机器人 {suffix}"),
     }
 }
 
@@ -660,7 +661,7 @@ fn default_connector(platform: BridgePlatform, index: usize) -> BridgeConnectorC
             BridgePlatform::Telegram => BridgeChannelMode::Polling,
             BridgePlatform::Feishu => BridgeChannelMode::Websocket,
         },
-        label: default_connector_label(platform),
+        label: default_connector_label(platform, index),
         default_work_dir: None,
         reset_binding_session_on_start: None,
         feishu_auto_approve: (platform == BridgePlatform::Feishu).then_some(true),

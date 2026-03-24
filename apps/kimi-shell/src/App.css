@@ -3748,6 +3748,27 @@ input:focus {
   gap: 8px;
 }
 
+.cc-install-advanced-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.cc-install-blocker-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: color-mix(in srgb, var(--text-primary) 88%, var(--warning));
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.cc-install-path-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .cc-install-console {
   min-height: 240px;
   max-height: 360px;
@@ -4915,6 +4936,13 @@ input:focus {
   padding: 18px;
 }
 
+.cc-onboarding-rail-current-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .cc-onboarding-rail-head h3,
 .cc-runtime-deep-dive-head h3 {
   margin: 14px 0 8px;
@@ -5008,6 +5036,12 @@ input:focus {
   gap: 16px;
   padding: 22px 22px 18px;
   border-bottom: 1px solid var(--cc-line);
+}
+
+.cc-onboarding-detail-intro-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
 }
 
 .cc-step-detail-card {
@@ -5689,6 +5723,111 @@ input:focus {
   color: var(--text-secondary);
 }
 
+.bridge-workbench-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--cc-line) 88%, transparent);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, rgba(255, 255, 255, 0.2)) 0%,
+      color-mix(in srgb, var(--surface-muted) 94%, transparent) 100%
+    );
+  box-shadow: var(--shadow-card);
+}
+
+.bridge-workbench-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.bridge-workbench-card-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bridge-workbench-card-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bridge-workbench-card-title-row strong {
+  font-family: var(--cc-display-font);
+  font-size: 1rem;
+}
+
+.bridge-workbench-card-copy > span {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.bridge-workbench-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.bridge-workbench-card-toggle {
+  min-width: 220px;
+}
+
+.bridge-workbench-card-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bridge-workbench-summary-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--cc-line) 84%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.bridge-workbench-summary-card span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.bridge-workbench-summary-card strong {
+  font-size: 13px;
+}
+
+.bridge-workbench-card-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--cc-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  color: color-mix(in srgb, var(--text-primary) 88%, var(--warning));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.bridge-workbench-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bridge-connector-name-field {
+  gap: 10px;
+}
+
 .bridge-overview-robot-section {
   display: grid;
   gap: 12px;
@@ -5811,7 +5950,10 @@ input:focus {
   justify-content: flex-start;
 }
 
-.cc-bridge-connector-modal,
+.cc-bridge-connector-modal {
+  width: clamp(640px, 72vw, 1024px);
+}
+
 .cc-bridge-runtime-modal {
   width: min(1120px, calc(100vw - 32px));
 }
@@ -5834,6 +5976,32 @@ input:focus {
 
 .cc-bridge-runtime-body .bridge-panel {
   min-height: 0;
+}
+
+@media (max-width: 1100px) {
+  .bridge-workbench-card-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .bridge-workbench-card-head,
+  .cc-install-path-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-workbench-card-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-workbench-card-toggle {
+    min-width: 0;
+  }
+
+  .cc-onboarding-detail-intro-actions {
+    width: 100%;
+    justify-items: start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -5861,6 +6029,10 @@ input:focus {
 
   .cc-config-modal-body {
     grid-template-columns: minmax(148px, 34vw) minmax(0, 1fr);
+  }
+
+  .cc-bridge-connector-modal {
+    width: calc(100vw - 16px);
   }
 
   .bridge-overview-robot-card {

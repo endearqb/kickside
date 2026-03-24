@@ -933,7 +933,6 @@ export type ControlCenterSurface = "fullscreen" | "modal";
 
 export type ControlCenterTaskId =
   | "config_center"
-  | "install_flow"
   | "bridge_connector_secrets"
   | "bridge_runtime"
   | "skill_git_import"

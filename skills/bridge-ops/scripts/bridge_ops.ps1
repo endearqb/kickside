@@ -46,6 +46,27 @@ function Normalize-Text {
     return $Value.Trim()
 }
 
+function Get-OptionalTextProperty {
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputObject,
+
+        [Parameter(Mandatory = $true)]
+        [string]$PropertyName
+    )
+
+    if ($null -eq $InputObject) {
+        return ''
+    }
+
+    $property = $InputObject.PSObject.Properties.Match($PropertyName) | Select-Object -First 1
+    if ($null -eq $property) {
+        return ''
+    }
+
+    return Normalize-Text ([string]$property.Value)
+}
+
 function Get-DefaultBridgeAuthCandidates {
     $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($base in @($env:APPDATA, $env:LOCALAPPDATA)) {
@@ -202,8 +223,8 @@ function Find-SessionCandidates {
     $lowerNeedle = $needle.ToLowerInvariant()
     return @($Sessions | Where-Object {
         $sessionId = (Normalize-Text $_.kimiSessionId).ToLowerInvariant()
-        $summary = (Normalize-Text $_.summary).ToLowerInvariant()
-        $workDir = (Normalize-Text $_.workDir).ToLowerInvariant()
+        $summary = (Get-OptionalTextProperty -InputObject $_ -PropertyName 'summary').ToLowerInvariant()
+        $workDir = (Get-OptionalTextProperty -InputObject $_ -PropertyName 'workDir').ToLowerInvariant()
         $sessionId.StartsWith($lowerNeedle) -or
         $summary.Contains($lowerNeedle) -or
         $workDir.Contains($lowerNeedle)
@@ -260,9 +281,9 @@ try {
             $items = @($sessions | ForEach-Object {
                 @{
                     kimi_session_id = $_.kimiSessionId
-                    summary = $_.summary
-                    work_dir = $_.workDir
-                    session_state = $_.sessionState
+                    summary = Get-OptionalTextProperty -InputObject $_ -PropertyName 'summary'
+                    work_dir = Get-OptionalTextProperty -InputObject $_ -PropertyName 'workDir'
+                    session_state = Get-OptionalTextProperty -InputObject $_ -PropertyName 'sessionState'
                     current = ((Normalize-Text $_.kimiSessionId) -eq $currentSessionId)
                 }
             })
@@ -303,8 +324,8 @@ try {
                     candidates = @($candidates | ForEach-Object {
                         @{
                             kimi_session_id = $_.kimiSessionId
-                            summary = $_.summary
-                            work_dir = $_.workDir
+                            summary = Get-OptionalTextProperty -InputObject $_ -PropertyName 'summary'
+                            work_dir = Get-OptionalTextProperty -InputObject $_ -PropertyName 'workDir'
                         }
                     })
                 } 1
@@ -313,7 +334,7 @@ try {
             $targetSession = $candidates[0]
             $workDir = Normalize-Text $binding.workDir
             if ([string]::IsNullOrWhiteSpace($workDir)) {
-                $workDir = Normalize-Text $targetSession.workDir
+                $workDir = Get-OptionalTextProperty -InputObject $targetSession -PropertyName 'workDir'
             }
             $body = @{
                 kimiSessionId = $targetSession.kimiSessionId

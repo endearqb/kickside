@@ -1102,7 +1102,7 @@
 .cc-modal-shell-overlay {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 80;
   display: grid;
   place-items: center;
   padding: clamp(8px, 2vw, 24px);
@@ -4341,6 +4341,93 @@ input:focus {
   line-height: 1.6;
 }
 
+.cc-task-surface {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 74%, rgba(255, 255, 255, 0.2));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 10%, transparent), transparent 38%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, rgba(255, 255, 255, 0.45)) 0%,
+      color-mix(in srgb, var(--surface) 88%, rgba(255, 255, 255, 0.18)) 100%
+    );
+  overflow: hidden;
+}
+
+.cc-task-surface-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--cc-line);
+  background: color-mix(in srgb, var(--surface) 96%, var(--surface-muted));
+}
+
+.cc-task-surface-title {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cc-task-surface-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.cc-task-surface-title h3 {
+  margin: 0;
+  font-family: var(--cc-display-font);
+  font-size: 1.06rem;
+  letter-spacing: 0;
+}
+
+.cc-task-surface-title p {
+  margin: 6px 0 0;
+  max-width: 50rem;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.cc-task-surface-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cc-task-surface-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  scrollbar-gutter: stable;
+}
+
+.cc-task-surface-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--cc-line);
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-muted));
+}
+
+.cc-skill-task-fields {
+  max-width: 560px;
+}
+
 .control-center-shell .cc-layout {
   grid-template-columns: minmax(0, 1fr);
   gap: 18px;
@@ -4444,6 +4531,14 @@ input:focus {
 .cc-card-header-title-controls {
   display: inline-flex;
   align-items: center;
+}
+
+.cc-bridge-title-controls {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .control-center-shell .cc-card-header-eyebrow {
@@ -5507,11 +5602,14 @@ input:focus {
 .bridge-robot-list {
   display: grid;
   gap: 14px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .bridge-robot-card {
   display: grid;
   gap: 14px;
+  min-width: 0;
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--cc-line) 88%, transparent);
   border-radius: 16px;
@@ -5529,11 +5627,13 @@ input:focus {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .bridge-robot-card-copy {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .bridge-robot-card-copy strong {
@@ -5544,6 +5644,8 @@ input:focus {
 .bridge-robot-card-copy span,
 .bridge-robot-card-copy small {
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bridge-robot-chip-row {
@@ -5551,6 +5653,7 @@ input:focus {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
 }
 
 .bridge-robot-error {
@@ -5566,6 +5669,12 @@ input:focus {
 
 .bridge-robot-workdir-card {
   gap: 10px;
+  min-width: 0;
+}
+
+.bridge-robot-workdir-card small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bridge-robot-empty {
@@ -5580,6 +5689,128 @@ input:focus {
   color: var(--text-secondary);
 }
 
+.bridge-overview-robot-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.bridge-overview-robot-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-overview-robot-section-header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.bridge-overview-robot-section-header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.bridge-overview-robot-list {
+  display: grid;
+  gap: 12px;
+}
+
+.bridge-overview-robot-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--cc-line) 88%, transparent);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 96%, rgba(255, 255, 255, 0.26)) 0%,
+      color-mix(in srgb, var(--surface-muted) 94%, transparent) 100%
+    );
+  box-shadow: var(--shadow-card);
+}
+
+.bridge-overview-robot-main,
+.bridge-overview-robot-copy {
+  min-width: 0;
+  display: grid;
+}
+
+.bridge-overview-robot-main {
+  gap: 10px;
+}
+
+.bridge-overview-robot-copy {
+  gap: 4px;
+}
+
+.bridge-overview-robot-copy strong {
+  font-family: var(--cc-display-font);
+  font-size: 1rem;
+}
+
+.bridge-overview-robot-copy span,
+.bridge-overview-robot-meta {
+  color: var(--text-secondary);
+}
+
+.bridge-overview-robot-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bridge-overview-robot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.bridge-overview-robot-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--cc-line) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.bridge-overview-robot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bridge-overview-robot-toggle {
+  min-width: 196px;
+  display: flex;
+  align-items: stretch;
+}
+
+.bridge-overview-robot-toggle .bridge-switch-card {
+  width: 100%;
+}
+
+.bridge-inline-path-row-compact {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.bridge-inline-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
 .cc-bridge-connector-modal,
 .cc-bridge-runtime-modal {
   width: min(1120px, calc(100vw - 32px));
@@ -5587,8 +5818,22 @@ input:focus {
 
 .cc-bridge-connector-body,
 .cc-bridge-runtime-body {
+  min-height: 0;
   display: grid;
   gap: 16px;
+}
+
+.cc-bridge-runtime-modal {
+  max-height: min(92dvh, 980px);
+}
+
+.cc-bridge-runtime-body {
+  overflow: auto;
+  align-content: start;
+}
+
+.cc-bridge-runtime-body .bridge-panel {
+  min-height: 0;
 }
 
 @media (max-width: 640px) {
@@ -5616,6 +5861,31 @@ input:focus {
 
   .cc-config-modal-body {
     grid-template-columns: minmax(148px, 34vw) minmax(0, 1fr);
+  }
+
+  .bridge-overview-robot-card {
+    grid-template-columns: 1fr;
+  }
+
+  .bridge-overview-robot-section-header,
+  .bridge-overview-robot-title-row {
+    flex-direction: column;
+  }
+
+  .bridge-overview-robot-toggle {
+    min-width: 0;
+  }
+
+  .cc-bridge-title-controls {
+    width: 100%;
+  }
+
+  .bridge-robot-card-header {
+    flex-direction: column;
+  }
+
+  .bridge-robot-chip-row {
+    justify-content: flex-start;
   }
 
   .cc-config-nav {
@@ -5684,7 +5954,74 @@ input:focus {
     padding: 10px;
   }
 
-  .skill-center-import-choice-grid {
+.skill-center-import-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.bridge-onboarding-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(182, 122, 40, 0.24);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(251, 248, 242, 0.98), rgba(242, 238, 231, 0.92));
+}
+
+.bridge-onboarding-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.bridge-onboarding-copy strong {
+  font-family: "Cabinet Grotesk", "Noto Sans SC", sans-serif;
+  font-size: 16px;
+  color: #1f252d;
+}
+
+.bridge-onboarding-copy p {
+  margin: 0;
+  color: #3d433f;
+  line-height: 1.55;
+}
+
+.bridge-onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bridge-onboarding-qr-shell {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 260px) 1fr;
+  align-items: start;
+}
+
+.bridge-onboarding-qr {
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border-radius: 14px;
+  background: #fbf8f2;
+  border: 1px solid rgba(31, 37, 45, 0.12);
+}
+
+.bridge-onboarding-qr svg {
+  width: 100%;
+  height: auto;
+}
+
+.bridge-onboarding-meta,
+.bridge-onboarding-success-list {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: #3d433f;
+}
+
+@media (max-width: 900px) {
+  .bridge-onboarding-qr-shell {
     grid-template-columns: 1fr;
   }
 }

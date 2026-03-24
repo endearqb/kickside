@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, RefreshCw, SquareTerminal } from "lucide-react";
+import { Copy, RefreshCw } from "lucide-react";
 import type {
   BackendState,
   InstallFlowCatalog,
@@ -12,10 +12,8 @@ import type {
   PowerShellPreflightSummary,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
-import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
-type InstallFlowModalProps = {
-  open: boolean;
+type InstallFlowTaskContentProps = {
   catalog: InstallFlowCatalog | null;
   session: InstallSessionSnapshot;
   probe: InstallProbeStatus | null;
@@ -24,13 +22,10 @@ type InstallFlowModalProps = {
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
-  onClose: () => void;
-  onRefreshProbe: () => Promise<unknown>;
   onRefreshPowerShellPreflight: () => Promise<unknown>;
   onSourceChange: (source: InstallSource) => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
   onStartTask: (taskId: InstallTaskId) => Promise<void>;
-  onCancelTask: () => Promise<void>;
   onRestartBackend: () => Promise<void>;
   restartBusy: boolean;
 };
@@ -42,7 +37,7 @@ type TaskAvailability = {
 
 type PreflightBadgeTone = "neutral" | "success" | "warning" | "danger";
 
-function formatInstallSessionStatus(status: InstallSessionSnapshot["status"]): string {
+export function formatInstallSessionStatus(status: InstallSessionSnapshot["status"]): string {
   switch (status) {
     case "starting":
       return "准备中";
@@ -63,7 +58,7 @@ function formatInstallSessionStatus(status: InstallSessionSnapshot["status"]): s
   }
 }
 
-function formatInstallSessionTone(
+export function formatInstallSessionTone(
   status: InstallSessionSnapshot["status"],
 ): PreflightBadgeTone {
   switch (status) {
@@ -81,7 +76,7 @@ function formatInstallSessionTone(
   }
 }
 
-function formatInstallStage(stage: InstallSessionSnapshot["stage"]): string {
+export function formatInstallStage(stage: InstallSessionSnapshot["stage"]): string {
   switch (stage) {
     case "prepare":
       return "准备";
@@ -253,8 +248,7 @@ function buildLogsText(session: InstallSessionSnapshot) {
   return lines.join("\n");
 }
 
-export function InstallFlowModal({
-  open,
+export function InstallFlowTaskContent({
   catalog,
   session,
   probe,
@@ -263,16 +257,13 @@ export function InstallFlowModal({
   installSettings,
   installSettingsBusy,
   powershellPreflight,
-  onClose,
-  onRefreshProbe,
   onRefreshPowerShellPreflight,
   onSourceChange,
   onSaveInstallSettings,
   onStartTask,
-  onCancelTask,
   onRestartBackend,
   restartBusy,
-}: InstallFlowModalProps) {
+}: InstallFlowTaskContentProps) {
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const [mirrorDraft, setMirrorDraft] = useState<InstallSettingsView>(installSettings);
   const activeTask = useMemo(
@@ -321,16 +312,11 @@ export function InstallFlowModal({
   }, [installSettings]);
 
   useEffect(() => {
-    if (!open) return;
     const node = consoleRef.current;
     if (node) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [open, session.logs.length, failureSummary, restartHint]);
-
-  if (!open) {
-    return null;
-  }
+  }, [session.logs.length, failureSummary, restartHint]);
 
   const renderTaskButton = (
     task: InstallTaskDefinition,
@@ -372,56 +358,7 @@ export function InstallFlowModal({
   );
 
   return (
-    <ControlCenterModalShell
-      open={open}
-      title="安装与升级"
-      description="基础安装在应用内执行，可选增强项可能会打开外部管理员终端。"
-      ariaLabel="安装与升级"
-      className="cc-install-flow-modal"
-      bodyClassName="cc-install-flow-modal-body"
-      headerActions={
-        <Button
-          type="button"
-          variant="outline"
-          icon={<RefreshCw size={14} />}
-          className="cc-action-btn"
-          onClick={() => void onRefreshProbe()}
-        >
-          重新检测
-        </Button>
-      }
-      onRequestClose={onClose}
-      footer={
-        <>
-          <div className="cc-install-footer-meta">
-            <span>{session.title ?? "当前没有安装任务"}</span>
-            <span>状态：{sessionStatusLabel}</span>
-            <span>阶段：{sessionStageLabel}</span>
-          </div>
-          <div className="cc-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={onClose}
-              disabled={isBusy}
-            >
-              关闭
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              icon={<SquareTerminal size={14} />}
-              className="cc-action-btn"
-              onClick={() => void onCancelTask()}
-              disabled={!isBusy}
-            >
-              取消任务
-            </Button>
-          </div>
-        </>
-      }
-    >
+    <>
       <section className="cc-install-overview">
         <div className="cc-install-overview-head">
           <div className="cc-install-overview-copy">
@@ -714,6 +651,6 @@ export function InstallFlowModal({
           </pre>
           {session.fallbackReason ? <p className="hint">{session.fallbackReason}</p> : null}
       </section>
-    </ControlCenterModalShell>
+    </>
   );
 }

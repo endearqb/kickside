@@ -12,9 +12,9 @@ use rand::{distributions::Alphanumeric, Rng};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    BackendState, BridgeChannelStatus, BridgeRuntimeState, LoginProbeState, MainCreateMode,
-    StartupFailureKind, StartupMonitorReason, StartupMonitorState, StartupMonitorTargetRoute,
-    StartupPhase, WebviewRuntimeKind,
+    BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
+    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
 };
 
 #[derive(Debug, Clone)]
@@ -155,9 +155,31 @@ impl BridgeProcessState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FeishuOnboardingRuntimeState {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: FeishuConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub expires_at_ms: Option<u64>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub scanner_open_id: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub app_id_masked: Option<String>,
+    pub last_configured_at: Option<String>,
+    pub device_code: String,
+    pub poll_base_url: String,
+    pub poll_interval_secs: u64,
+}
+
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub bridge_runtime: Mutex<BridgeProcessState>,
+    pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
     pub bridge_host_control_port: Mutex<Option<u16>>,
     pub settings_path: PathBuf,
     pub bridge_settings_path: PathBuf,
@@ -207,6 +229,7 @@ impl AppState {
         Ok(Self {
             runtime: Mutex::new(RuntimeState::default()),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
+            feishu_onboarding: Mutex::new(None),
             bridge_host_control_port: Mutex::new(None),
             settings_path: config_dir.join("settings.json"),
             bridge_settings_path: config_dir.join("bridge_settings.json"),

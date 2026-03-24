@@ -3,8 +3,6 @@ import { Check, Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { formatBackendState } from "@/app/types";
 import { IconButton } from "@/components/common/IconButton";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
@@ -44,23 +42,19 @@ function App() {
         : "unsaved";
 
   useEffect(() => {
-    if (!shell.controlCenterModalOpen || shell.configCenterOpen) {
+    if (!shell.controlCenterModalOpen) {
       return;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        shell.closeControlCenterModal();
+        shell.requestCloseControlCenter();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    shell.closeControlCenterModal,
-    shell.configCenterOpen,
-    shell.controlCenterModalOpen,
-  ]);
+  }, [shell.controlCenterModalOpen, shell.requestCloseControlCenter, shell.activeControlTask]);
 
   useEffect(() => {
     if (shell.shutdownProgress) {
@@ -76,6 +70,147 @@ function App() {
       setRememberMainCloseDecision(false);
     }
   }, [shell.mainWindowCloseDecisionRequest]);
+
+  const controlCenterProps = {
+    status: shell.status,
+    diagnostics: shell.diagnostics,
+    onboarding: shell.onboarding,
+    contextMenuStatus: shell.contextMenuStatus,
+    activeControlSection: shell.activeControlSection,
+    activeRuntimePanel: shell.activeRuntimePanel,
+    stepCompletion: shell.stepCompletion,
+    actionBusy: shell.actionBusy,
+    diagnosticsBusy: shell.diagnosticsBusy,
+    contextMenuBusy: shell.contextMenuBusy,
+    loginProbeBusy: shell.loginProbeBusy,
+    mainWindowCloseBehavior: shell.mainWindowCloseBehavior,
+    bridgeSettings: shell.bridgeSettings,
+    bridgeStatus: shell.bridgeStatus,
+    bridgeOnboardingDraft: shell.bridgeOnboardingDraft,
+    bridgeOnboardingDirty: shell.bridgeOnboardingDirty,
+    bridgeOnboardingValidation: shell.bridgeOnboardingValidation,
+    bridgeSettingsDirty: shell.bridgeSettingsDirty,
+    bridgePersistedConnectorIds: shell.bridgePersistedConnectorIds,
+    bridgeSessions: shell.bridgeSessions,
+    bridgeBindings: shell.bridgeBindings,
+    bridgeApprovals: shell.bridgeApprovals,
+    bridgeLogTail: shell.bridgeLogTail,
+    bridgeRecentErrors: shell.bridgeRecentErrors,
+    bridgeSecretsMask: shell.bridgeSecretsMask,
+    feishuConnectorOnboarding: shell.feishuConnectorOnboarding,
+    feishuConnectorOnboardingBusy: shell.feishuConnectorOnboardingBusy,
+    bridgeBusy: shell.bridgeBusy,
+    installedSkills: shell.installedSkills,
+    skillCenterBusy: shell.skillCenterBusy,
+    skillCenterSearch: shell.skillCenterSearch,
+    skillCenterFilter: shell.skillCenterFilter,
+    skillCenterSection: shell.skillCenterSection,
+    skillCenterGitRepoUrl: shell.skillCenterGitRepoUrl,
+    skillCenterGitRef: shell.skillCenterGitRef,
+    selectedSkillId: shell.selectedSkillId,
+    selectedSkillDetail: shell.selectedSkillDetail,
+    globalSkillProjections: shell.globalSkillProjections,
+    activeSessionSkillState: shell.activeSessionSkillState,
+    workspaceSkillProfile: shell.workspaceSkillProfile,
+    workspaceRecentSkillIds: shell.workspaceRecentSkillIds,
+    kimiPathInput: shell.kimiPathInput,
+    workDirInput: shell.workDirInput,
+    setActiveControlSection: shell.setActiveControlSection,
+    setActiveRuntimePanel: shell.setActiveRuntimePanel,
+    onWorkDirInputChange: shell.setWorkDirInput,
+    configCenterView: shell.configCenterView,
+    configCenterDraft: shell.configCenterDraft,
+    configCenterBusy: shell.configCenterBusy,
+    configCenterDirty: shell.configCenterDirty,
+    installProbe: shell.installProbe,
+    installSource: shell.installSource,
+    installSettings: shell.installSettings,
+    installSettingsBusy: shell.installSettingsBusy,
+    powershellPreflight: shell.powershellPreflight,
+    installFlowCatalog: shell.installFlowCatalog,
+    installSessionSnapshot: shell.installSessionSnapshot,
+    activeTask: shell.activeControlTask,
+    activeTaskPayload: shell.activeControlTaskPayload,
+    installBusy: shell.installBusy,
+    installAction: shell.installAction,
+    installMessage: shell.installMessage,
+    onClose: shell.dismissControlCenter,
+    onRefreshCoreState: shell.refreshCoreState,
+    onRefreshDiagnostics: shell.refreshDiagnostics,
+    onRefreshContextMenuStatus: shell.refreshContextMenuStatus,
+    onRefreshBridgeSettings: shell.refreshBridgeSettings,
+    onRefreshBridgeStatus: shell.refreshBridgeStatus,
+    onRefreshBridgeSessions: shell.refreshBridgeSessions,
+    onRefreshBridgeBindings: shell.refreshBridgeBindings,
+    onRefreshBridgeApprovals: shell.refreshBridgeApprovals,
+    onRefreshBridgeLogTail: shell.refreshBridgeLogTail,
+    onRefreshBridgeSecretsMask: shell.refreshBridgeSecretsMask,
+    onSaveBridgeConnectorSecrets: shell.handleSaveBridgeConnectorSecrets,
+    onStartFeishuConnectorOnboarding: shell.handleStartFeishuConnectorOnboarding,
+    onRefreshFeishuConnectorOnboardingStatus:
+      shell.handleRefreshFeishuConnectorOnboardingStatus,
+    onCancelFeishuConnectorOnboarding: shell.handleCancelFeishuConnectorOnboarding,
+    onRefreshSkillCenterState: () => shell.refreshSkillCenterState(shell.selectedSkillId),
+    onRefreshInstallProbe: shell.refreshInstallProbe,
+    onRefreshOnboarding: shell.refreshOnboarding,
+    onRetry: shell.handleRuntimeOnlyRetry,
+    onOpenLogs: shell.handleOpenLogs,
+    onOpenFolder: shell.handleOpenFolder,
+    onOpenKimiConfigDir: shell.handleOpenKimiConfigDir,
+    onPickKimiPath: shell.handlePickKimiPath,
+    onSavePathAndRetry: shell.handleSavePathAndRetry,
+    onEnableContextMenu: shell.handleEnableContextMenu,
+    onDisableContextMenu: shell.handleDisableContextMenu,
+    onProbeLogin: shell.handleProbeLogin,
+    onPickWorkDir: shell.handlePickWorkDir,
+    onPickBridgeConnectorDefaultWorkDir: shell.handlePickBridgeConnectorDefaultWorkDir,
+    onSaveWorkDirAndRestart: shell.handleSaveWorkDirAndRestart,
+    onClearWorkDir: shell.handleClearWorkDir,
+    onBridgeSettingsChange: shell.handleBridgeSettingsChange,
+    onBridgeOnboardingDraftChange: shell.handleBridgeOnboardingDraftChange,
+    onToggleBridgeConnectorEnabled: shell.handleToggleBridgeConnectorEnabled,
+    onPersistBridgeSettings: shell.handlePersistBridgeSettings,
+    onRunBridgePrimaryAction: shell.handleRunBridgePrimaryAction,
+    onStopBridge: shell.handleStopBridge,
+    onRestartBridge: shell.handleRestartBridge,
+    onImportBridgeSession: shell.handleImportBridgeSession,
+    onClearBridgeBinding: shell.handleClearBridgeBinding,
+    onResetBridgeBindingSession: shell.handleResetBridgeBindingSession,
+    onResetBridgeBindingToDefaultWorkDir:
+      shell.handleResetBridgeBindingToDefaultWorkDir,
+    onResolveBridgeApproval: shell.handleResolveBridgeApproval,
+    onSkillCenterSearchChange: shell.setSkillCenterSearch,
+    onSkillCenterFilterChange: shell.setSkillCenterFilter,
+    onSkillCenterSectionChange: shell.setSkillCenterSection,
+    onSkillCenterGitRepoUrlChange: shell.setSkillCenterGitRepoUrl,
+    onSkillCenterGitRefChange: shell.setSkillCenterGitRef,
+    onSelectSkill: shell.handleSelectSkill,
+    onOpenSkillFromInsights: shell.handleOpenSkillFromInsights,
+    onOpenTask: shell.handleOpenControlTask,
+    onCloseTask: shell.handleCloseControlTask,
+    onConfirmInstallSkillFromGit: shell.handleConfirmInstallSkillFromGit,
+    onConfirmImportSkillFromPath: shell.handleConfirmImportSkillFromPath,
+    onSetSkillTrust: shell.handleSetSkillTrust,
+    onApplySkill: shell.handleApplySkill,
+    onRemoveSkill: shell.handleRemoveSkill,
+    onRecoverWorkspaceSkill: shell.handleRecoverWorkspaceSkill,
+    onConfigCenterDraftChange: shell.handleConfigCenterDraftChange,
+    onResetConfigCenterDraft: shell.handleResetConfigCenterDraft,
+    onSaveKimiCliConfigCenter: shell.handleSaveKimiCliConfigCenter,
+    onSaveMainWindowCloseBehavior: shell.handleSaveMainWindowCloseBehavior,
+    onInstallSourceChange: shell.handleInstallSourceChange,
+    onSaveInstallSettings: shell.handleSaveInstallSettings,
+    onRefreshPowerShellPreflight: shell.refreshPowerShellPreflight,
+    onInstallDependencies: shell.handleInstallDependencies,
+    onInstallKimi: shell.handleInstallKimi,
+    onUpgradeKimi: shell.handleUpgradeKimi,
+    onInstallNodejs: shell.handleInstallNodejs,
+    onStartInstallTask: shell.handleStartInstallTask,
+    onCancelInstallTask: shell.handleCancelInstallTask,
+    onCompleteOnboarding: shell.handleCompleteOnboarding,
+    onSkipOnboarding: shell.handleSkipOnboarding,
+    onOpenExternalUrl: shell.handleOpenExternalUrl,
+  };
 
   return (
     <main
@@ -164,147 +299,7 @@ function App() {
 
         {shell.screen === "control_center" ? (
           <div className="shell-overlay-layer">
-            <ControlCenterView
-              surface="fullscreen"
-              status={shell.status}
-              diagnostics={shell.diagnostics}
-              onboarding={shell.onboarding}
-              contextMenuStatus={shell.contextMenuStatus}
-              activeControlSection={shell.activeControlSection}
-              activeRuntimePanel={shell.activeRuntimePanel}
-              stepCompletion={shell.stepCompletion}
-              actionBusy={shell.actionBusy}
-              diagnosticsBusy={shell.diagnosticsBusy}
-              contextMenuBusy={shell.contextMenuBusy}
-              loginProbeBusy={shell.loginProbeBusy}
-              mainWindowCloseBehavior={shell.mainWindowCloseBehavior}
-              bridgeSettings={shell.bridgeSettings}
-              bridgeStatus={shell.bridgeStatus}
-              bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
-              bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
-              bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
-              bridgeSettingsDirty={shell.bridgeSettingsDirty}
-              bridgeSessions={shell.bridgeSessions}
-              bridgeBindings={shell.bridgeBindings}
-              bridgeApprovals={shell.bridgeApprovals}
-              bridgeLogTail={shell.bridgeLogTail}
-              bridgeRecentErrors={shell.bridgeRecentErrors}
-              bridgeSecretsMask={shell.bridgeSecretsMask}
-              bridgeBusy={shell.bridgeBusy}
-              installedSkills={shell.installedSkills}
-              skillCenterBusy={shell.skillCenterBusy}
-              skillCenterSearch={shell.skillCenterSearch}
-              skillCenterFilter={shell.skillCenterFilter}
-              skillCenterSection={shell.skillCenterSection}
-              selectedSkillId={shell.selectedSkillId}
-              selectedSkillDetail={shell.selectedSkillDetail}
-              globalSkillProjections={shell.globalSkillProjections}
-              activeSessionSkillState={shell.activeSessionSkillState}
-              workspaceSkillProfile={shell.workspaceSkillProfile}
-              workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
-              kimiPathInput={shell.kimiPathInput}
-              workDirInput={shell.workDirInput}
-              setActiveControlSection={shell.setActiveControlSection}
-              setActiveRuntimePanel={shell.setActiveRuntimePanel}
-              onWorkDirInputChange={shell.setWorkDirInput}
-              configCenterView={shell.configCenterView}
-              configCenterDraft={shell.configCenterDraft}
-              configCenterOpen={shell.configCenterOpen}
-              configCenterBusy={shell.configCenterBusy}
-              configCenterDirty={shell.configCenterDirty}
-              installProbe={shell.installProbe}
-              installSource={shell.installSource}
-              installSettings={shell.installSettings}
-              installSettingsBusy={shell.installSettingsBusy}
-              powershellPreflight={shell.powershellPreflight}
-              installFlowOpen={shell.installFlowOpen}
-              installFlowCatalog={shell.installFlowCatalog}
-              installSessionSnapshot={shell.installSessionSnapshot}
-              installBusy={shell.installBusy}
-              installAction={shell.installAction}
-              installMessage={shell.installMessage}
-              installCommandsOpen={shell.installCommandsOpen}
-              installCommandsBusy={shell.installCommandsBusy}
-              installCommandCatalog={shell.installCommandCatalog}
-              onClose={shell.backToStatus}
-              onRefreshCoreState={shell.refreshCoreState}
-              onRefreshDiagnostics={shell.refreshDiagnostics}
-              onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
-              onRefreshBridgeSettings={shell.refreshBridgeSettings}
-              onRefreshBridgeStatus={shell.refreshBridgeStatus}
-              onRefreshBridgeSessions={shell.refreshBridgeSessions}
-              onRefreshBridgeBindings={shell.refreshBridgeBindings}
-              onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
-              onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
-              onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
-              onSaveBridgeConnectorSecrets={shell.handleSaveBridgeConnectorSecrets}
-              onRefreshSkillCenterState={() =>
-                shell.refreshSkillCenterState(shell.selectedSkillId)
-              }
-              onRefreshInstallProbe={shell.refreshInstallProbe}
-              onRefreshOnboarding={shell.refreshOnboarding}
-              onRetry={shell.handleRuntimeOnlyRetry}
-              onOpenLogs={shell.handleOpenLogs}
-              onOpenFolder={shell.handleOpenFolder}
-              onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
-              onPickKimiPath={shell.handlePickKimiPath}
-              onSavePathAndRetry={shell.handleSavePathAndRetry}
-              onEnableContextMenu={shell.handleEnableContextMenu}
-              onDisableContextMenu={shell.handleDisableContextMenu}
-              onProbeLogin={shell.handleProbeLogin}
-              onPickWorkDir={shell.handlePickWorkDir}
-              onPickBridgeConnectorDefaultWorkDir={
-                shell.handlePickBridgeConnectorDefaultWorkDir
-              }
-              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
-              onClearWorkDir={shell.handleClearWorkDir}
-              onBridgeSettingsChange={shell.handleBridgeSettingsChange}
-              onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
-              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
-              onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
-              onStopBridge={shell.handleStopBridge}
-              onRestartBridge={shell.handleRestartBridge}
-              onImportBridgeSession={shell.handleImportBridgeSession}
-              onClearBridgeBinding={shell.handleClearBridgeBinding}
-              onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
-              onResetBridgeBindingToDefaultWorkDir={
-                shell.handleResetBridgeBindingToDefaultWorkDir
-              }
-              onResolveBridgeApproval={shell.handleResolveBridgeApproval}
-              onSkillCenterSearchChange={shell.setSkillCenterSearch}
-              onSkillCenterFilterChange={shell.setSkillCenterFilter}
-              onSkillCenterSectionChange={shell.setSkillCenterSection}
-              onSelectSkill={shell.handleSelectSkill}
-              onOpenSkillFromInsights={shell.handleOpenSkillFromInsights}
-              onInstallSkillFromGit={shell.handleInstallSkillFromGit}
-              onImportSkillFromPath={shell.handleImportSkillFromPath}
-              onSetSkillTrust={shell.handleSetSkillTrust}
-              onApplySkill={shell.handleApplySkill}
-              onRemoveSkill={shell.handleRemoveSkill}
-              onRecoverWorkspaceSkill={shell.handleRecoverWorkspaceSkill}
-              onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
-              onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
-              onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
-              onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
-              onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
-              onSaveMainWindowCloseBehavior={shell.handleSaveMainWindowCloseBehavior}
-              onInstallSourceChange={shell.handleInstallSourceChange}
-              onSaveInstallSettings={shell.handleSaveInstallSettings}
-              onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
-              onInstallDependencies={shell.handleInstallDependencies}
-              onInstallKimi={shell.handleInstallKimi}
-              onUpgradeKimi={shell.handleUpgradeKimi}
-              onInstallNodejs={shell.handleInstallNodejs}
-              onOpenInstallFlow={shell.handleOpenInstallFlow}
-              onCloseInstallFlow={shell.handleCloseInstallFlow}
-              onStartInstallTask={shell.handleStartInstallTask}
-              onCancelInstallTask={shell.handleCancelInstallTask}
-              onOpenInstallCommands={shell.handleOpenInstallCommands}
-              onCloseInstallCommands={shell.handleCloseInstallCommands}
-              onCompleteOnboarding={shell.handleCompleteOnboarding}
-              onSkipOnboarding={shell.handleSkipOnboarding}
-              onOpenExternalUrl={shell.handleOpenExternalUrl}
-            />
+            <ControlCenterView surface="fullscreen" {...controlCenterProps} />
           </div>
         ) : null}
       </div>
@@ -315,252 +310,12 @@ function App() {
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              shell.closeControlCenterModal();
+              shell.dismissControlCenter();
             }
           }}
         >
           <div className="cc-shell-modal" role="dialog" aria-modal="true" aria-label="控制中心">
-            <ControlCenterView
-              surface="modal"
-              status={shell.status}
-              diagnostics={shell.diagnostics}
-              onboarding={shell.onboarding}
-              contextMenuStatus={shell.contextMenuStatus}
-              activeControlSection={shell.activeControlSection}
-              activeRuntimePanel={shell.activeRuntimePanel}
-              stepCompletion={shell.stepCompletion}
-              actionBusy={shell.actionBusy}
-              diagnosticsBusy={shell.diagnosticsBusy}
-              contextMenuBusy={shell.contextMenuBusy}
-              loginProbeBusy={shell.loginProbeBusy}
-              mainWindowCloseBehavior={shell.mainWindowCloseBehavior}
-              bridgeSettings={shell.bridgeSettings}
-              bridgeStatus={shell.bridgeStatus}
-              bridgeOnboardingDraft={shell.bridgeOnboardingDraft}
-              bridgeOnboardingDirty={shell.bridgeOnboardingDirty}
-              bridgeOnboardingValidation={shell.bridgeOnboardingValidation}
-              bridgeSettingsDirty={shell.bridgeSettingsDirty}
-              bridgeSessions={shell.bridgeSessions}
-              bridgeBindings={shell.bridgeBindings}
-              bridgeApprovals={shell.bridgeApprovals}
-              bridgeLogTail={shell.bridgeLogTail}
-              bridgeRecentErrors={shell.bridgeRecentErrors}
-              bridgeSecretsMask={shell.bridgeSecretsMask}
-              bridgeBusy={shell.bridgeBusy}
-              installedSkills={shell.installedSkills}
-              skillCenterBusy={shell.skillCenterBusy}
-              skillCenterSearch={shell.skillCenterSearch}
-              skillCenterFilter={shell.skillCenterFilter}
-              skillCenterSection={shell.skillCenterSection}
-              selectedSkillId={shell.selectedSkillId}
-              selectedSkillDetail={shell.selectedSkillDetail}
-              globalSkillProjections={shell.globalSkillProjections}
-              activeSessionSkillState={shell.activeSessionSkillState}
-              workspaceSkillProfile={shell.workspaceSkillProfile}
-              workspaceRecentSkillIds={shell.workspaceRecentSkillIds}
-              kimiPathInput={shell.kimiPathInput}
-              workDirInput={shell.workDirInput}
-              setActiveControlSection={shell.setActiveControlSection}
-              setActiveRuntimePanel={shell.setActiveRuntimePanel}
-              onWorkDirInputChange={shell.setWorkDirInput}
-              configCenterView={shell.configCenterView}
-              configCenterDraft={shell.configCenterDraft}
-              configCenterOpen={shell.configCenterOpen}
-              configCenterBusy={shell.configCenterBusy}
-              configCenterDirty={shell.configCenterDirty}
-              installProbe={shell.installProbe}
-              installSource={shell.installSource}
-              installSettings={shell.installSettings}
-              installSettingsBusy={shell.installSettingsBusy}
-              powershellPreflight={shell.powershellPreflight}
-              installFlowOpen={shell.installFlowOpen}
-              installFlowCatalog={shell.installFlowCatalog}
-              installSessionSnapshot={shell.installSessionSnapshot}
-              installBusy={shell.installBusy}
-              installAction={shell.installAction}
-              installMessage={shell.installMessage}
-              installCommandsOpen={shell.installCommandsOpen}
-              installCommandsBusy={shell.installCommandsBusy}
-              installCommandCatalog={shell.installCommandCatalog}
-              onClose={shell.closeControlCenterModal}
-              onRefreshCoreState={shell.refreshCoreState}
-              onRefreshDiagnostics={shell.refreshDiagnostics}
-              onRefreshContextMenuStatus={shell.refreshContextMenuStatus}
-              onRefreshBridgeSettings={shell.refreshBridgeSettings}
-              onRefreshBridgeStatus={shell.refreshBridgeStatus}
-              onRefreshBridgeSessions={shell.refreshBridgeSessions}
-              onRefreshBridgeBindings={shell.refreshBridgeBindings}
-              onRefreshBridgeApprovals={shell.refreshBridgeApprovals}
-              onRefreshBridgeLogTail={shell.refreshBridgeLogTail}
-              onRefreshBridgeSecretsMask={shell.refreshBridgeSecretsMask}
-              onSaveBridgeConnectorSecrets={shell.handleSaveBridgeConnectorSecrets}
-              onRefreshSkillCenterState={() =>
-                shell.refreshSkillCenterState(shell.selectedSkillId)
-              }
-              onRefreshInstallProbe={shell.refreshInstallProbe}
-              onRefreshOnboarding={shell.refreshOnboarding}
-              onRetry={shell.handleRuntimeOnlyRetry}
-              onOpenLogs={shell.handleOpenLogs}
-              onOpenFolder={shell.handleOpenFolder}
-              onOpenKimiConfigDir={shell.handleOpenKimiConfigDir}
-              onPickKimiPath={shell.handlePickKimiPath}
-              onSavePathAndRetry={shell.handleSavePathAndRetry}
-              onEnableContextMenu={shell.handleEnableContextMenu}
-              onDisableContextMenu={shell.handleDisableContextMenu}
-              onProbeLogin={shell.handleProbeLogin}
-              onPickWorkDir={shell.handlePickWorkDir}
-              onPickBridgeConnectorDefaultWorkDir={
-                shell.handlePickBridgeConnectorDefaultWorkDir
-              }
-              onSaveWorkDirAndRestart={shell.handleSaveWorkDirAndRestart}
-              onClearWorkDir={shell.handleClearWorkDir}
-              onBridgeSettingsChange={shell.handleBridgeSettingsChange}
-              onBridgeOnboardingDraftChange={shell.handleBridgeOnboardingDraftChange}
-              onSaveBridgeSettings={shell.handleSaveBridgeSettings}
-              onRunBridgePrimaryAction={shell.handleRunBridgePrimaryAction}
-              onStopBridge={shell.handleStopBridge}
-              onRestartBridge={shell.handleRestartBridge}
-              onImportBridgeSession={shell.handleImportBridgeSession}
-              onClearBridgeBinding={shell.handleClearBridgeBinding}
-              onResetBridgeBindingSession={shell.handleResetBridgeBindingSession}
-              onResetBridgeBindingToDefaultWorkDir={
-                shell.handleResetBridgeBindingToDefaultWorkDir
-              }
-              onResolveBridgeApproval={shell.handleResolveBridgeApproval}
-              onSkillCenterSearchChange={shell.setSkillCenterSearch}
-              onSkillCenterFilterChange={shell.setSkillCenterFilter}
-              onSkillCenterSectionChange={shell.setSkillCenterSection}
-              onSelectSkill={shell.handleSelectSkill}
-              onOpenSkillFromInsights={shell.handleOpenSkillFromInsights}
-              onInstallSkillFromGit={shell.handleInstallSkillFromGit}
-              onImportSkillFromPath={shell.handleImportSkillFromPath}
-              onSetSkillTrust={shell.handleSetSkillTrust}
-              onApplySkill={shell.handleApplySkill}
-              onRemoveSkill={shell.handleRemoveSkill}
-              onRecoverWorkspaceSkill={shell.handleRecoverWorkspaceSkill}
-              onOpenConfigCenterModal={shell.handleOpenConfigCenterModal}
-              onCloseConfigCenterModal={shell.handleCloseConfigCenterModal}
-              onConfigCenterDraftChange={shell.handleConfigCenterDraftChange}
-              onResetConfigCenterDraft={shell.handleResetConfigCenterDraft}
-              onSaveKimiCliConfigCenter={shell.handleSaveKimiCliConfigCenter}
-              onSaveMainWindowCloseBehavior={shell.handleSaveMainWindowCloseBehavior}
-              onInstallSourceChange={shell.handleInstallSourceChange}
-              onSaveInstallSettings={shell.handleSaveInstallSettings}
-              onRefreshPowerShellPreflight={shell.refreshPowerShellPreflight}
-              onInstallDependencies={shell.handleInstallDependencies}
-              onInstallKimi={shell.handleInstallKimi}
-              onUpgradeKimi={shell.handleUpgradeKimi}
-              onInstallNodejs={shell.handleInstallNodejs}
-              onOpenInstallFlow={shell.handleOpenInstallFlow}
-              onCloseInstallFlow={shell.handleCloseInstallFlow}
-              onStartInstallTask={shell.handleStartInstallTask}
-              onCancelInstallTask={shell.handleCancelInstallTask}
-              onOpenInstallCommands={shell.handleOpenInstallCommands}
-              onCloseInstallCommands={shell.handleCloseInstallCommands}
-              onCompleteOnboarding={shell.handleCompleteOnboarding}
-              onSkipOnboarding={shell.handleSkipOnboarding}
-              onOpenExternalUrl={shell.handleOpenExternalUrl}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      {shell.skillCenterGitDialogOpen ? (
-        <div className="skill-center-dialog-overlay" role="presentation">
-          <div
-            className="skill-center-dialog-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="从 Git 安装 Skill"
-          >
-            <h3>从 Git 安装 Skill</h3>
-            <p>输入仓库地址；Ref 可选，支持分支、tag 或 commit。</p>
-            <div className="skill-center-dialog-fields">
-              <label className="skill-center-dialog-field">
-                <span>仓库地址</span>
-                <Input
-                  value={shell.skillCenterGitRepoUrl}
-                  onChange={(event) => shell.setSkillCenterGitRepoUrl(event.target.value)}
-                  placeholder="https://github.com/owner/repo.git"
-                  autoFocus
-                />
-              </label>
-              <label className="skill-center-dialog-field">
-                <span>Ref（可选）</span>
-                <Input
-                  value={shell.skillCenterGitRef}
-                  onChange={(event) => shell.setSkillCenterGitRef(event.target.value)}
-                  placeholder="main / v1.0.0 / commit sha"
-                />
-              </label>
-            </div>
-            <div className="skill-center-dialog-actions">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={shell.handleCloseSkillCenterGitDialog}
-                disabled={shell.skillCenterBusy}
-              >
-                取消
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  void shell.handleConfirmInstallSkillFromGit();
-                }}
-                disabled={shell.skillCenterBusy}
-              >
-                从 Git 安装
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {shell.skillCenterImportDialogOpen ? (
-        <div className="skill-center-dialog-overlay" role="presentation">
-          <div
-            className="skill-center-dialog-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label="导入本地 Skill"
-          >
-            <h3>导入本地 Skill</h3>
-            <p>选择要导入的来源类型，然后继续选择目录或 ZIP 文件。</p>
-            <div className="skill-center-import-choice-grid">
-              <button
-                type="button"
-                className="skill-center-import-choice"
-                onClick={() => {
-                  void shell.handleConfirmImportSkillFromPath("directory");
-                }}
-                disabled={shell.skillCenterBusy}
-              >
-                <strong>导入目录</strong>
-                <span>选择包含 `SKILL.md` 的本地 Skill 目录。</span>
-              </button>
-              <button
-                type="button"
-                className="skill-center-import-choice"
-                onClick={() => {
-                  void shell.handleConfirmImportSkillFromPath("zip");
-                }}
-                disabled={shell.skillCenterBusy}
-              >
-                <strong>导入 ZIP</strong>
-                <span>选择本地 Skill ZIP 压缩包并导入。</span>
-              </button>
-            </div>
-            <div className="skill-center-dialog-actions">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={shell.handleCloseSkillCenterImportDialog}
-                disabled={shell.skillCenterBusy}
-              >
-                取消
-              </Button>
-            </div>
+            <ControlCenterView surface="modal" {...controlCenterProps} />
           </div>
         </div>
       ) : null}

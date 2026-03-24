@@ -486,6 +486,42 @@ pub struct BridgeConnectorSecretsInput {
     pub feishu: BridgeFeishuSecrets,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartFeishuConnectorOnboardingInput {
+    pub connector_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeishuConnectorOnboardingState {
+    Idle,
+    AwaitingScan,
+    Polling,
+    Succeeded,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeishuConnectorOnboardingSession {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: FeishuConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub scanner_open_id: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub app_id_masked: Option<String>,
+    pub last_configured_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct BridgeOnboardingFeishuInput {

@@ -7,6 +7,7 @@ mod bridge_settings_store;
 mod cli_contract;
 mod command_utils;
 mod context_menu;
+mod feishu_onboarding;
 mod install_manager;
 mod kimi_locator;
 mod log_manager;
@@ -34,16 +35,17 @@ use app_state::{unix_time_millis, AppState};
 use types::{
     AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
     BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
-    BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
-    BridgeSessionSource, BridgeSettings, BridgeStatus, ContextMenuStatus,
-    DiagnosticsInfo, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
-    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource,
-    InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, InstalledSkill,
-    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
-    PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
-    SkillApplyScope, SkillDetail, SkillProjectionRecord, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
+    BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource,
+    BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo,
+    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
+    InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
+    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
+    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
+    InstalledSkill, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
+    SkillApplyResult, SkillApplyScope, SkillDetail, SkillProjectionRecord,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
+    StartupMonitorTargetRoute, StartFeishuConnectorOnboardingInput, SubmitPrefillAck,
     WebviewRuntimeKind, WorkspaceSkillProfile, CURRENT_ONBOARDING_VERSION,
 };
 
@@ -597,6 +599,38 @@ fn save_bridge_connector_secrets(
     bridge_settings_store::save_connector_secrets(&app, &input)
         .map_err(|error| error.to_string())?;
     bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn start_feishu_connector_onboarding(
+    app: AppHandle,
+    input: StartFeishuConnectorOnboardingInput,
+) -> Result<FeishuConnectorOnboardingSession, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        feishu_onboarding::start(&app, &input).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join feishu onboarding start task: {error}"))?
+}
+
+#[tauri::command]
+async fn get_feishu_connector_onboarding_status(
+    app: AppHandle,
+    session_id: String,
+) -> Result<FeishuConnectorOnboardingSession, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        feishu_onboarding::get_status(&app, &session_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join feishu onboarding status task: {error}"))?
+}
+
+#[tauri::command]
+fn cancel_feishu_connector_onboarding(
+    app: AppHandle,
+    session_id: String,
+) -> Result<FeishuConnectorOnboardingSession, String> {
+    feishu_onboarding::cancel(&app, &session_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1241,13 +1275,16 @@ pub fn run() {
             list_bridge_approvals,
             resolve_bridge_approval,
             import_bridge_session,
-              get_bridge_log_tail,
-              get_bridge_secrets_mask_view,
-              save_bridge_connector_secrets,
-              install_skill_from_git,
-              import_skill_from_path,
-              list_installed_skills,
-              get_skill_detail,
+            get_bridge_log_tail,
+            get_bridge_secrets_mask_view,
+            save_bridge_connector_secrets,
+            start_feishu_connector_onboarding,
+            get_feishu_connector_onboarding_status,
+            cancel_feishu_connector_onboarding,
+            install_skill_from_git,
+            import_skill_from_path,
+            list_installed_skills,
+            get_skill_detail,
             set_skill_trust,
             apply_skill,
             remove_skill,

@@ -39,6 +39,7 @@ import type {
   BridgeApprovalRecord,
   BridgeConnectorConfig,
   BridgeConnectorSecretsInput,
+  FeishuConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
@@ -48,6 +49,8 @@ import type {
   BridgeSettings,
   BridgeStatus,
   ContextMenuStatus,
+  ControlCenterTaskId,
+  ControlCenterTaskPayload,
   ControlSectionId,
   DiagnosticsInfo,
   InstallFlowCatalog,
@@ -78,6 +81,7 @@ import type {
   ShellRoutePayload,
   PowerShellPreflightSummary,
   SkillCenterSectionId,
+  StartFeishuConnectorOnboardingInput,
   Theme,
   SessionSkillState,
   SkillApplyScope,
@@ -413,7 +417,6 @@ export function useShellController() {
   );
   const [configCenterSnapshot, setConfigCenterSnapshot] =
     useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
-  const [configCenterOpen, setConfigCenterOpen] = useState(false);
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
@@ -440,10 +443,8 @@ export function useShellController() {
   >("all");
   const [skillCenterSection, setSkillCenterSection] =
     useState<SkillCenterSectionId>("manage");
-  const [skillCenterGitDialogOpen, setSkillCenterGitDialogOpen] = useState(false);
   const [skillCenterGitRepoUrl, setSkillCenterGitRepoUrl] = useState("");
   const [skillCenterGitRef, setSkillCenterGitRef] = useState("");
-  const [skillCenterImportDialogOpen, setSkillCenterImportDialogOpen] = useState(false);
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [selectedSkillDetail, setSelectedSkillDetail] = useState<SkillDetail | null>(
     null,
@@ -459,6 +460,10 @@ export function useShellController() {
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
   );
+  const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
+    useState<FeishuConnectorOnboardingSession | null>(null);
+  const [feishuConnectorOnboardingBusy, setFeishuConnectorOnboardingBusy] =
+    useState(false);
   const [bridgeOnboardingDraft, setBridgeOnboardingDraft] =
     useState<BridgeOnboardingConfigInput>(() =>
       createDefaultBridgeOnboardingConfigInput(),
@@ -473,7 +478,6 @@ export function useShellController() {
   const [installAction, setInstallAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
-  const [installFlowOpen, setInstallFlowOpen] = useState(false);
   const [installFlowCatalog, setInstallFlowCatalog] =
     useState<InstallFlowCatalog | null>(null);
   const [installSessionSnapshot, setInstallSessionSnapshot] =
@@ -505,6 +509,10 @@ export function useShellController() {
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
   const [controlCenterModalOpen, setControlCenterModalOpen] = useState(false);
+  const [activeControlTask, setActiveControlTask] =
+    useState<ControlCenterTaskId | null>(null);
+  const [activeControlTaskPayload, setActiveControlTaskPayload] =
+    useState<ControlCenterTaskPayload | null>(null);
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
   const [listenersReady, setListenersReady] = useState(false);
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
@@ -755,6 +763,89 @@ export function useShellController() {
   function resetControlCenterNavigation() {
     setActiveControlSection("overview");
     setActiveRuntimePanel("paths");
+    setActiveControlTask(null);
+    setActiveControlTaskPayload(null);
+  }
+
+  function setControlCenterTask(
+    task: ControlCenterTaskId | null,
+    payload: ControlCenterTaskPayload | null = null,
+  ) {
+    setActiveControlTask(task);
+    setActiveControlTaskPayload(payload);
+  }
+
+  function closeActiveControlTask() {
+    if (activeControlTask === "config_center" && configCenterDirty) {
+      const confirmed = window.confirm("配置中心存在未保存更改，确定离开当前任务吗？");
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    if (activeControlTask === "install_flow" && installBusy) {
+      return false;
+    }
+
+    if (
+      (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
+      skillCenterBusy
+    ) {
+      return false;
+    }
+
+    setControlCenterTask(null);
+    return true;
+  }
+
+  function requestCloseControlCenter() {
+    if (activeControlTask) {
+      return closeActiveControlTask();
+    }
+
+    if (screen === "workspace") {
+      setControlCenterModalOpen(false);
+      resetControlCenterNavigation();
+      return true;
+    }
+
+    resetControlCenterNavigation();
+    window.location.hash = "/loading";
+    setRouteHash(window.location.hash);
+    return true;
+  }
+
+  function dismissControlCenter() {
+    if (activeControlTask === "config_center" && configCenterDirty) {
+      const confirmed = window.confirm("配置中心存在未保存更改，确定关闭控制中心吗？");
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    if (activeControlTask === "install_flow" && installBusy) {
+      return false;
+    }
+
+    if (
+      (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
+      skillCenterBusy
+    ) {
+      return false;
+    }
+
+    setControlCenterTask(null);
+
+    if (screen === "workspace") {
+      setControlCenterModalOpen(false);
+      resetControlCenterNavigation();
+      return true;
+    }
+
+    resetControlCenterNavigation();
+    window.location.hash = "/loading";
+    setRouteHash(window.location.hash);
+    return true;
   }
 
   function isWorkspaceReady(nextStatus: AppStatus | null | undefined) {
@@ -768,8 +859,6 @@ export function useShellController() {
   function navigateToWorkspaceAfterOnboarding() {
     setPendingWorkspaceEntryAfterOnboarding(false);
     if (controlCenterModalOpen) {
-      setConfigCenterOpen(false);
-      setInstallFlowOpen(false);
       setInstallCommandsOpen(false);
       resetControlCenterNavigation();
       setControlCenterModalOpen(false);
@@ -1195,6 +1284,72 @@ export function useShellController() {
       setActionError(String(error));
     } finally {
       setBridgeBusy(false);
+    }
+  }
+
+  async function handleStartFeishuConnectorOnboarding(connectorId: string) {
+    setFeishuConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "start_feishu_connector_onboarding",
+        {
+          input: {
+            connectorId,
+          } satisfies StartFeishuConnectorOnboardingInput,
+        },
+      );
+      setFeishuConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setFeishuConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function handleRefreshFeishuConnectorOnboardingStatus(sessionId: string) {
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "get_feishu_connector_onboarding_status",
+        { sessionId },
+      );
+      setFeishuConnectorOnboarding(data);
+      if (data.state === "succeeded") {
+        await Promise.all([
+          refreshBridgeSettings(),
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      }
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
+  }
+
+  async function handleCancelFeishuConnectorOnboarding(sessionId: string) {
+    setFeishuConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "cancel_feishu_connector_onboarding",
+        { sessionId },
+      );
+      setFeishuConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setFeishuConnectorOnboardingBusy(false);
     }
   }
 
@@ -2006,8 +2161,6 @@ export function useShellController() {
       return;
     }
     setControlCenterModalOpen(false);
-    setConfigCenterOpen(false);
-    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }, [keepControlCenterForUpgrade, screen]);
@@ -2206,19 +2359,16 @@ export function useShellController() {
   }
 
   async function handleOpenConfigCenterModal() {
+    setActionError(null);
     setConfigCenterBusy(true);
     try {
       await loadKimiCliConfigCenter();
-      setConfigCenterOpen(true);
+      setControlCenterTask("config_center");
     } catch (error) {
       setActionError(String(error));
     } finally {
       setConfigCenterBusy(false);
     }
-  }
-
-  function handleCloseConfigCenterModal() {
-    setConfigCenterOpen(false);
   }
 
   function handleConfigCenterDraftChange(next: KimiCliConfigCenterInput) {
@@ -2239,7 +2389,7 @@ export function useShellController() {
       });
       await loadKimiCliConfigCenter();
       await refreshOnboarding();
-      setConfigCenterOpen(false);
+      setControlCenterTask(null);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2437,12 +2587,103 @@ export function useShellController() {
   }
 
   async function handleSaveBridgeSettings() {
+    try {
+      await handlePersistBridgeSettings();
+    } catch {
+      return;
+    }
+  }
+
+  async function handlePersistBridgeSettings(options?: {
+    showRestartNotice?: boolean;
+  }) {
     setBridgeBusy(true);
     setActionError(null);
     try {
-      await saveBridgeSettingsInternal();
+      return await saveBridgeSettingsInternal(options);
     } catch (error) {
-      setActionError(String(error));
+      setActionError(`保存 Bridge 配置失败：${String(error)}`);
+      throw error;
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleToggleBridgeConnectorEnabled(
+    connectorId: string,
+    enabled: boolean,
+  ) {
+    setBridgeBusy(true);
+    setActionError(null);
+    const previousSettings = bridgeSettings;
+    const nextSettings = {
+      ...previousSettings,
+      connectors: previousSettings.connectors.map((connector) =>
+        connector.id === connectorId ? { ...connector, enabled } : connector,
+      ),
+    };
+    const shouldRestart =
+      bridgeStatus.state === "running" ||
+      bridgeStatus.state === "starting" ||
+      bridgeStatus.state === "degraded";
+    let saveCommitted = false;
+
+    setBridgeSettings(nextSettings);
+
+    try {
+      const saved = await invoke<BridgeSettings>("save_bridge_settings", {
+        input: nextSettings,
+      });
+      saveCommitted = true;
+      setBridgeSettings(saved);
+      setBridgeSettingsSnapshot(saved);
+
+      if (shouldRestart) {
+        const restarted = await invoke<BridgeStatus>("restart_bridge");
+        setBridgeStatus(restarted);
+      }
+
+      await Promise.all([
+        refreshBridgeStatus(),
+        refreshBridgeSessions(),
+        refreshBridgeBindings(),
+        refreshBridgeApprovals(),
+        refreshBridgeLogTail(),
+        refreshBridgeSecretsMask(),
+      ]);
+    } catch (error) {
+      if (saveCommitted) {
+        try {
+          const reverted = await invoke<BridgeSettings>("save_bridge_settings", {
+            input: previousSettings,
+          });
+          setBridgeSettings(reverted);
+          setBridgeSettingsSnapshot(reverted);
+
+          if (shouldRestart) {
+            const restarted = await invoke<BridgeStatus>("restart_bridge");
+            setBridgeStatus(restarted);
+          }
+
+          await Promise.all([
+            refreshBridgeStatus(),
+            refreshBridgeSessions(),
+            refreshBridgeBindings(),
+            refreshBridgeApprovals(),
+            refreshBridgeLogTail(),
+            refreshBridgeSecretsMask(),
+          ]);
+          setActionError(`切换机器人开关失败，已回滚：${String(error)}`);
+        } catch (rollbackError) {
+          setBridgeSettings(previousSettings);
+          setActionError(
+            `切换机器人开关失败，且回滚失败：${String(error)}；${String(rollbackError)}`,
+          );
+        }
+      } else {
+        setBridgeSettings(previousSettings);
+        setActionError(String(error));
+      }
     } finally {
       setBridgeBusy(false);
     }
@@ -2717,7 +2958,7 @@ export function useShellController() {
       if (snapshot.powershellDiagnostic) {
         setPowershellPreflight(snapshot.powershellDiagnostic);
       }
-      setInstallFlowOpen(true);
+      setControlCenterTask("install_flow");
       await refreshOnboarding();
     } catch (error) {
       setActionError(String(error));
@@ -2750,14 +2991,10 @@ export function useShellController() {
         refreshInstallSessionSnapshot(),
         refreshPowerShellPreflight(),
       ]);
-      setInstallFlowOpen(true);
+      setControlCenterTask("install_flow");
     } catch (error) {
       setActionError(String(error));
     }
-  }
-
-  function handleCloseInstallFlow() {
-    setInstallFlowOpen(false);
   }
 
   async function handleQuickInstallCore() {
@@ -2928,8 +3165,6 @@ export function useShellController() {
 
   function closeControlCenterModal() {
     setControlCenterModalOpen(false);
-    setConfigCenterOpen(false);
-    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }
@@ -2945,10 +3180,9 @@ export function useShellController() {
 
   function openSkillCenter() {
     setActionError(null);
-    setConfigCenterOpen(false);
-    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     setActiveControlSection("skill_center");
+    setControlCenterTask(null);
     if (screen === "workspace") {
       setControlCenterModalOpen(true);
       return;
@@ -2962,16 +3196,7 @@ export function useShellController() {
 
   async function handleInstallSkillFromGit() {
     setActionError(null);
-    setSkillCenterGitDialogOpen(true);
-  }
-
-  function handleCloseSkillCenterGitDialog() {
-    if (skillCenterBusy) {
-      return;
-    }
-    setSkillCenterGitDialogOpen(false);
-    setSkillCenterGitRepoUrl("");
-    setSkillCenterGitRef("");
+    setControlCenterTask("skill_git_import");
   }
 
   async function handleConfirmInstallSkillFromGit() {
@@ -2986,7 +3211,7 @@ export function useShellController() {
     try {
       const installed = await installSkillFromGit(repoUrl, gitRef || undefined);
       await refreshSkillCenterState(installed.id);
-      setSkillCenterGitDialogOpen(false);
+      setControlCenterTask(null);
       setSkillCenterGitRepoUrl("");
       setSkillCenterGitRef("");
     } catch (error) {
@@ -2998,18 +3223,11 @@ export function useShellController() {
 
   async function handleImportSkillFromPath() {
     setActionError(null);
-    setSkillCenterImportDialogOpen(true);
-  }
-
-  function handleCloseSkillCenterImportDialog() {
-    if (skillCenterBusy) {
-      return;
-    }
-    setSkillCenterImportDialogOpen(false);
+    setControlCenterTask("skill_import");
   }
 
   async function handleConfirmImportSkillFromPath(mode: "directory" | "zip") {
-    setSkillCenterImportDialogOpen(false);
+    setControlCenterTask(null);
     setActionError(null);
     try {
       const selected = await open({
@@ -3033,6 +3251,41 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
     }
+  }
+
+  async function handleOpenControlTask(
+    task: ControlCenterTaskId,
+    payload: ControlCenterTaskPayload | null = null,
+  ) {
+    switch (task) {
+      case "config_center":
+        await handleOpenConfigCenterModal();
+        return;
+      case "install_flow":
+        await handleOpenInstallFlow();
+        return;
+      case "skill_git_import":
+        await handleInstallSkillFromGit();
+        return;
+      case "skill_import":
+        await handleImportSkillFromPath();
+        return;
+      case "bridge_connector_secrets":
+      case "bridge_runtime":
+        if (!payload?.connectorId) {
+          setActionError("缺少 connector 上下文，无法打开任务面。");
+          return;
+        }
+        setActionError(null);
+        setControlCenterTask(task, payload);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function handleCloseControlTask() {
+    closeActiveControlTask();
   }
 
   async function handleSetSkillTrust(skillId: string, trusted: boolean) {
@@ -3113,7 +3366,6 @@ export function useShellController() {
 
   function openControlCenter() {
     if (screen === "workspace") {
-      setConfigCenterOpen(false);
       resetControlCenterNavigation();
       setControlCenterModalOpen(true);
       return;
@@ -3382,16 +3634,16 @@ export function useShellController() {
     bridgeLogTail,
     bridgeRecentErrors,
     bridgeSecretsMask,
+    feishuConnectorOnboarding,
+    feishuConnectorOnboardingBusy,
     installedSkills,
     skillCenterBusy,
     skillCenterSection,
     setSkillCenterSection: handleSkillCenterSectionChange,
-    skillCenterGitDialogOpen,
     skillCenterGitRepoUrl,
     setSkillCenterGitRepoUrl,
     skillCenterGitRef,
     setSkillCenterGitRef,
-    skillCenterImportDialogOpen,
     skillCenterSearch,
     setSkillCenterSearch,
     skillCenterFilter,
@@ -3407,6 +3659,9 @@ export function useShellController() {
     bridgeOnboardingDirty,
     bridgeOnboardingValidation,
     bridgeSettingsDirty,
+    bridgePersistedConnectorIds: bridgeSettingsSnapshot.connectors.map(
+      (connector) => connector.id,
+    ),
     bridgeBusy,
     mainWindowCloseBehavior,
     mainWindowCloseDecisionRequest,
@@ -3425,6 +3680,8 @@ export function useShellController() {
     activeRuntimePanel,
     setActiveRuntimePanel,
     controlCenterModalOpen,
+    activeControlTask,
+    activeControlTaskPayload,
     tauriRuntime,
     screen,
     uiBackendState,
@@ -3438,7 +3695,6 @@ export function useShellController() {
     stepCompletion,
     configCenterView,
     configCenterDraft,
-    configCenterOpen,
     configCenterBusy,
     configCenterDirty,
     installProbe,
@@ -3452,10 +3708,9 @@ export function useShellController() {
       installSessionSnapshot.status === "cancelling",
     installAction,
     installMessage,
-    installFlowOpen,
     installFlowCatalog,
     installSessionSnapshot,
-    installCommandsOpen: installFlowOpen,
+    installCommandsOpen: activeControlTask === "install_flow",
     installCommandsBusy: false,
     installCommandCatalog,
     refreshCoreState: async () => {
@@ -3485,8 +3740,8 @@ export function useShellController() {
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenKimiConfigDir,
-    handleOpenConfigCenterModal,
-    handleCloseConfigCenterModal,
+    handleOpenControlTask,
+    handleCloseControlTask,
     handleConfigCenterDraftChange,
     handleResetConfigCenterDraft,
     handleSaveKimiCliConfigCenter,
@@ -3499,9 +3754,14 @@ export function useShellController() {
     handleClearWorkDir,
     handleBridgeSettingsChange,
     handleBridgeOnboardingDraftChange,
+    handleToggleBridgeConnectorEnabled,
     handleSaveBridgeOnboarding,
     handleSaveBridgeSettings,
+    handlePersistBridgeSettings,
     handleSaveBridgeConnectorSecrets,
+    handleStartFeishuConnectorOnboarding,
+    handleRefreshFeishuConnectorOnboardingStatus,
+    handleCancelFeishuConnectorOnboarding,
     handleRunBridgePrimaryAction,
     handleStartBridge,
     handleStopBridge,
@@ -3517,22 +3777,14 @@ export function useShellController() {
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,
     handleInstallNodejs: handleInstallNodejsTask,
-    handleOpenInstallFlow,
-    handleCloseInstallFlow,
     handleStartInstallTask,
     handleCancelInstallTask,
-    handleOpenInstallCommands: handleOpenInstallFlow,
-    handleCloseInstallCommands: handleCloseInstallFlow,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,
     handleSelectSkill,
     handleOpenSkillFromInsights,
-    handleInstallSkillFromGit,
-    handleCloseSkillCenterGitDialog,
     handleConfirmInstallSkillFromGit,
-    handleImportSkillFromPath,
-    handleCloseSkillCenterImportDialog,
     handleConfirmImportSkillFromPath,
     handleSetSkillTrust,
     handleApplySkill,
@@ -3542,6 +3794,8 @@ export function useShellController() {
     handleSkipOnboarding,
     openControlCenter,
     closeControlCenterModal,
+    requestCloseControlCenter,
+    dismissControlCenter,
     openSkillCenter,
     backToStatus,
     handleStartWindowDrag,

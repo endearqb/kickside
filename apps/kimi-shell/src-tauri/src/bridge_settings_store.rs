@@ -53,23 +53,50 @@ pub fn save_connector_secrets(
         .entry(connector_id.to_string())
         .or_insert_with(BridgeConnectorSecrets::default);
 
-    entry.telegram = input.telegram.bot_token.as_ref().map(|_| BridgeTelegramSecrets {
-        bot_token: trim_optional_string(input.telegram.bot_token.clone()),
-    });
-    entry.feishu = if input.feishu.app_id.is_some()
+    if input.telegram.bot_token.is_some() {
+        let telegram = entry
+            .telegram
+            .clone()
+            .unwrap_or_else(BridgeTelegramSecrets::default);
+        entry.telegram = Some(BridgeTelegramSecrets {
+            bot_token: trim_optional_string(input.telegram.bot_token.clone())
+                .or(telegram.bot_token),
+        });
+    }
+
+    if input.feishu.app_id.is_some()
         || input.feishu.app_secret.is_some()
         || input.feishu.verification_token.is_some()
         || input.feishu.encrypt_key.is_some()
     {
-        Some(BridgeFeishuSecrets {
-            app_id: trim_optional_string(input.feishu.app_id.clone()),
-            app_secret: trim_optional_string(input.feishu.app_secret.clone()),
-            verification_token: trim_optional_string(input.feishu.verification_token.clone()),
-            encrypt_key: trim_optional_string(input.feishu.encrypt_key.clone()),
-        })
-    } else {
-        None
-    };
+        let existing = entry
+            .feishu
+            .clone()
+            .unwrap_or_else(BridgeFeishuSecrets::default);
+        entry.feishu = Some(BridgeFeishuSecrets {
+            app_id: if input.feishu.app_id.is_some() {
+                trim_optional_string(input.feishu.app_id.clone()).or(existing.app_id)
+            } else {
+                existing.app_id
+            },
+            app_secret: if input.feishu.app_secret.is_some() {
+                trim_optional_string(input.feishu.app_secret.clone()).or(existing.app_secret)
+            } else {
+                existing.app_secret
+            },
+            verification_token: if input.feishu.verification_token.is_some() {
+                trim_optional_string(input.feishu.verification_token.clone())
+                    .or(existing.verification_token)
+            } else {
+                existing.verification_token
+            },
+            encrypt_key: if input.feishu.encrypt_key.is_some() {
+                trim_optional_string(input.feishu.encrypt_key.clone()).or(existing.encrypt_key)
+            } else {
+                existing.encrypt_key
+            },
+        });
+    }
 
     secrets = normalize_bridge_secrets(secrets);
     write_json(&state.bridge_secrets_path, &secrets)?;

@@ -1,13 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Eye,
-  EyeOff,
-  Plus,
-  RotateCcw,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import type {
   ConfigCenterSectionId,
   EnvOverrideStatus,
@@ -24,18 +16,12 @@ import type {
 import { PROVIDER_TYPE_OPTIONS } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
-type ConfigCenterModalProps = {
-  open: boolean;
-  busy: boolean;
+type ConfigCenterTaskContentProps = {
   dirty: boolean;
   view: KimiCliConfigCenterView | null;
   draft: KimiCliConfigCenterInput;
   onDraftChange: (next: KimiCliConfigCenterInput) => void;
-  onClose: () => void;
-  onSave: () => Promise<void>;
-  onReset: () => void;
   onOpenConfigDir: () => Promise<void>;
 };
 
@@ -216,7 +202,7 @@ function validateTypedEntries(
   }
 }
 
-function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
+export function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
   const errors: string[] = [];
 
   const providerKeys = new Set<string>();
@@ -299,7 +285,7 @@ function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
   return errors;
 }
 
-function buildWarnings(
+export function buildWarnings(
   draft: KimiCliConfigCenterInput,
   envOverrides: EnvOverrideStatus[],
   backendWarnings: string[],
@@ -480,18 +466,13 @@ function TypedFieldEditor({
   );
 }
 
-export function ConfigCenterModal({
-  open,
-  busy,
+export function ConfigCenterTaskContent({
   dirty,
   view,
   draft,
   onDraftChange,
-  onClose,
-  onSave,
-  onReset,
   onOpenConfigDir,
-}: ConfigCenterModalProps) {
+}: ConfigCenterTaskContentProps) {
   const [activeSection, setActiveSection] = useState<ConfigCenterSectionId>("overview");
   const [sensitiveVisible, setSensitiveVisible] = useState<SensitiveMap>({});
 
@@ -510,21 +491,6 @@ export function ConfigCenterModal({
     onDraftChange(next);
   }
 
-  function requestClose() {
-    if (dirty && !window.confirm("存在未保存更改，确定关闭弹窗吗？")) {
-      return;
-    }
-    onClose();
-  }
-
-  async function handleSave() {
-    if (blockingErrors.length > 0) {
-      window.alert(`请先修复 ${blockingErrors.length} 个校验错误后再保存。`);
-      return;
-    }
-    await onSave();
-  }
-
   function toggleSensitive(key: string) {
     setSensitiveVisible((current) => ({
       ...current,
@@ -532,66 +498,8 @@ export function ConfigCenterModal({
     }));
   }
 
-  if (!open) {
-    return null;
-  }
-
   return (
-    <ControlCenterModalShell
-      open={open}
-      title="Kimi CLI 配置中心"
-      description="按结构编辑 `config.toml`，优先查看摘要，再进入具体配置块。"
-      ariaLabel="配置中心"
-      className="cc-config-modal"
-      bodyClassName="cc-config-modal-scroll"
-      onRequestClose={requestClose}
-      footer={
-        <>
-          <div className="cc-config-footer-meta">
-            <span>校验错误：{blockingErrors.length}</span>
-            <span>告警：{warnings.length}</span>
-            {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
-          </div>
-          <div className="cc-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={requestClose}
-              disabled={busy}
-            >
-              关闭
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn"
-              icon={<RotateCcw size={14} />}
-              onClick={onReset}
-              disabled={busy || !dirty}
-            >
-              重置草稿
-            </Button>
-            <Button
-              type="button"
-              className="cc-action-btn"
-              icon={<Save size={14} />}
-              onClick={() => void handleSave()}
-              disabled={busy}
-            >
-              保存配置
-            </Button>
-          </div>
-          {blockingErrors.length > 0 ? (
-            <ul className="cc-config-error-list">
-              {blockingErrors.slice(0, 8).map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      }
-    >
+    <>
       <div className="cc-config-meta">
         <p>
           配置文件：
@@ -1530,6 +1438,6 @@ export function ConfigCenterModal({
             )}
         </div>
       </div>
-    </ControlCenterModalShell>
+    </>
   );
 }

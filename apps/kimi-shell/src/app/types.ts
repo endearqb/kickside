@@ -369,6 +369,35 @@ export interface BridgeConnectorSecretsInput {
   };
 }
 
+export interface StartFeishuConnectorOnboardingInput {
+  connectorId: string;
+}
+
+export type FeishuConnectorOnboardingState =
+  | "idle"
+  | "awaiting_scan"
+  | "polling"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export interface FeishuConnectorOnboardingSession {
+  sessionId: string;
+  connectorId: string;
+  state: FeishuConnectorOnboardingState;
+  startedAt: string;
+  expiresAt?: string;
+  completedAt?: string;
+  verificationUrl?: string;
+  qrSvg?: string;
+  scannerOpenId?: string;
+  detailMessage?: string;
+  errorMessage?: string;
+  appIdMasked?: string;
+  lastConfiguredAt?: string;
+}
+
 export interface BridgeOnboardingFeishuInput {
   appId?: string;
   appSecret?: string;
@@ -901,6 +930,18 @@ export type ControlSectionId =
 export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 
 export type ControlCenterSurface = "fullscreen" | "modal";
+
+export type ControlCenterTaskId =
+  | "config_center"
+  | "install_flow"
+  | "bridge_connector_secrets"
+  | "bridge_runtime"
+  | "skill_git_import"
+  | "skill_import";
+
+export interface ControlCenterTaskPayload {
+  connectorId?: string;
+}
 
 export type ControlCenterChrome = "full";
 

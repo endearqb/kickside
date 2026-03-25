@@ -22,7 +22,7 @@ use crate::{
         BridgeChannelStatus, BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView,
         BridgeMaskedSecretValue, BridgeRuntimeState, BridgeSecretsMaskView,
         BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings, BridgeStatus,
-        BridgeTelegramSecretsMaskView,
+        BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
     },
 };
 
@@ -574,6 +574,16 @@ pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSec
                                 feishu.encrypt_key.as_deref().unwrap_or_default(),
                             )),
                         }),
+                    weixin: connector_secrets
+                        .and_then(|item| item.weixin.as_ref())
+                        .map(|weixin| BridgeWeixinSecretsMaskView {
+                            bot_token: mask_optional_secret(Some(
+                                weixin.bot_token.as_deref().unwrap_or_default(),
+                            )),
+                            base_url: weixin.base_url.clone(),
+                            account_id: weixin.account_id.clone(),
+                            owner_user_id: weixin.owner_user_id.clone(),
+                        }),
                 }
             })
             .collect(),
@@ -599,6 +609,14 @@ pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSec
             encrypt_key: mask_optional_secret(Some(
                 secrets.feishu.encrypt_key.as_deref().unwrap_or_default(),
             )),
+        },
+        weixin: BridgeWeixinSecretsMaskView {
+            bot_token: mask_optional_secret(Some(
+                secrets.weixin.bot_token.as_deref().unwrap_or_default(),
+            )),
+            base_url: secrets.weixin.base_url,
+            account_id: secrets.weixin.account_id,
+            owner_user_id: secrets.weixin.owner_user_id,
         },
     })
 }

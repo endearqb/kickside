@@ -14,7 +14,7 @@ use crate::{
         AppSettings, BridgeChannelMode, BridgeConnectorConfig, BridgeConnectorSecrets,
         BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgeOnboardingConfigInput,
         BridgePlatform, BridgeSecrets, BridgeSettings, BridgeSkillsMode, BridgeTelegramSecrets,
-        FeishuReplyRenderer, WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
+        BridgeWeixinSecrets, FeishuReplyRenderer, WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -94,6 +94,40 @@ pub fn save_connector_secrets(
                 trim_optional_string(input.feishu.encrypt_key.clone()).or(existing.encrypt_key)
             } else {
                 existing.encrypt_key
+            },
+        });
+    }
+
+    if input.weixin.bot_token.is_some()
+        || input.weixin.base_url.is_some()
+        || input.weixin.account_id.is_some()
+        || input.weixin.owner_user_id.is_some()
+    {
+        let existing = entry
+            .weixin
+            .clone()
+            .unwrap_or_else(BridgeWeixinSecrets::default);
+        entry.weixin = Some(BridgeWeixinSecrets {
+            bot_token: if input.weixin.bot_token.is_some() {
+                trim_optional_string(input.weixin.bot_token.clone()).or(existing.bot_token)
+            } else {
+                existing.bot_token
+            },
+            base_url: if input.weixin.base_url.is_some() {
+                trim_optional_string(input.weixin.base_url.clone()).or(existing.base_url)
+            } else {
+                existing.base_url
+            },
+            account_id: if input.weixin.account_id.is_some() {
+                trim_optional_string(input.weixin.account_id.clone()).or(existing.account_id)
+            } else {
+                existing.account_id
+            },
+            owner_user_id: if input.weixin.owner_user_id.is_some() {
+                trim_optional_string(input.weixin.owner_user_id.clone())
+                    .or(existing.owner_user_id)
+            } else {
+                existing.owner_user_id
             },
         });
     }
@@ -427,6 +461,7 @@ fn apply_onboarding_input(
                 .or_insert_with(|| BridgeConnectorSecrets {
                     feishu: Some(BridgeFeishuSecrets::default()),
                     telegram: None,
+                    weixin: None,
                 });
             let existing = connector_secrets
                 .feishu
@@ -506,6 +541,7 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         connectors: vec![
             default_connector(BridgePlatform::Telegram, 1),
             default_connector(BridgePlatform::Feishu, 1),
+            default_connector(BridgePlatform::Weixin, 1),
         ],
     }
 }
@@ -516,13 +552,29 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         Some(false) => FeishuReplyRenderer::Post,
         None => settings.feishu_reply_renderer,
     };
-    let connectors = normalize_connectors(
+    let mut connectors = normalize_connectors(
         settings.connectors,
         settings.default_work_dir.clone(),
         settings.reset_binding_session_on_bridge_start,
         settings.feishu_auto_approve,
         feishu_reply_renderer,
     );
+    let mut ensured = BridgeSettings {
+        enabled: settings.enabled,
+        auto_start: settings.auto_start,
+        admin_port: settings.admin_port,
+        skills_mode: BridgeSkillsMode::Disabled,
+        feishu_reply_renderer,
+        feishu_auto_approve: settings.feishu_auto_approve,
+        reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
+        feishu_reply_cards: None,
+        default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
+        work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
+        connectors: std::mem::take(&mut connectors),
+    };
+    ensure_default_feishu_connector(&mut ensured);
+    ensure_default_weixin_connector(&mut ensured);
+    connectors = ensured.connectors;
     let derived_feishu = connectors
         .iter()
         .find(|connector| connector.platform == BridgePlatform::Feishu);
@@ -544,8 +596,8 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
             .unwrap_or(settings.feishu_auto_approve),
         reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
         feishu_reply_cards: None,
-        default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
-        work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
+        default_work_dir: ensured.default_work_dir,
+        work_dir_presets: ensured.work_dir_presets,
         connectors,
     }
 }
@@ -583,6 +635,7 @@ fn normalize_connectors(
         item.mode = match platform {
             BridgePlatform::Telegram => BridgeChannelMode::Polling,
             BridgePlatform::Feishu => BridgeChannelMode::Websocket,
+            BridgePlatform::Weixin => BridgeChannelMode::Polling,
         };
         if platform == BridgePlatform::Feishu {
             item.feishu_auto_approve = Some(
@@ -610,7 +663,8 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
             continue;
         }
         let normalized = normalize_connector_secrets(connector);
-        if normalized.telegram.is_none() && normalized.feishu.is_none() {
+        if normalized.telegram.is_none() && normalized.feishu.is_none() && normalized.weixin.is_none()
+        {
             continue;
         }
         connectors.insert(normalized_id, normalized);
@@ -649,10 +703,33 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
         }
     }
 
+    let weixin_bot_token = trim_optional_string(secrets.weixin.bot_token.take());
+    let weixin_base_url = trim_optional_string(secrets.weixin.base_url.take());
+    let weixin_account_id = trim_optional_string(secrets.weixin.account_id.take());
+    let weixin_owner_user_id = trim_optional_string(secrets.weixin.owner_user_id.take());
+    if weixin_bot_token.is_some()
+        || weixin_base_url.is_some()
+        || weixin_account_id.is_some()
+        || weixin_owner_user_id.is_some()
+    {
+        let entry = connectors
+            .entry(default_connector_id(BridgePlatform::Weixin, 1))
+            .or_insert_with(BridgeConnectorSecrets::default);
+        if entry.weixin.is_none() {
+            entry.weixin = Some(BridgeWeixinSecrets {
+                bot_token: weixin_bot_token,
+                base_url: weixin_base_url,
+                account_id: weixin_account_id,
+                owner_user_id: weixin_owner_user_id,
+            });
+        }
+    }
+
     let mut normalized = BridgeSecrets {
         connectors,
         telegram: BridgeTelegramSecrets::default(),
         feishu: BridgeFeishuSecrets::default(),
+        weixin: BridgeWeixinSecrets::default(),
     };
 
     for connector in normalized.connectors.values() {
@@ -664,6 +741,11 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
         if normalized.feishu.app_id.is_none() && normalized.feishu.app_secret.is_none() {
             if let Some(feishu) = &connector.feishu {
                 normalized.feishu = feishu.clone();
+            }
+        }
+        if normalized.weixin.bot_token.is_none() {
+            if let Some(weixin) = &connector.weixin {
+                normalized.weixin = weixin.clone();
             }
         }
     }
@@ -688,6 +770,23 @@ fn normalize_connector_secrets(mut secrets: BridgeConnectorSecrets) -> BridgeCon
             && normalized.app_secret.is_none()
             && normalized.verification_token.is_none()
             && normalized.encrypt_key.is_none()
+        {
+            None
+        } else {
+            Some(normalized)
+        }
+    });
+    secrets.weixin = secrets.weixin.and_then(|weixin| {
+        let normalized = BridgeWeixinSecrets {
+            bot_token: trim_optional_string(weixin.bot_token),
+            base_url: trim_optional_string(weixin.base_url),
+            account_id: trim_optional_string(weixin.account_id),
+            owner_user_id: trim_optional_string(weixin.owner_user_id),
+        };
+        if normalized.bot_token.is_none()
+            && normalized.base_url.is_none()
+            && normalized.account_id.is_none()
+            && normalized.owner_user_id.is_none()
         {
             None
         } else {
@@ -720,6 +819,7 @@ fn default_connector_id(platform: BridgePlatform, index: usize) -> String {
     let base = match platform {
         BridgePlatform::Telegram => "telegram",
         BridgePlatform::Feishu => "feishu",
+        BridgePlatform::Weixin => "weixin",
     };
     if index <= 1 {
         format!("{base}-default")
@@ -733,6 +833,7 @@ fn default_connector_label(platform: BridgePlatform, index: usize) -> String {
     match platform {
         BridgePlatform::Telegram => format!("Telegram 机器人 {suffix}"),
         BridgePlatform::Feishu => format!("飞书机器人 {suffix}"),
+        BridgePlatform::Weixin => format!("微信机器人 {suffix}"),
     }
 }
 
@@ -744,6 +845,7 @@ fn default_connector(platform: BridgePlatform, index: usize) -> BridgeConnectorC
         mode: match platform {
             BridgePlatform::Telegram => BridgeChannelMode::Polling,
             BridgePlatform::Feishu => BridgeChannelMode::Websocket,
+            BridgePlatform::Weixin => BridgeChannelMode::Polling,
         },
         label: default_connector_label(platform, index),
         default_work_dir: None,
@@ -762,9 +864,23 @@ fn ensure_default_feishu_connector(bridge_settings: &mut BridgeSettings) {
     {
         return;
     }
+    let mut connector = default_connector(BridgePlatform::Feishu, 1);
+    connector.feishu_auto_approve = Some(bridge_settings.feishu_auto_approve);
+    connector.feishu_reply_renderer = Some(bridge_settings.feishu_reply_renderer);
+    bridge_settings.connectors.push(connector);
+}
+
+fn ensure_default_weixin_connector(bridge_settings: &mut BridgeSettings) {
+    if bridge_settings
+        .connectors
+        .iter()
+        .any(|connector| connector.platform == BridgePlatform::Weixin)
+    {
+        return;
+    }
     bridge_settings
         .connectors
-        .push(default_connector(BridgePlatform::Feishu, 1));
+        .push(default_connector(BridgePlatform::Weixin, 1));
 }
 
 fn sync_bridge_mirror(bridge_settings: &BridgeSettings, app_settings: &mut AppSettings) -> bool {
@@ -847,7 +963,7 @@ mod tests {
         assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
-        assert_eq!(bridge_settings.connectors.len(), 2);
+        assert_eq!(bridge_settings.connectors.len(), 3);
         assert!(!app_settings.bridge_enabled);
         assert!(!app_settings.bridge_auto_start);
         assert!(bridge_settings_path.exists());
@@ -989,7 +1105,7 @@ mod tests {
                 path: "D:/repo".to_string(),
             }]
         );
-        assert_eq!(bridge_settings.connectors.len(), 1);
+        assert_eq!(bridge_settings.connectors.len(), 3);
         assert!(app_settings.bridge_enabled);
         assert!(app_settings.bridge_auto_start);
         assert_eq!(app_settings.bridge_admin_port_override, Some(60_112));
@@ -1247,7 +1363,7 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert!(app_settings.bridge_auto_start);
-        assert_eq!(bridge_settings.connectors.len(), 2);
+        assert_eq!(bridge_settings.connectors.len(), 3);
         assert!(
             bridge_settings
                 .connectors
@@ -1295,6 +1411,7 @@ mod tests {
                     verification_token: Some("existing-token".to_string()),
                     encrypt_key: None,
                 },
+                weixin: Default::default(),
             },
         )
         .expect("seed secrets");
@@ -1408,6 +1525,7 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                     (
@@ -1420,11 +1538,13 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                 ]),
                 telegram: Default::default(),
                 feishu: Default::default(),
+                weixin: Default::default(),
             },
         )
         .expect("seed connector secrets");
@@ -1509,6 +1629,7 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                     (
@@ -1521,11 +1642,13 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                 ]),
                 telegram: Default::default(),
                 feishu: Default::default(),
+                weixin: Default::default(),
             },
         )
         .expect("seed connector secrets");
@@ -1606,6 +1729,7 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                     (
@@ -1618,11 +1742,13 @@ mod tests {
                                 verification_token: None,
                                 encrypt_key: None,
                             }),
+                            weixin: None,
                         },
                     ),
                 ]),
                 telegram: Default::default(),
                 feishu: Default::default(),
+                weixin: Default::default(),
             },
         )
         .expect("seed bridge secrets");
@@ -1635,8 +1761,19 @@ mod tests {
         )
         .expect("delete connector");
 
-        assert_eq!(saved.connectors.len(), 1);
-        assert_eq!(saved.connectors[0].id, "feishu-default");
+        assert_eq!(saved.connectors.len(), 2);
+        assert!(
+            saved
+                .connectors
+                .iter()
+                .any(|connector| connector.id == "feishu-default")
+        );
+        assert!(
+            saved
+                .connectors
+                .iter()
+                .any(|connector| connector.id == "weixin-default")
+        );
 
         let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
         assert!(reloaded_secrets.connectors.contains_key("feishu-default"));

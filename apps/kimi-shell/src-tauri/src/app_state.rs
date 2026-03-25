@@ -13,8 +13,9 @@ use tauri::{AppHandle, Manager};
 
 use crate::types::{
     BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
-    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
+    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase,
+    WeixinConnectorOnboardingState, WebviewRuntimeKind,
 };
 
 #[derive(Debug, Clone)]
@@ -176,10 +177,32 @@ pub struct FeishuOnboardingRuntimeState {
     pub poll_interval_secs: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct WeixinOnboardingRuntimeState {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: WeixinConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub expires_at_ms: Option<u64>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub qrcode: String,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+    pub last_configured_at: Option<String>,
+    pub api_base_url: String,
+    pub refresh_count: u32,
+}
+
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
     pub bridge_runtime: Mutex<BridgeProcessState>,
     pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
+    pub weixin_onboarding: Mutex<Option<WeixinOnboardingRuntimeState>>,
     pub bridge_host_control_port: Mutex<Option<u16>>,
     pub settings_path: PathBuf,
     pub bridge_settings_path: PathBuf,
@@ -230,6 +253,7 @@ impl AppState {
             runtime: Mutex::new(RuntimeState::default()),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
             feishu_onboarding: Mutex::new(None),
+            weixin_onboarding: Mutex::new(None),
             bridge_host_control_port: Mutex::new(None),
             settings_path: config_dir.join("settings.json"),
             bridge_settings_path: config_dir.join("bridge_settings.json"),

@@ -6,7 +6,7 @@ export type BackendState =
   | "stopping"
   | "missing_kimi";
 
-export type BridgePlatform = "telegram" | "feishu";
+export type BridgePlatform = "telegram" | "feishu" | "weixin";
 
 export type MainWindowCloseBehavior = "ask" | "exit" | "minimize_to_tray";
 
@@ -263,6 +263,27 @@ export type SkillProjectionMethod = "symlink" | "junction" | "copy";
 
 export type SkillSourceType = "git" | "local_import" | "bundled";
 
+export type SkillUpdateStatusKind =
+  | "up_to_date"
+  | "update_available"
+  | "source_missing"
+  | "refresh_available"
+  | "unsupported";
+
+export interface SkillUpdateStatusView {
+  kind: SkillUpdateStatusKind;
+  detail?: string;
+  checkedAt?: string;
+}
+
+export interface SkillManifestMetadata {
+  tags: string[];
+  filePatterns: string[];
+  workspacePatterns: string[];
+  languages: string[];
+  recommendedScopes: SkillApplyScope[];
+}
+
 export interface InstalledSkill {
   id: string;
   name: string;
@@ -280,6 +301,8 @@ export interface InstalledSkill {
   installedAt: string;
   updatedAt: string;
   hasScripts: boolean;
+  metadata: SkillManifestMetadata;
+  updateStatus: SkillUpdateStatusView;
 }
 
 export interface SkillDetail {
@@ -313,11 +336,37 @@ export interface WorkspaceSkillProfile {
 }
 
 export type SkillCenterSectionId = "manage" | "workspace_insights";
+export type SkillCenterFilter =
+  | "all"
+  | "session"
+  | "global"
+  | "pinned"
+  | "untrusted"
+  | "update_available";
 
 export interface SkillApplyResult {
   scope: SkillApplyScope;
   globalSkills: SkillProjectionRecord[];
   activeSession: SessionSkillState;
+}
+
+export interface SkillRecommendation {
+  skillId: string;
+  score: number;
+  reasons: string[];
+  matchedSignals: string[];
+  recommendedScope: SkillApplyScope;
+}
+
+export interface WorkspaceSkillRestoreResult {
+  skillId: string;
+  status:
+    | "applied"
+    | "skipped_already_applied"
+    | "skipped_untrusted"
+    | "missing_skill"
+    | "failed";
+  detail: string;
 }
 
 export interface BridgeApprovalResolveInput {
@@ -342,10 +391,18 @@ export interface BridgeFeishuSecretsMaskView {
   encryptKey: BridgeMaskedSecretValue;
 }
 
+export interface BridgeWeixinSecretsMaskView {
+  botToken: BridgeMaskedSecretValue;
+  baseUrl?: string;
+  accountId?: string;
+  ownerUserId?: string;
+}
+
 export interface BridgeSecretsMaskView {
   connectors: BridgeConnectorSecretsMaskView[];
   telegram: BridgeTelegramSecretsMaskView;
   feishu: BridgeFeishuSecretsMaskView;
+  weixin: BridgeWeixinSecretsMaskView;
 }
 
 export interface BridgeConnectorSecretsMaskView {
@@ -354,6 +411,7 @@ export interface BridgeConnectorSecretsMaskView {
   platform: BridgePlatform;
   telegram?: BridgeTelegramSecretsMaskView;
   feishu?: BridgeFeishuSecretsMaskView;
+  weixin?: BridgeWeixinSecretsMaskView;
 }
 
 export interface BridgeConnectorSecretsInput {
@@ -366,6 +424,12 @@ export interface BridgeConnectorSecretsInput {
     appSecret?: string;
     verificationToken?: string;
     encryptKey?: string;
+  };
+  weixin: {
+    botToken?: string;
+    baseUrl?: string;
+    accountId?: string;
+    ownerUserId?: string;
   };
 }
 
@@ -395,6 +459,35 @@ export interface FeishuConnectorOnboardingSession {
   detailMessage?: string;
   errorMessage?: string;
   appIdMasked?: string;
+  lastConfiguredAt?: string;
+}
+
+export interface StartWeixinConnectorOnboardingInput {
+  connectorId: string;
+}
+
+export type WeixinConnectorOnboardingState =
+  | "idle"
+  | "awaiting_scan"
+  | "polling"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export interface WeixinConnectorOnboardingSession {
+  sessionId: string;
+  connectorId: string;
+  state: WeixinConnectorOnboardingState;
+  startedAt: string;
+  expiresAt?: string;
+  completedAt?: string;
+  verificationUrl?: string;
+  qrSvg?: string;
+  detailMessage?: string;
+  errorMessage?: string;
+  accountId?: string;
+  ownerUserId?: string;
   lastConfiguredAt?: string;
 }
 

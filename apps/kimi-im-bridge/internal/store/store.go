@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 11
+const userVersion = 12
 
 type Store struct {
 	db *sql.DB
@@ -582,7 +582,7 @@ func (s *Store) ResolveBinding(ctx context.Context, key domain.BindingKey) (*dom
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT binding_id, ifnull(connector_id, ''), platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
-		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
+		        ifnull(work_dir, ''), source, ifnull(context_token, ''), ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
 		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
 		 FROM channel_bindings
@@ -616,8 +616,8 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 		ctx,
 		`INSERT INTO channel_bindings (
 			binding_id, connector_id, platform, account_id, chat_id, thread_id, kimi_session_id, work_dir, source,
-			onboarded_at, onboarding_version, last_inbound_message_id, last_outbound_message_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			context_token, onboarded_at, onboarding_version, last_inbound_message_id, last_outbound_message_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		binding.BindingID,
 		binding.Key.ConnectorID,
 		binding.Key.Platform,
@@ -627,6 +627,7 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 		binding.KimiSessionID,
 		nullIfEmpty(binding.WorkDir),
 		binding.Source,
+		nullIfEmpty(binding.ContextToken),
 		nullIfEmpty(binding.OnboardedAt),
 		nullIfEmpty(binding.OnboardingVersion),
 		nullIfEmpty(binding.LastInboundMessageID),
@@ -644,7 +645,7 @@ func (s *Store) GetBindingByID(ctx context.Context, bindingID string) (*domain.S
 	row := s.db.QueryRowContext(
 		ctx,
 		`SELECT binding_id, ifnull(connector_id, ''), platform, ifnull(account_id, ''), chat_id, ifnull(thread_id, ''), kimi_session_id,
-		        ifnull(work_dir, ''), source, ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
+		        ifnull(work_dir, ''), source, ifnull(context_token, ''), ifnull(onboarded_at, ''), ifnull(onboarding_version, ''),
 		        ifnull(last_inbound_message_id, ''), ifnull(last_outbound_message_id, ''),
 		        created_at, updated_at
 		 FROM channel_bindings
@@ -820,6 +821,29 @@ func (s *Store) UpdateBindingOnboarding(ctx context.Context, bindingID string, o
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to inspect binding onboarding rows affected for %s: %w", bindingID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("binding %s not found", bindingID)
+	}
+	return nil
+}
+
+func (s *Store) UpdateBindingContextToken(ctx context.Context, bindingID string, contextToken string) error {
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE channel_bindings
+		 SET context_token = ?, updated_at = ?
+		 WHERE binding_id = ?`,
+		nullIfEmpty(strings.TrimSpace(contextToken)),
+		nowRFC3339(),
+		bindingID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update binding context token %s: %w", bindingID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect context token rows affected for %s: %w", bindingID, err)
 	}
 	if affected == 0 {
 		return fmt.Errorf("binding %s not found", bindingID)
@@ -1682,6 +1706,7 @@ func scanBinding(scanner interface {
 		&binding.KimiSessionID,
 		&binding.WorkDir,
 		&binding.Source,
+		&binding.ContextToken,
 		&binding.OnboardedAt,
 		&binding.OnboardingVersion,
 		&binding.LastInboundMessageID,

@@ -123,6 +123,7 @@ type SessionBinding struct {
 	KimiSessionID         string     `json:"kimiSessionId"`
 	WorkDir               string     `json:"workDir,omitempty"`
 	Source                string     `json:"source"`
+	ContextToken          string     `json:"contextToken,omitempty"`
 	OnboardedAt           string     `json:"onboardedAt,omitempty"`
 	OnboardingVersion     string     `json:"onboardingVersion,omitempty"`
 	CreatedAt             string     `json:"createdAt"`

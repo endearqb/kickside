@@ -20,6 +20,7 @@ mod skill_center_store;
 mod skill_projection;
 mod tray_manager;
 mod types;
+mod weixin_onboarding;
 mod window_manager;
 mod workspace_session;
 
@@ -43,9 +44,11 @@ use types::{
     KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, MainWindowCloseBehavior,
     MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
     SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
-    SkillProjectionRecord, StartFeishuConnectorOnboardingInput, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, WorkspaceSkillProfile, CURRENT_ONBOARDING_VERSION,
+    SkillProjectionRecord, SkillRecommendation, StartFeishuConnectorOnboardingInput,
+    StartWeixinConnectorOnboardingInput, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
+    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceSkillProfile,
+    CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -640,6 +643,38 @@ fn cancel_feishu_connector_onboarding(
 }
 
 #[tauri::command]
+async fn start_weixin_connector_onboarding(
+    app: AppHandle,
+    input: StartWeixinConnectorOnboardingInput,
+) -> Result<WeixinConnectorOnboardingSession, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        weixin_onboarding::start(&app, &input).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join weixin onboarding start task: {error}"))?
+}
+
+#[tauri::command]
+async fn get_weixin_connector_onboarding_status(
+    app: AppHandle,
+    session_id: String,
+) -> Result<WeixinConnectorOnboardingSession, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        weixin_onboarding::get_status(&app, &session_id).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("failed to join weixin onboarding status task: {error}"))?
+}
+
+#[tauri::command]
+fn cancel_weixin_connector_onboarding(
+    app: AppHandle,
+    session_id: String,
+) -> Result<WeixinConnectorOnboardingSession, String> {
+    weixin_onboarding::cancel(&app, &session_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn install_skill_from_git(
     app: AppHandle,
     repo_url: String,
@@ -713,6 +748,36 @@ fn get_workspace_skill_profile(
 ) -> Result<Option<WorkspaceSkillProfile>, String> {
     skill_center::get_workspace_skill_profile(&app, workspace_key.as_deref())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_workspace_skill_pin(
+    app: AppHandle,
+    skill_id: String,
+    pinned: bool,
+    workspace_key: Option<String>,
+) -> Result<WorkspaceSkillProfile, String> {
+    skill_center::set_workspace_skill_pin(&app, &skill_id, pinned, workspace_key.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_workspace_skill_recommendations(
+    app: AppHandle,
+    workspace_key: Option<String>,
+) -> Result<Vec<SkillRecommendation>, String> {
+    skill_center::get_workspace_skill_recommendations(&app, workspace_key.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_skill(app: AppHandle, skill_id: String) -> Result<InstalledSkill, String> {
+    skill_center::update_skill(&app, &skill_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn uninstall_skill(app: AppHandle, skill_id: String) -> Result<(), String> {
+    skill_center::uninstall_skill(&app, &skill_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1284,6 +1349,9 @@ pub fn run() {
             start_feishu_connector_onboarding,
             get_feishu_connector_onboarding_status,
             cancel_feishu_connector_onboarding,
+            start_weixin_connector_onboarding,
+            get_weixin_connector_onboarding_status,
+            cancel_weixin_connector_onboarding,
             install_skill_from_git,
             import_skill_from_path,
             list_installed_skills,
@@ -1295,6 +1363,10 @@ pub fn run() {
             list_global_skills,
             list_workspace_recent_skills,
             get_workspace_skill_profile,
+            set_workspace_skill_pin,
+            get_workspace_skill_recommendations,
+            update_skill,
+            uninstall_skill,
             cleanup_session_skill_projections,
             get_diagnostics,
             open_logs_folder,

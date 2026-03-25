@@ -140,6 +140,10 @@ func (r *Router) UpdateBindingOnboarding(ctx context.Context, bindingID string, 
 	return r.store.UpdateBindingOnboarding(ctx, bindingID, onboardingVersion)
 }
 
+func (r *Router) UpdateBindingContextToken(ctx context.Context, bindingID string, contextToken string) error {
+	return r.store.UpdateBindingContextToken(ctx, bindingID, contextToken)
+}
+
 func (r *Router) MarkInboundConsumed(ctx context.Context, bindingID string, messageID string) (bool, error) {
 	if messageID == "" {
 		return false, nil

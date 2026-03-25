@@ -13,9 +13,11 @@ const DefaultAdminPort = 60110
 const (
 	PlatformTelegram = "telegram"
 	PlatformFeishu   = "feishu"
+	PlatformWeixin   = "weixin"
 
 	DefaultTelegramConnectorID = "telegram-default"
 	DefaultFeishuConnectorID   = "feishu-default"
+	DefaultWeixinConnectorID   = "weixin-default"
 
 	FeishuReplyRendererPost        = "post"
 	FeishuReplyRendererInteractive = "interactive"
@@ -57,11 +59,13 @@ type BridgeSecrets struct {
 
 	Telegram *TelegramSecrets `json:"-"`
 	Feishu   *FeishuSecrets   `json:"-"`
+	Weixin   *WeixinSecrets   `json:"-"`
 }
 
 type ConnectorSecrets struct {
 	Telegram *TelegramSecrets `json:"telegram,omitempty"`
 	Feishu   *FeishuSecrets   `json:"feishu,omitempty"`
+	Weixin   *WeixinSecrets   `json:"weixin,omitempty"`
 }
 
 type TelegramSecrets struct {
@@ -73,6 +77,13 @@ type FeishuSecrets struct {
 	AppSecret         string `json:"appSecret"`
 	VerificationToken string `json:"verificationToken"`
 	EncryptKey        string `json:"encryptKey"`
+}
+
+type WeixinSecrets struct {
+	BotToken    string `json:"botToken"`
+	BaseURL     string `json:"baseUrl"`
+	AccountID   string `json:"accountId"`
+	OwnerUserID string `json:"ownerUserId"`
 }
 
 type legacySettingsFile struct {
@@ -100,6 +111,7 @@ type legacySecretsFile struct {
 	Connectors map[string]ConnectorSecrets `json:"connectors"`
 	Telegram   *TelegramSecrets            `json:"telegram,omitempty"`
 	Feishu     *FeishuSecrets              `json:"feishu,omitempty"`
+	Weixin     *WeixinSecrets              `json:"weixin,omitempty"`
 }
 
 func DefaultSettings() BridgeSettings {
@@ -246,6 +258,15 @@ func normalizeSecrets(payload legacySecretsFile) BridgeSecrets {
 			Feishu: payload.Feishu,
 		})
 	}
+	if payload.Weixin != nil &&
+		(strings.TrimSpace(payload.Weixin.BotToken) != "" ||
+			strings.TrimSpace(payload.Weixin.BaseURL) != "" ||
+			strings.TrimSpace(payload.Weixin.AccountID) != "" ||
+			strings.TrimSpace(payload.Weixin.OwnerUserID) != "") {
+		connectors[DefaultWeixinConnectorID] = normalizeConnectorSecrets(ConnectorSecrets{
+			Weixin: payload.Weixin,
+		})
+	}
 
 	if len(connectors) == 0 {
 		return DefaultSecrets()
@@ -335,11 +356,22 @@ func normalizeConnectorSecrets(value ConnectorSecrets) ConnectorSecrets {
 			normalized.Feishu = &secret
 		}
 	}
+	if value.Weixin != nil {
+		secret := WeixinSecrets{
+			BotToken:    strings.TrimSpace(value.Weixin.BotToken),
+			BaseURL:     strings.TrimSpace(value.Weixin.BaseURL),
+			AccountID:   strings.TrimSpace(value.Weixin.AccountID),
+			OwnerUserID: strings.TrimSpace(value.Weixin.OwnerUserID),
+		}
+		if secret.BotToken != "" || secret.BaseURL != "" || secret.AccountID != "" || secret.OwnerUserID != "" {
+			normalized.Weixin = &secret
+		}
+	}
 	return normalized
 }
 
 func hasConnectorSecrets(value ConnectorSecrets) bool {
-	return value.Telegram != nil || value.Feishu != nil
+	return value.Telegram != nil || value.Feishu != nil || value.Weixin != nil
 }
 
 func migrateLegacyChannels(
@@ -435,6 +467,8 @@ func normalizePlatform(platform string) string {
 		return PlatformTelegram
 	case PlatformFeishu:
 		return PlatformFeishu
+	case PlatformWeixin:
+		return PlatformWeixin
 	default:
 		return ""
 	}
@@ -452,7 +486,7 @@ func defaultConnectorMode(platform string) string {
 	switch platform {
 	case PlatformFeishu:
 		return "websocket"
-	case PlatformTelegram:
+	case PlatformTelegram, PlatformWeixin:
 		return "polling"
 	default:
 		return "polling"
@@ -465,6 +499,8 @@ func defaultConnectorID(platform string) string {
 		return DefaultFeishuConnectorID
 	case PlatformTelegram:
 		return DefaultTelegramConnectorID
+	case PlatformWeixin:
+		return DefaultWeixinConnectorID
 	default:
 		return fmt.Sprintf("%s-default", platform)
 	}
@@ -483,6 +519,8 @@ func defaultConnectorLabel(platform string) string {
 		return "Feishu"
 	case PlatformTelegram:
 		return "Telegram"
+	case PlatformWeixin:
+		return "Weixin"
 	default:
 		return strings.Title(platform)
 	}
@@ -501,6 +539,9 @@ func defaultFeishuReplyRenderer() string {
 }
 
 func platformForConnectorSecrets(connectorID string, value ConnectorSecrets) string {
+	if value.Weixin != nil {
+		return PlatformWeixin
+	}
 	if value.Feishu != nil {
 		return PlatformFeishu
 	}
@@ -512,6 +553,8 @@ func platformForConnectorSecrets(connectorID string, value ConnectorSecrets) str
 		return PlatformFeishu
 	case DefaultTelegramConnectorID:
 		return PlatformTelegram
+	case DefaultWeixinConnectorID:
+		return PlatformWeixin
 	default:
 		return ""
 	}
@@ -547,6 +590,11 @@ func populateLegacySecretsView(secrets BridgeSecrets) BridgeSecrets {
 			if secrets.Feishu == nil && connector.Feishu != nil {
 				copy := *connector.Feishu
 				secrets.Feishu = &copy
+			}
+		case PlatformWeixin:
+			if secrets.Weixin == nil && connector.Weixin != nil {
+				copy := *connector.Weixin
+				secrets.Weixin = &copy
 			}
 		}
 	}

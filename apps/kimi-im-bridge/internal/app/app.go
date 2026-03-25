@@ -22,6 +22,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/logging"
 	feishuplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/feishu"
 	telegramplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/telegram"
+	weixinplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/weixin"
 	kimiprovider "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/providers/kimi"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
@@ -603,6 +604,22 @@ func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, 
 			Store:         s.store,
 			Logger:        s.logger,
 		}), nil
+	case "weixin":
+		return weixinplatform.NewService(weixinplatform.Options{
+			Config: weixinplatform.Config{
+				ConnectorID:    channel.ID,
+				ConnectorLabel: channel.Label,
+				BotToken:       secretWeixinBotToken(s.secrets, channel.ID),
+				BaseURL:        secretWeixinBaseURL(s.secrets, channel.ID),
+				AccountID:      secretWeixinAccountID(s.secrets, channel.ID),
+				OwnerUserID:    secretWeixinOwnerUserID(s.secrets, channel.ID),
+				DefaultWorkDir: s.settings.DefaultWorkDir,
+			},
+			BindingRouter: s.bindings,
+			Orchestrator:  s.orchestrator,
+			Store:         s.store,
+			Logger:        s.logger,
+		}), nil
 	default:
 		if err := s.store.UpdateChannelState(
 			context.Background(),
@@ -655,6 +672,38 @@ func secretFeishuEncryptKey(secrets config.BridgeSecrets, connectorID string) st
 		return ""
 	}
 	return strings.TrimSpace(connector.Feishu.EncryptKey)
+}
+
+func secretWeixinBotToken(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.BotToken)
+}
+
+func secretWeixinBaseURL(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.BaseURL)
+}
+
+func secretWeixinAccountID(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.AccountID)
+}
+
+func secretWeixinOwnerUserID(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.OwnerUserID)
 }
 
 func (s *Service) decorateBindingRecords(items []domain.BindingRecord) []domain.BindingRecord {

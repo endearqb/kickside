@@ -40,6 +40,7 @@ import type {
   BridgeConnectorConfig,
   BridgeConnectorSecretsInput,
   FeishuConnectorOnboardingSession,
+  WeixinConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
@@ -82,12 +83,15 @@ import type {
   PowerShellPreflightSummary,
   SkillCenterSectionId,
   StartFeishuConnectorOnboardingInput,
+  StartWeixinConnectorOnboardingInput,
   Theme,
   SessionSkillState,
   SkillApplyScope,
   SkillDetail,
   SkillProjectionRecord,
+  SkillRecommendation,
   WorkspaceSkillProfile,
+  WorkspaceSkillRestoreResult,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
   WorkspaceLayoutMode,
@@ -99,6 +103,7 @@ import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 import {
   applySkill,
   getWorkspaceSkillProfile,
+  getWorkspaceSkillRecommendations,
   getSkillDetail,
   importSkillFromPath,
   installSkillFromGit,
@@ -106,7 +111,10 @@ import {
   listGlobalSkills,
   listInstalledSkills,
   removeSkill,
+  setWorkspaceSkillPin,
   setSkillTrust,
+  uninstallSkill,
+  updateSkill,
 } from "@/services/skillCenterService";
 
 const POLL_MS = 1000;
@@ -136,19 +144,22 @@ type BootHint = Pick<
 >;
 
 function createDefaultBridgeConnector(
-  platform: "telegram" | "feishu",
+  platform: "telegram" | "feishu" | "weixin",
   index = 1,
 ): BridgeConnectorConfig {
-  const base = platform === "telegram" ? "telegram" : "feishu";
+  const base =
+    platform === "telegram" ? "telegram" : platform === "feishu" ? "feishu" : "weixin";
   const label =
     platform === "telegram"
       ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
-      : `飞书机器人 ${String(index).padStart(2, "0")}`;
+      : platform === "feishu"
+        ? `飞书机器人 ${String(index).padStart(2, "0")}`
+        : `微信机器人 ${String(index).padStart(2, "0")}`;
   return {
     id: index <= 1 ? `${base}-default` : `${base}-${index}`,
     platform,
     enabled: false,
-    mode: platform === "telegram" ? "polling" : "websocket",
+    mode: platform === "feishu" ? "websocket" : "polling",
     label,
     defaultWorkDir: undefined,
     resetBindingSessionOnStart: true,
@@ -159,7 +170,7 @@ function createDefaultBridgeConnector(
 
 function getBridgePlatformConnectors(
   settings: BridgeSettings,
-  platform: "telegram" | "feishu",
+  platform: "telegram" | "feishu" | "weixin",
 ): BridgeConnectorConfig[] {
   return settings.connectors.filter((connector) => connector.platform === platform);
 }
@@ -250,6 +261,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     connectors: [
       createDefaultBridgeConnector("telegram"),
       createDefaultBridgeConnector("feishu"),
+      createDefaultBridgeConnector("weixin"),
     ],
   };
 }
@@ -324,12 +336,17 @@ function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
         configured: false,
       },
     },
+    weixin: {
+      botToken: {
+        configured: false,
+      },
+    },
   };
 }
 
 function getBridgeChannelEnabled(
   settings: BridgeSettings,
-  platform: "telegram" | "feishu",
+  platform: "telegram" | "feishu" | "weixin",
 ): boolean {
   return getBridgePlatformConnectors(settings, platform).some((connector) => connector.enabled);
 }
@@ -449,7 +466,7 @@ export function useShellController() {
   const [skillCenterBusy, setSkillCenterBusy] = useState(false);
   const [skillCenterSearch, setSkillCenterSearch] = useState("");
   const [skillCenterFilter, setSkillCenterFilter] = useState<
-    "all" | "session" | "global" | "untrusted"
+    "all" | "session" | "global" | "pinned" | "untrusted" | "update_available"
   >("all");
   const [skillCenterSection, setSkillCenterSection] =
     useState<SkillCenterSectionId>("manage");
@@ -467,12 +484,23 @@ export function useShellController() {
   const [workspaceSkillProfile, setWorkspaceSkillProfile] =
     useState<WorkspaceSkillProfile | null>(() => createEmptyWorkspaceSkillProfile());
   const [workspaceRecentSkillIds, setWorkspaceRecentSkillIds] = useState<string[]>([]);
+  const [workspaceSkillRecommendations, setWorkspaceSkillRecommendations] = useState<
+    SkillRecommendation[]
+  >([]);
+  const [workspaceSkillRestoreResults, setWorkspaceSkillRestoreResults] = useState<
+    WorkspaceSkillRestoreResult[]
+  >([]);
+  const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
   );
   const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
     useState<FeishuConnectorOnboardingSession | null>(null);
   const [feishuConnectorOnboardingBusy, setFeishuConnectorOnboardingBusy] =
+    useState(false);
+  const [weixinConnectorOnboarding, setWeixinConnectorOnboarding] =
+    useState<WeixinConnectorOnboardingSession | null>(null);
+  const [weixinConnectorOnboardingBusy, setWeixinConnectorOnboardingBusy] =
     useState(false);
   const [bridgeOnboardingDraft, setBridgeOnboardingDraft] =
     useState<BridgeOnboardingConfigInput>(() =>
@@ -1274,6 +1302,18 @@ export function useShellController() {
     }
   }
 
+  async function refreshWorkspaceSkillRecommendationsState(workspaceKey?: string) {
+    try {
+      const recommendations = await getWorkspaceSkillRecommendations(workspaceKey);
+      setWorkspaceSkillRecommendations(recommendations);
+      return recommendations;
+    } catch (error) {
+      setActionError(String(error));
+      setWorkspaceSkillRecommendations([]);
+      return [];
+    }
+  }
+
   async function handleSaveBridgeConnectorSecrets(input: BridgeConnectorSecretsInput) {
     setBridgeBusy(true);
     setActionError(null);
@@ -1355,6 +1395,72 @@ export function useShellController() {
     }
   }
 
+  async function handleStartWeixinConnectorOnboarding(connectorId: string) {
+    setWeixinConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "start_weixin_connector_onboarding",
+        {
+          input: {
+            connectorId,
+          } satisfies StartWeixinConnectorOnboardingInput,
+        },
+      );
+      setWeixinConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWeixinConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function handleRefreshWeixinConnectorOnboardingStatus(sessionId: string) {
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "get_weixin_connector_onboarding_status",
+        { sessionId },
+      );
+      setWeixinConnectorOnboarding(data);
+      if (data.state === "succeeded") {
+        await Promise.all([
+          refreshBridgeSettings(),
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      }
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
+  }
+
+  async function handleCancelWeixinConnectorOnboarding(sessionId: string) {
+    setWeixinConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "cancel_weixin_connector_onboarding",
+        { sessionId },
+      );
+      setWeixinConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWeixinConnectorOnboardingBusy(false);
+    }
+  }
+
   async function refreshSkillCenterState(preferredSkillId?: string | null) {
     try {
       const [{ selectedSkillId: nextSelectedId }, globalState, sessionState] =
@@ -1366,6 +1472,7 @@ export function useShellController() {
       await Promise.all([
         refreshSelectedSkillDetail(nextSelectedId),
         refreshWorkspaceSkillProfileState(),
+        refreshWorkspaceSkillRecommendationsState(),
       ]);
       return {
         selectedSkillId: nextSelectedId,
@@ -2144,6 +2251,110 @@ export function useShellController() {
       status?.activeSessionId,
       status?.activeSessionWorkDir,
       status?.effectiveWorkDir,
+  ]);
+
+  useEffect(() => {
+    const workspaceKey =
+      status?.activeSessionWorkDir?.trim() || status?.effectiveWorkDir?.trim() || "";
+    const sessionId = status?.activeSessionId?.trim() || "";
+    const pinnedSkillIds = workspaceSkillProfile?.pinnedSkillIds ?? [];
+    const statusSignature = pinnedSkillIds
+      .map((skillId) => {
+        const installed = installedSkills.find((skill) => skill.id === skillId);
+        const applied = activeSessionSkillState.appliedSkillIds.includes(skillId);
+        return `${skillId}:${installed?.trusted ? "trusted" : "untrusted"}:${applied ? "applied" : "idle"}`;
+      })
+      .join("|");
+
+    if (!workspaceKey || !sessionId) {
+      workspaceSkillAutoRestoreKeyRef.current = null;
+      setWorkspaceSkillRestoreResults([]);
+      return;
+    }
+    if (pinnedSkillIds.length === 0) {
+      workspaceSkillAutoRestoreKeyRef.current = `${sessionId}::${workspaceKey}::empty`;
+      setWorkspaceSkillRestoreResults([]);
+      return;
+    }
+
+    const runKey = `${sessionId}::${workspaceKey}::${statusSignature}`;
+    if (workspaceSkillAutoRestoreKeyRef.current === runKey) {
+      return;
+    }
+    workspaceSkillAutoRestoreKeyRef.current = runKey;
+
+    let cancelled = false;
+    void (async () => {
+      const results: WorkspaceSkillRestoreResult[] = [];
+      let appliedCount = 0;
+      for (const skillId of pinnedSkillIds) {
+        const skill = installedSkills.find((item) => item.id === skillId);
+        if (!skill) {
+          results.push({
+            skillId,
+            status: "missing_skill",
+            detail: "已固定的 Skill 不再存在，无法自动恢复。",
+          });
+          continue;
+        }
+        if (activeSessionSkillState.appliedSkillIds.includes(skillId)) {
+          results.push({
+            skillId,
+            status: "skipped_already_applied",
+            detail: "这个 Skill 已经应用到当前工作区。",
+          });
+          continue;
+        }
+        if (!skill.trusted) {
+          results.push({
+            skillId,
+            status: "skipped_untrusted",
+            detail: "这个 Skill 尚未信任，只加入推荐，不会自动应用。",
+          });
+          continue;
+        }
+
+        try {
+          await applySkill(skillId, "session_kimi");
+          appliedCount += 1;
+          results.push({
+            skillId,
+            status: "applied",
+            detail: "已自动恢复到当前工作区。",
+          });
+        } catch (error) {
+          results.push({
+            skillId,
+            status: "failed",
+            detail: String(error),
+          });
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+      setWorkspaceSkillRestoreResults(results);
+      if (appliedCount > 0) {
+        try {
+          await refreshSkillCenterState(selectedSkillId);
+        } catch {
+          // keep per-skill restore results visible even if the follow-up refresh fails
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSessionSkillState.appliedSkillIds,
+    installedSkills,
+    selectedSkillId,
+    status?.activeSessionId,
+    status?.activeSessionWorkDir,
+    status?.effectiveWorkDir,
+    workspaceSkillProfile?.pinnedSkillIds,
   ]);
 
   useEffect(() => {
@@ -3361,6 +3572,57 @@ export function useShellController() {
     }
   }
 
+  async function handleSetWorkspaceSkillPin(skillId: string, pinned: boolean) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const profile = await setWorkspaceSkillPin(skillId, pinned);
+      setWorkspaceSkillProfile(profile);
+      setWorkspaceRecentSkillIds(profile.recentSkillIds ?? []);
+      await refreshWorkspaceSkillRecommendationsState();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleUpdateSkill(skillId: string) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const updated = await updateSkill(skillId);
+      await refreshSkillCenterState(updated.id);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleUninstallSkill(skillId: string) {
+    const target =
+      installedSkills.find((skill) => skill.id === skillId) ?? selectedSkillDetail?.skill;
+    const label = target?.name || "这个 Skill";
+    const confirmed = window.confirm(
+      `确定卸载“${label}”吗？如果它仍应用在全局或 Session 中，系统会先阻止卸载。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await uninstallSkill(skillId);
+      await refreshSkillCenterState(selectedSkillId === skillId ? null : selectedSkillId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
   async function handleRecoverWorkspaceSkill(skillId: string) {
     setSkillCenterSection("workspace_insights");
     await handleApplySkill(skillId, "session_kimi");
@@ -3643,6 +3905,8 @@ export function useShellController() {
     bridgeSecretsMask,
     feishuConnectorOnboarding,
     feishuConnectorOnboardingBusy,
+    weixinConnectorOnboarding,
+    weixinConnectorOnboardingBusy,
     installedSkills,
     skillCenterBusy,
     skillCenterSection,
@@ -3661,6 +3925,8 @@ export function useShellController() {
     activeSessionSkillState,
     workspaceSkillProfile,
     workspaceRecentSkillIds,
+    workspaceSkillRecommendations,
+    workspaceSkillRestoreResults,
     sessionSkillCount,
     bridgeOnboardingDraft,
     bridgeOnboardingDirty,
@@ -3770,6 +4036,9 @@ export function useShellController() {
     handleStartFeishuConnectorOnboarding,
     handleRefreshFeishuConnectorOnboardingStatus,
     handleCancelFeishuConnectorOnboarding,
+    handleStartWeixinConnectorOnboarding,
+    handleRefreshWeixinConnectorOnboardingStatus,
+    handleCancelWeixinConnectorOnboarding,
     handleRunBridgePrimaryAction,
     handleStartBridge,
     handleStopBridge,
@@ -3797,6 +4066,9 @@ export function useShellController() {
     handleSetSkillTrust,
     handleApplySkill,
     handleRemoveSkill,
+    handleSetWorkspaceSkillPin,
+    handleUpdateSkill,
+    handleUninstallSkill,
     handleRecoverWorkspaceSkill,
     handleCompleteOnboarding,
     handleSkipOnboarding,

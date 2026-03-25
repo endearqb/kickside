@@ -24,6 +24,7 @@ import type {
   BridgeConnectorConfig,
   BridgeConnectorSecretsInput,
   FeishuConnectorOnboardingSession,
+  WeixinConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgePlatform,
@@ -55,7 +56,9 @@ import type {
   SkillCenterSectionId,
   SkillDetail,
   SkillProjectionRecord,
+  SkillRecommendation,
   WorkspaceSkillProfile,
+  WorkspaceSkillRestoreResult,
 } from "@/app/types";
 import { formatLoginState } from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
@@ -89,6 +92,9 @@ type BridgeConnectorSecretDraft = {
   appSecret: string;
   verificationToken: string;
   encryptKey: string;
+  weixinBaseUrl: string;
+  weixinAccountId: string;
+  weixinOwnerUserId: string;
 };
 
 type BridgeDeleteConfirmState = {
@@ -127,11 +133,19 @@ type ControlCenterViewProps = {
   bridgeSecretsMask: BridgeSecretsMaskView;
   feishuConnectorOnboarding: FeishuConnectorOnboardingSession | null;
   feishuConnectorOnboardingBusy: boolean;
+  weixinConnectorOnboarding: WeixinConnectorOnboardingSession | null;
+  weixinConnectorOnboardingBusy: boolean;
   bridgeBusy: boolean;
   installedSkills: InstalledSkill[];
   skillCenterBusy: boolean;
   skillCenterSearch: string;
-  skillCenterFilter: "all" | "session" | "global" | "untrusted";
+  skillCenterFilter:
+    | "all"
+    | "session"
+    | "global"
+    | "pinned"
+    | "untrusted"
+    | "update_available";
   skillCenterSection: SkillCenterSectionId;
   skillCenterGitRepoUrl: string;
   skillCenterGitRef: string;
@@ -141,6 +155,8 @@ type ControlCenterViewProps = {
   activeSessionSkillState: SessionSkillState;
   workspaceSkillProfile: WorkspaceSkillProfile | null;
   workspaceRecentSkillIds: string[];
+  workspaceSkillRecommendations: SkillRecommendation[];
+  workspaceSkillRestoreResults: WorkspaceSkillRestoreResult[];
   kimiPathInput: string;
   workDirInput: string;
   configCenterView: KimiCliConfigCenterView | null;
@@ -179,6 +195,15 @@ type ControlCenterViewProps = {
   onCancelFeishuConnectorOnboarding: (
     sessionId: string,
   ) => Promise<FeishuConnectorOnboardingSession>;
+  onStartWeixinConnectorOnboarding: (
+    connectorId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
+  onRefreshWeixinConnectorOnboardingStatus: (
+    sessionId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
+  onCancelWeixinConnectorOnboarding: (
+    sessionId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
   onRefreshSkillCenterState: () => Promise<unknown>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
@@ -212,7 +237,15 @@ type ControlCenterViewProps = {
   onResetBridgeBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onSkillCenterSearchChange: (value: string) => void;
-  onSkillCenterFilterChange: (value: "all" | "session" | "global" | "untrusted") => void;
+  onSkillCenterFilterChange: (
+    value:
+      | "all"
+      | "session"
+      | "global"
+      | "pinned"
+      | "untrusted"
+      | "update_available",
+  ) => void;
   onSkillCenterSectionChange: (value: SkillCenterSectionId) => void;
   onSkillCenterGitRepoUrlChange: (value: string) => void;
   onSkillCenterGitRefChange: (value: string) => void;
@@ -228,6 +261,9 @@ type ControlCenterViewProps = {
   onSetSkillTrust: (skillId: string, trusted: boolean) => Promise<void>;
   onApplySkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
   onRemoveSkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
+  onSetWorkspaceSkillPin: (skillId: string, pinned: boolean) => Promise<void>;
+  onUpdateSkill: (skillId: string) => Promise<void>;
+  onUninstallSkill: (skillId: string) => Promise<void>;
   onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
   onResetConfigCenterDraft: () => void;
@@ -311,9 +347,15 @@ function hasLatinLetters(value: string): boolean {
 }
 
 function getBridgeDisplayName(settings: BridgeSettings): string {
+  const weixinEnabled = settings.connectors.some(
+    (connector) => connector.platform === "weixin" && connector.enabled,
+  );
   const feishuEnabled = settings.connectors.some(
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
+  if (weixinEnabled) {
+    return "微信";
+  }
   if (feishuEnabled) {
     return "飞书";
   }
@@ -331,24 +373,38 @@ function createEmptyBridgeConnectorSecretDraft(): BridgeConnectorSecretDraft {
     appSecret: "",
     verificationToken: "",
     encryptKey: "",
+    weixinBaseUrl: "",
+    weixinAccountId: "",
+    weixinOwnerUserId: "",
   };
 }
 
 function bridgePlatformLabel(platform: BridgePlatform): string {
-  return platform === "telegram" ? "Telegram" : "飞书";
+  if (platform === "telegram") {
+    return "Telegram";
+  }
+  if (platform === "weixin") {
+    return "微信";
+  }
+  return "飞书";
 }
 
 function defaultBridgeConnectorLabel(platform: BridgePlatform, index: number): string {
-  return platform === "telegram"
-    ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
-    : `飞书机器人 ${String(index).padStart(2, "0")}`;
+  if (platform === "telegram") {
+    return `Telegram 机器人 ${String(index).padStart(2, "0")}`;
+  }
+  if (platform === "weixin") {
+    return `微信机器人 ${String(index).padStart(2, "0")}`;
+  }
+  return `飞书机器人 ${String(index).padStart(2, "0")}`;
 }
 
 function generateUniqueBridgeConnectorId(
   platform: BridgePlatform,
   existingIds: Set<string>,
 ): string {
-  const idBase = platform === "telegram" ? "telegram" : "feishu";
+  const idBase =
+    platform === "telegram" ? "telegram" : platform === "weixin" ? "weixin" : "feishu";
 
   while (true) {
     const randomPart =
@@ -452,6 +508,50 @@ function formatFeishuOnboardingTone(
   }
 }
 
+function isWeixinOnboardingActive(
+  session: WeixinConnectorOnboardingSession | null,
+): boolean {
+  return session?.state === "awaiting_scan" || session?.state === "polling";
+}
+
+function formatWeixinOnboardingStateLabel(
+  state: WeixinConnectorOnboardingSession["state"],
+): string {
+  switch (state) {
+    case "awaiting_scan":
+      return "等待扫码";
+    case "polling":
+      return "等待登录";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "expired":
+      return "已过期";
+    case "cancelled":
+      return "已取消";
+    default:
+      return "未开始";
+  }
+}
+
+function formatWeixinOnboardingTone(
+  state: WeixinConnectorOnboardingSession["state"],
+): "success" | "warning" | "danger" | "neutral" {
+  switch (state) {
+    case "succeeded":
+      return "success";
+    case "awaiting_scan":
+    case "polling":
+      return "warning";
+    case "failed":
+    case "expired":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
 export function ControlCenterView({
   surface,
   status,
@@ -483,6 +583,8 @@ export function ControlCenterView({
   bridgeSecretsMask,
   feishuConnectorOnboarding,
   feishuConnectorOnboardingBusy,
+  weixinConnectorOnboarding,
+  weixinConnectorOnboardingBusy,
   bridgeBusy,
   installedSkills,
   skillCenterBusy,
@@ -497,6 +599,8 @@ export function ControlCenterView({
   activeSessionSkillState,
   workspaceSkillProfile,
   workspaceRecentSkillIds,
+  workspaceSkillRecommendations,
+  workspaceSkillRestoreResults,
   kimiPathInput,
   workDirInput,
   configCenterView,
@@ -529,6 +633,9 @@ export function ControlCenterView({
   onStartFeishuConnectorOnboarding,
   onRefreshFeishuConnectorOnboardingStatus,
   onCancelFeishuConnectorOnboarding,
+  onStartWeixinConnectorOnboarding,
+  onRefreshWeixinConnectorOnboardingStatus,
+  onCancelWeixinConnectorOnboarding,
   onRefreshSkillCenterState,
   onRefreshInstallProbe,
   onRefreshOnboarding,
@@ -573,6 +680,9 @@ export function ControlCenterView({
   onSetSkillTrust,
   onApplySkill,
   onRemoveSkill,
+  onSetWorkspaceSkillPin,
+  onUpdateSkill,
+  onUninstallSkill,
   onRecoverWorkspaceSkill,
   onConfigCenterDraftChange,
   onResetConfigCenterDraft,
@@ -672,15 +782,29 @@ export function ControlCenterView({
     feishuConnectorOnboarding?.connectorId === selectedBridgeConnector.id
       ? feishuConnectorOnboarding
       : null;
+  const selectedWeixinOnboarding =
+    selectedBridgeConnector?.platform === "weixin" &&
+    weixinConnectorOnboarding?.connectorId === selectedBridgeConnector.id
+      ? weixinConnectorOnboarding
+      : null;
   const selectedFeishuSecretsConfigured = Boolean(
     selectedBridgeConnectorSecrets?.feishu?.appId.configured &&
       selectedBridgeConnectorSecrets?.feishu?.appSecret.configured,
+  );
+  const selectedWeixinSecretsConfigured = Boolean(
+    selectedBridgeConnectorSecrets?.weixin?.botToken.configured &&
+      selectedBridgeConnectorSecrets?.weixin?.ownerUserId,
   );
   const selectedBridgeConnectorPersisted = Boolean(
     selectedBridgeConnector &&
       bridgePersistedConnectorIds.includes(selectedBridgeConnector.id),
   );
   const sortedBridgeConnectors = useMemo(() => {
+    const platformPriority: Record<BridgePlatform, number> = {
+      weixin: 0,
+      feishu: 1,
+      telegram: 2,
+    };
     return [...bridgeSettings.connectors].sort((left, right) => {
       const leftStatus =
         bridgeStatus.connectors.find((item) => item.connectorId === left.id) ?? null;
@@ -703,13 +827,13 @@ export function ControlCenterView({
         return leftHasIssue ? -1 : 1;
       }
       if (left.platform !== right.platform) {
-        return left.platform === "feishu" ? -1 : 1;
+        return platformPriority[left.platform] - platformPriority[right.platform];
       }
       return left.label.localeCompare(right.label, "zh-CN");
     });
   }, [bridgeRecentErrors, bridgeSettings.connectors, bridgeStatus.connectors]);
   const visibleBridgeConnectors = useMemo(
-    () => sortedBridgeConnectors.filter((connector) => connector.platform === "feishu"),
+    () => sortedBridgeConnectors,
     [sortedBridgeConnectors],
   );
   const mainWindowCloseBehaviorOptions: Array<{
@@ -757,6 +881,24 @@ export function ControlCenterView({
     isBridgeConnectorSecretsTask,
     onRefreshFeishuConnectorOnboardingStatus,
     selectedFeishuOnboarding,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isBridgeConnectorSecretsTask ||
+      !selectedWeixinOnboarding ||
+      !isWeixinOnboardingActive(selectedWeixinOnboarding)
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void onRefreshWeixinConnectorOnboardingStatus(selectedWeixinOnboarding.sessionId);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [
+    isBridgeConnectorSecretsTask,
+    onRefreshWeixinConnectorOnboardingStatus,
+    selectedWeixinOnboarding,
   ]);
 
   useEffect(() => {
@@ -1100,7 +1242,7 @@ export function ControlCenterView({
       id: generateUniqueBridgeConnectorId(platform, existingIds),
       platform,
       enabled: false,
-      mode: platform === "telegram" ? "polling" : "websocket",
+      mode: platform === "feishu" ? "websocket" : "polling",
       label: defaultBridgeConnectorLabel(platform, index),
       defaultWorkDir: bridgeSettings.defaultWorkDir,
       resetBindingSessionOnStart: true,
@@ -1287,6 +1429,12 @@ export function ControlCenterView({
             bridgeConnectorSecretDraft.verificationToken.trim() || undefined,
           encryptKey: bridgeConnectorSecretDraft.encryptKey.trim() || undefined,
         },
+        weixin: {
+          botToken: bridgeConnectorSecretDraft.botToken.trim() || undefined,
+          baseUrl: bridgeConnectorSecretDraft.weixinBaseUrl.trim() || undefined,
+          accountId: bridgeConnectorSecretDraft.weixinAccountId.trim() || undefined,
+          ownerUserId: bridgeConnectorSecretDraft.weixinOwnerUserId.trim() || undefined,
+        },
       });
 
       if (isBridgeRunning) {
@@ -1341,6 +1489,40 @@ export function ControlCenterView({
       return;
     }
     await onCancelFeishuConnectorOnboarding(selectedFeishuOnboarding.sessionId);
+  }
+
+  async function handleStartSelectedWeixinOnboarding() {
+    if (!selectedBridgeConnector || selectedBridgeConnector.platform !== "weixin") {
+      return;
+    }
+    setBridgeConnectorTaskError(null);
+    const connectorId = selectedBridgeConnector.id;
+    const shouldPersistBeforeOnboarding =
+      bridgeSettingsDirty || !selectedBridgeConnectorPersisted;
+
+    if (shouldPersistBeforeOnboarding) {
+      try {
+        await onPersistBridgeSettings({ showRestartNotice: false });
+      } catch (error) {
+        setBridgeConnectorTaskError(
+          `保存当前机器人配置失败，未启动微信扫码流程：${String(error)}`,
+        );
+        return;
+      }
+    }
+
+    try {
+      await onStartWeixinConnectorOnboarding(connectorId);
+    } catch (error) {
+      setBridgeConnectorTaskError(`启动微信扫码流程失败：${String(error)}`);
+    }
+  }
+
+  async function handleCancelSelectedWeixinOnboarding() {
+    if (!selectedWeixinOnboarding) {
+      return;
+    }
+    await onCancelWeixinConnectorOnboarding(selectedWeixinOnboarding.sessionId);
   }
 
   function renderContextMenuStepContent() {
@@ -2176,15 +2358,35 @@ export function ControlCenterView({
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
             primaryAction={
-              <Button
-                type="button"
-                icon={<Plus size={14} />}
-                className="cc-action-btn"
-                onClick={() => addBridgeConnector("feishu")}
-                disabled={bridgeBusy}
-              >
-                新增机器人
-              </Button>
+              <div className="cc-actions">
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("telegram")}
+                  disabled={bridgeBusy}
+                >
+                  新增 Telegram
+                </Button>
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("feishu")}
+                  disabled={bridgeBusy}
+                >
+                  新增飞书
+                </Button>
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("weixin")}
+                  disabled={bridgeBusy}
+                >
+                  新增微信
+                </Button>
+              </div>
             }
           />
           <div className="cc-card-body cc-step-body cc-step-body-single">
@@ -2201,6 +2403,11 @@ export function ControlCenterView({
                   const connectorSecretsConfigured =
                     connector.platform === "telegram"
                       ? Boolean(connectorSecrets?.telegram?.botToken.configured)
+                      : connector.platform === "weixin"
+                        ? Boolean(
+                            connectorSecrets?.weixin?.botToken.configured &&
+                              connectorSecrets?.weixin?.ownerUserId,
+                          )
                       : Boolean(
                           connectorSecrets?.feishu?.appId.configured &&
                             connectorSecrets?.feishu?.appSecret.configured,
@@ -2417,6 +2624,28 @@ export function ControlCenterView({
       <div className="skill-center-header-actions">
         <Button
           type="button"
+          icon={<Plus size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onOpenTask("skill_git_import");
+          }}
+          disabled={skillCenterBusy}
+        >
+          从 Git 安装
+        </Button>
+        <Button
+          type="button"
+          icon={<FolderOpen size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onOpenTask("skill_import");
+          }}
+          disabled={skillCenterBusy}
+        >
+          导入本地 Skill
+        </Button>
+        <Button
+          type="button"
           variant={skillCenterFilter === "global" ? "default" : "outline"}
           className="cc-action-btn skill-center-filter-btn"
           onClick={() =>
@@ -2437,25 +2666,35 @@ export function ControlCenterView({
         </Button>
         <Button
           type="button"
-          icon={<Plus size={14} />}
-          className="cc-action-btn"
-          onClick={() => {
-            void onOpenTask("skill_git_import");
-          }}
-          disabled={skillCenterBusy}
+          variant={skillCenterFilter === "pinned" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "pinned" ? "all" : "pinned")
+          }
         >
-          从 Git 安装
+          Pin
         </Button>
         <Button
           type="button"
-          icon={<FolderOpen size={14} />}
-          className="cc-action-btn"
-          onClick={() => {
-            void onOpenTask("skill_import");
-          }}
-          disabled={skillCenterBusy}
+          variant={skillCenterFilter === "untrusted" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "untrusted" ? "all" : "untrusted")
+          }
         >
-          导入本地 Skill
+          未信任
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "update_available" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(
+              skillCenterFilter === "update_available" ? "all" : "update_available",
+            )
+          }
+        >
+          可更新
         </Button>
       </div>
     );
@@ -2501,6 +2740,8 @@ export function ControlCenterView({
             activeSessionSkillState={activeSessionSkillState}
             workspaceSkillProfile={workspaceSkillProfile}
             workspaceRecentSkillIds={workspaceRecentSkillIds}
+            workspaceSkillRecommendations={workspaceSkillRecommendations}
+            workspaceSkillRestoreResults={workspaceSkillRestoreResults}
             currentWorkspaceLabel={status?.activeSessionWorkDir || effectiveWorkDir}
             onSelectSkill={(skillId) => {
               void onSelectSkill(skillId);
@@ -2517,12 +2758,22 @@ export function ControlCenterView({
             onRemoveSkill={(skillId, scope) => {
               void onRemoveSkill(skillId, scope);
             }}
+            onSetPin={(skillId, pinned) => {
+              void onSetWorkspaceSkillPin(skillId, pinned);
+            }}
+            onUpdateSkill={(skillId) => {
+              void onUpdateSkill(skillId);
+            }}
+            onUninstallSkill={(skillId) => {
+              void onUninstallSkill(skillId);
+            }}
             onRecoverWorkspaceSkill={(skillId) => {
               void onRecoverWorkspaceSkill(skillId);
             }}
             search={skillCenterSearch}
             filter={skillCenterFilter}
             onSearchChange={onSkillCenterSearchChange}
+            onFilterChange={onSkillCenterFilterChange}
           />
         </div>
       </section>
@@ -2622,7 +2873,7 @@ export function ControlCenterView({
               ? `${selectedBridgeConnector.label} 连接与凭据`
               : "连接与凭据"
           }
-          description="先确认状态，再统一维护机器人名称、连接凭据和飞书开通信息。"
+          description="先确认状态，再统一维护机器人名称、连接凭据和平台开通信息。"
           className="cc-bridge-task-surface cc-bridge-connector-modal"
           bodyClassName="cc-bridge-connector-body"
           onBack={closeBridgeConnectorSecretsTask}
@@ -2734,7 +2985,9 @@ export function ControlCenterView({
                     placeholder={
                       selectedBridgeConnector.platform === "telegram"
                         ? "Telegram 机器人名称"
-                        : "飞书机器人名称"
+                        : selectedBridgeConnector.platform === "weixin"
+                          ? "微信机器人名称"
+                          : "飞书机器人名称"
                     }
                   />
                   <small>保存后将同步到机器人卡片、运行面板和审批/绑定标题。</small>
@@ -2761,6 +3014,64 @@ export function ControlCenterView({
                       />
                       <small>留空则不覆盖现有已保存值。</small>
                     </label>
+                  ) : selectedBridgeConnector.platform === "weixin" ? (
+                    <>
+                      <label className="bridge-port-card">
+                        <span>botToken</span>
+                        <Input
+                          type="password"
+                          value={bridgeConnectorSecretDraft.botToken}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              botToken: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="输入新的微信 bot token"
+                        />
+                        <small>扫码成功后会自动回填；手动保存时可覆盖。</small>
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>baseUrl</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinBaseUrl}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinBaseUrl: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="https://ilinkai.weixin.qq.com"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>accountId</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinAccountId}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinAccountId: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="扫码后自动写入"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>ownerUserId</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinOwnerUserId}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinOwnerUserId: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="扫码后自动写入 owner 用户 ID"
+                        />
+                        <small>V1 仅允许这个 owner 的私聊消息进入 bridge。</small>
+                      </label>
+                    </>
                   ) : (
                     <>
                       <label className="bridge-port-card">
@@ -2850,6 +3161,52 @@ export function ControlCenterView({
                           : "未配置"}
                       </span>
                     </div>
+                  ) : null}
+                  {selectedBridgeConnector.platform === "weixin" &&
+                  selectedBridgeConnectorSecrets?.weixin ? (
+                    <>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>微信 botToken</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.weixin.botToken.configured
+                              ? selectedBridgeConnectorSecrets.weixin.botToken.maskedValue ?? "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.weixin.botToken.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.weixin.botToken.configured
+                            ? "已配置"
+                            : "未配置"}
+                        </span>
+                      </div>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>微信账号元数据</strong>
+                          <small>
+                            baseUrl：
+                            {selectedBridgeConnectorSecrets.weixin.baseUrl ?? "未配置"} ·
+                            accountId：
+                            {selectedBridgeConnectorSecrets.weixin.accountId ?? "未配置"} ·
+                            owner：
+                            {selectedBridgeConnectorSecrets.weixin.ownerUserId ?? "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedWeixinSecretsConfigured ? "configured" : "empty"
+                          }`}
+                        >
+                          {selectedWeixinSecretsConfigured ? "已配置" : "未配置"}
+                        </span>
+                      </div>
+                    </>
                   ) : null}
                   {selectedBridgeConnector.platform === "feishu" &&
                   selectedBridgeConnectorSecrets?.feishu ? (
@@ -3040,6 +3397,154 @@ export function ControlCenterView({
                         <span>1. 去飞书里找到这个机器人或刚创建的应用。</span>
                         <span>2. 给机器人发送第一条私聊消息，或在群里 @ 它。</span>
                         <span>3. 当前 bridge 会继续按现有 binding / session 机制自动工作。</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedBridgeConnector.platform === "weixin" ? (
+                <div className="bridge-panel-subsection">
+                  <div className="bridge-panel-subheader">
+                    <h5>微信扫码开通</h5>
+                    <span
+                      className={`cc-status-badge tone-${
+                        selectedWeixinOnboarding
+                          ? formatWeixinOnboardingTone(selectedWeixinOnboarding.state)
+                          : selectedWeixinSecretsConfigured
+                            ? "success"
+                            : "warning"
+                      }`}
+                    >
+                      {selectedWeixinOnboarding
+                        ? formatWeixinOnboardingStateLabel(selectedWeixinOnboarding.state)
+                        : selectedWeixinSecretsConfigured
+                          ? "已配置"
+                          : "待开通"}
+                    </span>
+                  </div>
+                  <div className="bridge-onboarding-card">
+                    <div className="bridge-onboarding-copy">
+                      <strong>
+                        {selectedWeixinSecretsConfigured
+                          ? "当前机器人已具备微信 owner 凭据"
+                          : "扫码绑定一个微信机器人"}
+                      </strong>
+                      <p>
+                        应用会拉起 iLink 兼容扫码流程，登录成功后自动保存 `botToken/baseUrl/accountId/ownerUserId`
+                        并重启 IM Bridge。V1 只支持 owner 私聊文本消息，不支持群聊和媒体。
+                      </p>
+                    </div>
+                    <div className="bridge-onboarding-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Sparkles size={15} />}
+                        className="cc-action-btn"
+                        onClick={() => void handleStartSelectedWeixinOnboarding()}
+                        disabled={
+                          bridgeBusy ||
+                          weixinConnectorOnboardingBusy ||
+                          (Boolean(selectedWeixinOnboarding) &&
+                            isWeixinOnboardingActive(selectedWeixinOnboarding))
+                        }
+                      >
+                        {selectedWeixinOnboarding &&
+                        isWeixinOnboardingActive(selectedWeixinOnboarding)
+                          ? "等待扫码中"
+                          : selectedWeixinOnboarding &&
+                              selectedWeixinOnboarding.state !== "succeeded"
+                            ? "重新开始"
+                            : selectedWeixinSecretsConfigured
+                              ? "重新扫码"
+                              : "开始扫码"}
+                      </Button>
+                      {selectedWeixinOnboarding?.verificationUrl ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<ChevronRight size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onOpenExternalUrl(selectedWeixinOnboarding.verificationUrl ?? "")
+                          }
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          在浏览器打开
+                        </Button>
+                      ) : null}
+                      {selectedWeixinOnboarding ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<RefreshCw size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onRefreshWeixinConnectorOnboardingStatus(
+                              selectedWeixinOnboarding.sessionId,
+                            )
+                          }
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          刷新开通状态
+                        </Button>
+                      ) : null}
+                      {selectedWeixinOnboarding &&
+                      isWeixinOnboardingActive(selectedWeixinOnboarding) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<Eraser size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void handleCancelSelectedWeixinOnboarding()}
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          取消开通
+                        </Button>
+                      ) : null}
+                    </div>
+                    {selectedWeixinOnboarding?.qrSvg ? (
+                      <div className="bridge-onboarding-qr-shell">
+                        <div
+                          className="bridge-onboarding-qr"
+                          aria-label="微信机器人开通二维码"
+                          dangerouslySetInnerHTML={{ __html: selectedWeixinOnboarding.qrSvg }}
+                        />
+                        <div className="bridge-onboarding-meta">
+                          <span>
+                            会话开始：{formatBridgeTimestamp(selectedWeixinOnboarding.startedAt)}
+                          </span>
+                          <span>
+                            截止时间：{formatBridgeTimestamp(selectedWeixinOnboarding.expiresAt)}
+                          </span>
+                          {selectedWeixinOnboarding.lastConfiguredAt ? (
+                            <span>
+                              最近配置：
+                              {formatBridgeTimestamp(selectedWeixinOnboarding.lastConfiguredAt)}
+                            </span>
+                          ) : null}
+                          {selectedWeixinOnboarding.accountId ? (
+                            <span>accountId：{selectedWeixinOnboarding.accountId}</span>
+                          ) : null}
+                          {selectedWeixinOnboarding.ownerUserId ? (
+                            <span>ownerUserId：{selectedWeixinOnboarding.ownerUserId}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {selectedWeixinOnboarding?.detailMessage ? (
+                      <p className="hint">{selectedWeixinOnboarding.detailMessage}</p>
+                    ) : null}
+                    {selectedWeixinOnboarding?.errorMessage ? (
+                      <p className="hint bridge-error-text">
+                        {selectedWeixinOnboarding.errorMessage}
+                      </p>
+                    ) : null}
+                    {selectedWeixinOnboarding?.state === "succeeded" ? (
+                      <div className="bridge-onboarding-success-list">
+                        <span>1. 用扫码成功的 owner 微信给机器人发送第一条私聊文本。</span>
+                        <span>2. bridge 会按当前 binding / session 机制建立会话并保存上下文。</span>
+                        <span>3. 其他用户、群聊和媒体消息在 V1 中会被明确忽略。</span>
                       </div>
                     ) : null}
                   </div>

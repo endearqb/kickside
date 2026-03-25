@@ -20,6 +20,8 @@
 }
 
 .prefill-titlebar {
+  height: 44px;
+  min-height: 44px;
   grid-template-columns: auto minmax(0, 1fr);
   border-bottom: none;
 }

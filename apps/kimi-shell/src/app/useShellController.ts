@@ -359,18 +359,24 @@ function createBridgeOnboardingValidation(
   secretsMask: BridgeSecretsMaskView,
   dirty: boolean,
 ): BridgeOnboardingValidation {
-  const effectiveAppId =
-    hasBridgeDraftSecretValue(draft.feishu.appId) || secretsMask.feishu.appId.configured;
-  const effectiveAppSecret =
-    hasBridgeDraftSecretValue(draft.feishu.appSecret) ||
-    secretsMask.feishu.appSecret.configured;
+  const draftHasFeishuSecrets =
+    hasBridgeDraftSecretValue(draft.feishu.appId) &&
+    hasBridgeDraftSecretValue(draft.feishu.appSecret);
+  const savedHasFeishuSecrets =
+    secretsMask.connectors.some(
+      (connector) =>
+        connector.platform === "feishu" &&
+        connector.feishu?.appId.configured &&
+        connector.feishu?.appSecret.configured,
+    ) ||
+    (secretsMask.feishu.appId.configured && secretsMask.feishu.appSecret.configured);
   const wantsEnabled = draft.enabled || draft.feishuEnabled;
 
-  if (draft.feishuEnabled && (!effectiveAppId || !effectiveAppSecret)) {
+  if (draft.feishuEnabled && !draftHasFeishuSecrets && !savedHasFeishuSecrets) {
     return {
       canSave: false,
       canStart: false,
-      message: "启用 Feishu 前需要提供 appId 和 appSecret，或保留已有已配置值。",
+      message: "启用 Feishu 前需要至少一个已配置 appId/appSecret 的飞书机器人。",
     };
   }
 
@@ -2453,20 +2459,12 @@ export function useShellController() {
         directory: true,
       });
       if (typeof selected === "string") {
-        setBridgeSettings((current) => ({
-          ...current,
-          connectors: current.connectors.map((item) =>
-            item.id === connectorId
-              ? {
-                  ...item,
-                  defaultWorkDir: selected,
-                }
-              : item,
-          ),
-        }));
+        return selected;
       }
+      return null;
     } catch (error) {
       setActionError(String(error));
+      return null;
     }
   }
 
@@ -2599,7 +2597,7 @@ export function useShellController() {
   ) {
     setBridgeBusy(true);
     setActionError(null);
-    const previousSettings = bridgeSettings;
+    const previousSettings = JSON.parse(JSON.stringify(bridgeSettings)) as BridgeSettings;
     const nextSettings = {
       ...previousSettings,
       connectors: previousSettings.connectors.map((connector) =>
@@ -2610,7 +2608,6 @@ export function useShellController() {
       bridgeStatus.state === "running" ||
       bridgeStatus.state === "starting" ||
       bridgeStatus.state === "degraded";
-    let saveCommitted = false;
 
     setBridgeSettings(nextSettings);
 
@@ -2618,56 +2615,102 @@ export function useShellController() {
       const saved = await invoke<BridgeSettings>("save_bridge_settings", {
         input: nextSettings,
       });
-      saveCommitted = true;
       setBridgeSettings(saved);
       setBridgeSettingsSnapshot(saved);
 
+      let restartError: string | null = null;
       if (shouldRestart) {
-        const restarted = await invoke<BridgeStatus>("restart_bridge");
-        setBridgeStatus(restarted);
-      }
-
-      await Promise.all([
-        refreshBridgeStatus(),
-        refreshBridgeSessions(),
-        refreshBridgeBindings(),
-        refreshBridgeApprovals(),
-        refreshBridgeLogTail(),
-        refreshBridgeSecretsMask(),
-      ]);
-    } catch (error) {
-      if (saveCommitted) {
         try {
-          const reverted = await invoke<BridgeSettings>("save_bridge_settings", {
-            input: previousSettings,
-          });
-          setBridgeSettings(reverted);
-          setBridgeSettingsSnapshot(reverted);
-
-          if (shouldRestart) {
-            const restarted = await invoke<BridgeStatus>("restart_bridge");
-            setBridgeStatus(restarted);
-          }
-
-          await Promise.all([
-            refreshBridgeStatus(),
-            refreshBridgeSessions(),
-            refreshBridgeBindings(),
-            refreshBridgeApprovals(),
-            refreshBridgeLogTail(),
-            refreshBridgeSecretsMask(),
-          ]);
-          setActionError(`切换机器人开关失败，已回滚：${String(error)}`);
-        } catch (rollbackError) {
-          setBridgeSettings(previousSettings);
-          setActionError(
-            `切换机器人开关失败，且回滚失败：${String(error)}；${String(rollbackError)}`,
-          );
+          const restarted = await invoke<BridgeStatus>("restart_bridge");
+          setBridgeStatus(restarted);
+        } catch (error) {
+          restartError = String(error);
         }
-      } else {
-        setBridgeSettings(previousSettings);
-        setActionError(String(error));
       }
+
+      let refreshError: string | null = null;
+      try {
+        await Promise.all([
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      } catch (error) {
+        refreshError = String(error);
+      }
+
+      if (restartError || refreshError) {
+        const details = [
+          restartError ? `重启 Bridge 失败：${restartError}` : null,
+          refreshError ? `刷新 Bridge 状态失败：${refreshError}` : null,
+        ]
+          .filter(Boolean)
+          .join("；");
+        setActionError(`机器人开关已保存。${details}`);
+      }
+    } catch (error) {
+      setBridgeSettings(previousSettings);
+      setActionError(`切换机器人开关失败：${String(error)}`);
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleDeleteBridgeConnector(connectorId: string) {
+    setBridgeBusy(true);
+    setActionError(null);
+    const shouldRestart =
+      bridgeStatus.state === "running" ||
+      bridgeStatus.state === "starting" ||
+      bridgeStatus.state === "degraded";
+
+    try {
+      const saved = await invoke<BridgeSettings>("delete_bridge_connector", {
+        connectorId,
+      });
+      setBridgeSettings(saved);
+      setBridgeSettingsSnapshot(saved);
+
+      let restartError: string | null = null;
+      if (shouldRestart) {
+        try {
+          const restarted = await invoke<BridgeStatus>("restart_bridge");
+          setBridgeStatus(restarted);
+        } catch (error) {
+          restartError = String(error);
+        }
+      }
+
+      let refreshError: string | null = null;
+      try {
+        await Promise.all([
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      } catch (error) {
+        refreshError = String(error);
+      }
+
+      if (restartError || refreshError) {
+        const details = [
+          restartError ? `重启 Bridge 失败：${restartError}` : null,
+          refreshError ? `刷新 Bridge 状态失败：${refreshError}` : null,
+        ]
+          .filter(Boolean)
+          .join("；");
+        setActionError(`机器人已删除。${details}`);
+      }
+      return saved;
+    } catch (error) {
+      setActionError(`删除机器人失败：${String(error)}`);
+      throw error;
     } finally {
       setBridgeBusy(false);
     }
@@ -3719,6 +3762,7 @@ export function useShellController() {
     handleBridgeSettingsChange,
     handleBridgeOnboardingDraftChange,
     handleToggleBridgeConnectorEnabled,
+    handleDeleteBridgeConnector,
     handleSaveBridgeOnboarding,
     handleSaveBridgeSettings,
     handlePersistBridgeSettings,

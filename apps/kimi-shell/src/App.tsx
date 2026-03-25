@@ -169,6 +169,7 @@ function App() {
     onBridgeSettingsChange: shell.handleBridgeSettingsChange,
     onBridgeOnboardingDraftChange: shell.handleBridgeOnboardingDraftChange,
     onToggleBridgeConnectorEnabled: shell.handleToggleBridgeConnectorEnabled,
+    onDeleteBridgeConnector: shell.handleDeleteBridgeConnector,
     onPersistBridgeSettings: shell.handlePersistBridgeSettings,
     onRunBridgePrimaryAction: shell.handleRunBridgePrimaryAction,
     onStopBridge: shell.handleStopBridge,

@@ -12,9 +12,9 @@ use crate::{
     app_state::{unix_time_millis, AppState, FeishuOnboardingRuntimeState},
     bridge_manager, bridge_settings_store,
     types::{
-        BridgeConnectorConfig, BridgePlatform, BridgeConnectorSecretsInput, BridgeFeishuSecrets,
-        BridgeTelegramSecrets, FeishuConnectorOnboardingSession,
-        FeishuConnectorOnboardingState, StartFeishuConnectorOnboardingInput,
+        BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
+        BridgeTelegramSecrets, FeishuConnectorOnboardingSession, FeishuConnectorOnboardingState,
+        StartFeishuConnectorOnboardingInput,
     },
 };
 
@@ -58,7 +58,8 @@ pub fn start(
     let verification_url = append_onboard_source(&begin.verification_uri_complete)?;
     let qr_svg = render_qr_svg(&verification_url)?;
     let started_at = now_rfc3339();
-    let expires_at_ms = now_ms.saturating_add(begin.expire_in.unwrap_or(DEFAULT_EXPIRE_IN_SECS) * 1000);
+    let expires_at_ms =
+        now_ms.saturating_add(begin.expire_in.unwrap_or(DEFAULT_EXPIRE_IN_SECS) * 1000);
     let runtime = FeishuOnboardingRuntimeState {
         session_id: format!("feishu-onboard-{}", now_ms),
         connector_id: connector.id.clone(),
@@ -70,7 +71,10 @@ pub fn start(
         verification_url: Some(verification_url),
         qr_svg: Some(qr_svg),
         scanner_open_id: None,
-        detail_message: Some(format!("请用飞书扫码完成 {} 的机器人创建。", connector.label)),
+        detail_message: Some(format!(
+            "请用飞书扫码完成 {} 的机器人创建。",
+            connector.label
+        )),
         error_message: None,
         app_id_masked: None,
         last_configured_at: None,
@@ -119,8 +123,12 @@ pub fn get_status(
 
     let mut client = FeishuRegistrationClient::new(existing.poll_base_url.as_str())?;
     let mut poll = client.poll(existing.device_code.as_str())?;
-    if matches!(poll.user_info.as_ref().and_then(|info| info.tenant_brand.as_deref()), Some("lark"))
-        && existing.poll_base_url != LARK_ACCOUNTS_BASE
+    if matches!(
+        poll.user_info
+            .as_ref()
+            .and_then(|info| info.tenant_brand.as_deref()),
+        Some("lark")
+    ) && existing.poll_base_url != LARK_ACCOUNTS_BASE
     {
         client = FeishuRegistrationClient::new(LARK_ACCOUNTS_BASE)?;
         poll = client.poll(existing.device_code.as_str())?;
@@ -131,8 +139,12 @@ pub fn get_status(
         (poll.client_id.clone(), poll.client_secret.clone())
     {
         let configured_at = now_rfc3339();
-        let restart_message =
-            persist_success(app, existing.connector_id.as_str(), client_id.as_str(), client_secret.as_str())?;
+        let restart_message = persist_success(
+            app,
+            existing.connector_id.as_str(),
+            client_id.as_str(),
+            client_secret.as_str(),
+        )?;
         let state = app.state::<AppState>();
         let mut onboarding = state
             .feishu_onboarding
@@ -239,7 +251,11 @@ fn persist_success(
     }
 }
 
-fn update_poll_base_url(app: &AppHandle, session_id: &str, next_base_url: &str) -> anyhow::Result<()> {
+fn update_poll_base_url(
+    app: &AppHandle,
+    session_id: &str,
+    next_base_url: &str,
+) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     let mut onboarding = state
         .feishu_onboarding
@@ -253,7 +269,10 @@ fn update_poll_base_url(app: &AppHandle, session_id: &str, next_base_url: &str) 
     Ok(())
 }
 
-fn get_feishu_connector(app: &AppHandle, connector_id: &str) -> anyhow::Result<BridgeConnectorConfig> {
+fn get_feishu_connector(
+    app: &AppHandle,
+    connector_id: &str,
+) -> anyhow::Result<BridgeConnectorConfig> {
     if connector_id.is_empty() {
         anyhow::bail!("connector id is required");
     }
@@ -330,7 +349,8 @@ fn apply_non_success_poll(session: &mut FeishuOnboardingRuntimeState, poll: &Pol
         None | Some("authorization_pending") => {
             session.state = FeishuConnectorOnboardingState::Polling;
             session.error_message = None;
-            session.detail_message = Some("等待扫码完成授权，创建成功后会自动保存凭据。".to_string());
+            session.detail_message =
+                Some("等待扫码完成授权，创建成功后会自动保存凭据。".to_string());
         }
         Some("slow_down") => {
             session.state = FeishuConnectorOnboardingState::Polling;
@@ -392,7 +412,14 @@ fn mask_secret(value: &str) -> String {
         );
     }
     let head: String = chars.iter().take(4).collect();
-    let tail: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{head}***{tail}")
 }
 
@@ -424,9 +451,7 @@ impl FeishuRegistrationClient {
     }
 
     fn init(&self) -> anyhow::Result<InitResponse> {
-        self.post_form(&[
-            ("action", "init".to_string()),
-        ])
+        self.post_form(&[("action", "init".to_string())])
     }
 
     fn begin(&self) -> anyhow::Result<BeginResponse> {
@@ -457,7 +482,9 @@ impl FeishuRegistrationClient {
             .send()
             .context("failed to send feishu onboarding request")?;
         let status = response.status();
-        let body = response.text().context("failed to read feishu onboarding response")?;
+        let body = response
+            .text()
+            .context("failed to read feishu onboarding response")?;
         serde_json::from_str::<T>(&body).with_context(|| {
             format!("failed to parse feishu onboarding response (status={status}): {body}")
         })

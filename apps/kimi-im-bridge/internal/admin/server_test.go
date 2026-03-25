@@ -42,13 +42,30 @@ func (f *fakeService) ClearBinding(_ context.Context, bindingID string) error {
 	return nil
 }
 
-func (f *fakeService) UpdateBinding(_ context.Context, bindingID string, input domain.BindingUpdate) error {
+func (f *fakeService) UpdateBinding(_ context.Context, bindingID string, input domain.BindingUpdate) (domain.BindingRecord, error) {
 	if input.WorkDir != nil {
 		f.updated = append(f.updated, bindingID+":"+*input.WorkDir)
-		return nil
+		return domain.BindingRecord{
+			BindingID:     bindingID,
+			Platform:      "feishu",
+			ConnectorID:   "feishu-default",
+			ChatID:        "chat-1",
+			KimiSessionID: "session-1",
+			WorkDir:       *input.WorkDir,
+			CreatedAt:     "2026-03-25T00:00:00Z",
+			UpdatedAt:     "2026-03-25T00:00:00Z",
+		}, nil
 	}
 	f.updated = append(f.updated, bindingID+":"+input.KimiSessionID)
-	return nil
+	return domain.BindingRecord{
+		BindingID:     bindingID,
+		Platform:      "feishu",
+		ConnectorID:   "feishu-default",
+		ChatID:        "chat-1",
+		KimiSessionID: input.KimiSessionID,
+		CreatedAt:     "2026-03-25T00:00:00Z",
+		UpdatedAt:     "2026-03-25T00:00:00Z",
+	}, nil
 }
 
 func (f *fakeService) ListApprovals(_ context.Context, _ string) ([]domain.ApprovalTicket, error) {
@@ -299,6 +316,13 @@ func TestPatchBindingAndImportSessionEndpoints(t *testing.T) {
 	}
 	if len(fake.updated) != 1 || fake.updated[0] != "binding-1:D:/workspace" {
 		t.Fatalf("expected binding update to be recorded, got %+v", fake.updated)
+	}
+	var updated domain.BindingRecord
+	if err := json.NewDecoder(patchResponse.Body).Decode(&updated); err != nil {
+		t.Fatalf("failed to decode patch response: %v", err)
+	}
+	if updated.BindingID != "binding-1" || updated.WorkDir != "D:/workspace" {
+		t.Fatalf("unexpected patch response payload: %+v", updated)
 	}
 
 	importRequest, _ := http.NewRequest(

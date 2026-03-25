@@ -761,6 +761,7 @@ fn rotate_binding_sessions_on_bridge_start(
     }
 
     let mut rotated = 0usize;
+    let mut failures = 0usize;
     for binding in &bindings {
         let should_rotate = settings
             .connectors
@@ -772,7 +773,7 @@ fn rotate_binding_sessions_on_bridge_start(
             continue;
         }
         let next_session_id = generate_bridge_session_id();
-        client
+        if let Err(error) = client
             .update_binding(
                 &binding.binding_id,
                 &BindingUpdateInput {
@@ -785,7 +786,18 @@ fn rotate_binding_sessions_on_bridge_start(
                     "failed to rotate bridge session on start for binding {}",
                     binding.binding_id
                 )
-            })?;
+            })
+        {
+            failures += 1;
+            log_manager::append_line(
+                app,
+                format!(
+                    "bridge session rotation skipped after error (binding_id={}, connector_id={}, error={error:#})",
+                    binding.binding_id, binding.connector_id
+                ),
+            );
+            continue;
+        }
         rotated += 1;
     }
 
@@ -794,6 +806,15 @@ fn rotate_binding_sessions_on_bridge_start(
             app,
             format!(
                 "bridge session rotation requested on start (bindings_rotated={rotated}, bindings_found={})",
+                bindings.len()
+            ),
+        );
+    }
+    if failures > 0 {
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge session rotation completed with partial failures (bindings_rotated={rotated}, failures={failures}, bindings_found={})",
                 bindings.len()
             ),
         );
@@ -1112,7 +1133,9 @@ fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
         })
         .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))?;
-    Ok(home.join(BRIDGE_SKILLS_DIR_SEGMENT).join(BRIDGE_SKILLS_SUBDIR_SEGMENT))
+    Ok(home
+        .join(BRIDGE_SKILLS_DIR_SEGMENT)
+        .join(BRIDGE_SKILLS_SUBDIR_SEGMENT))
 }
 
 fn resolve_connector_default_work_dir(
@@ -1476,7 +1499,9 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
     };
 
-    use crate::types::{BridgeChannelMode, BridgeConnectorConfig, BridgePlatform, BridgeSkillsMode};
+    use crate::types::{
+        BridgeChannelMode, BridgeConnectorConfig, BridgePlatform, BridgeSkillsMode,
+    };
 
     struct TempDirGuard {
         path: PathBuf,

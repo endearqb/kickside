@@ -16,7 +16,7 @@ type Service interface {
 	ListBindings(context.Context) ([]domain.BindingRecord, error)
 	ListSessions(context.Context) ([]domain.BridgeSession, error)
 	ClearBinding(context.Context, string) error
-	UpdateBinding(context.Context, string, domain.BindingUpdate) error
+	UpdateBinding(context.Context, string, domain.BindingUpdate) (domain.BindingRecord, error)
 	ListApprovals(context.Context, string) ([]domain.ApprovalTicket, error)
 	ResolveApproval(context.Context, string, string, string) error
 	ImportSession(context.Context, domain.SessionImportRequest) (domain.BridgeSession, error)
@@ -117,11 +117,12 @@ func NewHandler(service Service, adminToken string) http.Handler {
 				writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
 				return
 			}
-			if err := service.UpdateBinding(request.Context(), bindingID, payload); err != nil {
+			record, err := service.UpdateBinding(request.Context(), bindingID, payload)
+			if err != nil {
 				writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+			writeJSON(writer, http.StatusOK, record)
 			return
 		}
 		if err := service.ClearBinding(request.Context(), bindingID); err != nil {

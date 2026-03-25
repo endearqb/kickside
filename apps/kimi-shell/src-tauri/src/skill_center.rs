@@ -10,9 +10,7 @@ use zip::ZipArchive;
 
 use crate::{
     app_state::AppState,
-    log_manager,
-    skill_center_store,
-    skill_projection,
+    log_manager, skill_center_store, skill_projection,
     types::{
         BackendState, InstalledSkill, SessionSkillState, SkillApplyResult, SkillApplyScope,
         SkillDetail, SkillProjectionMethod, SkillProjectionRecord, SkillSourceType,
@@ -151,8 +149,8 @@ pub fn get_skill_detail(app: &AppHandle, skill_id: &str) -> anyhow::Result<Skill
     let skill = skill_center_store::find_skill(&registry, skill_id)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
-    let relative_paths =
-        skill_center_store::list_relative_paths(Path::new(&skill.local_path), 256).unwrap_or_default();
+    let relative_paths = skill_center_store::list_relative_paths(Path::new(&skill.local_path), 256)
+        .unwrap_or_default();
     let global_applied = load_global_projection_for_skill(app, &skill.id)?.is_some();
     let session_applied = current_active_session_state(app)?
         .projections
@@ -207,7 +205,11 @@ pub fn apply_skill(
         SkillApplyScope::SessionKimi => apply_skill_to_active_session(app, &skill)?,
     }
 
-    record_recent_skill(app, &skill.id, matches!(scope, SkillApplyScope::SessionKimi))?;
+    record_recent_skill(
+        app,
+        &skill.id,
+        matches!(scope, SkillApplyScope::SessionKimi),
+    )?;
     build_apply_result(app, scope)
 }
 
@@ -245,7 +247,9 @@ pub fn list_workspace_recent_skills(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(skill_center_store::normalize_workspace_key)
-        .or_else(|| effective_work_dir(app).map(|path| skill_center_store::normalize_workspace_key(&path)));
+        .or_else(|| {
+            effective_work_dir(app).map(|path| skill_center_store::normalize_workspace_key(&path))
+        });
     let Some(key) = key else {
         return Ok(Vec::new());
     };
@@ -334,8 +338,8 @@ fn install_skill_from_source(
                 .map(|value| value.to_string_lossy().to_string())
         })
         .unwrap_or_else(|| "skill".to_string());
-    let normalized_projection_name =
-        skill_center_store::normalize_projection_name(&raw_name).ok_or_else(|| {
+    let normalized_projection_name = skill_center_store::normalize_projection_name(&raw_name)
+        .ok_or_else(|| {
             anyhow::anyhow!("invalid skill name; expected lowercase letters, digits or hyphens")
         })?;
 
@@ -425,9 +429,12 @@ fn refresh_existing_bundled_skill(
 
 fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
     let bundled_dir = resolve_bundled_skills_dir(app)?;
-    for entry in fs::read_dir(&bundled_dir)
-        .with_context(|| format!("failed to read bundled skills dir: {}", bundled_dir.display()))?
-    {
+    for entry in fs::read_dir(&bundled_dir).with_context(|| {
+        format!(
+            "failed to read bundled skills dir: {}",
+            bundled_dir.display()
+        )
+    })? {
         let entry = entry.with_context(|| {
             format!(
                 "failed to read bundled skill entry under {}",
@@ -455,7 +462,10 @@ fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
         {
             log_manager::append_line(
                 app,
-                format!("bundled skill sync failed (path={}): {error:#}", path.display()),
+                format!(
+                    "bundled skill sync failed (path={}): {error:#}",
+                    path.display()
+                ),
             );
         }
     }
@@ -537,10 +547,9 @@ fn apply_skill_to_user_global(app: &AppHandle, skill: &InstalledSkill) -> anyhow
     let target_root = user_global_skills_dir()?;
     let target_path = target_root.join(&skill.projection_name);
     let mut projections = skill_center_store::load_global_projections(app)?;
-    if projections
-        .iter()
-        .any(|projection| projection.skill_id == skill.id && projection.target_path == target_path.to_string_lossy())
-    {
+    if projections.iter().any(|projection| {
+        projection.skill_id == skill.id && projection.target_path == target_path.to_string_lossy()
+    }) {
         return Ok(());
     }
     if target_path.exists() {
@@ -579,11 +588,9 @@ fn apply_skill_to_active_session(app: &AppHandle, skill: &InstalledSkill) -> any
     let mut state = skill_center_store::load_session_state(app, &session_id)?.unwrap_or_default();
     state.session_id = Some(session_id.clone());
     state.session_work_dir = Some(session_work_dir.clone());
-    if state
-        .projections
-        .iter()
-        .any(|projection| projection.skill_id == skill.id && projection.target_path == target_path.to_string_lossy())
-    {
+    if state.projections.iter().any(|projection| {
+        projection.skill_id == skill.id && projection.target_path == target_path.to_string_lossy()
+    }) {
         return Ok(());
     }
     if target_path.exists() {
@@ -673,12 +680,14 @@ fn current_active_session_state(app: &AppHandle) -> anyhow::Result<SessionSkillS
     let Some(session_id) = active_session_id(app)? else {
         return Ok(SessionSkillState::default());
     };
-    Ok(skill_center_store::load_session_state(app, &session_id)?.unwrap_or(SessionSkillState {
-        session_id: Some(session_id),
-        session_work_dir: active_session_work_dir(app)?,
-        applied_skill_ids: Vec::new(),
-        projections: Vec::new(),
-    }))
+    Ok(
+        skill_center_store::load_session_state(app, &session_id)?.unwrap_or(SessionSkillState {
+            session_id: Some(session_id),
+            session_work_dir: active_session_work_dir(app)?,
+            applied_skill_ids: Vec::new(),
+            projections: Vec::new(),
+        }),
+    )
 }
 
 fn build_apply_result(app: &AppHandle, scope: SkillApplyScope) -> anyhow::Result<SkillApplyResult> {
@@ -714,7 +723,10 @@ fn ensure_session_scope_available(app: &AppHandle) -> anyhow::Result<()> {
         .runtime
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-    if !matches!(runtime.state, BackendState::Starting | BackendState::Running) {
+    if !matches!(
+        runtime.state,
+        BackendState::Starting | BackendState::Running
+    ) {
         return Err(anyhow::anyhow!(
             "session skills require backend to be running or starting"
         ));
@@ -723,7 +735,9 @@ fn ensure_session_scope_available(app: &AppHandle) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("no active session available"));
     }
     if runtime.active_session_work_dir.is_none() {
-        return Err(anyhow::anyhow!("active session work directory is unavailable"));
+        return Err(anyhow::anyhow!(
+            "active session work directory is unavailable"
+        ));
     }
     Ok(())
 }
@@ -751,11 +765,7 @@ fn effective_work_dir(app: &AppHandle) -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
-fn record_recent_skill(
-    app: &AppHandle,
-    skill_id: &str,
-    session_scope: bool,
-) -> anyhow::Result<()> {
+fn record_recent_skill(app: &AppHandle, skill_id: &str, session_scope: bool) -> anyhow::Result<()> {
     let Some(workspace_key) =
         effective_work_dir(app).map(|value| skill_center_store::normalize_workspace_key(&value))
     else {
@@ -778,10 +788,11 @@ fn record_recent_skill(
         if session_scope {
             let mut last_session = vec![skill_id.trim().to_string()];
             last_session.extend(profile.last_session_skill_ids.clone());
-            profile.last_session_skill_ids = skill_center_store::dedupe_recent_skill_ids(&last_session)
-                .into_iter()
-                .take(12)
-                .collect();
+            profile.last_session_skill_ids =
+                skill_center_store::dedupe_recent_skill_ids(&last_session)
+                    .into_iter()
+                    .take(12)
+                    .collect();
         }
         break;
     }
@@ -820,8 +831,12 @@ fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
         .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))?;
     let target = home.join(".config").join("agents").join("skills");
-    fs::create_dir_all(&target)
-        .with_context(|| format!("failed to create user global skills dir: {}", target.display()))?;
+    fs::create_dir_all(&target).with_context(|| {
+        format!(
+            "failed to create user global skills dir: {}",
+            target.display()
+        )
+    })?;
     Ok(target)
 }
 
@@ -878,7 +893,10 @@ fn extract_zip_archive(zip_path: &Path, target_dir: &Path) -> anyhow::Result<()>
         .with_context(|| format!("failed to read zip archive: {}", zip_path.display()))?;
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).with_context(|| {
-            format!("failed to read zip archive entry #{index}: {}", zip_path.display())
+            format!(
+                "failed to read zip archive entry #{index}: {}",
+                zip_path.display()
+            )
         })?;
         let Some(relative_path) = entry.enclosed_name().map(PathBuf::from) else {
             continue;
@@ -907,12 +925,8 @@ fn extract_zip_archive(zip_path: &Path, target_dir: &Path) -> anyhow::Result<()>
                 output_path.display()
             )
         })?;
-        io::copy(&mut entry, &mut output).with_context(|| {
-            format!(
-                "failed to extract zip entry to {}",
-                output_path.display()
-            )
-        })?;
+        io::copy(&mut entry, &mut output)
+            .with_context(|| format!("failed to extract zip entry to {}", output_path.display()))?;
     }
     Ok(())
 }
@@ -947,10 +961,7 @@ mod tests {
 
         assert_eq!(profile.workspace_id, "d:\\repo");
         assert_eq!(profile.recent_skill_ids, vec!["skill-a".to_string()]);
-        assert_eq!(
-            profile.last_session_skill_ids,
-            vec!["skill-b".to_string()]
-        );
+        assert_eq!(profile.last_session_skill_ids, vec!["skill-b".to_string()]);
     }
 
     #[test]

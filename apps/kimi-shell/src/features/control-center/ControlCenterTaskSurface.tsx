@@ -12,6 +12,7 @@ type ControlCenterTaskSurfaceProps = {
   footer?: ReactNode;
   onBack: () => void;
   onClose: () => void;
+  showCloseButton?: boolean;
   children: ReactNode;
 };
 
@@ -25,6 +26,7 @@ export function ControlCenterTaskSurface({
   footer,
   onBack,
   onClose,
+  showCloseButton = true,
   children,
 }: ControlCenterTaskSurfaceProps) {
   return (
@@ -49,14 +51,16 @@ export function ControlCenterTaskSurface({
         </div>
         <div className="cc-task-surface-header-actions">
           {headerActions}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            icon={<X size={16} />}
-            onClick={onClose}
-            aria-label="关闭控制中心"
-          />
+          {showCloseButton ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              icon={<X size={16} />}
+              onClick={onClose}
+              aria-label="关闭控制中心"
+            />
+          ) : null}
         </div>
       </header>
       <div className={`cc-task-surface-body ${bodyClassName ?? ""}`.trim()}>{children}</div>

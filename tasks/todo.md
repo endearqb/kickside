@@ -277,3 +277,174 @@
 - [x] IM Bridge 进入“单页机器人工作台”后，最稳的边界是“页面只负责机器人级管理，运行排障仍留给独立高级运行面板”；否则列表页会重新膨胀回总览 + 详情的双重信息架构。
 - [x] 快速设置改成右侧详情区内联执行后，安装/升级终端必须直接绑定外层步骤详情，而不是再借一个 `install_flow` 任务页承载；只要重新引入中间任务面，外层 `升级 Kimi` CTA 和执行反馈就会再次脱节。
 
+## IM Bridge 卡片、安装页与预加载标题栏统一调整 (2026-03-25)
+
+### Plan
+
+- [x] 为 IM Bridge 机器人卡片补齐工作区目录选择 / 跟随应用默认目录 / 删除机器人动作，并接入自定义删除确认弹层。
+- [x] 统一“连接与凭据”与“高级运行面板”任务面的宽度、间距和视觉层级，使其与 IM Bridge 主页面风格一致。
+- [x] 调整安装 Kimi 详情区默认主操作布局，仅默认显示一键安装 / 升级 / 详细安装入口，并修复展开后的滚动链。
+- [x] 对齐预加载页标题栏高度与主窗口标题栏，并运行前端构建验证。
+
+### Validation
+
+- [ ] 机器人卡片可显示当前工作区目录，选择新目录后会即时保存；Bridge 运行中自动重启并刷新状态。
+- [ ] 已设置自定义目录的机器人可回退到“跟随应用默认目录”。
+- [ ] 删除机器人先显示自定义确认弹层；确认后完成删除保存，并在 Bridge 运行时自动重启。
+- [ ] “连接与凭据”与“高级运行面板”任务面宽度一致，且 1280px / 1024px / 768px / 640px 下无异常横向溢出。
+- [ ] 安装页默认仅显示一键安装 / 升级 / 详细安装入口；展开详细安装选项后可完整纵向滚动，不再遮挡内容。
+- [ ] 预加载窗口标题栏高度与主窗口标题栏一致。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“单机器人即时动作”和“详情区滚动链”边界的经验。
+
+### Notes
+
+- [x] 机器人卡片上的“选择工作区 / 跟随应用默认目录 / 删除机器人”这类单机器人动作，最稳的实现方式是复用同一条“更新草稿 -> 持久化配置 -> 运行中按需重启 -> 刷新 Bridge 状态”的链路；否则卡片级即时动作和页级统一保存会很快分叉成两套行为。
+- [x] 详情区折叠面板一旦承载安装终端、预检和高级选项，滚动不能只补在最内层组件上，必须沿着 `detail card -> body -> main column` 整条父级链路一起补 `min-height: 0` 与 `overflow-y: auto`，否则小窗口下内容仍会被父容器裁掉。
+
+## 快速设置布局与 Bridge 卡片头部修正 (2026-03-25)
+
+### Plan
+
+- [x] 将快速设置左侧步骤卡片收紧为单行信息布局，并让状态标签与步骤名称在同一行显示。
+- [x] 去掉快速设置右侧详情区上层标题栏，只保留“操作与详情”内容卡。
+- [x] 修正 IM Bridge 机器人启用开关的即时视觉反馈，移除卡片头部的系统名称与标题栏冗余说明。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录本轮经验。
+
+### Validation
+
+- [ ] 快速设置左侧步骤卡片改为单行，状态标签与名称同行显示。
+- [ ] 快速设置右侧详情区不再显示上层“当前步骤”标题栏。
+- [ ] IM Bridge 卡片头部不再显示 connector 系统名称，启用开关点击后可立即看到目标状态。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“步骤列表信息密度”和“即时开关反馈”边界的经验。
+
+### Notes
+
+- [x] 快速设置这种步骤导航列表的核心任务是“扫一眼知道现在该点哪一步”，因此标题、简短动作提示和状态应该压缩到一条扫描线上；右侧详情再承担解释和操作，才能避免左右两栏都在重复说同一件事。
+- [x] 即时开关类控件不能把视觉反馈完全押注在异步保存完成后的外部状态回流上；对于“点击即保存”的机器人启停操作，前端需要先给出明确的目标态，再用持久化结果兜底确认或回滚。
+
+## Telegram 入口下线与快速设置左栏收口 (2026-03-25)
+
+### Plan
+
+- [x] 暂时下线 Telegram 机器人的 Bridge 页面入口与卡片显示，仅保留 Feishu 机器人可见入口。
+- [x] 过滤运行诊断中 Telegram 相关的风险摘要文案，避免下线后仍在主诊断卡片中暴露。
+- [x] 移除快速设置左侧步骤栏里的安装 / 升级按钮，仅保留步骤导航与底部统一动作。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录结果。
+
+### Validation
+
+- [ ] IM Bridge 页面不再显示 Telegram 机器人卡片，新增机器人入口只创建 Feishu 机器人。
+- [ ] 运行诊断的风险摘要不再显示 Telegram 相关提示。
+- [ ] 快速设置左侧列表不再出现安装 / 升级按钮。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“临时下线入口”和“步骤导航去操作化”的经验。
+
+### Notes
+
+- [x] 临时下线某一渠道时，不能只隐藏“新增”按钮；列表展示、标题派生文案和风险摘要也要一起收口，否则用户会继续从状态提示里感知到一个已经无法操作的渠道。
+- [x] 快速设置左栏的职责是导航而不是执行；把安装 / 升级按钮留在步骤详情区而不是步骤列表里，能显著降低左右两栏同时争抢主操作的问题。
+
+## 飞书多机器人凭据掩码串写排查与修复 (2026-03-25)
+
+### Plan
+
+- [x] 排查飞书多机器人“已保存凭据掩码相同”的真实数据来源，确认是否为 UI 串线还是 secrets 写入覆盖。
+- [x] 修复多机器人场景下旧 Bridge onboarding 保存路径对机器人级凭据的串写风险，并补测试覆盖。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录结论与现场数据判断。
+
+### Validation
+
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+- [x] 本机 `bridge_settings.json` 确认当前存在两个启用中的飞书机器人：`feishu-default` / `feishu-2`。
+- [x] 本机 `bridge_secrets.json` 确认问题发生时两个飞书 connector 的真实 `appId/appSecret` 已被写成同一套值，并非仅前端掩码显示串线。
+
+### Retrospective
+
+- [x] 记录本轮关于“legacy 根级 secrets 镜像”不能回写覆盖 connector 级 secrets 的经验。
+
+### Notes
+
+- [x] `normalize_bridge_secrets()` 这类兼容旧字段的迁移逻辑，若同时承担“根级镜像回填”职责，必须保证只补空值、不能覆盖已有 connector secrets；否则一旦根级镜像来源于另一个 connector，就会在后续 normalize 时把默认 connector 脏写成相同凭据。
+- [x] 多机器人场景下，任何“全局 onboarding 保存”都不能再默默写入某一个具体机器人；只要存在多个飞书机器人，就应明确要求用户去对应机器人的“连接与凭据”里维护凭据。
+
+## IM Bridge 机器人关闭/删除与多机器人绑定修复 (2026-03-25)
+
+### Plan
+
+- [x] 修复 bridge binding 更新接口的返回契约，避免启动时 session 轮换导致 restart 失败。
+- [x] 为 sidecar 启动同步补上已删除 connector 的关联数据清理，并让删除机器人同步清理本地保存的 connector secrets。
+- [x] 收紧多机器人 binding / session 规则，禁止不同 binding 共享同一个活动 Kimi session。
+- [x] 调整前端机器人关闭/删除状态流，将“设置已保存”和“重启失败”拆开提示。
+- [x] 运行针对性的 Go / Rust / 前端构建验证并记录结果。
+
+### Validation
+
+- [x] 运行 `go test ./internal/admin ./internal/app ./internal/binding ./internal/store`。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store`。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_http_client`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“删除 connector 不能只删 settings/secrets”以及“binding PATCH 契约要双端锁死”的经验。
+
+### Notes
+
+- [x] 机器人删除如果只改 `bridge_settings.json` 而不在 sidecar 启动同步里清理同 connector 的 bindings / approvals / channel cache，下一次重启后仍会把已删除机器人的历史运行态带回来，表现成“入口没了但状态还在”。
+- [x] 桌面端和 sidecar 共用的 admin 接口一旦出现“调用方期待完整记录、服务端只回 status”这种半契约错配，最容易在 restart / recovery 这种低频链路里潜伏；这类接口必须用两端测试直接锁住响应形状。
+
+## 控制中心快速设置与 Bridge 子任务面样式修复 (2026-03-25)
+
+### Plan
+
+- [x] 修复快速设置左侧第一张步骤卡片 hover 时被滚动容器上边缘裁切的问题。
+- [x] 修复安装页右侧 Kimi 状态卡内长路径文本溢出卡片的问题。
+- [x] 移除 IM Bridge 子任务面右上角关闭按钮，仅保留返回入口。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证前端改动。
+
+### Validation
+
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“滚动容器内 hover 位移”和“子任务面关闭入口层级”的经验。
+
+### Notes
+
+- [x] 带 `overflow: auto` 的步骤列表如果对子项做 `translateY` hover 动效，顶部至少要预留少量内边距，否则第一张卡片会在 hover 时被容器边界裁掉，看起来像被上方遮挡。
+- [x] IM Bridge 的连接与凭据 / 高级运行面板属于桥内子任务面，右上角再放一个“关闭控制中心”会和左上角返回形成重复退出语义；这里保留返回比双出口更清晰。
+
+## IM Bridge 新建机器人 connectorId 唯一化 (2026-03-25)
+
+### Plan
+
+- [x] 将控制中心“新建机器人”的 connectorId 生成规则改成不复用的唯一 ID。
+- [x] 保持机器人显示名称继续使用人类可读的顺序标题，不把唯一 ID 暴露成主展示名。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证前端保存链路。
+
+### Validation
+
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+
+### Retrospective
+
+- [x] 记录本轮关于“内部身份唯一化”和“显示名顺序编号解耦”的经验。
+
+### Notes
+
+- [x] 机器人 `connectorId` 是内部身份，不应同时承担“给人看的顺序编号”职责；一旦删除后再复用 `feishu-2` 这类短 id，历史 bindings 就会被新机器人误继承。
+- [x] 更稳的做法是：`connectorId` 只负责唯一性，显示名继续用“飞书机器人 01 / Eleven”这类人类可读标题，两者必须解耦。
+

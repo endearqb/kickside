@@ -11,8 +11,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
-    log_manager,
-    skill_center,
+    log_manager, skill_center,
     types::{BackendState, OpenRequestErrorPayload, WorkspaceSessionBridgePayload},
     window_manager,
 };
@@ -114,7 +113,10 @@ fn cleanup_replaced_session_skills(
     next_session_id: Option<&str>,
     source: &str,
 ) {
-    let Some(previous_session_id) = previous_session_id.map(str::trim).filter(|value| !value.is_empty()) else {
+    let Some(previous_session_id) = previous_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
         return;
     };
     if Some(previous_session_id) == next_session_id {

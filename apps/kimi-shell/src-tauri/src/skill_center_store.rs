@@ -54,10 +54,18 @@ struct SkillFrontmatter {
 
 pub fn ensure_layout(app: &AppHandle) -> anyhow::Result<()> {
     let root = skill_center_root(app)?;
-    fs::create_dir_all(repos_dir(app)?)
-        .with_context(|| format!("failed to create skill center repos dir: {}", root.display()))?;
-    fs::create_dir_all(cache_git_dir(app)?)
-        .with_context(|| format!("failed to create skill center cache dir: {}", root.display()))?;
+    fs::create_dir_all(repos_dir(app)?).with_context(|| {
+        format!(
+            "failed to create skill center repos dir: {}",
+            root.display()
+        )
+    })?;
+    fs::create_dir_all(cache_git_dir(app)?).with_context(|| {
+        format!(
+            "failed to create skill center cache dir: {}",
+            root.display()
+        )
+    })?;
     fs::create_dir_all(session_states_dir(app)?).with_context(|| {
         format!(
             "failed to create skill center session states dir: {}",
@@ -215,7 +223,10 @@ pub fn load_all_session_states(app: &AppHandle) -> anyhow::Result<Vec<SessionSki
         .with_context(|| format!("failed to read session states dir: {}", dir.display()))?
     {
         let entry = entry.with_context(|| {
-            format!("failed to read skill center session state entry: {}", dir.display())
+            format!(
+                "failed to read skill center session state entry: {}",
+                dir.display()
+            )
         })?;
         let path = entry.path();
         if path.extension() != Some(OsStr::new("json")) {
@@ -292,7 +303,10 @@ pub fn parse_skill_manifest(skill_md_path: &Path) -> anyhow::Result<ParsedSkillM
                 skill_md_path.display()
             )
         })?;
-        manifest.name = parsed.name.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+        manifest.name = parsed
+            .name
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         manifest.description = parsed
             .description
             .map(|value| value.trim().to_string())
@@ -397,7 +411,10 @@ pub fn copy_skill_source(source_dir: &Path, target_dir: &Path) -> anyhow::Result
         .with_context(|| format!("failed to read skill source dir: {}", source_dir.display()))?
     {
         let entry = entry.with_context(|| {
-            format!("failed to read skill source entry: {}", source_dir.display())
+            format!(
+                "failed to read skill source entry: {}",
+                source_dir.display()
+            )
         })?;
         let name = entry.file_name();
         if name == OsStr::new(".git") {
@@ -456,7 +473,10 @@ pub fn build_local_source_key(path: &Path, is_zip: bool) -> anyhow::Result<Strin
 pub fn build_bundled_source_key(relative_bundle_path: &str) -> String {
     format!(
         "bundled:{}",
-        relative_bundle_path.trim().replace('\\', "/").trim_matches('/'),
+        relative_bundle_path
+            .trim()
+            .replace('\\', "/")
+            .trim_matches('/'),
     )
 }
 
@@ -473,7 +493,12 @@ pub fn resolve_skill_root_from_extracted_dir(extracted_dir: &Path) -> anyhow::Re
     }
 
     let entries = fs::read_dir(extracted_dir)
-        .with_context(|| format!("failed to inspect extracted zip dir: {}", extracted_dir.display()))?
+        .with_context(|| {
+            format!(
+                "failed to inspect extracted zip dir: {}",
+                extracted_dir.display()
+            )
+        })?
         .collect::<Result<Vec<_>, _>>()
         .with_context(|| {
             format!(
@@ -542,7 +567,10 @@ fn visit_relative_paths(
             break;
         }
         let entry = entry.with_context(|| {
-            format!("failed to read skill directory entry: {}", current.display())
+            format!(
+                "failed to read skill directory entry: {}",
+                current.display()
+            )
         })?;
         let path = entry.path();
         let relative = path
@@ -550,9 +578,9 @@ fn visit_relative_paths(
             .map(|item| item.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
         output.push(relative);
-        let metadata = entry.metadata().with_context(|| {
-            format!("failed to read skill entry metadata: {}", path.display())
-        })?;
+        let metadata = entry
+            .metadata()
+            .with_context(|| format!("failed to read skill entry metadata: {}", path.display()))?;
         if metadata.is_dir() {
             visit_relative_paths(root, &path, limit, output)?;
         }
@@ -578,13 +606,22 @@ fn normalize_legacy_skill(skill: &mut InstalledSkill) -> bool {
     let mut dirty = false;
     if skill.source_label.trim().is_empty() || skill.source_key.trim().is_empty() {
         dirty = true;
-        if let Some(repo_url) = skill.repo_url.clone().filter(|value| !value.trim().is_empty()) {
+        if let Some(repo_url) = skill
+            .repo_url
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+        {
             skill.source_type = SkillSourceType::Git;
             skill.source_label = repo_url.clone();
-            skill.source_key =
-                build_git_source_key(&repo_url, skill.git_ref.as_deref(), skill.commit.as_deref().unwrap_or(""));
-        } else if let Some(source_path) =
-            skill.source_path.clone().filter(|value| !value.trim().is_empty())
+            skill.source_key = build_git_source_key(
+                &repo_url,
+                skill.git_ref.as_deref(),
+                skill.commit.as_deref().unwrap_or(""),
+            );
+        } else if let Some(source_path) = skill
+            .source_path
+            .clone()
+            .filter(|value| !value.trim().is_empty())
         {
             skill.source_type = SkillSourceType::LocalImport;
             skill.source_label = source_path.clone();
@@ -621,7 +658,10 @@ where
 fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create skill center parent dir: {}", parent.display())
+            format!(
+                "failed to create skill center parent dir: {}",
+                parent.display()
+            )
         })?;
     }
     let raw = serde_json::to_string_pretty(value).context("failed to serialize json")?;

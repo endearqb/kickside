@@ -286,7 +286,8 @@ export function InstallFlowTaskContent({
     session.status === "cancelling";
   const primaryTaskId: InstallTaskId = probe?.kimiReady ? "upgrade_kimi" : "quick_install_core";
   const primaryTask = catalog?.tasks.find((task) => task.id === primaryTaskId);
-  const primaryAvailability = getTaskAvailability(primaryTaskId, probe, isBusy);
+  const quickInstallAvailability = getTaskAvailability("quick_install_core", probe, isBusy);
+  const upgradeAvailability = getTaskAvailability("upgrade_kimi", probe, isBusy);
   const activeTaskForCommands = activeTask ?? primaryTask;
   const currentStepCommand =
     taskSteps(activeTaskForCommands, installSource).find((step) => step.id === session.currentStepId)
@@ -358,32 +359,12 @@ export function InstallFlowTaskContent({
         <div className="cc-install-overview-head">
           <div className="cc-install-overview-copy">
             <span className={`cc-status-badge tone-${sessionTone}`}>{sessionStatusLabel}</span>
-            <h4>{primaryTaskId === "upgrade_kimi" ? "升级 Kimi CLI" : "一键安装 Kimi CLI"}</h4>
+            <h4>安装 / 升级 Kimi CLI</h4>
             <p>
               {session.message?.trim() ||
                 primaryTask?.description ||
                 "先看状态，再决定是立即安装还是升级。"}
             </p>
-          </div>
-          <div className="cc-install-overview-actions">
-            <div className="cc-install-flow-source" role="group" aria-label="安装来源">
-              <button
-                type="button"
-                className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
-                onClick={() => onSourceChange("official")}
-                disabled={isBusy}
-              >
-                官方源
-              </button>
-              <button
-                type="button"
-                className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
-                onClick={() => onSourceChange("mirror")}
-                disabled={isBusy}
-              >
-                镜像源
-              </button>
-            </div>
           </div>
         </div>
 
@@ -423,30 +404,28 @@ export function InstallFlowTaskContent({
         <div className="cc-install-console-head">
           <div>
             <h4>主操作区</h4>
-            <p>保持一个主动作，其余安装增强项收进高级选项。</p>
+            <p>默认只保留一键安装、升级和详细安装入口，其余内容下沉到下方展开区。</p>
           </div>
           <div className="cc-install-flow-actions">
             <Button
               type="button"
               className="cc-action-btn"
-              onClick={() => void onStartTask(primaryTaskId)}
-              disabled={primaryAvailability.disabled}
-              title={primaryAvailability.reason}
+              onClick={() => void onStartTask("quick_install_core")}
+              disabled={quickInstallAvailability.disabled}
+              title={quickInstallAvailability.reason}
             >
-              {primaryTaskId === "upgrade_kimi" ? "升级 Kimi" : "一键安装 Kimi CLI"}
+              一键安装 Kimi CLI
             </Button>
-            {showRestartAction ? (
-              <Button
-                type="button"
-                variant="outline"
-                icon={<RefreshCw size={14} />}
-                className="cc-action-btn"
-                onClick={() => void onRestartBackend()}
-                disabled={restartBusy}
-              >
-                重启后端
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="cc-action-btn"
+              onClick={() => void onStartTask("upgrade_kimi")}
+              disabled={upgradeAvailability.disabled}
+              title={upgradeAvailability.reason}
+            >
+              升级 Kimi
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -454,16 +433,48 @@ export function InstallFlowTaskContent({
               onClick={() => setAdvancedOpen((current) => !current)}
               aria-expanded={advancedOpen}
             >
-              {advancedOpen ? "收起高级选项" : "展开高级选项"}
+              {advancedOpen ? "收起详细安装选项" : "打开详细安装选项"}
             </Button>
           </div>
         </div>
-        {primaryAvailability.reason ? (
-          <p className="hint cc-install-task-hint">{primaryAvailability.reason}</p>
-        ) : null}
+        <div className="cc-install-primary-hints">
+          <p className="hint cc-install-task-hint">
+            一键安装：{quickInstallAvailability.reason ?? "补齐 uv / Python 3.13 / Kimi CLI 核心依赖。"}
+          </p>
+          <p className="hint cc-install-task-hint">
+            升级 Kimi：{upgradeAvailability.reason ?? "仅升级已安装的 Kimi CLI，不额外引入安装引导。"}
+          </p>
+        </div>
 
         {advancedOpen ? (
           <div className="cc-install-advanced-panel">
+            <div className="cc-install-mirror-config-card">
+              <div className="cc-install-console-head">
+                <div>
+                  <h4>安装来源</h4>
+                  <p>默认保持当前来源；只有需要切换官方源 / 镜像源时再展开这里。</p>
+                </div>
+              </div>
+              <div className="cc-install-flow-source" role="group" aria-label="安装来源">
+                <button
+                  type="button"
+                  className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
+                  onClick={() => onSourceChange("official")}
+                  disabled={isBusy}
+                >
+                  官方源
+                </button>
+                <button
+                  type="button"
+                  className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
+                  onClick={() => onSourceChange("mirror")}
+                  disabled={isBusy}
+                >
+                  镜像源
+                </button>
+              </div>
+            </div>
+
             <div className="cc-install-console-head">
               <div>
                 <h4>PowerShell 预检</h4>
@@ -685,6 +696,18 @@ export function InstallFlowTaskContent({
             </p>
           </div>
           <div className="cc-install-console-toolbar">
+            {showRestartAction ? (
+              <Button
+                type="button"
+                variant="outline"
+                icon={<RefreshCw size={14} />}
+                className="cc-action-btn"
+                onClick={() => void onRestartBackend()}
+                disabled={restartBusy}
+              >
+                重启后端
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

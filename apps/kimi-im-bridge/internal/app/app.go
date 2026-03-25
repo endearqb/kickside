@@ -402,9 +402,9 @@ func (s *Service) ClearBinding(ctx context.Context, bindingID string) error {
 	return nil
 }
 
-func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input domain.BindingUpdate) error {
+func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input domain.BindingUpdate) (domain.BindingRecord, error) {
 	if strings.TrimSpace(bindingID) == "" {
-		return fmt.Errorf("binding id is required")
+		return domain.BindingRecord{}, fmt.Errorf("binding id is required")
 	}
 
 	workDirWasSet := input.WorkDir != nil
@@ -414,22 +414,30 @@ func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input dom
 	}
 
 	if strings.TrimSpace(input.KimiSessionID) == "" && !workDirWasSet {
-		return fmt.Errorf("binding update requires kimiSessionId or workDir")
+		return domain.BindingRecord{}, fmt.Errorf("binding update requires kimiSessionId or workDir")
 	}
 
 	if sessionID := strings.TrimSpace(input.KimiSessionID); sessionID != "" {
 		if err := s.bindings.Rebind(ctx, bindingID, sessionID); err != nil {
-			return err
+			return domain.BindingRecord{}, err
 		}
 		s.logger.Printf("binding rebound: %s -> %s", bindingID, sessionID)
 	}
 	if workDirWasSet {
 		if err := s.bindings.UpdateBindingWorkDir(ctx, bindingID, workDirValue); err != nil {
-			return err
+			return domain.BindingRecord{}, err
 		}
 		s.logger.Printf("binding workdir updated: %s -> %q", bindingID, workDirValue)
 	}
-	return nil
+
+	record, err := s.bindingRecordByID(ctx, bindingID)
+	if err != nil {
+		return domain.BindingRecord{}, err
+	}
+	if record == nil {
+		return domain.BindingRecord{}, fmt.Errorf("binding %s not found after update", bindingID)
+	}
+	return *record, nil
 }
 
 func (s *Service) ImportSession(ctx context.Context, input domain.SessionImportRequest) (domain.BridgeSession, error) {
@@ -658,6 +666,33 @@ func (s *Service) decorateBindingRecords(items []domain.BindingRecord) []domain.
 		items[index].ConnectorLabel = labels[items[index].ConnectorID]
 	}
 	return items
+}
+
+func (s *Service) bindingRecordByID(ctx context.Context, bindingID string) (*domain.BindingRecord, error) {
+	binding, err := s.store.GetBindingByID(ctx, bindingID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		return nil, nil
+	}
+	record := domain.BindingRecord{
+		BindingID:            binding.BindingID,
+		ConnectorID:          binding.Key.ConnectorID,
+		Platform:             binding.Key.Platform,
+		AccountID:            binding.Key.AccountID,
+		ChatID:               binding.Key.ChatID,
+		ThreadID:             binding.Key.ThreadID,
+		KimiSessionID:        binding.KimiSessionID,
+		WorkDir:              binding.WorkDir,
+		OnboardedAt:          binding.OnboardedAt,
+		OnboardingVersion:    binding.OnboardingVersion,
+		CreatedAt:            binding.CreatedAt,
+		UpdatedAt:            binding.UpdatedAt,
+		LastInboundMessageID: binding.LastInboundMessageID,
+	}
+	decorated := s.decorateBindingRecords([]domain.BindingRecord{record})
+	return &decorated[0], nil
 }
 
 func (s *Service) decorateApprovals(items []domain.ApprovalTicket) []domain.ApprovalTicket {

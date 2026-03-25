@@ -816,6 +816,7 @@
 
 .cc-step-main {
   min-width: 0;
+  min-height: 0;
 }
 
 .cc-step-summary {
@@ -3670,6 +3671,7 @@ input:focus {
 .cc-install-overview-card,
 .cc-install-console-summary-card,
 .cc-config-summary-card {
+  min-width: 0;
   display: grid;
   gap: 4px;
   padding: 12px;
@@ -3698,6 +3700,8 @@ input:focus {
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cc-install-status-grid {
@@ -3749,8 +3753,14 @@ input:focus {
 }
 
 .cc-install-advanced-panel {
+  min-height: 0;
   display: grid;
   gap: 12px;
+}
+
+.cc-install-primary-hints {
+  display: grid;
+  gap: 6px;
 }
 
 .cc-install-blocker-list {
@@ -4807,11 +4817,17 @@ input:focus {
   color: var(--text-primary);
 }
 
-.cc-task-card-copy,
-.cc-onboarding-step-copy {
+.cc-task-card-copy {
   min-width: 0;
   display: grid;
   gap: 4px;
+}
+
+.cc-onboarding-step-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .cc-task-card-copy strong,
@@ -4819,11 +4835,27 @@ input:focus {
   font-size: 14px;
 }
 
+.cc-onboarding-step-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cc-task-card-copy small,
 .cc-onboarding-step-copy span,
 .cc-onboarding-step-copy small {
   color: var(--text-secondary);
   line-height: 1.55;
+}
+
+.cc-onboarding-step-copy small {
+  white-space: nowrap;
+}
+
+.cc-onboarding-step-status {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .cc-task-card-meta {
@@ -4989,6 +5021,7 @@ input:focus {
   overflow: auto;
   display: grid;
   gap: 10px;
+  padding-top: 4px;
   padding-right: 4px;
 }
 
@@ -5001,6 +5034,7 @@ input:focus {
   border: 1px solid var(--cc-line);
   border-radius: 20px;
   background: color-mix(in srgb, var(--surface) 82%, rgba(255, 255, 255, 0.22));
+  align-items: center;
   text-align: left;
   color: inherit;
   cursor: pointer;
@@ -5025,8 +5059,11 @@ input:focus {
 
 .cc-onboarding-detail-shell {
   overflow: hidden;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+}
+
+.cc-onboarding-detail-shell .cc-step-detail-card {
+  flex: 1 1 auto;
 }
 
 .cc-onboarding-detail-intro {
@@ -5045,6 +5082,9 @@ input:focus {
 }
 
 .cc-step-detail-card {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -5053,6 +5093,16 @@ input:focus {
 
 .cc-step-detail-card .cc-card-header {
   border-bottom-color: var(--cc-line);
+}
+
+.cc-step-detail-card .cc-card-body {
+  min-height: 0;
+}
+
+.cc-step-detail-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .cc-runtime-summary-grid {
@@ -5706,6 +5756,12 @@ input:focus {
   min-width: 0;
 }
 
+.bridge-robot-workdir-card strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .bridge-robot-workdir-card small {
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -5950,12 +6006,27 @@ input:focus {
   justify-content: flex-start;
 }
 
-.cc-bridge-connector-modal {
-  width: clamp(640px, 72vw, 1024px);
+.cc-bridge-task-surface {
+  width: min(1024px, 100%);
+  max-height: min(92dvh, 980px);
+  margin: 0 auto;
 }
 
+.cc-bridge-task-surface .cc-task-surface-header {
+  padding: 20px 20px 18px;
+}
+
+.cc-bridge-task-surface .cc-task-surface-body {
+  padding: 18px 20px 20px;
+}
+
+.cc-bridge-task-surface .cc-task-surface-footer {
+  padding: 16px 20px;
+}
+
+.cc-bridge-connector-modal,
 .cc-bridge-runtime-modal {
-  width: min(1120px, calc(100vw - 32px));
+  width: min(1024px, 100%);
 }
 
 .cc-bridge-connector-body,
@@ -5963,10 +6034,6 @@ input:focus {
   min-height: 0;
   display: grid;
   gap: 16px;
-}
-
-.cc-bridge-runtime-modal {
-  max-height: min(92dvh, 980px);
 }
 
 .cc-bridge-runtime-body {
@@ -6082,14 +6149,6 @@ input:focus {
 
   .cc-task-card-meta {
     grid-column: 2;
-  }
-
-  .cc-onboarding-step-card {
-    grid-template-columns: 1fr;
-  }
-
-  .cc-onboarding-step-meta {
-    grid-column: 1;
   }
 
   .cc-onboarding-detail-intro {

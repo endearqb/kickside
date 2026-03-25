@@ -37,15 +37,14 @@ use types::{
     BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
     BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource,
     BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo,
-    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
-    InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView,
-    InstallSource, InstallTaskId, KimiCliApiConfigInput, KimiCliApiConfigView,
-    KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult, LoginProbeState,
-    InstalledSkill, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
-    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
-    SkillApplyResult, SkillApplyScope, SkillDetail, SkillProjectionRecord,
-    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus,
-    StartupMonitorTargetRoute, StartFeishuConnectorOnboardingInput, SubmitPrefillAck,
+    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
+    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
+    InstalledSkill, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
+    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, MainWindowCloseBehavior,
+    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
+    SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
+    SkillProjectionRecord, StartFeishuConnectorOnboardingInput, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
     WebviewRuntimeKind, WorkspaceSkillProfile, CURRENT_ONBOARDING_VERSION,
 };
 
@@ -414,10 +413,17 @@ fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
 
 #[tauri::command]
 fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
-    bridge_manager::ensure_bundled_bridge_ops_installed(&app)
-        .map_err(|error| error.to_string())?;
+    bridge_manager::ensure_bundled_bridge_ops_installed(&app).map_err(|error| error.to_string())?;
 
     let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
+    sync_idle_bridge_runtime(&app, &saved)?;
+    Ok(saved)
+}
+
+#[tauri::command]
+fn delete_bridge_connector(app: AppHandle, connector_id: String) -> Result<BridgeSettings, String> {
+    let saved = bridge_settings_store::delete_connector(&app, &connector_id)
+        .map_err(|error| error.to_string())?;
     sync_idle_bridge_runtime(&app, &saved)?;
     Ok(saved)
 }
@@ -659,11 +665,7 @@ fn get_skill_detail(app: AppHandle, skill_id: String) -> Result<SkillDetail, Str
 }
 
 #[tauri::command]
-fn set_skill_trust(
-    app: AppHandle,
-    skill_id: String,
-    trusted: bool,
-) -> Result<(), String> {
+fn set_skill_trust(app: AppHandle, skill_id: String, trusted: bool) -> Result<(), String> {
     skill_center::set_skill_trust(&app, &skill_id, trusted).map_err(|error| error.to_string())
 }
 
@@ -1262,6 +1264,7 @@ pub fn run() {
             save_work_dir,
             get_bridge_settings,
             save_bridge_settings,
+            delete_bridge_connector,
             save_bridge_onboarding_config,
             get_bridge_status,
             start_bridge,

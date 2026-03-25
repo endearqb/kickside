@@ -103,6 +103,16 @@ pub fn save_connector_secrets(
     Ok(secrets)
 }
 
+pub fn delete_connector(app: &AppHandle, connector_id: &str) -> anyhow::Result<BridgeSettings> {
+    let state = app.state::<AppState>();
+    delete_connector_files(
+        &state.settings_path,
+        &state.bridge_settings_path,
+        &state.bridge_secrets_path,
+        connector_id,
+    )
+}
+
 pub fn save_onboarding_config(
     app: &AppHandle,
     input: &BridgeOnboardingConfigInput,
@@ -242,6 +252,53 @@ fn save_onboarding_files(
     Ok((app_settings, bridge_settings, bridge_secrets))
 }
 
+fn delete_connector_files(
+    app_settings_path: &Path,
+    bridge_settings_path: &Path,
+    bridge_secrets_path: &Path,
+    connector_id: &str,
+) -> anyhow::Result<BridgeSettings> {
+    let target_connector_id = connector_id.trim();
+    if target_connector_id.is_empty() {
+        anyhow::bail!("connector id is required")
+    }
+
+    let mut app_settings = load_app_settings_at(app_settings_path)?;
+    let mut bridge_settings = if bridge_settings_path.exists() {
+        read_json::<BridgeSettings>(bridge_settings_path)?
+    } else {
+        default_bridge_settings(&app_settings)
+    };
+    let mut bridge_secrets = load_secrets_at(bridge_secrets_path)?;
+
+    let original_len = bridge_settings.connectors.len();
+    bridge_settings
+        .connectors
+        .retain(|connector| connector.id.trim() != target_connector_id);
+    if bridge_settings.connectors.len() == original_len {
+        anyhow::bail!("connector not found: {target_connector_id}")
+    }
+
+    bridge_secrets.connectors.remove(target_connector_id);
+
+    bridge_settings = normalize_bridge_settings(bridge_settings);
+    sync_bridge_default_work_dir_from_app(
+        &mut bridge_settings,
+        None,
+        app_settings.work_dir.as_deref(),
+    );
+    bridge_secrets = normalize_bridge_secrets(bridge_secrets);
+
+    write_json(bridge_settings_path, &bridge_settings)?;
+    write_json(bridge_secrets_path, &bridge_secrets)?;
+
+    if sync_bridge_mirror(&bridge_settings, &mut app_settings) {
+        save_app_settings_at(app_settings_path, &app_settings)?;
+    }
+
+    Ok(bridge_settings)
+}
+
 fn load_app_settings_at(path: &Path) -> anyhow::Result<AppSettings> {
     if path.exists() {
         let mut settings = read_json::<AppSettings>(path)?;
@@ -340,39 +397,58 @@ fn apply_onboarding_input(
 ) -> anyhow::Result<()> {
     *bridge_secrets = normalize_bridge_secrets(bridge_secrets.clone());
     ensure_default_feishu_connector(bridge_settings);
-    let feishu_connector_id = bridge_settings
+    let feishu_connector_ids = bridge_settings
         .connectors
         .iter()
-        .find(|connector| connector.platform == BridgePlatform::Feishu)
+        .filter(|connector| connector.platform == BridgePlatform::Feishu)
         .map(|connector| connector.id.clone())
-        .unwrap_or_else(|| default_connector_id(BridgePlatform::Feishu, 1));
-    let connector_secrets = bridge_secrets
-        .connectors
-        .entry(feishu_connector_id)
-        .or_insert_with(|| BridgeConnectorSecrets {
-            feishu: Some(BridgeFeishuSecrets::default()),
-            telegram: None,
-        });
-    let feishu_secrets = connector_secrets
-        .feishu
-        .get_or_insert_with(BridgeFeishuSecrets::default);
+        .collect::<Vec<_>>();
 
-    if let Some(value) = trim_optional_string(input.feishu.app_id.clone()) {
-        feishu_secrets.app_id = Some(value);
-    }
-    if let Some(value) = trim_optional_string(input.feishu.app_secret.clone()) {
-        feishu_secrets.app_secret = Some(value);
-    }
-    if let Some(value) = trim_optional_string(input.feishu.verification_token.clone()) {
-        feishu_secrets.verification_token = Some(value);
-    }
-    if let Some(value) = trim_optional_string(input.feishu.encrypt_key.clone()) {
-        feishu_secrets.encrypt_key = Some(value);
+    let next_app_id = trim_optional_string(input.feishu.app_id.clone());
+    let next_app_secret = trim_optional_string(input.feishu.app_secret.clone());
+    let next_verification_token = trim_optional_string(input.feishu.verification_token.clone());
+    let next_encrypt_key = trim_optional_string(input.feishu.encrypt_key.clone());
+    let has_secret_input = next_app_id.is_some()
+        || next_app_secret.is_some()
+        || next_verification_token.is_some()
+        || next_encrypt_key.is_some();
+
+    if feishu_connector_ids.len() > 1 && has_secret_input {
+        anyhow::bail!(
+            "当前存在多个飞书机器人，请在对应机器人的“连接与凭据”中维护 appId / appSecret。"
+        );
     }
 
-    if input.feishu_enabled
-        && (feishu_secrets.app_id.is_none() || feishu_secrets.app_secret.is_none())
-    {
+    if let Some(feishu_connector_id) = feishu_connector_ids.first() {
+        if has_secret_input {
+            let connector_secrets = bridge_secrets
+                .connectors
+                .entry(feishu_connector_id.clone())
+                .or_insert_with(|| BridgeConnectorSecrets {
+                    feishu: Some(BridgeFeishuSecrets::default()),
+                    telegram: None,
+                });
+            let existing = connector_secrets
+                .feishu
+                .clone()
+                .unwrap_or_else(BridgeFeishuSecrets::default);
+            connector_secrets.feishu = Some(BridgeFeishuSecrets {
+                app_id: next_app_id.or(existing.app_id),
+                app_secret: next_app_secret.or(existing.app_secret),
+                verification_token: next_verification_token.or(existing.verification_token),
+                encrypt_key: next_encrypt_key.or(existing.encrypt_key),
+            });
+        }
+    }
+
+    let has_effective_feishu_credentials = bridge_secrets.connectors.values().any(|connector| {
+        connector
+            .feishu
+            .as_ref()
+            .is_some_and(|feishu| feishu.app_id.is_some() && feishu.app_secret.is_some())
+    });
+
+    if input.feishu_enabled && !has_effective_feishu_credentials {
         anyhow::bail!("feishu appId and appSecret are required before enabling Feishu bridge")
     }
 
@@ -509,10 +585,14 @@ fn normalize_connectors(
             BridgePlatform::Feishu => BridgeChannelMode::Websocket,
         };
         if platform == BridgePlatform::Feishu {
-            item.feishu_auto_approve =
-                Some(item.feishu_auto_approve.unwrap_or(default_feishu_auto_approve));
-            item.feishu_reply_renderer =
-                Some(item.feishu_reply_renderer.unwrap_or(default_feishu_reply_renderer));
+            item.feishu_auto_approve = Some(
+                item.feishu_auto_approve
+                    .unwrap_or(default_feishu_auto_approve),
+            );
+            item.feishu_reply_renderer = Some(
+                item.feishu_reply_renderer
+                    .unwrap_or(default_feishu_reply_renderer),
+            );
         } else {
             item.feishu_auto_approve = None;
             item.feishu_reply_renderer = None;
@@ -537,12 +617,14 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
     }
 
     if let Some(bot_token) = trim_optional_string(secrets.telegram.bot_token.take()) {
-        connectors
+        let entry = connectors
             .entry(default_connector_id(BridgePlatform::Telegram, 1))
-            .or_insert_with(BridgeConnectorSecrets::default)
-            .telegram = Some(BridgeTelegramSecrets {
-            bot_token: Some(bot_token),
-        });
+            .or_insert_with(BridgeConnectorSecrets::default);
+        if entry.telegram.is_none() {
+            entry.telegram = Some(BridgeTelegramSecrets {
+                bot_token: Some(bot_token),
+            });
+        }
     }
 
     let app_id = trim_optional_string(secrets.feishu.app_id.take());
@@ -554,15 +636,17 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
         || verification_token.is_some()
         || encrypt_key.is_some()
     {
-        connectors
+        let entry = connectors
             .entry(default_connector_id(BridgePlatform::Feishu, 1))
-            .or_insert_with(BridgeConnectorSecrets::default)
-            .feishu = Some(BridgeFeishuSecrets {
-            app_id,
-            app_secret,
-            verification_token,
-            encrypt_key,
-        });
+            .or_insert_with(BridgeConnectorSecrets::default);
+        if entry.feishu.is_none() {
+            entry.feishu = Some(BridgeFeishuSecrets {
+                app_id,
+                app_secret,
+                verification_token,
+                encrypt_key,
+            });
+        }
     }
 
     let mut normalized = BridgeSecrets {
@@ -1281,5 +1365,282 @@ mod tests {
                 .contains("feishu appId and appSecret are required"),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn save_onboarding_config_keeps_distinct_feishu_connector_secrets() {
+        let temp = TempDirGuard::new("onboarding-multi-feishu-preserve");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: false,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
+                feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_auto_approve: true,
+                reset_binding_session_on_bridge_start: true,
+                feishu_reply_cards: None,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                connectors: vec![
+                    default_connector(BridgePlatform::Feishu, 1),
+                    default_connector(BridgePlatform::Feishu, 2),
+                ],
+            },
+        )
+        .expect("seed bridge settings");
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                connectors: BTreeMap::from([
+                    (
+                        "feishu-default".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-id-one".to_string()),
+                                app_secret: Some("app-secret-one".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                    (
+                        "feishu-2".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-id-two".to_string()),
+                                app_secret: Some("app-secret-two".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                ]),
+                telegram: Default::default(),
+                feishu: Default::default(),
+            },
+        )
+        .expect("seed connector secrets");
+
+        let input = BridgeOnboardingConfigInput {
+            enabled: true,
+            feishu_enabled: true,
+            auto_start: false,
+            feishu: Default::default(),
+        };
+
+        let (_, bridge_settings, bridge_secrets) = save_onboarding_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            &input,
+        )
+        .expect("save onboarding config");
+
+        assert!(bridge_settings.enabled);
+        assert!(bridge_settings
+            .connectors
+            .iter()
+            .filter(|connector| connector.platform == BridgePlatform::Feishu)
+            .all(|connector| connector.enabled));
+        assert_eq!(
+            bridge_secrets
+                .connectors
+                .get("feishu-default")
+                .and_then(|connector| connector.feishu.as_ref())
+                .and_then(|feishu| feishu.app_id.as_deref()),
+            Some("app-id-one")
+        );
+        assert_eq!(
+            bridge_secrets
+                .connectors
+                .get("feishu-2")
+                .and_then(|connector| connector.feishu.as_ref())
+                .and_then(|feishu| feishu.app_id.as_deref()),
+            Some("app-id-two")
+        );
+    }
+
+    #[test]
+    fn save_onboarding_config_rejects_global_feishu_secret_update_when_multiple_connectors_exist() {
+        let temp = TempDirGuard::new("onboarding-multi-feishu-reject-global-secret");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: false,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
+                feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_auto_approve: true,
+                reset_binding_session_on_bridge_start: true,
+                feishu_reply_cards: None,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                connectors: vec![
+                    default_connector(BridgePlatform::Feishu, 1),
+                    default_connector(BridgePlatform::Feishu, 2),
+                ],
+            },
+        )
+        .expect("seed bridge settings");
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                connectors: BTreeMap::from([
+                    (
+                        "feishu-default".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-id-one".to_string()),
+                                app_secret: Some("app-secret-one".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                    (
+                        "feishu-2".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-id-two".to_string()),
+                                app_secret: Some("app-secret-two".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                ]),
+                telegram: Default::default(),
+                feishu: Default::default(),
+            },
+        )
+        .expect("seed connector secrets");
+
+        let input = BridgeOnboardingConfigInput {
+            enabled: true,
+            feishu_enabled: true,
+            auto_start: false,
+            feishu: crate::types::BridgeOnboardingFeishuInput {
+                app_id: Some("override-app-id".to_string()),
+                app_secret: Some("override-app-secret".to_string()),
+                verification_token: None,
+                encrypt_key: None,
+            },
+        };
+
+        let error = save_onboarding_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            &input,
+        )
+        .expect_err("multi-feishu global secret update should fail");
+
+        assert!(
+            error.to_string().contains("当前存在多个飞书机器人"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn delete_connector_removes_saved_connector_and_connector_secrets() {
+        let temp = TempDirGuard::new("delete-connector");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(
+            &settings_path,
+            &AppSettings {
+                schema_version: CURRENT_SETTINGS_SCHEMA_VERSION,
+                work_dir: Some("D:/workspace".to_string()),
+                ..AppSettings::default()
+            },
+        )
+        .expect("seed app settings");
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: true,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
+                feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+                feishu_auto_approve: true,
+                reset_binding_session_on_bridge_start: true,
+                feishu_reply_cards: None,
+                default_work_dir: Some("D:/workspace".to_string()),
+                work_dir_presets: vec![],
+                connectors: vec![
+                    default_connector(BridgePlatform::Feishu, 1),
+                    default_connector(BridgePlatform::Feishu, 2),
+                ],
+            },
+        )
+        .expect("seed bridge settings");
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                connectors: BTreeMap::from([
+                    (
+                        "feishu-default".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-one".to_string()),
+                                app_secret: Some("secret-one".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                    (
+                        "feishu-2".to_string(),
+                        BridgeConnectorSecrets {
+                            telegram: None,
+                            feishu: Some(BridgeFeishuSecrets {
+                                app_id: Some("app-two".to_string()),
+                                app_secret: Some("secret-two".to_string()),
+                                verification_token: None,
+                                encrypt_key: None,
+                            }),
+                        },
+                    ),
+                ]),
+                telegram: Default::default(),
+                feishu: Default::default(),
+            },
+        )
+        .expect("seed bridge secrets");
+
+        let saved = delete_connector_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            "feishu-2",
+        )
+        .expect("delete connector");
+
+        assert_eq!(saved.connectors.len(), 1);
+        assert_eq!(saved.connectors[0].id, "feishu-default");
+
+        let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
+        assert!(reloaded_secrets.connectors.contains_key("feishu-default"));
+        assert!(!reloaded_secrets.connectors.contains_key("feishu-2"));
+        assert_eq!(reloaded_secrets.feishu.app_id.as_deref(), Some("app-one"));
     }
 }

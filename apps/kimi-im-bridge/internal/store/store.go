@@ -97,6 +97,18 @@ func (s *Store) JournalMode(ctx context.Context) (string, error) {
 
 func (s *Store) SyncConfiguredChannels(ctx context.Context, connectors []config.ConnectorConfig) error {
 	now := nowRFC3339()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin configured channel sync: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	keepIDs := make([]string, 0, len(connectors))
+	seenIDs := make(map[string]struct{}, len(connectors))
 	for _, connector := range connectors {
 		connectorID := strings.TrimSpace(connector.ID)
 		if connectorID == "" {
@@ -105,7 +117,11 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, connectors []config.
 		if connector.Platform == "" || connectorID == "" {
 			continue
 		}
-		_, err := s.db.ExecContext(
+		if _, seen := seenIDs[connectorID]; !seen {
+			seenIDs[connectorID] = struct{}{}
+			keepIDs = append(keepIDs, connectorID)
+		}
+		_, err = tx.ExecContext(
 			ctx,
 			`INSERT INTO bridge_channels (
 				channel_id, platform, enabled, account_id, state, last_offset, last_error, last_heartbeat_at,
@@ -126,6 +142,58 @@ func (s *Store) SyncConfiguredChannels(ctx context.Context, connectors []config.
 		if err != nil {
 			return fmt.Errorf("failed to upsert channel %s: %w", connectorID, err)
 		}
+	}
+	if err = pruneRemovedConnectorRows(ctx, tx, keepIDs); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit configured channel sync: %w", err)
+	}
+	return nil
+}
+
+func pruneRemovedConnectorRows(ctx context.Context, tx *sql.Tx, keepIDs []string) error {
+	operations := []struct {
+		table  string
+		column string
+	}{
+		{table: "bridge_channels", column: "channel_id"},
+		{table: "channel_bindings", column: "connector_id"},
+		{table: "approval_requests", column: "connector_id"},
+		{table: "delivery_events", column: "connector_id"},
+		{table: "pending_inbound_attachments", column: "connector_id"},
+		{table: "bridge_turns", column: "connector_id"},
+		{table: "turn_events", column: "connector_id"},
+		{table: "channel_checkpoints", column: "channel_id"},
+	}
+
+	for _, operation := range operations {
+		if err := deleteRowsOutsideConnectorSet(ctx, tx, operation.table, operation.column, keepIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteRowsOutsideConnectorSet(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	column string,
+	keepIDs []string,
+) error {
+	query := fmt.Sprintf("DELETE FROM %s WHERE trim(%s) <> ''", table, column)
+	args := make([]any, 0, len(keepIDs))
+	if len(keepIDs) > 0 {
+		placeholders := make([]string, 0, len(keepIDs))
+		for _, keepID := range keepIDs {
+			placeholders = append(placeholders, "?")
+			args = append(args, keepID)
+		}
+		query += fmt.Sprintf(" AND trim(%s) NOT IN (%s)", column, strings.Join(placeholders, ", "))
+	}
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("failed to prune stale connector rows from %s: %w", table, err)
 	}
 	return nil
 }

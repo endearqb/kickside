@@ -212,6 +212,123 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 	}
 }
 
+func TestSyncConfiguredChannelsPrunesRemovedConnectorData(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	connectors := []config.ConnectorConfig{
+		{ID: "feishu-default", Platform: "feishu", Label: "Feishu A", Enabled: true, Mode: "websocket"},
+		{ID: "feishu-2", Platform: "feishu", Label: "Feishu B", Enabled: true, Mode: "websocket"},
+	}
+	if err := store.SyncConfiguredChannels(ctx, connectors); err != nil {
+		t.Fatalf("initial SyncConfiguredChannels returned error: %v", err)
+	}
+
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		if err := store.UpsertSession(ctx, domain.BridgeSession{
+			KimiSessionID: sessionID,
+			CreatedAt:     "2026-03-25T00:00:00Z",
+			UpdatedAt:     "2026-03-25T00:00:00Z",
+		}); err != nil {
+			t.Fatalf("UpsertSession(%s) returned error: %v", sessionID, err)
+		}
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID: "binding-a",
+		Key: domain.BindingKey{
+			ConnectorID: "feishu-default",
+			Platform:    "feishu",
+			ChatID:      "chat-a",
+		},
+		KimiSessionID: "session-a",
+		Source:        "auto",
+		CreatedAt:     "2026-03-25T00:00:00Z",
+		UpdatedAt:     "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding(binding-a) returned error: %v", err)
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID: "binding-b",
+		Key: domain.BindingKey{
+			ConnectorID: "feishu-2",
+			Platform:    "feishu",
+			ChatID:      "chat-b",
+		},
+		KimiSessionID: "session-b",
+		Source:        "auto",
+		CreatedAt:     "2026-03-25T00:00:00Z",
+		UpdatedAt:     "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding(binding-b) returned error: %v", err)
+	}
+	if err := store.CreateApprovalTicket(ctx, domain.ApprovalTicket{
+		ApprovalID:         "approval-a",
+		ConnectorID:        "feishu-default",
+		KimiSessionID:      "session-a",
+		Platform:           "feishu",
+		ChatID:             "chat-a",
+		RequestKind:        "tool",
+		Prompt:             "approve a",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "approval-a",
+		CreatedAt:          "2026-03-25T00:00:00Z",
+		UpdatedAt:          "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket(approval-a) returned error: %v", err)
+	}
+	if err := store.CreateApprovalTicket(ctx, domain.ApprovalTicket{
+		ApprovalID:         "approval-b",
+		ConnectorID:        "feishu-2",
+		KimiSessionID:      "session-b",
+		Platform:           "feishu",
+		ChatID:             "chat-b",
+		RequestKind:        "tool",
+		Prompt:             "approve b",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "approval-b",
+		CreatedAt:          "2026-03-25T00:00:00Z",
+		UpdatedAt:          "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket(approval-b) returned error: %v", err)
+	}
+
+	if err := store.SyncConfiguredChannels(ctx, connectors[:1]); err != nil {
+		t.Fatalf("pruning SyncConfiguredChannels returned error: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector channel to remain, got %+v", statuses)
+	}
+
+	bindings, err := store.ListBindings(ctx)
+	if err != nil {
+		t.Fatalf("ListBindings returned error: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector binding to remain, got %+v", bindings)
+	}
+
+	approvals, err := store.ListApprovals(ctx, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals returned error: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector approval to remain, got %+v", approvals)
+	}
+}
+
 func TestOpenMigratesApprovalRuntimeColumns(t *testing.T) {
 	t.Parallel()
 

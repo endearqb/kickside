@@ -91,6 +91,11 @@ type BridgeConnectorSecretDraft = {
   encryptKey: string;
 };
 
+type BridgeDeleteConfirmState = {
+  connectorId: string;
+  connectorLabel: string;
+};
+
 type ControlCenterViewProps = {
   surface: ControlCenterSurface;
   status: AppStatus | null;
@@ -188,12 +193,13 @@ type ControlCenterViewProps = {
   onDisableContextMenu: () => Promise<void>;
   onProbeLogin: () => Promise<void>;
   onPickWorkDir: () => Promise<void>;
-  onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<void>;
+  onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<string | null>;
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
   onBridgeSettingsChange: (next: BridgeSettings) => void;
   onBridgeOnboardingDraftChange: (next: BridgeOnboardingConfigInput) => void;
   onToggleBridgeConnectorEnabled: (connectorId: string, enabled: boolean) => Promise<void>;
+  onDeleteBridgeConnector: (connectorId: string) => Promise<BridgeSettings>;
   onPersistBridgeSettings: (options?: {
     showRestartNotice?: boolean;
   }) => Promise<BridgeSettings>;
@@ -300,47 +306,6 @@ function RuntimePanel({
   );
 }
 
-function getBridgeChannelStatus(status: BridgeStatus, platform: "telegram" | "feishu") {
-  return status.connectors.find((connector) => connector.platform === platform);
-}
-
-function formatBridgeRuntimeStateLabel(state: BridgeStatus["state"]): string {
-  switch (state) {
-    case "running":
-      return "就绪";
-    case "starting":
-    case "stopping":
-      return "进行中";
-    case "degraded":
-    case "crashed":
-      return "异常";
-    default:
-      return "待办";
-  }
-}
-
-function formatBridgeChannelStateLabel(state: string): string {
-  switch (state) {
-    case "ready":
-      return "就绪";
-    case "connecting":
-      return "进行中";
-    case "degraded":
-    case "error":
-      return "异常";
-    default:
-      return "待办";
-  }
-}
-
-function formatImFinalStatusLabel(status: BridgeStatus, feishuEnabled: boolean): string {
-  if (feishuEnabled) {
-    const feishuStatus = getBridgeChannelStatus(status, "feishu")?.state ?? "idle";
-    return formatBridgeChannelStateLabel(feishuStatus);
-  }
-  return formatBridgeRuntimeStateLabel(status.state);
-}
-
 function hasLatinLetters(value: string): boolean {
   return /[A-Za-z]/.test(value);
 }
@@ -349,20 +314,10 @@ function getBridgeDisplayName(settings: BridgeSettings): string {
   const feishuEnabled = settings.connectors.some(
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
-  const telegramEnabled = settings.connectors.some(
-    (connector) => connector.platform === "telegram" && connector.enabled,
-  );
-  if (feishuEnabled && !telegramEnabled) {
+  if (feishuEnabled) {
     return "飞书";
   }
-  if (telegramEnabled && !feishuEnabled) {
-    return "Telegram";
-  }
   return "IM Bridge";
-}
-
-function formatBridgeDisplayNameLabel(displayName: string, suffix: string): string {
-  return hasLatinLetters(displayName) ? `${displayName} ${suffix}` : `${displayName}${suffix}`;
 }
 
 function formatOpenBridgeDisplayName(displayName: string): string {
@@ -387,6 +342,24 @@ function defaultBridgeConnectorLabel(platform: BridgePlatform, index: number): s
   return platform === "telegram"
     ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
     : `飞书机器人 ${String(index).padStart(2, "0")}`;
+}
+
+function generateUniqueBridgeConnectorId(
+  platform: BridgePlatform,
+  existingIds: Set<string>,
+): string {
+  const idBase = platform === "telegram" ? "telegram" : "feishu";
+
+  while (true) {
+    const randomPart =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+        : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 12);
+    const nextId = `${idBase}-${randomPart.toLowerCase()}`;
+    if (!existingIds.has(nextId)) {
+      return nextId;
+    }
+  }
 }
 
 function findBridgeConnectorRecentError(
@@ -576,6 +549,7 @@ export function ControlCenterView({
   onBridgeSettingsChange,
   onBridgeOnboardingDraftChange,
   onToggleBridgeConnectorEnabled,
+  onDeleteBridgeConnector,
   onPersistBridgeSettings,
   onRunBridgePrimaryAction,
   onStopBridge,
@@ -623,10 +597,15 @@ export function ControlCenterView({
   const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
   const [bridgeOverviewPendingConnectorId, setBridgeOverviewPendingConnectorId] =
     useState<string | null>(null);
+  const [bridgeOverviewPendingEnabled, setBridgeOverviewPendingEnabled] = useState<
+    Record<string, boolean>
+  >({});
   const [bridgeConnectorSecretDraft, setBridgeConnectorSecretDraft] =
     useState<BridgeConnectorSecretDraft>(() => createEmptyBridgeConnectorSecretDraft());
   const [bridgeConnectorLabelDraft, setBridgeConnectorLabelDraft] = useState("");
   const [bridgeConnectorTaskError, setBridgeConnectorTaskError] = useState<string | null>(null);
+  const [bridgeDeleteConfirm, setBridgeDeleteConfirm] =
+    useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
   const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
@@ -635,7 +614,6 @@ export function ControlCenterView({
   void installAction;
   void bridgeOnboardingDraft;
   void bridgeOnboardingValidation;
-  void onPickBridgeConnectorDefaultWorkDir;
   void onBridgeOnboardingDraftChange;
   void onRunBridgePrimaryAction;
   void onStopBridge;
@@ -664,11 +642,8 @@ export function ControlCenterView({
   const feishuEnabled = bridgeSettings.connectors.some(
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
-  const telegramEnabled = bridgeSettings.connectors.some(
-    (connector) => connector.platform === "telegram" && connector.enabled,
-  );
   const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
-  const bridgeFinalStatusTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "最终状态");
+  const bridgeFinalStatusTitle = "飞书最终状态";
   const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
@@ -733,6 +708,10 @@ export function ControlCenterView({
       return left.label.localeCompare(right.label, "zh-CN");
     });
   }, [bridgeRecentErrors, bridgeSettings.connectors, bridgeStatus.connectors]);
+  const visibleBridgeConnectors = useMemo(
+    () => sortedBridgeConnectors.filter((connector) => connector.platform === "feishu"),
+    [sortedBridgeConnectors],
+  );
   const mainWindowCloseBehaviorOptions: Array<{
     value: MainWindowCloseBehavior;
     label: string;
@@ -841,11 +820,11 @@ export function ControlCenterView({
   useEffect(() => {
     if (
       !selectedBridgeConnectorId ||
-      !bridgeSettings.connectors.some((item) => item.id === selectedBridgeConnectorId)
+      !visibleBridgeConnectors.some((item) => item.id === selectedBridgeConnectorId)
     ) {
-      setSelectedBridgeConnectorId(sortedBridgeConnectors[0]?.id ?? null);
+      setSelectedBridgeConnectorId(visibleBridgeConnectors[0]?.id ?? null);
     }
-  }, [bridgeSettings.connectors, selectedBridgeConnectorId, sortedBridgeConnectors]);
+  }, [selectedBridgeConnectorId, visibleBridgeConnectors]);
 
   useEffect(() => {
     setBridgeConnectorLabelDraft(selectedBridgeConnector?.label ?? "");
@@ -1108,14 +1087,17 @@ export function ControlCenterView({
   function addBridgeConnector(platform: BridgePlatform) {
     const existingIds = new Set(bridgeSettings.connectors.map((connector) => connector.id));
     let index = 1;
-    const idBase = platform === "telegram" ? "telegram" : "feishu";
-    let nextId = `${idBase}-default`;
-    while (existingIds.has(nextId)) {
+    while (
+      bridgeSettings.connectors.some(
+        (connector) =>
+          connector.platform === platform &&
+          connector.label === defaultBridgeConnectorLabel(platform, index),
+      )
+    ) {
       index += 1;
-      nextId = `${idBase}-${index}`;
     }
     const nextConnector: BridgeConnectorConfig = {
-      id: nextId,
+      id: generateUniqueBridgeConnectorId(platform, existingIds),
       platform,
       enabled: false,
       mode: platform === "telegram" ? "polling" : "websocket",
@@ -1154,37 +1136,78 @@ export function ControlCenterView({
     if (!connector) {
       return;
     }
-    const confirmed = window.confirm(
-      `确定删除机器人“${connector.label}”吗？此操作会立即保存配置${
-        isBridgeRunning ? "并重启 IM Bridge" : ""
-      }。`,
-    );
-    if (!confirmed) {
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeConnectorTaskError(null);
+    setBridgeDeleteConfirm({
+      connectorId,
+      connectorLabel: connector.label,
+    });
+  }
+
+  function closeBridgeDeleteConfirm() {
+    setBridgeDeleteConfirm(null);
+  }
+
+  async function handleConfirmDeleteBridgeRobot() {
+    if (!bridgeDeleteConfirm) {
       return;
     }
-
-    const previousSettings = bridgeSettings;
-    const nextConnectors = previousSettings.connectors.filter(
-      (item) => item.id !== connectorId,
-    );
+    const { connectorId } = bridgeDeleteConfirm;
+    const nextConnectors = bridgeSettings.connectors.filter((item) => item.id !== connectorId);
     const nextSelectedConnectorId =
       selectedBridgeConnectorId === connectorId
         ? nextConnectors[0]?.id ?? null
         : selectedBridgeConnectorId;
-
-    onBridgeSettingsChange({
-      ...previousSettings,
-      connectors: nextConnectors,
-    });
-    setSelectedBridgeConnectorId(nextSelectedConnectorId);
     setBridgeConnectorTaskError(null);
 
     try {
-      await handleApplyBridgeRobotSettings(nextSelectedConnectorId);
-    } catch {
+      await onDeleteBridgeConnector(connectorId);
+      setSelectedBridgeConnectorId(nextSelectedConnectorId);
+      setBridgeDeleteConfirm(null);
+    } catch (error) {
+      setBridgeConnectorTaskError(`删除机器人失败：${String(error)}`);
+    }
+  }
+
+  async function handleBridgeConnectorWorkDirChange(
+    connectorId: string,
+    nextWorkDir: string | undefined,
+  ) {
+    const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
+    if (!connector) {
+      return;
+    }
+    const normalizedWorkDir = nextWorkDir?.trim() || undefined;
+    const currentWorkDir = connector.defaultWorkDir?.trim() || undefined;
+    if (normalizedWorkDir === currentWorkDir) {
+      return;
+    }
+
+    const previousSettings = bridgeSettings;
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeOverviewPendingConnectorId(connectorId);
+    setBridgeConnectorTaskError(null);
+    updateBridgeConnector(connectorId, { defaultWorkDir: normalizedWorkDir });
+
+    try {
+      await handleApplyBridgeRobotSettings(connectorId);
+    } catch (error) {
       onBridgeSettingsChange(previousSettings);
       setSelectedBridgeConnectorId(selectedBridgeConnectorId);
+      setBridgeConnectorTaskError(`保存机器人工作区失败：${String(error)}`);
+    } finally {
+      setBridgeOverviewPendingConnectorId((current) =>
+        current === connectorId ? null : current,
+      );
     }
+  }
+
+  async function handlePickBridgeConnectorWorkDir(connectorId: string) {
+    const selected = await onPickBridgeConnectorDefaultWorkDir(connectorId);
+    if (typeof selected !== "string") {
+      return;
+    }
+    await handleBridgeConnectorWorkDirChange(connectorId, selected);
   }
 
   function openBridgeConnectorSecretsModal(connectorId: string) {
@@ -1204,12 +1227,18 @@ export function ControlCenterView({
   ) {
     setSelectedBridgeConnectorId(connectorId);
     setBridgeOverviewPendingConnectorId(connectorId);
+    setBridgeOverviewPendingEnabled((current) => ({ ...current, [connectorId]: enabled }));
     try {
       await onToggleBridgeConnectorEnabled(connectorId, enabled);
     } finally {
       setBridgeOverviewPendingConnectorId((current) =>
         current === connectorId ? null : current,
       );
+      setBridgeOverviewPendingEnabled((current) => {
+        const next = { ...current };
+        delete next[connectorId];
+        return next;
+      });
     }
   }
 
@@ -1451,14 +1480,19 @@ export function ControlCenterView({
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
     diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
     bridgeRecentErrors[0] ? `Bridge：${bridgeRecentErrors[0]}` : null,
-  ].filter((item): item is string => Boolean(item));
+  ]
+    .filter((item): item is string => Boolean(item))
+    .filter((item) => !/telegram/i.test(item));
   const condensedLogPreview =
     diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0
       ? diagnostics.backendLogTail.slice(-2).join("\n")
       : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
-  const imFinalStatusLabel = formatImFinalStatusLabel(bridgeStatus, feishuEnabled);
+  const enabledBridgeRobotCount = bridgeSettings.connectors.filter(
+    (connector) => connector.platform === "feishu" && connector.enabled,
+  ).length;
+  const imFinalStatusLabel = `已启用 ${enabledBridgeRobotCount} 个机器人`;
   const overviewBriefs = [
     !installReady ? "Kimi CLI 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
@@ -1705,16 +1739,16 @@ export function ControlCenterView({
                   <span className="cc-onboarding-step-copy">
                     <strong>{step.title}</strong>
                     <small>{step.actionLabel}</small>
+                    <span
+                      className={`cc-status-badge cc-onboarding-step-status tone-${step.statusTone}`}
+                    >
+                      {step.statusLabel}
+                    </span>
                   </span>
-                  <span className={`cc-status-badge tone-${step.statusTone}`}>{step.statusLabel}</span>
                 </button>
               );
             })}
           </div>
-
-          {activeOnboardingStep.id === "install" ? (
-            <div className="cc-onboarding-rail-current-action">{installPrimaryAction}</div>
-          ) : null}
 
           <section className="cc-onboarding-flow-actions">
             <div className="cc-actions">
@@ -1769,22 +1803,6 @@ export function ControlCenterView({
         </aside>
 
         <section className="cc-card cc-onboarding-detail-shell">
-          <div className="cc-onboarding-detail-intro">
-            <div>
-              <span className="cc-kicker">当前步骤</span>
-              <h2>{activeOnboardingStep.title}</h2>
-            </div>
-            <div className="cc-onboarding-detail-intro-actions">
-              <div className="cc-chip-row">
-                <span className={`cc-status-badge tone-${selectedStepTone}`}>
-                  {activeOnboardingStep.statusLabel}
-                </span>
-                <span className="cc-quiet-chip">{activeOnboardingStep.actionLabel}</span>
-              </div>
-              {activeOnboardingStep.id === "install" ? installPrimaryAction : null}
-            </div>
-          </div>
-
           <section className="cc-card cc-step-detail-card">
             <ControlCenterCardHeader
               eyebrow={`步骤 ${activeOnboardingStep.index}`}
@@ -1794,7 +1812,7 @@ export function ControlCenterView({
               statusTone={selectedStepTone}
               primaryAction={activeOnboardingStep.primaryAction}
             />
-            <div className="cc-card-body cc-step-body cc-step-body-single">
+            <div className="cc-card-body cc-step-body cc-step-body-single cc-step-detail-scroll">
               <div className="cc-step-main">
                 {activeOnboardingStep.id === "install" ? (
                   <>
@@ -2117,9 +2135,6 @@ export function ControlCenterView({
   }
 
   function renderBridgeSection() {
-    const nextConnectorPlatform =
-      selectedBridgeConnector?.platform ??
-      (!telegramEnabled ? "telegram" : !feishuEnabled ? "feishu" : "telegram");
     const bridgeHeaderControls = (
       <div className="cc-bridge-title-controls">
         <Button
@@ -2157,9 +2172,7 @@ export function ControlCenterView({
         <section className="cc-card">
           <ControlCenterCardHeader
             title="IM Bridge"
-            titleMeta={bridgeDisplayName !== "IM Bridge" ? bridgeDisplayName : undefined}
             titleControls={bridgeHeaderControls}
-            description="单页机器人工作台。名称、凭据与运行诊断都围绕具体机器人展开。"
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
             primaryAction={
@@ -2167,7 +2180,7 @@ export function ControlCenterView({
                 type="button"
                 icon={<Plus size={14} />}
                 className="cc-action-btn"
-                onClick={() => addBridgeConnector(nextConnectorPlatform)}
+                onClick={() => addBridgeConnector("feishu")}
                 disabled={bridgeBusy}
               >
                 新增机器人
@@ -2176,8 +2189,8 @@ export function ControlCenterView({
           />
           <div className="cc-card-body cc-step-body cc-step-body-single">
             <div className="bridge-robot-list">
-              {sortedBridgeConnectors.length > 0 ? (
-                sortedBridgeConnectors.map((connector) => {
+              {visibleBridgeConnectors.length > 0 ? (
+                visibleBridgeConnectors.map((connector) => {
                   const connectorStatus =
                     bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ??
                     null;
@@ -2209,6 +2222,10 @@ export function ControlCenterView({
                     (item) => item.connectorId === connector.id,
                   );
                   const pendingToggle = bridgeOverviewPendingConnectorId === connector.id;
+                  const connectorEnabledValue = pendingToggle
+                    ? (bridgeOverviewPendingEnabled[connector.id] ?? connector.enabled)
+                    : connector.enabled;
+                  const connectorUsesCustomWorkDir = Boolean(connector.defaultWorkDir?.trim());
                   return (
                     <article key={connector.id} className="bridge-workbench-card">
                       <div className="bridge-workbench-card-head">
@@ -2236,7 +2253,6 @@ export function ControlCenterView({
                               </span>
                             </div>
                           </div>
-                          <span>{connector.id}</span>
                           <div className="bridge-workbench-card-meta">
                             <span>平台：{bridgePlatformLabel(connector.platform)}</span>
                             <span>默认目录：{effectiveWorkDir || "跟随应用默认目录"}</span>
@@ -2255,14 +2271,14 @@ export function ControlCenterView({
                           <input
                             type="checkbox"
                             className="cc-switch-input"
-                            checked={connector.enabled}
+                            checked={connectorEnabledValue}
                             onChange={(event) => {
                               void handleImmediateBridgeConnectorToggle(
                                 connector.id,
                                 event.currentTarget.checked,
                               );
                             }}
-                            disabled={bridgeBusy}
+                            disabled={bridgeBusy || pendingToggle}
                           />
                           <span className="cc-switch-track" aria-hidden />
                         </label>
@@ -2295,6 +2311,51 @@ export function ControlCenterView({
                         {recentConnectorError || "当前没有记录到该机器人的最近错误。"}
                       </p>
 
+                      <div className="bridge-port-card bridge-robot-workdir-card">
+                        <span>工作区目录</span>
+                        <strong>{effectiveWorkDir || "跟随应用默认目录"}</strong>
+                        <small>
+                          {connectorUsesCustomWorkDir
+                            ? "当前机器人使用独立工作区目录。"
+                            : "当前机器人继承应用默认工作目录。"}
+                        </small>
+                        <div className="bridge-inline-path-actions">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            icon={<FolderOpen size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void handlePickBridgeConnectorWorkDir(connector.id)}
+                            disabled={bridgeBusy || pendingToggle}
+                          >
+                            {pendingToggle ? "正在保存目录..." : "选择工作区"}
+                          </Button>
+                          {connectorUsesCustomWorkDir ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="cc-action-btn"
+                              onClick={() =>
+                                void handleBridgeConnectorWorkDirChange(connector.id, undefined)
+                              }
+                              disabled={bridgeBusy || pendingToggle}
+                            >
+                              跟随应用默认目录
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon={<FolderOpen size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void onOpenFolder(effectiveWorkDir)}
+                            disabled={!effectiveWorkDir || pendingToggle}
+                          >
+                            打开目录
+                          </Button>
+                        </div>
+                      </div>
+
                       <div className="bridge-workbench-card-actions">
                         <Button
                           type="button"
@@ -2316,23 +2377,32 @@ export function ControlCenterView({
                         >
                           高级运行面板
                         </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          icon={<FolderOpen size={14} />}
-                          className="cc-action-btn"
-                          onClick={() => void onOpenFolder(effectiveWorkDir)}
-                          disabled={!effectiveWorkDir}
-                        >
-                          打开目录
-                        </Button>
+                      </div>
+
+                      <div className="bridge-danger-group">
+                        <div className="bridge-panel-group-label is-danger">
+                          <span>危险操作</span>
+                          <small>删除后会立即保存配置，并在运行中自动重启 IM Bridge。</small>
+                        </div>
+                        <div className="cc-actions">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon={<X size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void handleDeleteBridgeRobot(connector.id)}
+                            disabled={bridgeBusy}
+                          >
+                            删除机器人
+                          </Button>
+                        </div>
                       </div>
                     </article>
                   );
                 })
               ) : (
                 <div className="bridge-robot-empty">
-                  <p>还没有机器人。点击上方“新增机器人”即可创建第一张机器人卡片。</p>
+                  <p>还没有飞书机器人。点击上方“新增机器人”即可创建第一张机器人卡片。</p>
                 </div>
               )}
             </div>
@@ -2553,10 +2623,11 @@ export function ControlCenterView({
               : "连接与凭据"
           }
           description="先确认状态，再统一维护机器人名称、连接凭据和飞书开通信息。"
-          className="cc-bridge-connector-modal"
+          className="cc-bridge-task-surface cc-bridge-connector-modal"
           bodyClassName="cc-bridge-connector-body"
           onBack={closeBridgeConnectorSecretsTask}
           onClose={onClose}
+          showCloseButton={false}
           headerActions={
             <Button
               type="button"
@@ -3014,10 +3085,11 @@ export function ControlCenterView({
               : "高级运行面板"
           }
           description="这个任务面只显示当前机器人相关的状态、绑定、审批、会话、日志和凭据掩码。"
-          className="cc-bridge-runtime-modal"
+          className="cc-bridge-task-surface cc-bridge-runtime-modal"
           bodyClassName="cc-bridge-runtime-body"
           onBack={onCloseTask}
           onClose={onClose}
+          showCloseButton={false}
         >
           {selectedBridgeConnector ? (
             <BridgeRuntimePanel
@@ -3186,6 +3258,43 @@ export function ControlCenterView({
           )}
         </div>
       </div>
+      {bridgeDeleteConfirm ? (
+        <div className="main-close-decision-overlay" role="presentation">
+          <div
+            className="main-close-decision-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`删除机器人 ${bridgeDeleteConfirm.connectorLabel}`}
+          >
+            <h3>删除机器人</h3>
+            <p>
+              {`确定删除机器人“${bridgeDeleteConfirm.connectorLabel}”吗？此操作会立即保存配置${
+                isBridgeRunning ? "并重启 IM Bridge" : ""
+              }。`}
+            </p>
+            <div className="main-close-decision-actions">
+              <button
+                type="button"
+                className="ui-btn ui-btn-default ui-btn-size-default"
+                onClick={closeBridgeDeleteConfirm}
+                disabled={bridgeBusy}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                onClick={() => {
+                  void handleConfirmDeleteBridgeRobot();
+                }}
+                disabled={bridgeBusy}
+              >
+                删除机器人
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

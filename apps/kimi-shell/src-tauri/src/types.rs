@@ -771,7 +771,6 @@ pub struct BridgeSecretsMaskView {
 
 pub type BridgeChannelStatus = BridgeConnectorStatus;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeConnectorSecretsMaskView {

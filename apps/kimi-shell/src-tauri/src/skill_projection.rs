@@ -15,7 +15,10 @@ pub fn session_skills_dir(work_dir: &Path) -> PathBuf {
         .join(SESSION_SKILLS_SUBDIR_SEGMENT)
 }
 
-pub fn materialize_skill(source_dir: &Path, target_dir: &Path) -> anyhow::Result<SkillProjectionMethod> {
+pub fn materialize_skill(
+    source_dir: &Path,
+    target_dir: &Path,
+) -> anyhow::Result<SkillProjectionMethod> {
     if !source_dir.is_dir() {
         return Err(anyhow::anyhow!(
             "skill source is not a directory: {}",
@@ -91,12 +94,7 @@ fn try_create_windows_junction(source_dir: &Path, target_dir: &Path) -> anyhow::
             &source_dir.to_string_lossy(),
         ])
         .status()
-        .with_context(|| {
-            format!(
-                "failed to invoke mklink /J for {}",
-                target_dir.display()
-            )
-        })?;
+        .with_context(|| format!("failed to invoke mklink /J for {}", target_dir.display()))?;
     if status.success() {
         Ok(())
     } else {
@@ -118,7 +116,10 @@ fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> anyhow::Res
         .with_context(|| format!("failed to read source skill dir: {}", source_dir.display()))?
     {
         let entry = entry.with_context(|| {
-            format!("failed to read source skill entry: {}", source_dir.display())
+            format!(
+                "failed to read source skill entry: {}",
+                source_dir.display()
+            )
         })?;
         let source_path = entry.path();
         let target_path = target_dir.join(entry.file_name());

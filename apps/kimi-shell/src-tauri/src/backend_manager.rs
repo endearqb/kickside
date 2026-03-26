@@ -19,6 +19,7 @@ use url::Url;
 use crate::{
     app_state::{unix_time_millis, AppState},
     cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
+    skill_center,
     types::{
         AppSettings, BackendState, EnvOverrideStatus, InstallCommandCatalog, InstallCommandEntry,
         InstallCommandStep, InstallProbeStatus, KeyValueEntry, KimiCliApiConfigInput,
@@ -2662,6 +2663,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         runtime.cli_contract_ok = Some(true);
         runtime.cli_contract_error = None;
     }
+    let _ = skill_center::track_workspace_root(app, &work_dir);
 
     let Some(active_port) = port_manager::wait_for_ready_port(base_port) else {
         stop_child_for_generation(app, generation);

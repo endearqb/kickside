@@ -1,12 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  DiscoveredSkillDetail,
   InstalledSkill,
   SessionSkillState,
   SkillApplyResult,
   SkillApplyScope,
+  SkillDiscoverySnapshot,
   SkillDetail,
   SkillProjectionRecord,
+  SkillRecommendation,
+  WorkspaceDiscoveryRoot,
+  WorkspaceSkillInventory,
   WorkspaceSkillProfile,
+  WorkspaceSkillTarget,
 } from "@/app/types";
 
 export function installSkillFromGit(repoUrl: string, gitRef?: string) {
@@ -22,6 +28,58 @@ export function importSkillFromPath(path: string) {
 
 export function listInstalledSkills() {
   return invoke<InstalledSkill[]>("list_installed_skills");
+}
+
+export function scanDiscoverableSkills() {
+  return invoke<SkillDiscoverySnapshot>("scan_discoverable_skills");
+}
+
+export function listSkillDiscoveryWorkspaces() {
+  return invoke<WorkspaceDiscoveryRoot[]>("list_skill_discovery_workspaces");
+}
+
+export function listWorkspaceSkillTargets() {
+  return invoke<WorkspaceSkillTarget[]>("list_workspace_skill_targets");
+}
+
+export function getWorkspaceSkillInventory(targetId: string) {
+  return invoke<WorkspaceSkillInventory>("get_workspace_skill_inventory", {
+    targetId,
+  });
+}
+
+export function addInstalledSkillToWorkspaceTarget(
+  targetId: string,
+  containerKind: "agents" | "codex" | "claude",
+  skillId: string,
+) {
+  return invoke<WorkspaceSkillInventory>("add_installed_skill_to_workspace_target", {
+    targetId,
+    containerKind,
+    skillId,
+  });
+}
+
+export function removeWorkspaceTargetSkill(
+  targetId: string,
+  containerKind: "agents" | "codex" | "claude",
+  skillPathOrKey: string,
+) {
+  return invoke<WorkspaceSkillInventory>("remove_workspace_target_skill", {
+    targetId,
+    containerKind,
+    skillPathOrKey,
+  });
+}
+
+export function getDiscoveredSkillDetail(discoveryId: string) {
+  return invoke<DiscoveredSkillDetail>("get_discovered_skill_detail", {
+    discoveryId,
+  });
+}
+
+export function importDiscoveredSkill(discoveryId: string) {
+  return invoke<InstalledSkill>("import_discovered_skill", { discoveryId });
 }
 
 export function getSkillDetail(skillId: string) {
@@ -56,4 +114,30 @@ export function getWorkspaceSkillProfile(workspaceKey?: string) {
   return invoke<WorkspaceSkillProfile | null>("get_workspace_skill_profile", {
     workspaceKey,
   });
+}
+
+export function getWorkspaceSkillRecommendations(workspaceKey?: string) {
+  return invoke<SkillRecommendation[]>("get_workspace_skill_recommendations", {
+    workspaceKey,
+  });
+}
+
+export function setWorkspaceSkillPin(
+  skillId: string,
+  pinned: boolean,
+  workspaceKey?: string,
+) {
+  return invoke<WorkspaceSkillProfile>("set_workspace_skill_pin", {
+    skillId,
+    pinned,
+    workspaceKey,
+  });
+}
+
+export function updateSkill(skillId: string) {
+  return invoke<InstalledSkill>("update_skill", { skillId });
+}
+
+export function uninstallSkill(skillId: string) {
+  return invoke<void>("uninstall_skill", { skillId });
 }

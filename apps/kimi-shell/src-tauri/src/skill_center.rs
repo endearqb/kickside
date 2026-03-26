@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -12,9 +13,15 @@ use crate::{
     app_state::AppState,
     log_manager, skill_center_store, skill_projection,
     types::{
-        BackendState, InstalledSkill, SessionSkillState, SkillApplyResult, SkillApplyScope,
-        SkillDetail, SkillProjectionMethod, SkillProjectionRecord, SkillSourceType,
-        WorkspaceSkillProfile,
+        BackendState, DiscoveredSkillDetail, DiscoveredSkillRecord, InstalledSkill,
+        SessionSkillState, SkillApplyResult, SkillApplyScope, SkillDetail,
+        SkillDiscoveryContainerKind, SkillDiscoveryLocation, SkillDiscoveryScope,
+        SkillDiscoverySnapshot, SkillManifestMetadata, SkillProjectionMethod,
+        SkillProjectionRecord, SkillRecommendation, SkillSourceType,
+        SkillUpdateStatusKind, SkillUpdateStatusView, WorkspaceDiscoveryRoot,
+        WorkspaceManagedSkillRecord, WorkspaceSkillContainerInventory,
+        WorkspaceSkillInventory, WorkspaceSkillProfile, WorkspaceSkillTarget,
+        WorkspaceSkillTargetContainerRoot,
     },
 };
 
@@ -36,6 +43,7 @@ struct InstallSourceMetadata {
     git_ref: Option<String>,
     commit: Option<String>,
     default_trusted: bool,
+    discovery_locations: Vec<SkillDiscoveryLocation>,
 }
 
 pub fn initialize(app: &AppHandle) -> anyhow::Result<()> {
@@ -78,6 +86,7 @@ pub fn install_skill_from_git(
             git_ref: git_ref.map(str::to_string),
             commit: Some(commit),
             default_trusted: false,
+            discovery_locations: Vec::new(),
         };
         install_skill_from_source(app, &temp_dir, metadata, ExistingSkillAction::Error)
     })();
@@ -130,6 +139,7 @@ pub fn import_skill_from_path(app: &AppHandle, path: &str) -> anyhow::Result<Ins
             git_ref: None,
             commit: None,
             default_trusted: false,
+            discovery_locations: Vec::new(),
         };
         install_skill_from_source(app, &skill_root, metadata, ExistingSkillAction::Error)
     })();
@@ -265,13 +275,7 @@ pub fn get_workspace_skill_profile(
     app: &AppHandle,
     workspace_key: Option<&str>,
 ) -> anyhow::Result<Option<WorkspaceSkillProfile>> {
-    let key = workspace_key
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(skill_center_store::normalize_workspace_key)
-        .or_else(|| {
-            effective_work_dir(app).map(|path| skill_center_store::normalize_workspace_key(&path))
-        });
+    let key = resolve_workspace_key(app, workspace_key);
     let Some(key) = key else {
         return Ok(None);
     };
@@ -279,6 +283,349 @@ pub fn get_workspace_skill_profile(
         skill_center_store::load_workspace_profiles(app)?,
         &key,
     ))
+}
+
+pub fn set_workspace_skill_pin(
+    app: &AppHandle,
+    skill_id: &str,
+    pinned: bool,
+    workspace_key: Option<&str>,
+) -> anyhow::Result<WorkspaceSkillProfile> {
+    let skill_id = skill_id.trim();
+    if skill_id.is_empty() {
+        return Err(anyhow::anyhow!("skill id cannot be empty"));
+    }
+    let registry = skill_center_store::load_registry(app)?;
+    if skill_center_store::find_skill(&registry, skill_id).is_none() {
+        return Err(anyhow::anyhow!("skill not found: {}", skill_id));
+    }
+
+    let workspace_id = resolve_workspace_key(app, workspace_key)
+        .ok_or_else(|| anyhow::anyhow!("workspace unavailable"))?;
+    let mut profiles = skill_center_store::load_workspace_profiles(app)?;
+    let mut updated_profile = None;
+
+    for profile in &mut profiles {
+        if profile.workspace_id != workspace_id {
+            continue;
+        }
+        if pinned {
+            let mut next = vec![skill_id.to_string()];
+            next.extend(profile.pinned_skill_ids.clone());
+            profile.pinned_skill_ids = skill_center_store::dedupe_recent_skill_ids(&next);
+        } else {
+            profile.pinned_skill_ids.retain(|value| value != skill_id);
+        }
+        updated_profile = Some(profile.clone());
+        break;
+    }
+
+    if updated_profile.is_none() {
+        let profile = WorkspaceSkillProfile {
+            workspace_id,
+            recent_skill_ids: Vec::new(),
+            pinned_skill_ids: if pinned {
+                vec![skill_id.to_string()]
+            } else {
+                Vec::new()
+            },
+            last_session_skill_ids: Vec::new(),
+        };
+        profiles.push(profile.clone());
+        updated_profile = Some(profile);
+    }
+
+    skill_center_store::save_workspace_profiles(app, &profiles)?;
+    updated_profile.ok_or_else(|| anyhow::anyhow!("failed to update workspace skill profile"))
+}
+
+pub fn get_workspace_skill_recommendations(
+    app: &AppHandle,
+    workspace_key: Option<&str>,
+) -> anyhow::Result<Vec<SkillRecommendation>> {
+    let Some(workspace_id) = resolve_workspace_key(app, workspace_key) else {
+        return Ok(Vec::new());
+    };
+
+    let profile = resolve_workspace_skill_profile(
+        skill_center_store::load_workspace_profiles(app)?,
+        &workspace_id,
+    )
+    .unwrap_or(WorkspaceSkillProfile {
+        workspace_id,
+        recent_skill_ids: Vec::new(),
+        pinned_skill_ids: Vec::new(),
+        last_session_skill_ids: Vec::new(),
+    });
+    let globally_applied = skill_center_store::load_global_projections(app)?
+        .into_iter()
+        .map(|projection| projection.skill_id)
+        .collect::<HashSet<_>>();
+    let session_applied = current_active_session_state(app)?
+        .applied_skill_ids
+        .into_iter()
+        .collect::<HashSet<_>>();
+
+    let mut recommendations = Vec::new();
+    for skill in skill_center_store::load_registry(app)? {
+        if !skill.trusted
+            || globally_applied.contains(&skill.id)
+            || session_applied.contains(&skill.id)
+        {
+            continue;
+        }
+
+        let mut score = 0;
+        let mut reasons = Vec::new();
+        let mut matched_signals = Vec::new();
+
+        if profile.pinned_skill_ids.iter().any(|value| value == &skill.id) {
+            score += 120;
+            reasons.push("已固定到当前工作区".to_string());
+            matched_signals.push("pinned".to_string());
+        }
+        if profile
+            .last_session_skill_ids
+            .iter()
+            .any(|value| value == &skill.id)
+        {
+            score += 80;
+            reasons.push("最近在此工作区会话中使用过".to_string());
+            matched_signals.push("last_session".to_string());
+        }
+        if profile.recent_skill_ids.iter().any(|value| value == &skill.id) {
+            score += 40;
+            reasons.push("最近在此工作区使用过".to_string());
+            matched_signals.push("recent".to_string());
+        }
+        if score <= 0 {
+            continue;
+        }
+
+        let recommended_scope = default_recommended_scope(&skill);
+        recommendations.push(SkillRecommendation {
+            skill_id: skill.id,
+            score,
+            reasons,
+            matched_signals,
+            recommended_scope,
+        });
+    }
+
+    recommendations.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.skill_id.cmp(&right.skill_id))
+    });
+    Ok(recommendations)
+}
+
+pub fn update_skill(app: &AppHandle, skill_id: &str) -> anyhow::Result<InstalledSkill> {
+    let skill_id = skill_id.trim();
+    if skill_id.is_empty() {
+        return Err(anyhow::anyhow!("skill id cannot be empty"));
+    }
+
+    let registry = skill_center_store::load_registry(app)?;
+    let existing = skill_center_store::find_skill(&registry, skill_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id))?;
+    let temp_dir = skill_center_store::create_temp_install_dir(app)?;
+
+    let refresh_result = (|| -> anyhow::Result<InstalledSkill> {
+        let (source_root, metadata) = match existing.source_type {
+            SkillSourceType::Git => {
+                let repo_url = existing
+                    .repo_url
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("git skill missing repo url"))?;
+                run_git(
+                    &["clone", "--quiet", repo_url, &temp_dir.to_string_lossy()],
+                    None,
+                )?;
+                if let Some(git_ref) = existing.git_ref.as_deref() {
+                    let git_ref = git_ref.trim();
+                    if !git_ref.is_empty() {
+                        run_git(&["checkout", "--quiet", "--detach", git_ref], Some(&temp_dir))?;
+                    }
+                }
+                let commit = run_git_capture(&["rev-parse", "HEAD"], Some(&temp_dir))?;
+                (
+                    temp_dir.clone(),
+                    InstallSourceMetadata {
+                        source_type: SkillSourceType::Git,
+                        source_label: repo_url.to_string(),
+                        source_key: skill_center_store::build_git_source_key(
+                            repo_url,
+                            existing.git_ref.as_deref(),
+                            &commit,
+                        ),
+                        source_path: None,
+                        repo_url: Some(repo_url.to_string()),
+                        git_ref: existing.git_ref.clone(),
+                        commit: Some(commit),
+                        default_trusted: existing.trusted,
+                        discovery_locations: existing.discovery_locations.clone(),
+                    },
+                )
+            }
+            SkillSourceType::LocalImport => {
+                let source_path = existing
+                    .source_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("local skill missing source path"))?;
+                let canonical =
+                    skill_center_store::canonicalize_source_path(Path::new(source_path))?;
+                if canonical.is_dir() {
+                    (
+                        canonical.clone(),
+                        InstallSourceMetadata {
+                            source_type: SkillSourceType::LocalImport,
+                            source_label: canonical.to_string_lossy().to_string(),
+                            source_key: skill_center_store::build_local_source_key(
+                                &canonical, false,
+                            )?,
+                            source_path: Some(canonical.to_string_lossy().to_string()),
+                            repo_url: None,
+                            git_ref: None,
+                            commit: None,
+                            default_trusted: existing.trusted,
+                            discovery_locations: existing.discovery_locations.clone(),
+                        },
+                    )
+                } else if canonical.is_file() && skill_center_store::is_zip_path(&canonical) {
+                    extract_zip_archive(&canonical, &temp_dir)?;
+                    (
+                        skill_center_store::resolve_skill_root_from_extracted_dir(&temp_dir)?,
+                        InstallSourceMetadata {
+                            source_type: SkillSourceType::LocalImport,
+                            source_label: canonical.to_string_lossy().to_string(),
+                            source_key: skill_center_store::build_local_source_key(
+                                &canonical, true,
+                            )?,
+                            source_path: Some(canonical.to_string_lossy().to_string()),
+                            repo_url: None,
+                            git_ref: None,
+                            commit: None,
+                            default_trusted: existing.trusted,
+                            discovery_locations: existing.discovery_locations.clone(),
+                        },
+                    )
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "manual import supports only directories and .zip files: {}",
+                        canonical.display()
+                    ));
+                }
+            }
+            SkillSourceType::Bundled => {
+                let relative_path = existing
+                    .source_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("bundled skill missing source path"))?;
+                (
+                    resolve_bundled_skill_source(app, relative_path)?,
+                    InstallSourceMetadata {
+                        source_type: SkillSourceType::Bundled,
+                        source_label: "内置 Skill".to_string(),
+                        source_key: skill_center_store::build_bundled_source_key(relative_path),
+                        source_path: Some(relative_path.to_string()),
+                        repo_url: None,
+                        git_ref: None,
+                        commit: None,
+                        default_trusted: existing.trusted,
+                        discovery_locations: existing.discovery_locations.clone(),
+                    },
+                )
+            }
+            SkillSourceType::DiscoveredImport => {
+                let source_path = existing
+                    .source_path
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("discovered skill missing source path"))?;
+                let canonical = match skill_center_store::canonicalize_source_path(Path::new(source_path)) {
+                    Ok(path) => path,
+                    Err(_) => {
+                        return mark_skill_source_missing(
+                            app,
+                            skill_id,
+                            format!("外部来源不可用：{}", source_path),
+                        );
+                    }
+                };
+                if !canonical.join("SKILL.md").is_file() {
+                    return mark_skill_source_missing(
+                        app,
+                        skill_id,
+                        format!("外部来源缺少 SKILL.md：{}", canonical.display()),
+                    );
+                }
+                (
+                    canonical.clone(),
+                    InstallSourceMetadata {
+                        source_type: SkillSourceType::DiscoveredImport,
+                        source_label: canonical.to_string_lossy().to_string(),
+                        source_key: skill_center_store::build_discovered_source_key(&canonical)?,
+                        source_path: Some(canonical.to_string_lossy().to_string()),
+                        repo_url: None,
+                        git_ref: None,
+                        commit: None,
+                        default_trusted: existing.trusted,
+                        discovery_locations: existing.discovery_locations.clone(),
+                    },
+                )
+            }
+        };
+
+        refresh_installed_skill_from_source(app, skill_id, &source_root, &metadata)
+    })();
+
+    skill_center_store::remove_temp_install_dir(&temp_dir);
+    refresh_result
+}
+
+pub fn uninstall_skill(app: &AppHandle, skill_id: &str) -> anyhow::Result<()> {
+    let skill_id = skill_id.trim();
+    if skill_id.is_empty() {
+        return Err(anyhow::anyhow!("skill id cannot be empty"));
+    }
+
+    let mut registry = skill_center_store::load_registry(app)?;
+    let existing = skill_center_store::find_skill(&registry, skill_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id))?;
+    if existing.source_type == SkillSourceType::Bundled {
+        return Err(anyhow::anyhow!("bundled skills cannot be uninstalled"));
+    }
+
+    remove_skill_from_global_state(app, skill_id)?;
+    for session_state in skill_center_store::load_all_session_states(app)? {
+        if let Some(session_id) = session_state.session_id.as_deref() {
+            remove_skill_from_session_state(app, session_id, skill_id)?;
+        }
+    }
+
+    registry.retain(|skill| skill.id != skill_id);
+    skill_center_store::save_registry(app, &registry)?;
+
+    let local_path = PathBuf::from(&existing.local_path);
+    if local_path.exists() {
+        fs::remove_dir_all(&local_path).with_context(|| {
+            format!(
+                "failed to remove installed skill directory: {}",
+                local_path.display()
+            )
+        })?;
+    }
+
+    let mut profiles = skill_center_store::load_workspace_profiles(app)?;
+    for profile in &mut profiles {
+        profile.recent_skill_ids.retain(|value| value != skill_id);
+        profile.pinned_skill_ids.retain(|value| value != skill_id);
+        profile.last_session_skill_ids.retain(|value| value != skill_id);
+    }
+    skill_center_store::save_workspace_profiles(app, &profiles)
 }
 
 pub fn cleanup_session_skill_projections(app: &AppHandle, session_id: &str) -> anyhow::Result<()> {
@@ -312,6 +659,376 @@ pub fn cleanup_stale_session_projections(app: &AppHandle) -> anyhow::Result<()> 
         }
     }
     Ok(())
+}
+
+pub fn track_workspace_root(app: &AppHandle, path: &Path) -> anyhow::Result<()> {
+    if !path.is_dir() {
+        return Ok(());
+    }
+    let canonical = match skill_center_store::canonicalize_source_path(path) {
+        Ok(value) => value,
+        Err(_) => return Ok(()),
+    };
+    let workspace_id =
+        skill_center_store::normalize_workspace_key(&canonical.to_string_lossy());
+    let mut workspaces = skill_center_store::load_workspace_index(app)?;
+    let mut found = false;
+    for workspace in &mut workspaces {
+        if workspace.id != workspace_id {
+            continue;
+        }
+        workspace.path = canonical.to_string_lossy().to_string();
+        workspace.label = canonical.to_string_lossy().to_string();
+        workspace.last_seen_at = skill_center_store::now_timestamp();
+        found = true;
+        break;
+    }
+    if !found {
+        workspaces.push(WorkspaceDiscoveryRoot {
+            id: workspace_id,
+            scope: SkillDiscoveryScope::Workspace,
+            path: canonical.to_string_lossy().to_string(),
+            label: canonical.to_string_lossy().to_string(),
+            last_seen_at: skill_center_store::now_timestamp(),
+        });
+    }
+    workspaces.sort_by(|left, right| left.path.cmp(&right.path));
+    skill_center_store::save_workspace_index(app, &workspaces)
+}
+
+pub fn list_skill_discovery_workspaces(
+    app: &AppHandle,
+) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot>> {
+    discovery_roots(app)
+}
+
+pub fn list_workspace_skill_targets(
+    app: &AppHandle,
+) -> anyhow::Result<Vec<WorkspaceSkillTarget>> {
+    let current_workspace_path = active_session_work_dir(app)?
+        .or_else(|| effective_work_dir(app));
+    if let Some(path) = current_workspace_path.as_deref() {
+        let _ = track_workspace_root(app, Path::new(path));
+    }
+
+    let mut targets = Vec::new();
+    let current_workspace_key = current_workspace_path
+        .as_deref()
+        .map(skill_center_store::normalize_workspace_key);
+
+    if let Some(path) = current_workspace_path {
+        let root_path = match skill_center_store::canonicalize_source_path(Path::new(&path)) {
+            Ok(value) => value,
+            Err(_) => PathBuf::from(&path),
+        };
+        targets.push(build_workspace_skill_target(
+            "current_workspace".to_string(),
+            SkillDiscoveryScope::Workspace,
+            "当前工作区".to_string(),
+            &root_path,
+            false,
+            true,
+        ));
+    }
+
+    for root in discovery_roots(app)? {
+        if root.scope != SkillDiscoveryScope::Workspace {
+            continue;
+        }
+        if current_workspace_key.as_deref() == Some(&root.id) {
+            continue;
+        }
+        let root_path = PathBuf::from(&root.path);
+        targets.push(build_workspace_skill_target(
+            format!("workspace:{}", root.id),
+            SkillDiscoveryScope::Workspace,
+            display_workspace_label(&root_path, &root.label),
+            &root_path,
+            false,
+            false,
+        ));
+    }
+
+    let home_dir = skill_center_store::user_home_dir()?;
+    targets.push(build_workspace_skill_target(
+        "user_home".to_string(),
+        SkillDiscoveryScope::UserHome,
+        "主目录".to_string(),
+        &home_dir,
+        true,
+        false,
+    ));
+
+    Ok(targets)
+}
+
+pub fn get_workspace_skill_inventory(
+    app: &AppHandle,
+    target_id: &str,
+) -> anyhow::Result<WorkspaceSkillInventory> {
+    let target = resolve_workspace_skill_target(app, target_id)?;
+    let registry = skill_center_store::load_registry(app)?;
+    let containers = target
+        .container_roots
+        .iter()
+        .map(|container_root| {
+            build_workspace_skill_container_inventory(
+                &registry,
+                &target,
+                container_root.container_kind,
+                Path::new(&container_root.container_path),
+            )
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    Ok(WorkspaceSkillInventory {
+        target,
+        scanned_at: skill_center_store::now_timestamp(),
+        containers,
+    })
+}
+
+pub fn add_installed_skill_to_workspace_target(
+    app: &AppHandle,
+    target_id: &str,
+    container_kind: SkillDiscoveryContainerKind,
+    skill_id: &str,
+) -> anyhow::Result<WorkspaceSkillInventory> {
+    let target = resolve_workspace_skill_target(app, target_id)?;
+    if target.read_only {
+        return Err(anyhow::anyhow!("当前目标为只读，不能导入 Skill"));
+    }
+
+    let registry = skill_center_store::load_registry(app)?;
+    let skill = skill_center_store::find_skill(&registry, skill_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    let container_root = resolve_workspace_target_container_path(&target, container_kind)?;
+    let target_path = container_root.join(&skill.projection_name);
+    if target_path.exists() {
+        return Err(anyhow::anyhow!(
+            "目标容器中已存在同名 Skill: {}",
+            target_path.display()
+        ));
+    }
+
+    skill_projection::copy_skill_directory(Path::new(&skill.local_path), &target_path)?;
+    get_workspace_skill_inventory(app, target_id)
+}
+
+pub fn remove_workspace_target_skill(
+    app: &AppHandle,
+    target_id: &str,
+    container_kind: SkillDiscoveryContainerKind,
+    skill_path_or_key: &str,
+) -> anyhow::Result<WorkspaceSkillInventory> {
+    let target = resolve_workspace_skill_target(app, target_id)?;
+    if target.read_only {
+        return Err(anyhow::anyhow!("当前目标为只读，不能删除 Skill"));
+    }
+
+    let container_root = resolve_workspace_target_container_path(&target, container_kind)?;
+    let skill_path = PathBuf::from(skill_path_or_key.trim());
+    if !skill_path.exists() {
+        return Err(anyhow::anyhow!(
+            "workspace skill path does not exist: {}",
+            skill_path.display()
+        ));
+    }
+    let parent = skill_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("workspace skill path missing parent"))?;
+    if skill_center_store::normalize_workspace_key(&parent.to_string_lossy())
+        != skill_center_store::normalize_workspace_key(&container_root.to_string_lossy())
+    {
+        return Err(anyhow::anyhow!(
+            "workspace skill is outside target container: {}",
+            skill_path.display()
+        ));
+    }
+    if !skill_path.join("SKILL.md").is_file() {
+        return Err(anyhow::anyhow!(
+            "target path is not a managed skill directory: {}",
+            skill_path.display()
+        ));
+    }
+
+    skill_projection::remove_projection_target(&skill_path)?;
+    get_workspace_skill_inventory(app, target_id)
+}
+
+pub fn scan_discoverable_skills(app: &AppHandle) -> anyhow::Result<SkillDiscoverySnapshot> {
+    if let Some(path) = effective_work_dir(app) {
+        let _ = track_workspace_root(app, Path::new(&path));
+    }
+    if let Some(path) = active_session_work_dir(app)? {
+        let _ = track_workspace_root(app, Path::new(&path));
+    }
+
+    let scanned_at = skill_center_store::now_timestamp();
+    let workspaces = discovery_roots(app)?;
+    let registry = skill_center_store::load_registry(app)?;
+    let mut records = Vec::<DiscoveredSkillRecord>::new();
+
+    for root in &workspaces {
+        let root_path = PathBuf::from(&root.path);
+        for (container_kind, container_path) in discovery_container_paths(&root_path) {
+            if !container_path.is_dir() {
+                continue;
+            }
+            let container_path_str = container_path.to_string_lossy().to_string();
+            for entry in fs::read_dir(&container_path).with_context(|| {
+                format!(
+                    "failed to read discovery container directory: {}",
+                    container_path.display()
+                )
+            })? {
+                let entry = entry.with_context(|| {
+                    format!(
+                        "failed to inspect discovery entry under {}",
+                        container_path.display()
+                    )
+                })?;
+                let skill_path = entry.path();
+                if !skill_path.is_dir() || !skill_path.join("SKILL.md").is_file() {
+                    continue;
+                }
+                let canonical = match skill_center_store::canonicalize_source_path(&skill_path) {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+                let discovery_id = skill_center_store::build_discovery_id(&canonical)?;
+                let manifest =
+                    skill_center_store::parse_skill_manifest(&canonical.join("SKILL.md"))?;
+                let raw_name = manifest
+                    .name
+                    .clone()
+                    .or_else(|| {
+                        canonical
+                            .file_name()
+                            .map(|value| value.to_string_lossy().to_string())
+                    })
+                    .unwrap_or_else(|| "skill".to_string());
+                let projection_name =
+                    skill_center_store::normalize_projection_name(&raw_name).unwrap_or_else(|| {
+                        "skill".to_string()
+                    });
+                let canonical_str = canonical.to_string_lossy().to_string();
+                let imported_skill = registry.iter().find(|skill| {
+                    skill
+                        .source_path
+                        .as_deref()
+                        .map(|value| {
+                            skill_center_store::normalize_workspace_key(value)
+                                == skill_center_store::normalize_workspace_key(&canonical_str)
+                        })
+                        .unwrap_or(false)
+                });
+                let location = SkillDiscoveryLocation {
+                    scope: root.scope,
+                    container_kind,
+                    container_path: container_path_str.clone(),
+                    skill_path: canonical_str.clone(),
+                    workspace_id: match root.scope {
+                        SkillDiscoveryScope::Workspace => Some(root.id.clone()),
+                        SkillDiscoveryScope::UserHome => None,
+                    },
+                    workspace_label: Some(root.label.clone()),
+                };
+
+                if let Some(existing) = records.iter_mut().find(|item| item.discovery_id == discovery_id)
+                {
+                    existing.locations.push(location);
+                    existing.locations =
+                        skill_center_store::dedupe_discovery_locations(&existing.locations);
+                    if existing.imported_skill_id.is_none() {
+                        existing.imported_skill_id =
+                            imported_skill.map(|skill| skill.id.clone());
+                    }
+                    existing.last_scanned_at = scanned_at.clone();
+                    continue;
+                }
+
+                records.push(DiscoveredSkillRecord {
+                    discovery_id,
+                    name: raw_name,
+                    description: manifest.description.unwrap_or_default(),
+                    canonical_path: canonical_str,
+                    projection_name,
+                    has_scripts: skill_center_store::has_scripts_dir(&canonical),
+                    locations: vec![location],
+                    imported_skill_id: imported_skill.map(|skill| skill.id.clone()),
+                    last_scanned_at: scanned_at.clone(),
+                });
+            }
+        }
+    }
+
+    records.sort_by(|left, right| left.name.cmp(&right.name));
+    let snapshot = SkillDiscoverySnapshot {
+        scanned_at,
+        workspaces,
+        records,
+    };
+    skill_center_store::save_discovery_cache(app, &snapshot)?;
+    Ok(snapshot)
+}
+
+pub fn get_discovered_skill_detail(
+    app: &AppHandle,
+    discovery_id: &str,
+) -> anyhow::Result<DiscoveredSkillDetail> {
+    let snapshot = skill_center_store::load_discovery_cache(app)?;
+    let record = snapshot
+        .records
+        .into_iter()
+        .find(|item| item.discovery_id == discovery_id.trim())
+        .ok_or_else(|| anyhow::anyhow!("discovered skill not found: {}", discovery_id.trim()))?;
+    let relative_paths = skill_center_store::list_relative_paths(
+        Path::new(&record.canonical_path),
+        256,
+    )
+    .unwrap_or_default();
+    Ok(DiscoveredSkillDetail {
+        record,
+        relative_paths,
+    })
+}
+
+pub fn import_discovered_skill(
+    app: &AppHandle,
+    discovery_id: &str,
+) -> anyhow::Result<InstalledSkill> {
+    let snapshot = skill_center_store::load_discovery_cache(app)?;
+    let record = snapshot
+        .records
+        .into_iter()
+        .find(|item| item.discovery_id == discovery_id.trim())
+        .ok_or_else(|| anyhow::anyhow!("discovered skill not found: {}", discovery_id.trim()))?;
+    let canonical_path = PathBuf::from(&record.canonical_path);
+    let source_key = skill_center_store::build_discovered_source_key(&canonical_path)?;
+    let registry = skill_center_store::load_registry(app)?;
+    if let Some(existing) = registry.into_iter().find(|skill| skill.source_key == source_key) {
+        return Ok(existing);
+    }
+    if !canonical_path.join("SKILL.md").is_file() {
+        return Err(anyhow::anyhow!(
+            "discovered skill source is missing SKILL.md: {}",
+            canonical_path.display()
+        ));
+    }
+    let metadata = InstallSourceMetadata {
+        source_type: SkillSourceType::DiscoveredImport,
+        source_label: record.canonical_path.clone(),
+        source_key,
+        source_path: Some(record.canonical_path.clone()),
+        repo_url: None,
+        git_ref: None,
+        commit: None,
+        default_trusted: false,
+        discovery_locations: record.locations,
+    };
+    install_skill_from_source(app, &canonical_path, metadata, ExistingSkillAction::Error)
 }
 
 fn install_skill_from_source(
@@ -367,7 +1084,7 @@ fn install_skill_from_source(
     let target_dir = skill_center_store::repos_dir(app)?.join(&install_id);
     skill_center_store::copy_skill_source(source_dir, &target_dir)?;
     let timestamp = skill_center_store::now_timestamp();
-    let installed = InstalledSkill {
+        let installed = InstalledSkill {
         id: install_id,
         name: raw_name,
         description: manifest.description.unwrap_or_default(),
@@ -384,6 +1101,9 @@ fn install_skill_from_source(
         installed_at: timestamp.clone(),
         updated_at: timestamp,
         has_scripts: skill_center_store::has_scripts_dir(&target_dir),
+        metadata: SkillManifestMetadata::default(),
+        update_status: SkillUpdateStatusView::default(),
+        discovery_locations: metadata.discovery_locations.clone(),
     };
     registry.push(installed.clone());
     skill_center_store::save_registry(app, &registry)?;
@@ -420,9 +1140,74 @@ fn refresh_existing_bundled_skill(
     }
     existing.updated_at = skill_center_store::now_timestamp();
     existing.has_scripts = skill_center_store::has_scripts_dir(&target_dir);
+    existing.metadata = SkillManifestMetadata::default();
+    existing.update_status = build_update_status(SkillUpdateStatusKind::UpToDate, None);
+    existing.discovery_locations = metadata.discovery_locations.clone();
 
     let refreshed = existing.clone();
     skill_center_store::save_registry(app, registry)?;
+    resync_bundled_copy_projections(app, &refreshed)?;
+    Ok(refreshed)
+}
+
+fn refresh_installed_skill_from_source(
+    app: &AppHandle,
+    skill_id: &str,
+    source_dir: &Path,
+    metadata: &InstallSourceMetadata,
+) -> anyhow::Result<InstalledSkill> {
+    let skill_md = source_dir.join("SKILL.md");
+    if !skill_md.is_file() {
+        return Err(anyhow::anyhow!(
+            "skill root must contain SKILL.md: {}",
+            source_dir.display()
+        ));
+    }
+
+    let manifest = skill_center_store::parse_skill_manifest(&skill_md)?;
+    let raw_name = manifest
+        .name
+        .clone()
+        .or_else(|| {
+            source_dir
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| "skill".to_string());
+    let normalized_projection_name = skill_center_store::normalize_projection_name(&raw_name)
+        .ok_or_else(|| {
+            anyhow::anyhow!("invalid skill name; expected lowercase letters, digits or hyphens")
+        })?;
+
+    let mut registry = skill_center_store::load_registry(app)?;
+    let existing = skill_center_store::find_skill_mut(&mut registry, skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    let target_dir = PathBuf::from(&existing.local_path);
+    skill_center_store::replace_skill_source(source_dir, &target_dir)?;
+
+    existing.name = raw_name;
+    existing.description = manifest.description.unwrap_or_default();
+    existing.source_type = metadata.source_type;
+    existing.source_label = metadata.source_label.clone();
+    existing.source_key = metadata.source_key.clone();
+    existing.source_path = metadata.source_path.clone();
+    existing.repo_url = metadata.repo_url.clone();
+    existing.git_ref = metadata.git_ref.clone();
+    existing.commit = metadata.commit.clone();
+    if existing.projection_name.trim().is_empty() {
+        existing.projection_name = normalized_projection_name;
+    }
+    existing.updated_at = skill_center_store::now_timestamp();
+    existing.has_scripts = skill_center_store::has_scripts_dir(&target_dir);
+    existing.metadata = SkillManifestMetadata::default();
+    existing.update_status = build_update_status(
+        SkillUpdateStatusKind::UpToDate,
+        Some("技能已从来源重新同步".to_string()),
+    );
+    existing.discovery_locations = metadata.discovery_locations.clone();
+
+    let refreshed = existing.clone();
+    skill_center_store::save_registry(app, &registry)?;
     resync_bundled_copy_projections(app, &refreshed)?;
     Ok(refreshed)
 }
@@ -456,6 +1241,7 @@ fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
             git_ref: None,
             commit: None,
             default_trusted: true,
+            discovery_locations: Vec::new(),
         };
         if let Err(error) =
             install_skill_from_source(app, &path, metadata, ExistingSkillAction::RefreshBundled)
@@ -765,6 +1551,16 @@ fn effective_work_dir(app: &AppHandle) -> Option<String> {
         .map(|path| path.to_string_lossy().to_string())
 }
 
+fn resolve_workspace_key(app: &AppHandle, workspace_key: Option<&str>) -> Option<String> {
+    workspace_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(skill_center_store::normalize_workspace_key)
+        .or_else(|| {
+            effective_work_dir(app).map(|path| skill_center_store::normalize_workspace_key(&path))
+        })
+}
+
 fn record_recent_skill(app: &AppHandle, skill_id: &str, session_scope: bool) -> anyhow::Result<()> {
     let Some(workspace_key) =
         effective_work_dir(app).map(|value| skill_center_store::normalize_workspace_key(&value))
@@ -809,6 +1605,254 @@ fn record_recent_skill(app: &AppHandle, skill_id: &str, session_scope: bool) -> 
         });
     }
     skill_center_store::save_workspace_profiles(app, &profiles)
+}
+
+fn discovery_roots(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot>> {
+    let mut roots = skill_center_store::load_workspace_index(app)?;
+    let home_dir = skill_center_store::user_home_dir()?;
+    roots.push(WorkspaceDiscoveryRoot {
+        id: "user-home".to_string(),
+        scope: SkillDiscoveryScope::UserHome,
+        path: home_dir.to_string_lossy().to_string(),
+        label: home_dir.to_string_lossy().to_string(),
+        last_seen_at: skill_center_store::now_timestamp(),
+    });
+    let mut deduped = Vec::new();
+    let mut seen = HashSet::new();
+    for root in roots {
+        let key = format!(
+            "{:?}|{}",
+            root.scope,
+            skill_center_store::normalize_workspace_key(&root.path)
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        deduped.push(root);
+    }
+    deduped.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(deduped)
+}
+
+fn discovery_container_paths(
+    root: &Path,
+) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
+    vec![
+        (
+            SkillDiscoveryContainerKind::Agents,
+            root.join(".agents").join("skills"),
+        ),
+        (
+            SkillDiscoveryContainerKind::Codex,
+            root.join(".codex").join("skills"),
+        ),
+        (
+            SkillDiscoveryContainerKind::Claude,
+            root.join(".claude").join("skills"),
+        ),
+    ]
+}
+
+fn build_workspace_skill_target(
+    id: String,
+    scope: SkillDiscoveryScope,
+    label: String,
+    root_path: &Path,
+    read_only: bool,
+    is_current: bool,
+) -> WorkspaceSkillTarget {
+    WorkspaceSkillTarget {
+        id,
+        scope,
+        label,
+        root_path: root_path.to_string_lossy().to_string(),
+        read_only,
+        is_current,
+        container_roots: discovery_container_paths(root_path)
+            .into_iter()
+            .map(|(container_kind, container_path)| WorkspaceSkillTargetContainerRoot {
+                container_kind,
+                container_path: container_path.to_string_lossy().to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn display_workspace_label(root_path: &Path, fallback: &str) -> String {
+    root_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.trim().to_string())
+}
+
+fn resolve_workspace_skill_target(
+    app: &AppHandle,
+    target_id: &str,
+) -> anyhow::Result<WorkspaceSkillTarget> {
+    let target_id = target_id.trim();
+    if target_id.is_empty() {
+        return Err(anyhow::anyhow!("target id cannot be empty"));
+    }
+    list_workspace_skill_targets(app)?
+        .into_iter()
+        .find(|target| target.id == target_id)
+        .ok_or_else(|| anyhow::anyhow!("workspace skill target not found: {}", target_id))
+}
+
+fn resolve_workspace_target_container_path(
+    target: &WorkspaceSkillTarget,
+    container_kind: SkillDiscoveryContainerKind,
+) -> anyhow::Result<PathBuf> {
+    target
+        .container_roots
+        .iter()
+        .find(|root| root.container_kind == container_kind)
+        .map(|root| PathBuf::from(&root.container_path))
+        .ok_or_else(|| anyhow::anyhow!("workspace skill container not found"))
+}
+
+fn build_workspace_skill_container_inventory(
+    registry: &[InstalledSkill],
+    target: &WorkspaceSkillTarget,
+    container_kind: SkillDiscoveryContainerKind,
+    container_path: &Path,
+) -> anyhow::Result<WorkspaceSkillContainerInventory> {
+    let skills = scan_workspace_container_skills(registry, container_kind, container_path)?;
+    Ok(WorkspaceSkillContainerInventory {
+        container_kind,
+        container_path: container_path.to_string_lossy().to_string(),
+        read_only: target.read_only,
+        skills,
+    })
+}
+
+fn scan_workspace_container_skills(
+    registry: &[InstalledSkill],
+    container_kind: SkillDiscoveryContainerKind,
+    container_path: &Path,
+) -> anyhow::Result<Vec<WorkspaceManagedSkillRecord>> {
+    if !container_path.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut skills = Vec::new();
+    for entry in fs::read_dir(container_path).with_context(|| {
+        format!(
+            "failed to read workspace skill container directory: {}",
+            container_path.display()
+        )
+    })? {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to inspect workspace skill entry under {}",
+                container_path.display()
+            )
+        })?;
+        let skill_path = entry.path();
+        if !skill_path.is_dir() || !skill_path.join("SKILL.md").is_file() {
+            continue;
+        }
+        let manifest = skill_center_store::parse_skill_manifest(&skill_path.join("SKILL.md"))?;
+        let raw_name = manifest
+            .name
+            .clone()
+            .or_else(|| {
+                skill_path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+            })
+            .unwrap_or_else(|| "skill".to_string());
+        let projection_name =
+            skill_center_store::normalize_projection_name(&raw_name).unwrap_or_else(|| {
+                "skill".to_string()
+            });
+        let canonical_path = skill_center_store::canonicalize_source_path(&skill_path).ok();
+        let matched_installed_skill_id = registry
+            .iter()
+            .find(|skill| {
+                canonical_path
+                    .as_ref()
+                    .map(|path| {
+                        skill_center_store::normalize_workspace_key(&skill.local_path)
+                            == skill_center_store::normalize_workspace_key(&path.to_string_lossy())
+                    })
+                    .unwrap_or(false)
+                    || skill.projection_name == projection_name
+            })
+            .map(|skill| skill.id.clone());
+        skills.push(WorkspaceManagedSkillRecord {
+            skill_key: skill_path.to_string_lossy().to_string(),
+            name: raw_name,
+            description: manifest.description.unwrap_or_default(),
+            projection_name,
+            has_scripts: skill_center_store::has_scripts_dir(&skill_path),
+            skill_path: skill_path.to_string_lossy().to_string(),
+            container_kind,
+            matched_installed_skill_id,
+        });
+    }
+    skills.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(skills)
+}
+
+fn mark_skill_source_missing(
+    app: &AppHandle,
+    skill_id: &str,
+    detail: String,
+) -> anyhow::Result<InstalledSkill> {
+    let mut registry = skill_center_store::load_registry(app)?;
+    let existing = skill_center_store::find_skill_mut(&mut registry, skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    existing.updated_at = skill_center_store::now_timestamp();
+    existing.update_status = build_update_status(SkillUpdateStatusKind::SourceMissing, Some(detail));
+    let updated = existing.clone();
+    skill_center_store::save_registry(app, &registry)?;
+    Ok(updated)
+}
+
+fn resolve_bundled_skill_source(app: &AppHandle, relative_path: &str) -> anyhow::Result<PathBuf> {
+    let bundled_dir = resolve_bundled_skills_dir(app)?;
+    let normalized = relative_path
+        .trim()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string();
+    let relative = normalized
+        .strip_prefix(&format!("{BUNDLED_SKILLS_DIR_NAME}/"))
+        .unwrap_or(&normalized);
+    let source_dir = relative
+        .split('/')
+        .filter(|part| !part.trim().is_empty())
+        .fold(bundled_dir, |path, part| path.join(part));
+    if !source_dir.join("SKILL.md").is_file() {
+        return Err(anyhow::anyhow!(
+            "bundled skill source is missing: {}",
+            source_dir.display()
+        ));
+    }
+    Ok(source_dir)
+}
+
+fn default_recommended_scope(skill: &InstalledSkill) -> SkillApplyScope {
+    skill
+        .metadata
+        .recommended_scopes
+        .first()
+        .copied()
+        .unwrap_or(SkillApplyScope::SessionKimi)
+}
+
+fn build_update_status(
+    kind: SkillUpdateStatusKind,
+    detail: Option<String>,
+) -> SkillUpdateStatusView {
+    SkillUpdateStatusView {
+        kind,
+        detail,
+        checked_at: Some(skill_center_store::now_timestamp()),
+    }
 }
 
 fn resolve_workspace_skill_profile(

@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager};
 use url::Url;
 
 use crate::{
-    app_state::AppState, backend_manager, log_manager, settings_store,
+    app_state::AppState, backend_manager, log_manager, settings_store, skill_center,
     types::OpenRequestErrorPayload, window_manager, workspace_session,
 };
 
@@ -256,6 +256,7 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
     if !metadata.is_dir() {
         return Err(format!("path is not a directory: {}", directory.display()));
     }
+    let _ = skill_center::track_workspace_root(app, &directory);
 
     backend_manager::set_session_work_dir(app, Some(directory.clone()))
         .map_err(|error| error.to_string())?;
@@ -324,6 +325,7 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
             workspace_dir.display()
         )
     })?;
+    let _ = skill_center::track_workspace_root(app, &workspace_dir);
     workspace_session::clear_active_session_runtime(app, "open_files_request");
     workspace_session::queue_workspace_bootstrap(
         app,

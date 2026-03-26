@@ -7,6 +7,7 @@ type ControlCenterCardHeaderProps = {
   eyebrow?: string;
   title: string;
   titleMeta?: ReactNode;
+  titleMetaPlacement?: "inline" | "below";
   titleControls?: ReactNode;
   description?: string;
   statusLabel: string;
@@ -15,12 +16,14 @@ type ControlCenterCardHeaderProps = {
   collapsible?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
+  className?: string;
 };
 
 export function ControlCenterCardHeader({
   eyebrow,
   title,
   titleMeta,
+  titleMetaPlacement = "inline",
   titleControls,
   description,
   statusLabel,
@@ -29,10 +32,41 @@ export function ControlCenterCardHeader({
   collapsible = false,
   expanded = false,
   onToggle,
+  className,
 }: ControlCenterCardHeaderProps) {
   const canToggle = collapsible && typeof onToggle === "function";
+  const headerClassName = [
+    "cc-card-header",
+    "cc-card-header-structured",
+    titleMetaPlacement === "below" ? "is-title-meta-below" : "",
+    className ?? "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const titleStack = (
+    <span className="cc-card-header-title-stack">
+      <span className="cc-card-header-title-row">
+        <h3 className="cc-step-title-line">{title}</h3>
+        {titleMeta && titleMetaPlacement === "inline" ? (
+          <span className="cc-card-header-title-meta">{titleMeta}</span>
+        ) : null}
+        {titleControls ? (
+          <span className="cc-card-header-title-controls">{titleControls}</span>
+        ) : null}
+      </span>
+      {titleMeta && titleMetaPlacement === "below" ? (
+        <span className="cc-card-header-title-meta is-below">{titleMeta}</span>
+      ) : null}
+    </span>
+  );
+
+  const descriptionNode = description ? (
+    <p className="cc-card-header-description">{description}</p>
+  ) : null;
+
   return (
-    <header className="cc-card-header cc-card-header-structured">
+    <header className={headerClassName}>
       <div className="cc-card-header-copy">
         {canToggle ? (
           <button
@@ -43,14 +77,8 @@ export function ControlCenterCardHeader({
           >
             <span className="cc-step-title-copy">
               {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
-              <span className="cc-card-header-title-row">
-                <h3 className="cc-step-title-line">{title}</h3>
-                {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
-                {titleControls ? (
-                  <span className="cc-card-header-title-controls">{titleControls}</span>
-                ) : null}
-              </span>
-              {description ? <p className="cc-step-inline-summary">{description}</p> : null}
+              {titleStack}
+              {descriptionNode}
             </span>
             <ChevronRight
               size={14}
@@ -60,14 +88,8 @@ export function ControlCenterCardHeader({
         ) : (
           <div className="cc-card-header-static-copy">
             {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
-            <div className="cc-card-header-title-row">
-              <h3>{title}</h3>
-              {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
-              {titleControls ? (
-                <span className="cc-card-header-title-controls">{titleControls}</span>
-              ) : null}
-            </div>
-            {description ? <p>{description}</p> : null}
+            {titleStack}
+            {descriptionNode}
           </div>
         )}
       </div>

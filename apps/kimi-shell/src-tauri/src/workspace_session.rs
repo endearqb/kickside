@@ -62,6 +62,7 @@ pub fn queue_workspace_bootstrap(
     force_create_new: bool,
 ) {
     let normalized = normalize_path(work_dir);
+    let _ = skill_center::track_workspace_root(app, &normalized);
     let state = app.state::<AppState>();
     let lock = state.runtime.lock();
     let Ok(mut runtime) = lock else {
@@ -427,6 +428,7 @@ pub fn list_workspace_sessions_for_bridge(
     };
     let sessions = fetch_sessions(workspace_port)
         .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    remember_workspace_paths(app, &sessions);
     Ok(sessions
         .into_iter()
         .map(|session| WorkspaceSessionRecord {
@@ -456,6 +458,7 @@ pub fn get_workspace_session_for_bridge(
     };
     let sessions = fetch_sessions(workspace_port)
         .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    remember_workspace_paths(app, &sessions);
     Ok(sessions
         .into_iter()
         .find(|session| session.session_id == session_id.trim())
@@ -560,6 +563,14 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
         return;
     }
 
+    if let Some(work_dir) = snapshot
+        .as_ref()
+        .and_then(|item| item.work_dir.as_deref())
+        .map(PathBuf::from)
+    {
+        let _ = skill_center::track_workspace_root(app, &work_dir);
+    }
+
     cleanup_replaced_session_skills(
         app,
         previous_session_id.as_deref(),
@@ -578,6 +589,15 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
         reason: None,
     };
     emit_workspace_session_event(app, WORKSPACE_SESSION_BRIDGE_EVENT, &payload);
+}
+
+fn remember_workspace_paths(app: &AppHandle, sessions: &[ApiSession]) {
+    for session in sessions {
+        let Some(work_dir) = session.work_dir.as_deref() else {
+            continue;
+        };
+        let _ = skill_center::track_workspace_root(app, Path::new(work_dir));
+    }
 }
 
 fn emit_workspace_session_event(

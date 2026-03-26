@@ -700,6 +700,7 @@ pub enum SkillSourceType {
     Git,
     LocalImport,
     Bundled,
+    DiscoveredImport,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -737,6 +738,127 @@ pub struct SkillManifestMetadata {
     pub recommended_scopes: Vec<SkillApplyScope>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDiscoveryScope {
+    UserHome,
+    Workspace,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDiscoveryContainerKind {
+    Agents,
+    Codex,
+    Claude,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDiscoveryLocation {
+    pub scope: SkillDiscoveryScope,
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+    pub skill_path: String,
+    pub workspace_id: Option<String>,
+    pub workspace_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiscoveryRoot {
+    pub id: String,
+    pub scope: SkillDiscoveryScope,
+    pub path: String,
+    pub label: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillTargetContainerRoot {
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillTarget {
+    pub id: String,
+    pub scope: SkillDiscoveryScope,
+    pub label: String,
+    pub root_path: String,
+    pub read_only: bool,
+    pub is_current: bool,
+    #[serde(default)]
+    pub container_roots: Vec<WorkspaceSkillTargetContainerRoot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceManagedSkillRecord {
+    pub skill_key: String,
+    pub name: String,
+    pub description: String,
+    pub projection_name: String,
+    pub has_scripts: bool,
+    pub skill_path: String,
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub matched_installed_skill_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillContainerInventory {
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+    pub read_only: bool,
+    #[serde(default)]
+    pub skills: Vec<WorkspaceManagedSkillRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillInventory {
+    pub target: WorkspaceSkillTarget,
+    pub scanned_at: String,
+    #[serde(default)]
+    pub containers: Vec<WorkspaceSkillContainerInventory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSkillRecord {
+    pub discovery_id: String,
+    pub name: String,
+    pub description: String,
+    pub canonical_path: String,
+    pub projection_name: String,
+    pub has_scripts: bool,
+    #[serde(default)]
+    pub locations: Vec<SkillDiscoveryLocation>,
+    pub imported_skill_id: Option<String>,
+    pub last_scanned_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSkillDetail {
+    pub record: DiscoveredSkillRecord,
+    #[serde(default)]
+    pub relative_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDiscoverySnapshot {
+    pub scanned_at: String,
+    #[serde(default)]
+    pub workspaces: Vec<WorkspaceDiscoveryRoot>,
+    #[serde(default)]
+    pub records: Vec<DiscoveredSkillRecord>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledSkill {
@@ -763,6 +885,8 @@ pub struct InstalledSkill {
     pub metadata: SkillManifestMetadata,
     #[serde(default)]
     pub update_status: SkillUpdateStatusView,
+    #[serde(default)]
+    pub discovery_locations: Vec<SkillDiscoveryLocation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

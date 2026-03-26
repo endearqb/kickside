@@ -13,8 +13,8 @@ use crate::{
     bridge_manager, bridge_settings_store,
     types::{
         BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
-        BridgeTelegramSecrets, FeishuConnectorOnboardingSession, FeishuConnectorOnboardingState,
-        StartFeishuConnectorOnboardingInput,
+        BridgeTelegramSecrets, BridgeWeixinSecrets, FeishuConnectorOnboardingSession,
+        FeishuConnectorOnboardingState, StartFeishuConnectorOnboardingInput,
     },
 };
 
@@ -223,6 +223,7 @@ fn persist_success(
                 verification_token: None,
                 encrypt_key: None,
             },
+            weixin: BridgeWeixinSecrets::default(),
         },
     )?;
 

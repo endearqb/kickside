@@ -36,6 +36,7 @@ import type {
   ActionableOnboardingStep,
   AppStatus,
   BindingRecord,
+  DiscoveredSkillDetail,
   BridgeApprovalRecord,
   BridgeConnectorConfig,
   BridgeConnectorSecretsInput,
@@ -81,17 +82,23 @@ import type {
   Screen,
   ShellRoutePayload,
   PowerShellPreflightSummary,
+  SkillDiscoverySnapshot,
   SkillCenterSectionId,
   StartFeishuConnectorOnboardingInput,
   StartWeixinConnectorOnboardingInput,
   Theme,
   SessionSkillState,
   SkillApplyScope,
+  SkillCenterFilter,
   SkillDetail,
   SkillProjectionRecord,
   SkillRecommendation,
+  SkillDiscoveryContainerKind,
+  WorkspaceDiscoveryRoot,
+  WorkspaceSkillInventory,
   WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
+  WorkspaceSkillTarget,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
   WorkspaceLayoutMode,
@@ -102,15 +109,23 @@ import type {
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 import {
   applySkill,
+  addInstalledSkillToWorkspaceTarget,
+  getDiscoveredSkillDetail,
   getWorkspaceSkillProfile,
+  getWorkspaceSkillInventory,
   getWorkspaceSkillRecommendations,
   getSkillDetail,
+  importDiscoveredSkill,
   importSkillFromPath,
   installSkillFromGit,
   listActiveSessionSkills,
+  listSkillDiscoveryWorkspaces,
   listGlobalSkills,
   listInstalledSkills,
+  listWorkspaceSkillTargets,
   removeSkill,
+  removeWorkspaceTargetSkill,
+  scanDiscoverableSkills,
   setWorkspaceSkillPin,
   setSkillTrust,
   uninstallSkill,
@@ -465,9 +480,7 @@ export function useShellController() {
   const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
   const [skillCenterBusy, setSkillCenterBusy] = useState(false);
   const [skillCenterSearch, setSkillCenterSearch] = useState("");
-  const [skillCenterFilter, setSkillCenterFilter] = useState<
-    "all" | "session" | "global" | "pinned" | "untrusted" | "update_available"
-  >("all");
+  const [skillCenterFilter, setSkillCenterFilter] = useState<SkillCenterFilter>("all");
   const [skillCenterSection, setSkillCenterSection] =
     useState<SkillCenterSectionId>("manage");
   const [skillCenterGitRepoUrl, setSkillCenterGitRepoUrl] = useState("");
@@ -490,6 +503,22 @@ export function useShellController() {
   const [workspaceSkillRestoreResults, setWorkspaceSkillRestoreResults] = useState<
     WorkspaceSkillRestoreResult[]
   >([]);
+  const [skillDiscoverySnapshot, setSkillDiscoverySnapshot] =
+    useState<SkillDiscoverySnapshot | null>(null);
+  const [skillDiscoveryWorkspaces, setSkillDiscoveryWorkspaces] = useState<
+    WorkspaceDiscoveryRoot[]
+  >([]);
+  const [selectedDiscoveryId, setSelectedDiscoveryId] = useState<string | null>(null);
+  const [selectedDiscoveryDetail, setSelectedDiscoveryDetail] =
+    useState<DiscoveredSkillDetail | null>(null);
+  const [workspaceSkillTargets, setWorkspaceSkillTargets] = useState<WorkspaceSkillTarget[]>([]);
+  const [selectedWorkspaceSkillTargetId, setSelectedWorkspaceSkillTargetId] = useState<
+    string | null
+  >(null);
+  const [workspaceSkillInventory, setWorkspaceSkillInventory] =
+    useState<WorkspaceSkillInventory | null>(null);
+  const [selectedWorkspaceSkillContainerKind, setSelectedWorkspaceSkillContainerKind] =
+    useState<SkillDiscoveryContainerKind>("agents");
   const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
@@ -1312,6 +1341,106 @@ export function useShellController() {
       setWorkspaceSkillRecommendations([]);
       return [];
     }
+  }
+
+  async function refreshSkillDiscoveryWorkspaces() {
+    try {
+      const workspaces = await listSkillDiscoveryWorkspaces();
+      setSkillDiscoveryWorkspaces(workspaces);
+      return workspaces;
+    } catch (error) {
+      setActionError(String(error));
+      setSkillDiscoveryWorkspaces([]);
+      return [];
+    }
+  }
+
+  async function refreshSelectedDiscoveryDetail(discoveryId?: string | null) {
+    if (!discoveryId?.trim()) {
+      setSelectedDiscoveryDetail(null);
+      return null;
+    }
+    const detail = await getDiscoveredSkillDetail(discoveryId);
+    setSelectedDiscoveryDetail(detail);
+    return detail;
+  }
+
+  async function refreshSkillDiscoveryState(preferredDiscoveryId?: string | null) {
+    try {
+      const [workspaces, snapshot] = await Promise.all([
+        refreshSkillDiscoveryWorkspaces(),
+        scanDiscoverableSkills(),
+      ]);
+      setSkillDiscoverySnapshot(snapshot);
+      const nextSelectedId =
+        preferredDiscoveryId &&
+        snapshot.records.some((record) => record.discoveryId === preferredDiscoveryId)
+          ? preferredDiscoveryId
+          : snapshot.records[0]?.discoveryId ?? null;
+      setSelectedDiscoveryId(nextSelectedId);
+      setSkillDiscoveryWorkspaces(snapshot.workspaces.length > 0 ? snapshot.workspaces : workspaces);
+      await refreshSelectedDiscoveryDetail(nextSelectedId);
+      return {
+        snapshot,
+        workspaces: snapshot.workspaces.length > 0 ? snapshot.workspaces : workspaces,
+        selectedDiscoveryId: nextSelectedId,
+      };
+    } catch (error) {
+      setActionError(String(error));
+      setSkillDiscoverySnapshot(null);
+      setSkillDiscoveryWorkspaces([]);
+      setSelectedDiscoveryId(null);
+      setSelectedDiscoveryDetail(null);
+      throw error;
+    }
+  }
+
+  async function refreshWorkspaceSkillTargetsState(preferredTargetId?: string | null) {
+    try {
+      const targets = await listWorkspaceSkillTargets();
+      setWorkspaceSkillTargets(targets);
+      const nextSelectedTargetId =
+        preferredTargetId &&
+        targets.some((target) => target.id === preferredTargetId)
+          ? preferredTargetId
+          : targets[0]?.id ?? null;
+      setSelectedWorkspaceSkillTargetId(nextSelectedTargetId);
+      return { targets, selectedWorkspaceSkillTargetId: nextSelectedTargetId };
+    } catch (error) {
+      setActionError(String(error));
+      setWorkspaceSkillTargets([]);
+      setSelectedWorkspaceSkillTargetId(null);
+      throw error;
+    }
+  }
+
+  async function refreshWorkspaceSkillInventoryState(targetId?: string | null) {
+    if (!targetId?.trim()) {
+      setWorkspaceSkillInventory(null);
+      return null;
+    }
+    try {
+      const inventory = await getWorkspaceSkillInventory(targetId);
+      setWorkspaceSkillInventory(inventory);
+      const availableContainerKinds = inventory.containers.map((container) => container.containerKind);
+      setSelectedWorkspaceSkillContainerKind((current) =>
+        availableContainerKinds.includes(current)
+          ? current
+          : availableContainerKinds[0] ?? "agents",
+      );
+      return inventory;
+    } catch (error) {
+      setActionError(String(error));
+      setWorkspaceSkillInventory(null);
+      throw error;
+    }
+  }
+
+  async function refreshWorkspaceSkillManagementState(preferredTargetId?: string | null) {
+    const { selectedWorkspaceSkillTargetId: nextTargetId } =
+      await refreshWorkspaceSkillTargetsState(preferredTargetId ?? selectedWorkspaceSkillTargetId);
+    await refreshWorkspaceSkillInventoryState(nextTargetId);
+    return nextTargetId;
   }
 
   async function handleSaveBridgeConnectorSecrets(input: BridgeConnectorSecretsInput) {
@@ -2251,6 +2380,43 @@ export function useShellController() {
       status?.activeSessionId,
       status?.activeSessionWorkDir,
       status?.effectiveWorkDir,
+  ]);
+
+  useEffect(() => {
+    const visible =
+      activeControlSection === "skill_center" &&
+      (screen === "control_center" || controlCenterModalOpen);
+    if (!visible) {
+      return;
+    }
+    void refreshSkillDiscoveryState(selectedDiscoveryId);
+  }, [
+    activeControlSection,
+    controlCenterModalOpen,
+    screen,
+    status?.activeSessionId,
+    status?.activeSessionWorkDir,
+    status?.effectiveWorkDir,
+  ]);
+
+  useEffect(() => {
+    const visible =
+      activeControlSection === "skill_center" &&
+      skillCenterSection === "workspace_insights" &&
+      (screen === "control_center" || controlCenterModalOpen);
+    if (!visible) {
+      return;
+    }
+    void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
+  }, [
+    activeControlSection,
+    controlCenterModalOpen,
+    screen,
+    selectedWorkspaceSkillTargetId,
+    skillCenterSection,
+    status?.activeSessionId,
+    status?.activeSessionWorkDir,
+    status?.effectiveWorkDir,
   ]);
 
   useEffect(() => {
@@ -3623,14 +3789,118 @@ export function useShellController() {
     }
   }
 
+  async function handleSelectWorkspaceSkillTarget(targetId: string) {
+    setSelectedWorkspaceSkillTargetId(targetId);
+    try {
+      await refreshWorkspaceSkillInventoryState(targetId);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  function handleSelectWorkspaceSkillContainer(containerKind: SkillDiscoveryContainerKind) {
+    setSelectedWorkspaceSkillContainerKind(containerKind);
+  }
+
+  async function handleAddInstalledSkillToWorkspaceTarget(
+    skillId: string,
+    targetId?: string | null,
+    containerKind?: SkillDiscoveryContainerKind,
+  ) {
+    const nextTargetId = targetId ?? selectedWorkspaceSkillTargetId;
+    const nextContainerKind = containerKind ?? selectedWorkspaceSkillContainerKind;
+    if (!nextTargetId) {
+      setActionError("缺少工作区目标，暂时无法导入 Skill。");
+      return;
+    }
+
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await ensureSkillTrusted(skillId);
+      await addInstalledSkillToWorkspaceTarget(nextTargetId, nextContainerKind, skillId);
+      await refreshWorkspaceSkillInventoryState(nextTargetId);
+      await refreshSkillDiscoveryState(selectedDiscoveryId);
+      await refreshSkillCenterState(selectedSkillId);
+    } catch (error) {
+      const message = String(error);
+      if (message !== "Error: 已取消信任并应用" && message !== "已取消信任并应用") {
+        setActionError(message);
+      }
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleRemoveWorkspaceTargetSkill(
+    skillPathOrKey: string,
+    targetId?: string | null,
+    containerKind?: SkillDiscoveryContainerKind,
+  ) {
+    const nextTargetId = targetId ?? selectedWorkspaceSkillTargetId;
+    const nextContainerKind = containerKind ?? selectedWorkspaceSkillContainerKind;
+    if (!nextTargetId) {
+      setActionError("缺少工作区目标，暂时无法删除 Skill。");
+      return;
+    }
+
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await removeWorkspaceTargetSkill(nextTargetId, nextContainerKind, skillPathOrKey);
+      await refreshWorkspaceSkillInventoryState(nextTargetId);
+      await refreshSkillDiscoveryState(selectedDiscoveryId);
+      await refreshSkillCenterState(selectedSkillId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
   async function handleRecoverWorkspaceSkill(skillId: string) {
-    setSkillCenterSection("workspace_insights");
+    setSkillCenterSection("manage");
     await handleApplySkill(skillId, "session_kimi");
   }
 
   async function handleOpenSkillFromInsights(skillId: string) {
     setSkillCenterSection("manage");
     await handleSelectSkill(skillId);
+  }
+
+  async function handleSelectDiscoveredSkill(discoveryId: string) {
+    setSelectedDiscoveryId(discoveryId);
+    try {
+      await refreshSelectedDiscoveryDetail(discoveryId);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handleScanDiscoveredSkills() {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await refreshSkillDiscoveryState(selectedDiscoveryId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleImportDiscoveredSkill(discoveryId: string) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const installed = await importDiscoveredSkill(discoveryId);
+      await refreshSkillCenterState(installed.id);
+      await refreshSkillDiscoveryState(discoveryId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
   }
 
   function openControlCenter() {
@@ -3645,6 +3915,11 @@ export function useShellController() {
 
   function handleSkillCenterSectionChange(section: SkillCenterSectionId) {
     setSkillCenterSection(section);
+    if (section === "workspace_insights") {
+      void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
+      return;
+    }
+    void refreshSkillDiscoveryState(selectedDiscoveryId);
   }
 
   function backToStatus() {
@@ -3927,6 +4202,14 @@ export function useShellController() {
     workspaceRecentSkillIds,
     workspaceSkillRecommendations,
     workspaceSkillRestoreResults,
+    skillDiscoverySnapshot,
+    skillDiscoveryWorkspaces,
+    selectedDiscoveryId,
+    selectedDiscoveryDetail,
+    workspaceSkillTargets,
+    selectedWorkspaceSkillTargetId,
+    workspaceSkillInventory,
+    selectedWorkspaceSkillContainerKind,
     sessionSkillCount,
     bridgeOnboardingDraft,
     bridgeOnboardingDirty,
@@ -3999,6 +4282,8 @@ export function useShellController() {
     refreshBridgeLogTail,
     refreshBridgeSecretsMask,
     refreshSkillCenterState,
+    refreshSkillDiscoveryState,
+    refreshWorkspaceSkillManagementState,
     refreshInstallProbe,
     refreshInstallSettings,
     refreshPowerShellPreflight,
@@ -4061,6 +4346,13 @@ export function useShellController() {
     handleProbeLogin,
     handleSelectSkill,
     handleOpenSkillFromInsights,
+    handleSelectDiscoveredSkill,
+    handleScanDiscoveredSkills,
+    handleImportDiscoveredSkill,
+    handleSelectWorkspaceSkillTarget,
+    handleSelectWorkspaceSkillContainer,
+    handleAddInstalledSkillToWorkspaceTarget,
+    handleRemoveWorkspaceTargetSkill,
     handleConfirmInstallSkillFromGit,
     handleConfirmImportSkillFromPath,
     handleSetSkillTrust,

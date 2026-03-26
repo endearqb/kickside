@@ -10,14 +10,16 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    InstalledSkill, SessionSkillState, SkillProjectionRecord, SkillSourceType,
-    WorkspaceSkillProfile,
+    DiscoveredSkillRecord, InstalledSkill, SessionSkillState, SkillDiscoverySnapshot,
+    SkillProjectionRecord, SkillSourceType, WorkspaceDiscoveryRoot, WorkspaceSkillProfile,
 };
 
 const SKILL_CENTER_DIR_NAME: &str = "skill-center";
 const REGISTRY_FILE_NAME: &str = "registry.json";
 const GLOBAL_STATE_FILE_NAME: &str = "global.json";
 const WORKSPACE_STATE_FILE_NAME: &str = "workspaces.json";
+const WORKSPACE_INDEX_FILE_NAME: &str = "workspace-index.json";
+const DISCOVERY_CACHE_FILE_NAME: &str = "discovery-cache.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +40,23 @@ struct GlobalStateFile {
 struct WorkspaceProfilesFile {
     #[serde(default)]
     profiles: Vec<WorkspaceSkillProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceIndexFile {
+    #[serde(default)]
+    workspaces: Vec<WorkspaceDiscoveryRoot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryCacheFile {
+    scanned_at: Option<String>,
+    #[serde(default)]
+    workspaces: Vec<WorkspaceDiscoveryRoot>,
+    #[serde(default)]
+    records: Vec<DiscoveredSkillRecord>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -97,6 +116,17 @@ pub fn ensure_layout(app: &AppHandle) -> anyhow::Result<()> {
             },
         )?;
     }
+    if !workspace_index_path(app)?.exists() {
+        write_json(
+            &workspace_index_path(app)?,
+            &WorkspaceIndexFile {
+                workspaces: Vec::new(),
+            },
+        )?;
+    }
+    if !discovery_cache_path(app)?.exists() {
+        write_json(&discovery_cache_path(app)?, &DiscoveryCacheFile::default())?;
+    }
     Ok(())
 }
 
@@ -135,6 +165,14 @@ pub fn global_state_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
 
 pub fn workspace_profiles_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
     Ok(state_dir(app)?.join(WORKSPACE_STATE_FILE_NAME))
+}
+
+pub fn workspace_index_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(state_dir(app)?.join(WORKSPACE_INDEX_FILE_NAME))
+}
+
+pub fn discovery_cache_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    Ok(state_dir(app)?.join(DISCOVERY_CACHE_FILE_NAME))
 }
 
 pub fn session_state_path(app: &AppHandle, session_id: &str) -> anyhow::Result<PathBuf> {
@@ -254,6 +292,50 @@ pub fn save_workspace_profiles(
         &workspace_profiles_path(app)?,
         &WorkspaceProfilesFile {
             profiles: profiles.to_vec(),
+        },
+    )
+}
+
+pub fn load_workspace_index(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot>> {
+    ensure_layout(app)?;
+    let file: WorkspaceIndexFile = read_json_or_default(&workspace_index_path(app)?)?;
+    Ok(file.workspaces)
+}
+
+pub fn save_workspace_index(
+    app: &AppHandle,
+    workspaces: &[WorkspaceDiscoveryRoot],
+) -> anyhow::Result<()> {
+    ensure_layout(app)?;
+    write_json(
+        &workspace_index_path(app)?,
+        &WorkspaceIndexFile {
+            workspaces: workspaces.to_vec(),
+        },
+    )
+}
+
+pub fn load_discovery_cache(app: &AppHandle) -> anyhow::Result<SkillDiscoverySnapshot> {
+    ensure_layout(app)?;
+    let file: DiscoveryCacheFile = read_json_or_default(&discovery_cache_path(app)?)?;
+    Ok(SkillDiscoverySnapshot {
+        scanned_at: file.scanned_at.unwrap_or_default(),
+        workspaces: file.workspaces,
+        records: file.records,
+    })
+}
+
+pub fn save_discovery_cache(
+    app: &AppHandle,
+    snapshot: &SkillDiscoverySnapshot,
+) -> anyhow::Result<()> {
+    ensure_layout(app)?;
+    write_json(
+        &discovery_cache_path(app)?,
+        &DiscoveryCacheFile {
+            scanned_at: Some(snapshot.scanned_at.clone()),
+            workspaces: snapshot.workspaces.clone(),
+            records: snapshot.records.clone(),
         },
     )
 }
@@ -456,6 +538,18 @@ pub fn canonicalize_source_path(path: &Path) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("failed to canonicalize source path: {}", path.display()))
 }
 
+pub fn user_home_dir() -> anyhow::Result<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .or_else(|| {
+            let drive = std::env::var_os("HOMEDRIVE")?;
+            let path = std::env::var_os("HOMEPATH")?;
+            Some(PathBuf::from(drive).join(path).into_os_string())
+        })
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))
+}
+
 pub fn build_git_source_key(repo_url: &str, git_ref: Option<&str>, commit: &str) -> String {
     let git_ref = git_ref
         .map(str::trim)
@@ -478,6 +572,22 @@ pub fn build_bundled_source_key(relative_bundle_path: &str) -> String {
             .replace('\\', "/")
             .trim_matches('/'),
     )
+}
+
+pub fn build_discovered_source_key(path: &Path) -> anyhow::Result<String> {
+    let canonical = canonicalize_source_path(path)?;
+    Ok(format!(
+        "discovered:{}",
+        canonical.to_string_lossy().replace('\\', "/")
+    ))
+}
+
+pub fn build_discovery_id(path: &Path) -> anyhow::Result<String> {
+    let canonical = canonicalize_source_path(path)?;
+    Ok(format!(
+        "discovery:{}",
+        canonical.to_string_lossy().replace('\\', "/")
+    ))
 }
 
 pub fn is_zip_path(path: &Path) -> bool {
@@ -547,6 +657,37 @@ pub fn dedupe_recent_skill_ids(values: &[String]) -> Vec<String> {
             continue;
         }
         result.push(trimmed.to_string());
+    }
+    result
+}
+
+pub fn dedupe_discovery_locations(
+    values: &[crate::types::SkillDiscoveryLocation],
+) -> Vec<crate::types::SkillDiscoveryLocation> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for value in values {
+        let scope = match value.scope {
+            crate::types::SkillDiscoveryScope::UserHome => "user_home",
+            crate::types::SkillDiscoveryScope::Workspace => "workspace",
+        };
+        let container_kind = match value.container_kind {
+            crate::types::SkillDiscoveryContainerKind::Agents => "agents",
+            crate::types::SkillDiscoveryContainerKind::Codex => "codex",
+            crate::types::SkillDiscoveryContainerKind::Claude => "claude",
+        };
+        let key = format!(
+            "{}|{}|{}|{}|{}",
+            scope,
+            container_kind,
+            value.container_path,
+            value.skill_path,
+            value.workspace_id.as_deref().unwrap_or("")
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        result.push(value.clone());
     }
     result
 }
@@ -671,6 +812,9 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{
+        SkillDiscoveryContainerKind, SkillDiscoveryLocation, SkillDiscoveryScope,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDir {
@@ -751,5 +895,40 @@ mod tests {
 
         assert!(target.join("SKILL.md").exists());
         assert!(!target.join(".git").exists());
+    }
+
+    #[test]
+    fn dedupe_discovery_locations_collapses_exact_duplicates() {
+        let location = SkillDiscoveryLocation {
+            scope: SkillDiscoveryScope::Workspace,
+            container_kind: SkillDiscoveryContainerKind::Codex,
+            container_path: "D:/repo/.codex/skills".to_string(),
+            skill_path: "D:/repo/.codex/skills/demo".to_string(),
+            workspace_id: Some("repo".to_string()),
+            workspace_label: Some("D:/repo".to_string()),
+        };
+
+        let deduped = dedupe_discovery_locations(&[
+            location.clone(),
+            location,
+        ]);
+
+        assert_eq!(deduped.len(), 1);
+    }
+
+    #[test]
+    fn build_discovered_source_key_uses_canonical_skill_root() {
+        let temp = TempDir::new("discovered-key");
+        let source = temp.path.join("source");
+        fs::create_dir_all(&source).expect("source dir");
+        fs::write(source.join("SKILL.md"), "# Demo").expect("skill");
+
+        let key = build_discovered_source_key(&source).expect("source key");
+        let canonical = canonicalize_source_path(&source).expect("canonical");
+
+        assert_eq!(
+            key,
+            format!("discovered:{}", canonical.to_string_lossy().replace('\\', "/"))
+        );
     }
 }

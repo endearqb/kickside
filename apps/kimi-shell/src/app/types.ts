@@ -261,7 +261,15 @@ export type SkillApplyScope = "user_global_kimi" | "session_kimi";
 
 export type SkillProjectionMethod = "symlink" | "junction" | "copy";
 
-export type SkillSourceType = "git" | "local_import" | "bundled";
+export type SkillSourceType =
+  | "git"
+  | "local_import"
+  | "bundled"
+  | "discovered_import";
+
+export type SkillDiscoveryScope = "user_home" | "workspace";
+
+export type SkillDiscoveryContainerKind = "agents" | "codex" | "claude";
 
 export type SkillUpdateStatusKind =
   | "up_to_date"
@@ -284,6 +292,85 @@ export interface SkillManifestMetadata {
   recommendedScopes: SkillApplyScope[];
 }
 
+export interface SkillDiscoveryLocation {
+  scope: SkillDiscoveryScope;
+  containerKind: SkillDiscoveryContainerKind;
+  containerPath: string;
+  skillPath: string;
+  workspaceId?: string;
+  workspaceLabel?: string;
+}
+
+export interface WorkspaceDiscoveryRoot {
+  id: string;
+  scope: SkillDiscoveryScope;
+  path: string;
+  label: string;
+  lastSeenAt: string;
+}
+
+export interface WorkspaceSkillTargetContainerRoot {
+  containerKind: SkillDiscoveryContainerKind;
+  containerPath: string;
+}
+
+export interface WorkspaceSkillTarget {
+  id: string;
+  scope: SkillDiscoveryScope;
+  label: string;
+  rootPath: string;
+  readOnly: boolean;
+  isCurrent: boolean;
+  containerRoots: WorkspaceSkillTargetContainerRoot[];
+}
+
+export interface WorkspaceManagedSkillRecord {
+  skillKey: string;
+  name: string;
+  description: string;
+  projectionName: string;
+  hasScripts: boolean;
+  skillPath: string;
+  containerKind: SkillDiscoveryContainerKind;
+  matchedInstalledSkillId?: string;
+}
+
+export interface WorkspaceSkillContainerInventory {
+  containerKind: SkillDiscoveryContainerKind;
+  containerPath: string;
+  readOnly: boolean;
+  skills: WorkspaceManagedSkillRecord[];
+}
+
+export interface WorkspaceSkillInventory {
+  target: WorkspaceSkillTarget;
+  scannedAt: string;
+  containers: WorkspaceSkillContainerInventory[];
+}
+
+export interface DiscoveredSkillRecord {
+  discoveryId: string;
+  name: string;
+  description: string;
+  canonicalPath: string;
+  projectionName: string;
+  hasScripts: boolean;
+  locations: SkillDiscoveryLocation[];
+  importedSkillId?: string;
+  lastScannedAt: string;
+}
+
+export interface DiscoveredSkillDetail {
+  record: DiscoveredSkillRecord;
+  relativePaths: string[];
+}
+
+export interface SkillDiscoverySnapshot {
+  scannedAt: string;
+  workspaces: WorkspaceDiscoveryRoot[];
+  records: DiscoveredSkillRecord[];
+}
+
 export interface InstalledSkill {
   id: string;
   name: string;
@@ -303,6 +390,7 @@ export interface InstalledSkill {
   hasScripts: boolean;
   metadata: SkillManifestMetadata;
   updateStatus: SkillUpdateStatusView;
+  discoveryLocations: SkillDiscoveryLocation[];
 }
 
 export interface SkillDetail {

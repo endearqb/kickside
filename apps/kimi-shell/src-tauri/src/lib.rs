@@ -38,17 +38,18 @@ use types::{
     BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
     BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource,
     BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo,
-    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
-    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
-    InstalledSkill, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, MainWindowCloseBehavior,
-    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
-    SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
+    DiscoveredSkillDetail, FeishuConnectorOnboardingSession, FrontendReadyAck,
+    InstallFlowCatalog, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
+    InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCliApiConfigInput,
+    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, LoginProbeResult,
+    LoginProbeState, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
+    SkillApplyResult, SkillApplyScope, SkillDetail, SkillDiscoverySnapshot,
     SkillProjectionRecord, SkillRecommendation, StartFeishuConnectorOnboardingInput,
     StartWeixinConnectorOnboardingInput, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceSkillProfile,
-    CURRENT_ONBOARDING_VERSION,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot, WorkspaceSkillInventory,
+    WorkspaceSkillProfile, WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -687,6 +688,75 @@ fn install_skill_from_git(
 #[tauri::command]
 fn import_skill_from_path(app: AppHandle, path: String) -> Result<InstalledSkill, String> {
     skill_center::import_skill_from_path(&app, &path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn scan_discoverable_skills(app: AppHandle) -> Result<SkillDiscoverySnapshot, String> {
+    skill_center::scan_discoverable_skills(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_skill_discovery_workspaces(app: AppHandle) -> Result<Vec<WorkspaceDiscoveryRoot>, String> {
+    skill_center::list_skill_discovery_workspaces(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_workspace_skill_targets(app: AppHandle) -> Result<Vec<WorkspaceSkillTarget>, String> {
+    skill_center::list_workspace_skill_targets(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_workspace_skill_inventory(
+    app: AppHandle,
+    target_id: String,
+) -> Result<WorkspaceSkillInventory, String> {
+    skill_center::get_workspace_skill_inventory(&app, &target_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn add_installed_skill_to_workspace_target(
+    app: AppHandle,
+    target_id: String,
+    container_kind: types::SkillDiscoveryContainerKind,
+    skill_id: String,
+) -> Result<WorkspaceSkillInventory, String> {
+    skill_center::add_installed_skill_to_workspace_target(
+        &app,
+        &target_id,
+        container_kind,
+        &skill_id,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_workspace_target_skill(
+    app: AppHandle,
+    target_id: String,
+    container_kind: types::SkillDiscoveryContainerKind,
+    skill_path_or_key: String,
+) -> Result<WorkspaceSkillInventory, String> {
+    skill_center::remove_workspace_target_skill(
+        &app,
+        &target_id,
+        container_kind,
+        &skill_path_or_key,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_discovered_skill_detail(
+    app: AppHandle,
+    discovery_id: String,
+) -> Result<DiscoveredSkillDetail, String> {
+    skill_center::get_discovered_skill_detail(&app, &discovery_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_discovered_skill(app: AppHandle, discovery_id: String) -> Result<InstalledSkill, String> {
+    skill_center::import_discovered_skill(&app, &discovery_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1354,6 +1424,14 @@ pub fn run() {
             cancel_weixin_connector_onboarding,
             install_skill_from_git,
             import_skill_from_path,
+            scan_discoverable_skills,
+            list_skill_discovery_workspaces,
+            list_workspace_skill_targets,
+            get_workspace_skill_inventory,
+            add_installed_skill_to_workspace_target,
+            remove_workspace_target_skill,
+            get_discovered_skill_detail,
+            import_discovered_skill,
             list_installed_skills,
             get_skill_detail,
             set_skill_trust,

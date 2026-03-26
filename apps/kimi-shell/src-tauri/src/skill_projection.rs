@@ -68,6 +68,34 @@ pub fn materialize_skill(
     Ok(SkillProjectionMethod::Copy)
 }
 
+pub fn copy_skill_directory(source_dir: &Path, target_dir: &Path) -> anyhow::Result<()> {
+    if !source_dir.is_dir() {
+        return Err(anyhow::anyhow!(
+            "skill source is not a directory: {}",
+            source_dir.display()
+        ));
+    }
+    if target_dir.exists() {
+        return Err(anyhow::anyhow!(
+            "skill target already exists: {}",
+            target_dir.display()
+        ));
+    }
+    let Some(parent) = target_dir.parent() else {
+        return Err(anyhow::anyhow!(
+            "skill target missing parent: {}",
+            target_dir.display()
+        ));
+    };
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to create copied skill parent dir: {}",
+            parent.display()
+        )
+    })?;
+    copy_directory_recursive(source_dir, target_dir)
+}
+
 pub fn remove_projection_target(target_dir: &Path) -> anyhow::Result<()> {
     if !target_dir.exists() {
         return Ok(());

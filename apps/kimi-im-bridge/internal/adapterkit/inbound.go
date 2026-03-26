@@ -4,6 +4,7 @@ import "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 
 type NormalizedInbound struct {
 	MessageID   string
+	ConnectorID string
 	Platform    string
 	AccountID   string
 	ChatID      string
@@ -21,6 +22,7 @@ type NormalizedInbound struct {
 func FromDomainInbound(inbound domain.InboundMessage, key domain.BindingKey) NormalizedInbound {
 	return NormalizedInbound{
 		MessageID:   inbound.MessageID,
+		ConnectorID: inbound.ConnectorID,
 		Platform:    inbound.Platform,
 		AccountID:   inbound.AccountID,
 		ChatID:      inbound.ChatID,

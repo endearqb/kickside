@@ -69,6 +69,7 @@ func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequ
 	if existing == nil {
 		_, err := s.store.RecordDeliveryEventIfAbsent(ctx, domain.DeliveryEvent{
 			EventID:         uuid.NewString(),
+			ConnectorID:     s.connectorID(),
 			Platform:        platformID,
 			ChatID:          strconv.FormatInt(request.ChatID, 10),
 			ThreadID:        int64String(request.ThreadID),
@@ -95,7 +96,7 @@ func (s *Service) sendRecordedText(ctx context.Context, request outboundTextRequ
 	if err := s.store.UpdateDeliveryEventStatus(ctx, deliveryKey, "sent", ""); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	return nil
@@ -162,7 +163,7 @@ func (s *Service) editTextWithFallback(ctx context.Context, chatID int64, messag
 	if err != nil {
 		return err
 	}
-	if touchErr := s.store.TouchChannelOutbound(ctx, platformID, ""); touchErr != nil {
+	if touchErr := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); touchErr != nil {
 		return reliability.Wrap("unknown", touchErr)
 	}
 	return nil

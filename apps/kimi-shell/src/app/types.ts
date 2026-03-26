@@ -6,7 +6,7 @@ export type BackendState =
   | "stopping"
   | "missing_kimi";
 
-export type BridgePlatform = "telegram" | "feishu";
+export type BridgePlatform = "telegram" | "feishu" | "weixin";
 
 export type MainWindowCloseBehavior = "ask" | "exit" | "minimize_to_tray";
 
@@ -124,12 +124,19 @@ export interface AppStatus {
   hotkey: string;
 }
 
-export interface BridgeChannelConfig {
+export interface BridgeConnectorConfig {
+  id: string;
   platform: BridgePlatform;
   enabled: boolean;
   mode: BridgeChannelMode;
-  accountLabel: string;
+  label: string;
+  defaultWorkDir?: string;
+  resetBindingSessionOnStart?: boolean;
+  feishuAutoApprove?: boolean;
+  feishuReplyRenderer?: FeishuReplyRenderer;
 }
+
+export type BridgeChannelConfig = BridgeConnectorConfig;
 
 export interface WorkDirPreset {
   name: string;
@@ -145,10 +152,12 @@ export interface BridgeSettings {
   resetBindingSessionOnBridgeStart: boolean;
   defaultWorkDir?: string;
   workDirPresets: WorkDirPreset[];
-  channels: BridgeChannelConfig[];
+  connectors: BridgeConnectorConfig[];
 }
 
-export interface BridgeChannelStatus {
+export interface BridgeConnectorStatus {
+  connectorId: string;
+  connectorLabel: string;
   platform: BridgePlatform;
   enabled: boolean;
   state: BridgeChannelState;
@@ -158,7 +167,17 @@ export interface BridgeChannelStatus {
   lastOffset?: string;
   lastErrorCode?: string;
   lastError?: string;
+  lastReadyAt?: string;
+  lastFailureAt?: string;
+  lastFailureOperation?: string;
+  lastFailureRetryable?: boolean;
+  consecutiveFailures?: number;
+  nextRetryAt?: string;
+  lastRecoveryAt?: string;
+  recoveryHint?: string;
 }
+
+export type BridgeChannelStatus = BridgeConnectorStatus;
 
 export interface BridgeStatus {
   state: BridgeRuntimeState;
@@ -166,7 +185,7 @@ export interface BridgeStatus {
   pid?: number;
   adminPort: number;
   version?: string;
-  channels: BridgeChannelStatus[];
+  connectors: BridgeConnectorStatus[];
   pendingApprovals: number;
   bindings: number;
   lastErrorCode?: string;
@@ -175,6 +194,8 @@ export interface BridgeStatus {
 
 export interface BindingRecord {
   bindingId: string;
+  connectorId: string;
+  connectorLabel: string;
   platform: BridgePlatform;
   accountId?: string;
   chatId: string;
@@ -217,6 +238,8 @@ export interface BridgeSessionImportInput {
 
 export interface BridgeApprovalRecord {
   approvalId: string;
+  connectorId: string;
+  connectorLabel: string;
   kimiSessionId: string;
   turnId?: string;
   stepId?: string;
@@ -232,6 +255,118 @@ export interface BridgeApprovalRecord {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+
+export type SkillApplyScope = "user_global_kimi" | "session_kimi";
+
+export type SkillProjectionMethod = "symlink" | "junction" | "copy";
+
+export type SkillSourceType = "git" | "local_import" | "bundled";
+
+export type SkillUpdateStatusKind =
+  | "up_to_date"
+  | "update_available"
+  | "source_missing"
+  | "refresh_available"
+  | "unsupported";
+
+export interface SkillUpdateStatusView {
+  kind: SkillUpdateStatusKind;
+  detail?: string;
+  checkedAt?: string;
+}
+
+export interface SkillManifestMetadata {
+  tags: string[];
+  filePatterns: string[];
+  workspacePatterns: string[];
+  languages: string[];
+  recommendedScopes: SkillApplyScope[];
+}
+
+export interface InstalledSkill {
+  id: string;
+  name: string;
+  description: string;
+  sourceType: SkillSourceType;
+  sourceLabel: string;
+  sourceKey: string;
+  sourcePath?: string;
+  repoUrl?: string;
+  gitRef?: string;
+  commit?: string;
+  localPath: string;
+  projectionName: string;
+  trusted: boolean;
+  installedAt: string;
+  updatedAt: string;
+  hasScripts: boolean;
+  metadata: SkillManifestMetadata;
+  updateStatus: SkillUpdateStatusView;
+}
+
+export interface SkillDetail {
+  skill: InstalledSkill;
+  relativePaths: string[];
+  userGlobalApplied: boolean;
+  currentSessionApplied: boolean;
+}
+
+export interface SkillProjectionRecord {
+  skillId: string;
+  scope: SkillApplyScope;
+  targetPath: string;
+  projectionName: string;
+  appliedAt: string;
+  method: SkillProjectionMethod;
+}
+
+export interface SessionSkillState {
+  sessionId?: string;
+  sessionWorkDir?: string;
+  appliedSkillIds: string[];
+  projections: SkillProjectionRecord[];
+}
+
+export interface WorkspaceSkillProfile {
+  workspaceId: string;
+  recentSkillIds: string[];
+  pinnedSkillIds: string[];
+  lastSessionSkillIds: string[];
+}
+
+export type SkillCenterSectionId = "manage" | "workspace_insights";
+export type SkillCenterFilter =
+  | "all"
+  | "session"
+  | "global"
+  | "pinned"
+  | "untrusted"
+  | "update_available";
+
+export interface SkillApplyResult {
+  scope: SkillApplyScope;
+  globalSkills: SkillProjectionRecord[];
+  activeSession: SessionSkillState;
+}
+
+export interface SkillRecommendation {
+  skillId: string;
+  score: number;
+  reasons: string[];
+  matchedSignals: string[];
+  recommendedScope: SkillApplyScope;
+}
+
+export interface WorkspaceSkillRestoreResult {
+  skillId: string;
+  status:
+    | "applied"
+    | "skipped_already_applied"
+    | "skipped_untrusted"
+    | "missing_skill"
+    | "failed";
+  detail: string;
 }
 
 export interface BridgeApprovalResolveInput {
@@ -256,9 +391,104 @@ export interface BridgeFeishuSecretsMaskView {
   encryptKey: BridgeMaskedSecretValue;
 }
 
+export interface BridgeWeixinSecretsMaskView {
+  botToken: BridgeMaskedSecretValue;
+  baseUrl?: string;
+  accountId?: string;
+  ownerUserId?: string;
+}
+
 export interface BridgeSecretsMaskView {
+  connectors: BridgeConnectorSecretsMaskView[];
   telegram: BridgeTelegramSecretsMaskView;
   feishu: BridgeFeishuSecretsMaskView;
+  weixin: BridgeWeixinSecretsMaskView;
+}
+
+export interface BridgeConnectorSecretsMaskView {
+  connectorId: string;
+  connectorLabel: string;
+  platform: BridgePlatform;
+  telegram?: BridgeTelegramSecretsMaskView;
+  feishu?: BridgeFeishuSecretsMaskView;
+  weixin?: BridgeWeixinSecretsMaskView;
+}
+
+export interface BridgeConnectorSecretsInput {
+  connectorId: string;
+  telegram: {
+    botToken?: string;
+  };
+  feishu: {
+    appId?: string;
+    appSecret?: string;
+    verificationToken?: string;
+    encryptKey?: string;
+  };
+  weixin: {
+    botToken?: string;
+    baseUrl?: string;
+    accountId?: string;
+    ownerUserId?: string;
+  };
+}
+
+export interface StartFeishuConnectorOnboardingInput {
+  connectorId: string;
+}
+
+export type FeishuConnectorOnboardingState =
+  | "idle"
+  | "awaiting_scan"
+  | "polling"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export interface FeishuConnectorOnboardingSession {
+  sessionId: string;
+  connectorId: string;
+  state: FeishuConnectorOnboardingState;
+  startedAt: string;
+  expiresAt?: string;
+  completedAt?: string;
+  verificationUrl?: string;
+  qrSvg?: string;
+  scannerOpenId?: string;
+  detailMessage?: string;
+  errorMessage?: string;
+  appIdMasked?: string;
+  lastConfiguredAt?: string;
+}
+
+export interface StartWeixinConnectorOnboardingInput {
+  connectorId: string;
+}
+
+export type WeixinConnectorOnboardingState =
+  | "idle"
+  | "awaiting_scan"
+  | "polling"
+  | "succeeded"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export interface WeixinConnectorOnboardingSession {
+  sessionId: string;
+  connectorId: string;
+  state: WeixinConnectorOnboardingState;
+  startedAt: string;
+  expiresAt?: string;
+  completedAt?: string;
+  verificationUrl?: string;
+  qrSvg?: string;
+  detailMessage?: string;
+  errorMessage?: string;
+  accountId?: string;
+  ownerUserId?: string;
+  lastConfiguredAt?: string;
 }
 
 export interface BridgeOnboardingFeishuInput {
@@ -787,11 +1017,23 @@ export type ControlSectionId =
   | "overview"
   | "onboarding"
   | "runtime_center"
-  | "bridge_center";
+  | "bridge_center"
+  | "skill_center";
 
 export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 
 export type ControlCenterSurface = "fullscreen" | "modal";
+
+export type ControlCenterTaskId =
+  | "config_center"
+  | "bridge_connector_secrets"
+  | "bridge_runtime"
+  | "skill_git_import"
+  | "skill_import";
+
+export interface ControlCenterTaskPayload {
+  connectorId?: string;
+}
 
 export type ControlCenterChrome = "full";
 

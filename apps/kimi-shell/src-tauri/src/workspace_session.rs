@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
-    log_manager,
+    log_manager, skill_center,
     types::{BackendState, OpenRequestErrorPayload, WorkspaceSessionBridgePayload},
     window_manager,
 };
@@ -90,15 +90,46 @@ pub fn queue_workspace_bootstrap(
 }
 
 pub fn clear_active_session_runtime(app: &AppHandle, source: &str) {
-    let state = app.state::<AppState>();
-    let lock = state.runtime.lock();
-    let Ok(mut runtime) = lock else {
-        return;
+    let previous_session_id = {
+        let state = app.state::<AppState>();
+        let lock = state.runtime.lock();
+        let Ok(mut runtime) = lock else {
+            return;
+        };
+
+        let previous = runtime.active_session_id.clone();
+        runtime.active_session_id = None;
+        runtime.active_session_work_dir = None;
+        runtime.session_source = Some(format!("cleared:{source}"));
+        previous
     };
 
-    runtime.active_session_id = None;
-    runtime.active_session_work_dir = None;
-    runtime.session_source = Some(format!("cleared:{source}"));
+    cleanup_replaced_session_skills(app, previous_session_id.as_deref(), None, source);
+}
+
+fn cleanup_replaced_session_skills(
+    app: &AppHandle,
+    previous_session_id: Option<&str>,
+    next_session_id: Option<&str>,
+    source: &str,
+) {
+    let Some(previous_session_id) = previous_session_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    if Some(previous_session_id) == next_session_id {
+        return;
+    }
+    if let Err(error) = skill_center::cleanup_session_skill_projections(app, previous_session_id) {
+        log_manager::append_line(
+            app,
+            format!(
+                "failed to cleanup previous session skills (source={source}, session_id={previous_session_id}): {error:#}"
+            ),
+        );
+    }
 }
 
 pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u16) {
@@ -500,6 +531,8 @@ fn create_session_for_work_dir(workspace_port: u16, work_dir: &Path) -> Result<A
 
 fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapshot>, source: &str) {
     let mut changed = false;
+    let mut previous_session_id: Option<String> = None;
+    let next_session_id = snapshot.as_ref().map(|item| item.session_id.clone());
     {
         let state = app.state::<AppState>();
         let lock = state.runtime.lock();
@@ -507,7 +540,7 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
             return;
         };
 
-        let next_id = snapshot.as_ref().map(|item| item.session_id.clone());
+        let next_id = next_session_id.clone();
         let next_work_dir = snapshot
             .as_ref()
             .and_then(|item| item.work_dir.as_ref())
@@ -516,6 +549,7 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
         if runtime.active_session_id != next_id || runtime.active_session_work_dir != next_work_dir
         {
             changed = true;
+            previous_session_id = runtime.active_session_id.clone();
             runtime.active_session_id = next_id.clone();
             runtime.active_session_work_dir = next_work_dir.clone();
             runtime.session_source = Some(source.to_string());
@@ -525,6 +559,13 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
     if !changed {
         return;
     }
+
+    cleanup_replaced_session_skills(
+        app,
+        previous_session_id.as_deref(),
+        next_session_id.as_deref(),
+        source,
+    );
 
     let payload = WorkspaceSessionBridgePayload {
         action: "active_session_updated".to_string(),

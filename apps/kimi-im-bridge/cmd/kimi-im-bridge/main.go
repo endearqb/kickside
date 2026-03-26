@@ -58,6 +58,9 @@ func parseFlags() (app.Options, error) {
 	flag.StringVar(&options.LogFilePath, "log-file", "", "absolute path to bridge.log")
 	flag.IntVar(&options.AdminPort, "admin-port", 60110, "loopback admin API port")
 	flag.StringVar(&options.AdminToken, "admin-token", "", "shell-provided loopback admin token")
+	flag.StringVar(&options.HostControlURL, "host-control-url", "", "optional shell host-control base URL for bridge ops")
+	flag.StringVar(&options.HostControlToken, "host-control-token", "", "optional shell host-control token for bridge ops")
+	flag.StringVar(&options.SkillsDir, "skills-dir", "", "optional skills directory mounted into Kimi CLI sessions")
 	flag.Parse()
 
 	options.Version = version

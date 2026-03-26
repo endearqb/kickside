@@ -11,38 +11,61 @@ import (
 const DefaultAdminPort = 60110
 
 const (
+	PlatformTelegram = "telegram"
+	PlatformFeishu   = "feishu"
+	PlatformWeixin   = "weixin"
+
+	DefaultTelegramConnectorID = "telegram-default"
+	DefaultFeishuConnectorID   = "feishu-default"
+	DefaultWeixinConnectorID   = "weixin-default"
+
 	FeishuReplyRendererPost        = "post"
 	FeishuReplyRendererInteractive = "interactive"
 )
 
 type BridgeSettings struct {
-	Enabled             bool            `json:"enabled"`
-	AdminPort           int             `json:"adminPort"`
-	AutoStart           bool            `json:"autoStart"`
-	Channels            []ChannelConfig `json:"channels"`
-	FeishuAutoApprove   bool            `json:"feishuAutoApprove"`
-	DefaultWorkDir      string          `json:"defaultWorkDir,omitempty"`
-	WorkDirPresets      []WorkDirPreset `json:"workDirPresets"`
-	FeishuReplyRenderer string          `json:"feishuReplyRenderer,omitempty"`
-	FeishuReplyCards    *bool           `json:"feishuReplyCards,omitempty"`
-	LogLevel            string          `json:"logLevel"`
+	Enabled        bool              `json:"enabled"`
+	AdminPort      int               `json:"adminPort"`
+	AutoStart      bool              `json:"autoStart"`
+	Connectors     []ConnectorConfig `json:"connectors"`
+	DefaultWorkDir string            `json:"defaultWorkDir,omitempty"`
+	WorkDirPresets []WorkDirPreset   `json:"workDirPresets"`
+	LogLevel       string            `json:"logLevel"`
+
+	Channels            []ConnectorConfig `json:"-"`
+	FeishuAutoApprove   bool              `json:"-"`
+	FeishuReplyRenderer string            `json:"-"`
 }
+
+type ConnectorConfig struct {
+	ID                  string `json:"id"`
+	Platform            string `json:"platform"`
+	Label               string `json:"label"`
+	Enabled             bool   `json:"enabled"`
+	Mode                string `json:"mode"`
+	FeishuAutoApprove   bool   `json:"feishuAutoApprove,omitempty"`
+	FeishuReplyRenderer string `json:"feishuReplyRenderer,omitempty"`
+}
+
+type ChannelConfig = ConnectorConfig
 
 type WorkDirPreset struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
 
-type ChannelConfig struct {
-	Platform     string `json:"platform"`
-	Enabled      bool   `json:"enabled"`
-	AccountLabel string `json:"accountLabel"`
-	Mode         string `json:"mode"`
+type BridgeSecrets struct {
+	Connectors map[string]ConnectorSecrets `json:"connectors,omitempty"`
+
+	Telegram *TelegramSecrets `json:"-"`
+	Feishu   *FeishuSecrets   `json:"-"`
+	Weixin   *WeixinSecrets   `json:"-"`
 }
 
-type BridgeSecrets struct {
+type ConnectorSecrets struct {
 	Telegram *TelegramSecrets `json:"telegram,omitempty"`
 	Feishu   *FeishuSecrets   `json:"feishu,omitempty"`
+	Weixin   *WeixinSecrets   `json:"weixin,omitempty"`
 }
 
 type TelegramSecrets struct {
@@ -50,108 +73,351 @@ type TelegramSecrets struct {
 }
 
 type FeishuSecrets struct {
-	AppID     string `json:"appId"`
-	AppSecret string `json:"appSecret"`
+	AppID             string `json:"appId"`
+	AppSecret         string `json:"appSecret"`
+	VerificationToken string `json:"verificationToken"`
+	EncryptKey        string `json:"encryptKey"`
+}
+
+type WeixinSecrets struct {
+	BotToken    string `json:"botToken"`
+	BaseURL     string `json:"baseUrl"`
+	AccountID   string `json:"accountId"`
+	OwnerUserID string `json:"ownerUserId"`
+}
+
+type legacySettingsFile struct {
+	Enabled             bool                  `json:"enabled"`
+	AdminPort           int                   `json:"adminPort"`
+	AutoStart           bool                  `json:"autoStart"`
+	Connectors          []ConnectorConfig     `json:"connectors"`
+	Channels            []legacyChannelConfig `json:"channels"`
+	DefaultWorkDir      string                `json:"defaultWorkDir,omitempty"`
+	WorkDirPresets      []WorkDirPreset       `json:"workDirPresets"`
+	FeishuAutoApprove   *bool                 `json:"feishuAutoApprove,omitempty"`
+	FeishuReplyRenderer string                `json:"feishuReplyRenderer,omitempty"`
+	FeishuReplyCards    *bool                 `json:"feishuReplyCards,omitempty"`
+	LogLevel            string                `json:"logLevel"`
+}
+
+type legacyChannelConfig struct {
+	Platform     string `json:"platform"`
+	Enabled      bool   `json:"enabled"`
+	AccountLabel string `json:"accountLabel"`
+	Mode         string `json:"mode"`
+}
+
+type legacySecretsFile struct {
+	Connectors map[string]ConnectorSecrets `json:"connectors"`
+	Telegram   *TelegramSecrets            `json:"telegram,omitempty"`
+	Feishu     *FeishuSecrets              `json:"feishu,omitempty"`
+	Weixin     *WeixinSecrets              `json:"weixin,omitempty"`
 }
 
 func DefaultSettings() BridgeSettings {
-	return BridgeSettings{
-		Enabled:   false,
-		AdminPort: DefaultAdminPort,
-		AutoStart: false,
-		Channels: []ChannelConfig{
-			{
-				Platform:     "telegram",
-				Enabled:      false,
-				AccountLabel: "Telegram",
-				Mode:         "polling",
-			},
-			{
-				Platform:     "feishu",
-				Enabled:      false,
-				AccountLabel: "Feishu",
-				Mode:         "websocket",
-			},
-		},
-		FeishuAutoApprove:   true,
-		WorkDirPresets:      []WorkDirPreset{},
-		FeishuReplyRenderer: FeishuReplyRendererInteractive,
-		LogLevel:            "info",
-	}
+	return populateLegacyView(BridgeSettings{
+		Enabled:        false,
+		AdminPort:      DefaultAdminPort,
+		AutoStart:      false,
+		Connectors:     []ConnectorConfig{},
+		WorkDirPresets: []WorkDirPreset{},
+		LogLevel:       "info",
+	})
 }
 
 func DefaultSecrets() BridgeSecrets {
-	return BridgeSecrets{}
+	return populateLegacySecretsView(BridgeSecrets{
+		Connectors: map[string]ConnectorSecrets{},
+	})
 }
 
 func LoadOrCreateSettings(path string) (BridgeSettings, error) {
-	settings := DefaultSettings()
-	if err := loadOrCreateJSON(path, &settings, DefaultSettings()); err != nil {
+	defaults := DefaultSettings()
+	var payload legacySettingsFile
+	if err := loadOrCreateJSON(path, &payload, legacySettingsFile{
+		Enabled:        defaults.Enabled,
+		AdminPort:      defaults.AdminPort,
+		AutoStart:      defaults.AutoStart,
+		Connectors:     defaults.Connectors,
+		DefaultWorkDir: defaults.DefaultWorkDir,
+		WorkDirPresets: defaults.WorkDirPresets,
+		LogLevel:       defaults.LogLevel,
+	}); err != nil {
 		return BridgeSettings{}, err
 	}
-	return normalizeSettings(settings)
+	return normalizeSettings(payload)
 }
 
 func LoadOrCreateSecrets(path string) (BridgeSecrets, error) {
-	secrets := DefaultSecrets()
-	if err := loadOrCreateJSON(path, &secrets, DefaultSecrets()); err != nil {
+	defaults := DefaultSecrets()
+	var payload legacySecretsFile
+	if err := loadOrCreateJSON(path, &payload, legacySecretsFile{
+		Connectors: defaults.Connectors,
+	}); err != nil {
 		return BridgeSecrets{}, err
 	}
-	return secrets, nil
+	return normalizeSecrets(payload), nil
 }
 
-func normalizeSettings(settings BridgeSettings) (BridgeSettings, error) {
+func ReconcileSettingsWithSecrets(
+	settings BridgeSettings,
+	secrets BridgeSecrets,
+) BridgeSettings {
+	if len(secrets.Connectors) == 0 {
+		return settings
+	}
+
+	connectors := append([]ConnectorConfig(nil), settings.Connectors...)
+	seenIDs := make(map[string]struct{}, len(connectors))
+	for _, connector := range connectors {
+		if strings.TrimSpace(connector.ID) == "" {
+			continue
+		}
+		seenIDs[strings.TrimSpace(connector.ID)] = struct{}{}
+	}
+
+	for connectorID, connectorSecrets := range secrets.Connectors {
+		connectorID = strings.TrimSpace(connectorID)
+		if connectorID == "" {
+			continue
+		}
+		if _, exists := seenIDs[connectorID]; exists {
+			continue
+		}
+
+		platform := platformForConnectorSecrets(connectorID, connectorSecrets)
+		if platform == "" {
+			continue
+		}
+		connectors = append(connectors, ConnectorConfig{
+			ID:                  connectorID,
+			Platform:            platform,
+			Label:               defaultConnectorLabel(platform),
+			Enabled:             false,
+			Mode:                defaultConnectorMode(platform),
+			FeishuAutoApprove:   defaultFeishuAutoApprove(),
+			FeishuReplyRenderer: defaultFeishuReplyRenderer(),
+		})
+		seenIDs[connectorID] = struct{}{}
+	}
+
+	settings.Connectors = normalizeConnectors(connectors)
+	return populateLegacyView(settings)
+}
+
+func normalizeSettings(payload legacySettingsFile) (BridgeSettings, error) {
 	defaults := DefaultSettings()
+
+	connectors := payload.Connectors
+	if len(connectors) == 0 {
+		connectors = migrateLegacyChannels(payload.Channels, payload.FeishuAutoApprove, payload.FeishuReplyRenderer, payload.FeishuReplyCards)
+	}
+
+	settings := BridgeSettings{
+		Enabled:        payload.Enabled,
+		AdminPort:      payload.AdminPort,
+		AutoStart:      payload.AutoStart,
+		Connectors:     normalizeConnectors(connectors),
+		DefaultWorkDir: strings.TrimSpace(payload.DefaultWorkDir),
+		WorkDirPresets: normalizeWorkDirPresets(payload.WorkDirPresets),
+		LogLevel:       strings.TrimSpace(payload.LogLevel),
+	}
 	if settings.AdminPort == 0 {
 		settings.AdminPort = defaults.AdminPort
 	}
 	if settings.LogLevel == "" {
 		settings.LogLevel = defaults.LogLevel
 	}
-	settings.FeishuReplyRenderer = normalizeFeishuReplyRenderer(settings.FeishuReplyRenderer, settings.FeishuReplyCards)
-	settings.FeishuReplyCards = nil
-	settings.WorkDirPresets = normalizeWorkDirPresets(settings.WorkDirPresets)
-	if len(settings.Channels) == 0 {
-		settings.Channels = defaults.Channels
-	}
-
-	seen := map[string]bool{}
-	normalized := make([]ChannelConfig, 0, len(defaults.Channels))
-	for _, candidate := range defaults.Channels {
-		var current ChannelConfig
-		found := false
-		for _, channel := range settings.Channels {
-			if channel.Platform == candidate.Platform {
-				current = channel
-				found = true
-				break
-			}
-		}
-		if !found {
-			current = candidate
-		}
-		if current.Mode == "" {
-			current.Mode = candidate.Mode
-		}
-		if current.AccountLabel == "" {
-			current.AccountLabel = candidate.AccountLabel
-		}
-		seen[current.Platform] = true
-		normalized = append(normalized, current)
-	}
-
-	for _, channel := range settings.Channels {
-		if channel.Platform == "" || seen[channel.Platform] {
-			continue
-		}
-		normalized = append(normalized, channel)
-	}
-
-	settings.Channels = normalized
 	if settings.AdminPort <= 0 || settings.AdminPort > 65535 {
 		return BridgeSettings{}, fmt.Errorf("adminPort must be between 1 and 65535")
 	}
-	return settings, nil
+	return populateLegacyView(settings), nil
+}
+
+func normalizeSecrets(payload legacySecretsFile) BridgeSecrets {
+	connectors := map[string]ConnectorSecrets{}
+	for connectorID, connectorSecrets := range payload.Connectors {
+		normalized := normalizeConnectorSecrets(connectorSecrets)
+		if !hasConnectorSecrets(normalized) {
+			continue
+		}
+		connectors[strings.TrimSpace(connectorID)] = normalized
+	}
+
+	if payload.Telegram != nil && strings.TrimSpace(payload.Telegram.BotToken) != "" {
+		connectors[DefaultTelegramConnectorID] = normalizeConnectorSecrets(ConnectorSecrets{
+			Telegram: payload.Telegram,
+		})
+	}
+	if payload.Feishu != nil &&
+		(strings.TrimSpace(payload.Feishu.AppID) != "" ||
+			strings.TrimSpace(payload.Feishu.AppSecret) != "" ||
+			strings.TrimSpace(payload.Feishu.VerificationToken) != "" ||
+			strings.TrimSpace(payload.Feishu.EncryptKey) != "") {
+		connectors[DefaultFeishuConnectorID] = normalizeConnectorSecrets(ConnectorSecrets{
+			Feishu: payload.Feishu,
+		})
+	}
+	if payload.Weixin != nil &&
+		(strings.TrimSpace(payload.Weixin.BotToken) != "" ||
+			strings.TrimSpace(payload.Weixin.BaseURL) != "" ||
+			strings.TrimSpace(payload.Weixin.AccountID) != "" ||
+			strings.TrimSpace(payload.Weixin.OwnerUserID) != "") {
+		connectors[DefaultWeixinConnectorID] = normalizeConnectorSecrets(ConnectorSecrets{
+			Weixin: payload.Weixin,
+		})
+	}
+
+	if len(connectors) == 0 {
+		return DefaultSecrets()
+	}
+	return populateLegacySecretsView(BridgeSecrets{Connectors: connectors})
+}
+
+func normalizeConnectors(connectors []ConnectorConfig) []ConnectorConfig {
+	if len(connectors) == 0 {
+		return []ConnectorConfig{}
+	}
+
+	normalized := make([]ConnectorConfig, 0, len(connectors))
+	seenIDs := map[string]struct{}{}
+	seenLabels := map[string]int{}
+	perPlatformCounts := map[string]int{}
+	for _, connector := range connectors {
+		platform := normalizePlatform(connector.Platform)
+		if platform == "" {
+			continue
+		}
+		perPlatformCounts[platform]++
+
+		connectorID := strings.TrimSpace(connector.ID)
+		if connectorID == "" {
+			connectorID = generateConnectorID(platform, perPlatformCounts[platform])
+		}
+		if _, exists := seenIDs[connectorID]; exists {
+			connectorID = generateConnectorID(platform, perPlatformCounts[platform])
+		}
+		seenIDs[connectorID] = struct{}{}
+
+		label := strings.TrimSpace(connector.Label)
+		if label == "" {
+			label = defaultConnectorLabel(platform)
+		}
+		labelKey := strings.ToLower(label)
+		seenLabels[labelKey]++
+		if seenLabels[labelKey] > 1 {
+			label = fmt.Sprintf("%s %d", label, seenLabels[labelKey])
+		}
+
+		item := ConnectorConfig{
+			ID:                  connectorID,
+			Platform:            platform,
+			Label:               label,
+			Enabled:             connector.Enabled,
+			Mode:                normalizeConnectorMode(platform, connector.Mode),
+			FeishuAutoApprove:   connector.FeishuAutoApprove,
+			FeishuReplyRenderer: normalizeFeishuReplyRenderer(connector.FeishuReplyRenderer, nil),
+		}
+		if platform == PlatformFeishu {
+			if connector.FeishuReplyRenderer == "" {
+				item.FeishuReplyRenderer = defaultFeishuReplyRenderer()
+			}
+			if !connector.FeishuAutoApprove {
+				item.FeishuAutoApprove = connector.FeishuAutoApprove
+			}
+		} else {
+			item.FeishuReplyRenderer = ""
+			item.FeishuAutoApprove = false
+		}
+		if platform == PlatformFeishu && connector.FeishuReplyRenderer == "" && !connector.FeishuAutoApprove {
+			item.FeishuAutoApprove = defaultFeishuAutoApprove()
+		}
+		normalized = append(normalized, item)
+	}
+	return normalized
+}
+
+func normalizeConnectorSecrets(value ConnectorSecrets) ConnectorSecrets {
+	normalized := ConnectorSecrets{}
+	if value.Telegram != nil {
+		token := strings.TrimSpace(value.Telegram.BotToken)
+		if token != "" {
+			normalized.Telegram = &TelegramSecrets{BotToken: token}
+		}
+	}
+	if value.Feishu != nil {
+		secret := FeishuSecrets{
+			AppID:             strings.TrimSpace(value.Feishu.AppID),
+			AppSecret:         strings.TrimSpace(value.Feishu.AppSecret),
+			VerificationToken: strings.TrimSpace(value.Feishu.VerificationToken),
+			EncryptKey:        strings.TrimSpace(value.Feishu.EncryptKey),
+		}
+		if secret.AppID != "" || secret.AppSecret != "" || secret.VerificationToken != "" || secret.EncryptKey != "" {
+			normalized.Feishu = &secret
+		}
+	}
+	if value.Weixin != nil {
+		secret := WeixinSecrets{
+			BotToken:    strings.TrimSpace(value.Weixin.BotToken),
+			BaseURL:     strings.TrimSpace(value.Weixin.BaseURL),
+			AccountID:   strings.TrimSpace(value.Weixin.AccountID),
+			OwnerUserID: strings.TrimSpace(value.Weixin.OwnerUserID),
+		}
+		if secret.BotToken != "" || secret.BaseURL != "" || secret.AccountID != "" || secret.OwnerUserID != "" {
+			normalized.Weixin = &secret
+		}
+	}
+	return normalized
+}
+
+func hasConnectorSecrets(value ConnectorSecrets) bool {
+	return value.Telegram != nil || value.Feishu != nil || value.Weixin != nil
+}
+
+func migrateLegacyChannels(
+	channels []legacyChannelConfig,
+	legacyFeishuAutoApprove *bool,
+	legacyFeishuReplyRenderer string,
+	legacyFeishuReplyCards *bool,
+) []ConnectorConfig {
+	connectors := make([]ConnectorConfig, 0, len(channels))
+	for _, channel := range channels {
+		platform := normalizePlatform(channel.Platform)
+		if platform == "" || !legacyChannelShouldMigrate(channel, platform) {
+			continue
+		}
+		connector := ConnectorConfig{
+			ID:       defaultConnectorID(platform),
+			Platform: platform,
+			Label:    strings.TrimSpace(channel.AccountLabel),
+			Enabled:  channel.Enabled,
+			Mode:     normalizeConnectorMode(platform, channel.Mode),
+		}
+		if connector.Label == "" {
+			connector.Label = defaultConnectorLabel(platform)
+		}
+		if platform == PlatformFeishu {
+			connector.FeishuAutoApprove = defaultFeishuAutoApprove()
+			if legacyFeishuAutoApprove != nil {
+				connector.FeishuAutoApprove = *legacyFeishuAutoApprove
+			}
+			connector.FeishuReplyRenderer = normalizeFeishuReplyRenderer(legacyFeishuReplyRenderer, legacyFeishuReplyCards)
+		}
+		connectors = append(connectors, connector)
+	}
+	return connectors
+}
+
+func legacyChannelShouldMigrate(channel legacyChannelConfig, platform string) bool {
+	if channel.Enabled {
+		return true
+	}
+	label := strings.TrimSpace(channel.AccountLabel)
+	if label != "" && label != defaultLegacyAccountLabel(platform) {
+		return true
+	}
+	mode := strings.TrimSpace(channel.Mode)
+	return mode != "" && mode != defaultConnectorMode(platform)
 }
 
 func normalizeFeishuReplyRenderer(renderer string, legacy *bool) string {
@@ -193,6 +459,146 @@ func normalizeWorkDirPresets(presets []WorkDirPreset) []WorkDirPreset {
 		})
 	}
 	return normalized
+}
+
+func normalizePlatform(platform string) string {
+	switch strings.TrimSpace(strings.ToLower(platform)) {
+	case PlatformTelegram:
+		return PlatformTelegram
+	case PlatformFeishu:
+		return PlatformFeishu
+	case PlatformWeixin:
+		return PlatformWeixin
+	default:
+		return ""
+	}
+}
+
+func normalizeConnectorMode(platform string, mode string) string {
+	normalized := strings.TrimSpace(strings.ToLower(mode))
+	if normalized != "" {
+		return normalized
+	}
+	return defaultConnectorMode(platform)
+}
+
+func defaultConnectorMode(platform string) string {
+	switch platform {
+	case PlatformFeishu:
+		return "websocket"
+	case PlatformTelegram, PlatformWeixin:
+		return "polling"
+	default:
+		return "polling"
+	}
+}
+
+func defaultConnectorID(platform string) string {
+	switch platform {
+	case PlatformFeishu:
+		return DefaultFeishuConnectorID
+	case PlatformTelegram:
+		return DefaultTelegramConnectorID
+	case PlatformWeixin:
+		return DefaultWeixinConnectorID
+	default:
+		return fmt.Sprintf("%s-default", platform)
+	}
+}
+
+func generateConnectorID(platform string, index int) string {
+	if index <= 1 {
+		return defaultConnectorID(platform)
+	}
+	return fmt.Sprintf("%s-%d", platform, index)
+}
+
+func defaultConnectorLabel(platform string) string {
+	switch platform {
+	case PlatformFeishu:
+		return "Feishu"
+	case PlatformTelegram:
+		return "Telegram"
+	case PlatformWeixin:
+		return "Weixin"
+	default:
+		return strings.Title(platform)
+	}
+}
+
+func defaultLegacyAccountLabel(platform string) string {
+	return defaultConnectorLabel(platform)
+}
+
+func defaultFeishuAutoApprove() bool {
+	return true
+}
+
+func defaultFeishuReplyRenderer() string {
+	return FeishuReplyRendererInteractive
+}
+
+func platformForConnectorSecrets(connectorID string, value ConnectorSecrets) string {
+	if value.Weixin != nil {
+		return PlatformWeixin
+	}
+	if value.Feishu != nil {
+		return PlatformFeishu
+	}
+	if value.Telegram != nil {
+		return PlatformTelegram
+	}
+	switch strings.TrimSpace(connectorID) {
+	case DefaultFeishuConnectorID:
+		return PlatformFeishu
+	case DefaultTelegramConnectorID:
+		return PlatformTelegram
+	case DefaultWeixinConnectorID:
+		return PlatformWeixin
+	default:
+		return ""
+	}
+}
+
+func populateLegacyView(settings BridgeSettings) BridgeSettings {
+	settings.Channels = append([]ConnectorConfig(nil), settings.Connectors...)
+	settings.FeishuAutoApprove = defaultFeishuAutoApprove()
+	settings.FeishuReplyRenderer = defaultFeishuReplyRenderer()
+	for _, connector := range settings.Connectors {
+		if connector.Platform != PlatformFeishu {
+			continue
+		}
+		settings.FeishuAutoApprove = connector.FeishuAutoApprove
+		settings.FeishuReplyRenderer = connector.FeishuReplyRenderer
+		break
+	}
+	return settings
+}
+
+func populateLegacySecretsView(secrets BridgeSecrets) BridgeSecrets {
+	if secrets.Connectors == nil {
+		secrets.Connectors = map[string]ConnectorSecrets{}
+	}
+	for connectorID, connector := range secrets.Connectors {
+		switch platformForConnectorSecrets(connectorID, connector) {
+		case PlatformTelegram:
+			if secrets.Telegram == nil && connector.Telegram != nil {
+				copy := *connector.Telegram
+				secrets.Telegram = &copy
+			}
+		case PlatformFeishu:
+			if secrets.Feishu == nil && connector.Feishu != nil {
+				copy := *connector.Feishu
+				secrets.Feishu = &copy
+			}
+		case PlatformWeixin:
+			if secrets.Weixin == nil && connector.Weixin != nil {
+				copy := *connector.Weixin
+				secrets.Weixin = &copy
+			}
+		}
+	}
+	return secrets
 }
 
 func loadOrCreateJSON[T any](path string, target *T, defaults T) error {

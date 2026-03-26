@@ -32,8 +32,8 @@ func TestLoadOrCreateSettingsWritesDefaults(t *testing.T) {
 	if len(settings.WorkDirPresets) != 0 {
 		t.Fatalf("expected workDirPresets to default empty, got %d", len(settings.WorkDirPresets))
 	}
-	if len(settings.Channels) != 2 {
-		t.Fatalf("expected 2 default channels, got %d", len(settings.Channels))
+	if len(settings.Connectors) != 0 {
+		t.Fatalf("expected no default connectors, got %d", len(settings.Connectors))
 	}
 }
 
@@ -52,14 +52,14 @@ func TestLoadOrCreateSettingsNormalizesMissingChannelDefaults(t *testing.T) {
 		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
 	}
 
-	if len(settings.Channels) != 2 {
-		t.Fatalf("expected normalized channels length 2, got %d", len(settings.Channels))
+	if len(settings.Connectors) != 1 {
+		t.Fatalf("expected normalized connectors length 1, got %d", len(settings.Connectors))
 	}
-	if settings.Channels[0].Mode == "" {
+	if settings.Connectors[0].Mode == "" {
 		t.Fatalf("expected telegram mode to be filled from defaults")
 	}
-	if settings.Channels[1].Platform != "feishu" {
-		t.Fatalf("expected feishu default channel to be restored, got %+v", settings.Channels[1])
+	if settings.Connectors[0].Platform != "telegram" {
+		t.Fatalf("expected telegram connector to be preserved, got %+v", settings.Connectors[0])
 	}
 }
 
@@ -88,7 +88,7 @@ func TestLoadOrCreateSettingsPreservesFeishuReplyRenderer(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bridge_settings.json")
-	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuReplyRenderer":"post","channels":[{"platform":"telegram","enabled":true}]}`)
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuReplyRenderer":"post","channels":[{"platform":"feishu","enabled":true}]}`)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("failed to seed settings file: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestLoadOrCreateSettingsPreservesFeishuAutoApproveFalse(t *testing.T) {
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bridge_settings.json")
-	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuAutoApprove":false,"channels":[{"platform":"telegram","enabled":true}]}`)
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuAutoApprove":false,"channels":[{"platform":"feishu","enabled":true}]}`)
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatalf("failed to seed settings file: %v", err)
 	}

@@ -36,7 +36,7 @@ type RuntimeExecutor interface {
 type ChannelStore interface {
 	GetOffset(context.Context, string, string) (string, bool, error)
 	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
-	UpdateChannelOffset(context.Context, string, string) error
+	UpdateChannelOffset(context.Context, string, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
 	GetApprovalByID(context.Context, string) (*domain.ApprovalTicket, error)
@@ -59,6 +59,8 @@ type BotAPI interface {
 }
 
 type Config struct {
+	ConnectorID    string
+	ConnectorLabel string
 	BotToken       string
 	DefaultWorkDir string
 }
@@ -113,6 +115,12 @@ func NewService(options Options) *Service {
 }
 
 func (s *Service) Name() string {
+	if value := strings.TrimSpace(s.config.ConnectorLabel); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
 	return platformID
 }
 
@@ -142,7 +150,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.done = make(chan struct{})
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, "", ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateConnecting, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 
@@ -174,7 +182,7 @@ func (s *Service) Start(ctx context.Context) error {
 	done := s.done
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateReady, "", ""); err != nil {
 		return s.abortStart(err)
 	}
 
@@ -183,7 +191,7 @@ func (s *Service) Start(ctx context.Context) error {
 }
 
 func (s *Service) loadOffset(ctx context.Context) (int64, error) {
-	value, ok, err := s.store.GetOffset(ctx, platformID, telegramOffsetKind)
+	value, ok, err := s.store.GetOffset(ctx, s.connectorID(), telegramOffsetKind)
 	if err != nil {
 		return 0, fmt.Errorf("read telegram offset: %w", err)
 	}
@@ -245,7 +253,7 @@ func (s *Service) pollLoop(ctx context.Context, offset int64, done chan struct{}
 				backoffNext.Milliseconds(),
 				err.Error(),
 			)
-			_ = s.store.UpdateChannelState(context.Background(), platformID, state, code, err.Error())
+			_ = s.store.UpdateChannelState(context.Background(), s.connectorID(), state, code, err.Error())
 			if state == domain.ChannelStateError || !reliability.SleepContext(ctx, backoff) {
 				return
 			}
@@ -254,7 +262,7 @@ func (s *Service) pollLoop(ctx context.Context, offset int64, done chan struct{}
 		}
 
 		backoff = time.Second
-		_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", "")
+		_ = s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateReady, "", "")
 
 		nextOffset, err := s.handleUpdates(ctx, updates, currentOffset)
 		if err != nil {
@@ -268,7 +276,7 @@ func (s *Service) pollLoop(ctx context.Context, offset int64, done chan struct{}
 			)
 			_ = s.store.UpdateChannelState(
 				context.Background(),
-				platformID,
+				s.connectorID(),
 				domain.ChannelStateDegraded,
 				code,
 				err.Error(),
@@ -294,7 +302,7 @@ func (s *Service) handleUpdates(ctx context.Context, updates []update, currentOf
 			continue
 		}
 		candidate := item.UpdateID + 1
-		if err := s.store.UpdateChannelOffset(ctx, platformID, strconv.FormatInt(candidate, 10)); err != nil {
+		if err := s.store.UpdateChannelOffset(ctx, s.connectorID(), telegramOffsetKind, strconv.FormatInt(candidate, 10)); err != nil {
 			return nextOffset, reliability.Wrap(
 				"unknown",
 				fmt.Errorf("persist telegram offset %d: %w", candidate, err),
@@ -326,7 +334,9 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 	if !ok {
 		return true, nil
 	}
-	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
+	inbound.ConnectorID = s.connectorID()
+	key.ConnectorID = s.connectorID()
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), inbound.ReceivedAt); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
 
@@ -416,7 +426,7 @@ func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.Binding
 }
 
 func (s *Service) failStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	_ = s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateError, code, err.Error())
 	s.logf(
 		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
 		platformID,
@@ -427,7 +437,7 @@ func (s *Service) failStart(ctx context.Context, code string, err error) error {
 }
 
 func (s *Service) failAfterStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
+	_ = s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateError, code, err.Error())
 	s.logf(
 		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
 		platformID,
@@ -452,6 +462,13 @@ func (s *Service) logf(format string, args ...any) {
 	if s.logger != nil {
 		s.logger.Printf(format, args...)
 	}
+}
+
+func (s *Service) connectorID() string {
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
+	return platformID
 }
 
 func closedDone() chan struct{} {

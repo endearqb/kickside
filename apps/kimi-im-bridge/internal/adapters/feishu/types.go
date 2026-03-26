@@ -31,11 +31,16 @@ type RuntimeExecutor interface {
 	ResolveApproval(context.Context, string, string, string) error
 }
 
+type HostController interface {
+	RequestRestart(context.Context) error
+}
+
 type ChannelStore interface {
 	GetOffset(context.Context, string, string) (string, bool, error)
 	ListChannelStatuses(context.Context) ([]domain.ChannelStatus, error)
 	UpdateChannelState(context.Context, string, domain.ChannelRuntimeState, string, string) error
-	UpdateChannelOffset(context.Context, string, string) error
+	UpdateChannelDiagnostics(context.Context, string, domain.ChannelDiagnosticsUpdate) error
+	UpdateChannelOffset(context.Context, string, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
 	ListSessions(context.Context) ([]domain.BridgeSession, error)
@@ -63,13 +68,19 @@ type WorkDirPreset struct {
 }
 
 type Config struct {
-	AppID          string
-	AppSecret      string
-	AutoApprove    bool
-	DefaultWorkDir string
-	WorkDirPresets []WorkDirPreset
-	ReplyRenderer  string
-	AttachmentsDir string
+	ConnectorID           string
+	ConnectorLabel        string
+	AppID                 string
+	AppSecret             string
+	VerificationToken     string
+	EncryptKey            string
+	AutoApprove           bool
+	DefaultWorkDir        string
+	WorkDirPresets        []WorkDirPreset
+	ReplyRenderer         string
+	AttachmentsDir        string
+	BridgeOpsSkillEnabled bool
+	BridgeOpsAuthFile     string
 }
 
 type Options struct {
@@ -78,6 +89,7 @@ type Options struct {
 	BindingRouter BindingRouter
 	Runtime       RuntimeExecutor
 	Orchestrator  bridgecore.InboundExecutor
+	HostControl   HostController
 	Store         ChannelStore
 	Logger        Logger
 }

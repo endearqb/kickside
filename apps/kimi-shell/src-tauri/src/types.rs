@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
@@ -19,6 +21,7 @@ pub enum BackendState {
 pub enum BridgePlatform {
     Telegram,
     Feishu,
+    Weixin,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +45,10 @@ fn default_feishu_auto_approve() -> bool {
 
 fn default_reset_binding_session_on_bridge_start() -> bool {
     true
+}
+
+fn bridge_skills_mode_is_disabled(value: &BridgeSkillsMode) -> bool {
+    matches!(value, BridgeSkillsMode::Disabled)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -345,11 +352,22 @@ pub struct MainWindowCloseDecisionRequestPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeChannelConfig {
+pub struct BridgeConnectorConfig {
+    #[serde(default)]
+    pub id: String,
     pub platform: BridgePlatform,
     pub enabled: bool,
     pub mode: BridgeChannelMode,
-    pub account_label: String,
+    #[serde(default, alias = "accountLabel")]
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_work_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_binding_session_on_start: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_reply_renderer: Option<FeishuReplyRenderer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -365,6 +383,8 @@ pub struct BridgeSettings {
     pub enabled: bool,
     pub auto_start: bool,
     pub admin_port: u16,
+    #[serde(default, skip_serializing_if = "bridge_skills_mode_is_disabled")]
+    pub skills_mode: BridgeSkillsMode,
     #[serde(default)]
     pub feishu_reply_renderer: FeishuReplyRenderer,
     #[serde(default = "default_feishu_auto_approve")]
@@ -376,8 +396,16 @@ pub struct BridgeSettings {
     pub default_work_dir: Option<String>,
     #[serde(default)]
     pub work_dir_presets: Vec<WorkDirPreset>,
-    #[serde(default)]
-    pub channels: Vec<BridgeChannelConfig>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSkillsMode {
+    #[default]
+    Disabled,
+    FollowDefaultWorkDir,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -435,9 +463,113 @@ pub struct BridgeFeishuSecrets {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
+pub struct BridgeWeixinSecrets {
+    pub bot_token: Option<String>,
+    pub base_url: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecrets {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecrets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecrets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weixin: Option<BridgeWeixinSecrets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
 pub struct BridgeSecrets {
+    #[serde(default)]
+    pub connectors: BTreeMap<String, BridgeConnectorSecrets>,
     pub telegram: BridgeTelegramSecrets,
     pub feishu: BridgeFeishuSecrets,
+    pub weixin: BridgeWeixinSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecretsInput {
+    pub connector_id: String,
+    pub telegram: BridgeTelegramSecrets,
+    pub feishu: BridgeFeishuSecrets,
+    pub weixin: BridgeWeixinSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartFeishuConnectorOnboardingInput {
+    pub connector_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeishuConnectorOnboardingState {
+    Idle,
+    AwaitingScan,
+    Polling,
+    Succeeded,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeishuConnectorOnboardingSession {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: FeishuConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub scanner_open_id: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub app_id_masked: Option<String>,
+    pub last_configured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWeixinConnectorOnboardingInput {
+    pub connector_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WeixinConnectorOnboardingState {
+    Idle,
+    AwaitingScan,
+    Polling,
+    Succeeded,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WeixinConnectorOnboardingSession {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: WeixinConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+    pub last_configured_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -460,7 +592,11 @@ pub struct BridgeOnboardingConfigInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct BridgeChannelStatus {
+pub struct BridgeConnectorStatus {
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub platform: BridgePlatform,
     pub enabled: bool,
     pub state: BridgeChannelState,
@@ -470,6 +606,14 @@ pub struct BridgeChannelStatus {
     pub last_offset: Option<String>,
     pub last_error_code: Option<String>,
     pub last_error: Option<String>,
+    pub last_ready_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub last_failure_operation: Option<String>,
+    pub last_failure_retryable: Option<bool>,
+    pub consecutive_failures: Option<usize>,
+    pub next_retry_at: Option<String>,
+    pub last_recovery_at: Option<String>,
+    pub recovery_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -480,8 +624,8 @@ pub struct BridgeStatus {
     pub pid: Option<u32>,
     pub admin_port: u16,
     pub version: Option<String>,
-    #[serde(default)]
-    pub channels: Vec<BridgeChannelStatus>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorStatus>,
     pub pending_approvals: usize,
     pub bindings: usize,
     pub last_error_code: Option<String>,
@@ -492,6 +636,10 @@ pub struct BridgeStatus {
 #[serde(rename_all = "camelCase")]
 pub struct BindingRecord {
     pub binding_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub platform: BridgePlatform,
     pub account_id: Option<String>,
     pub chat_id: String,
@@ -509,6 +657,10 @@ pub struct BindingRecord {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeApprovalRecord {
     pub approval_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
     pub kimi_session_id: String,
     pub turn_id: Option<String>,
     pub step_id: Option<String>,
@@ -524,6 +676,158 @@ pub struct BridgeApprovalRecord {
     pub created_at: String,
     pub updated_at: String,
     pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillApplyScope {
+    UserGlobalKimi,
+    SessionKimi,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillProjectionMethod {
+    Symlink,
+    Junction,
+    Copy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSourceType {
+    #[default]
+    Git,
+    LocalImport,
+    Bundled,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUpdateStatusKind {
+    #[default]
+    UpToDate,
+    UpdateAvailable,
+    SourceMissing,
+    RefreshAvailable,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillUpdateStatusView {
+    #[serde(default)]
+    pub kind: SkillUpdateStatusKind,
+    pub detail: Option<String>,
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillManifestMetadata {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub file_patterns: Vec<String>,
+    #[serde(default)]
+    pub workspace_patterns: Vec<String>,
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub recommended_scopes: Vec<SkillApplyScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub source_type: SkillSourceType,
+    #[serde(default)]
+    pub source_label: String,
+    #[serde(default)]
+    pub source_key: String,
+    pub source_path: Option<String>,
+    pub repo_url: Option<String>,
+    pub git_ref: Option<String>,
+    pub commit: Option<String>,
+    pub local_path: String,
+    pub projection_name: String,
+    pub trusted: bool,
+    pub installed_at: String,
+    pub updated_at: String,
+    pub has_scripts: bool,
+    #[serde(default)]
+    pub metadata: SkillManifestMetadata,
+    #[serde(default)]
+    pub update_status: SkillUpdateStatusView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDetail {
+    pub skill: InstalledSkill,
+    #[serde(default)]
+    pub relative_paths: Vec<String>,
+    pub user_global_applied: bool,
+    pub current_session_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillProjectionRecord {
+    pub skill_id: String,
+    pub scope: SkillApplyScope,
+    pub target_path: String,
+    pub projection_name: String,
+    pub applied_at: String,
+    pub method: SkillProjectionMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSkillState {
+    pub session_id: Option<String>,
+    pub session_work_dir: Option<String>,
+    #[serde(default)]
+    pub applied_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub projections: Vec<SkillProjectionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillProfile {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub recent_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub pinned_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub last_session_skill_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillApplyResult {
+    pub scope: SkillApplyScope,
+    #[serde(default)]
+    pub global_skills: Vec<SkillProjectionRecord>,
+    pub active_session: SessionSkillState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRecommendation {
+    pub skill_id: String,
+    pub score: i32,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub matched_signals: Vec<String>,
+    pub recommended_scope: SkillApplyScope,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -559,9 +863,37 @@ pub struct BridgeFeishuSecretsMaskView {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct BridgeWeixinSecretsMaskView {
+    pub bot_token: BridgeMaskedSecretValue,
+    pub base_url: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeSecretsMaskView {
+    #[serde(default)]
+    pub connectors: Vec<BridgeConnectorSecretsMaskView>,
     pub telegram: BridgeTelegramSecretsMaskView,
     pub feishu: BridgeFeishuSecretsMaskView,
+    pub weixin: BridgeWeixinSecretsMaskView,
+}
+
+pub type BridgeChannelStatus = BridgeConnectorStatus;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConnectorSecretsMaskView {
+    pub connector_id: String,
+    pub connector_label: String,
+    pub platform: BridgePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecretsMaskView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecretsMaskView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weixin: Option<BridgeWeixinSecretsMaskView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

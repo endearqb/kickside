@@ -2,10 +2,10 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
+use chrono::Local;
 use tauri::{AppHandle, Manager};
 
 use crate::app_state::AppState;
@@ -51,10 +51,7 @@ pub fn append_line(app: &AppHandle, line: impl AsRef<str>) {
         return;
     }
 
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string();
 
     let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) else {
         return;

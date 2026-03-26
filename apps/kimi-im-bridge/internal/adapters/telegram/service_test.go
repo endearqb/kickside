@@ -354,7 +354,7 @@ func TestServiceStartUsesPersistedOffset(t *testing.T) {
 	t.Parallel()
 
 	service, storeHandle, botAPI, _ := newTestService(t, Config{BotToken: "token"})
-	if err := storeHandle.UpdateChannelOffset(context.Background(), "telegram", "21"); err != nil {
+	if err := storeHandle.UpdateChannelOffset(context.Background(), "telegram", "telegram_update", "21"); err != nil {
 		t.Fatalf("UpdateChannelOffset returned error: %v", err)
 	}
 

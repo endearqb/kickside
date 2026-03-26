@@ -1,13 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useMemo } from "react";
 import {
   Check,
   Download,
   FolderOpen,
   Plus,
-  Play,
   RefreshCcw,
   RefreshCw,
-  Square,
   Trash2,
   X,
 } from "lucide-react";
@@ -15,185 +13,139 @@ import type {
   BindingRecord,
   BridgeApprovalRecord,
   BridgeApprovalResolveInput,
+  BridgeConnectorConfig,
+  BridgeConnectorSecretsMaskView,
   BridgePlatform,
-  BridgeSecretsMaskView,
   BridgeSessionImportInput,
   BridgeSessionRecord,
-  BridgeSettings,
   BridgeStatus,
-  FeishuReplyRenderer,
-  WorkDirPreset,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ControlCenterCardHeader } from "@/features/control-center/ControlCenterCardHeader";
 
-type BridgeRuntimePanelProps = {
-  settings: BridgeSettings;
+type Props = {
+  connector: BridgeConnectorConfig;
   status: BridgeStatus;
   sessions: BridgeSessionRecord[];
   bindings: BindingRecord[];
   approvals: BridgeApprovalRecord[];
   logTail: string[];
   recentErrors: string[];
-  secretsMask: BridgeSecretsMaskView;
+  secretsMask: BridgeConnectorSecretsMaskView | null;
   busy: boolean;
-  onSettingsChange: (next: BridgeSettings) => void;
-  onSave: () => Promise<void>;
-  onStart: () => Promise<void>;
-  onStop: () => Promise<void>;
-  onRestart: () => Promise<void>;
   onRefreshStatus: () => Promise<BridgeStatus>;
   onRefreshSessions: () => Promise<BridgeSessionRecord[]>;
   onRefreshBindings: () => Promise<BindingRecord[]>;
   onRefreshApprovals: () => Promise<BridgeApprovalRecord[]>;
   onRefreshLogTail: () => Promise<string[]>;
-  onRefreshSecretsMask: () => Promise<BridgeSecretsMaskView>;
   onOpenLogs: () => Promise<void>;
   onImportSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBinding: (bindingId: string) => Promise<void>;
   onResetBindingSession: (bindingId: string) => Promise<void>;
+  onResetBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveApproval: (
     approvalId: string,
     status: BridgeApprovalResolveInput["status"],
   ) => Promise<void>;
 };
 
-type BridgePanelSectionId =
-  | "runtime"
-  | "status"
-  | "sessions"
-  | "bindings"
-  | "approvals"
-  | "logs";
-
-type SectionTone = "neutral" | "success" | "warning" | "danger";
-
-function updateChannelEnabled(
-  settings: BridgeSettings,
-  platform: BridgePlatform,
-  enabled: boolean,
-): BridgeSettings {
-  return {
-    ...settings,
-    channels: settings.channels.map((channel) =>
-      channel.platform === platform ? { ...channel, enabled } : channel,
-    ),
-  };
+function formatTs(value?: string) {
+  if (!value) {
+    return "-";
+  }
+  return Number.isNaN(Date.parse(value))
+    ? value
+    : new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
-function updateWorkDirPreset(
-  settings: BridgeSettings,
-  index: number,
-  patch: Partial<WorkDirPreset>,
-): BridgeSettings {
-  return {
-    ...settings,
-    workDirPresets: settings.workDirPresets.map((preset, presetIndex) =>
-      presetIndex === index ? { ...preset, ...patch } : preset,
-    ),
-  };
+function formatPlatform(platform: BridgePlatform) {
+  return platform === "telegram" ? "Telegram" : "飞书";
 }
 
-function addWorkDirPreset(settings: BridgeSettings): BridgeSettings {
-  return {
-    ...settings,
-    workDirPresets: [...settings.workDirPresets, { name: "", path: "" }],
-  };
+function formatConnectorState(state?: string) {
+  switch (state) {
+    case "ready":
+      return "已就绪";
+    case "connecting":
+      return "连接中";
+    case "degraded":
+      return "降级";
+    case "error":
+      return "异常";
+    case "idle":
+    default:
+      return "空闲";
+  }
 }
 
-function removeWorkDirPreset(settings: BridgeSettings, index: number): BridgeSettings {
-  return {
-    ...settings,
-    workDirPresets: settings.workDirPresets.filter((_, presetIndex) => presetIndex !== index),
-  };
-}
-
-function platformLabel(platform: BridgePlatform): string {
-  return platform === "telegram" ? "Telegram" : "Feishu";
-}
-
-function feishuReplyRendererLabel(renderer: FeishuReplyRenderer): string {
-  return renderer === "interactive" ? "Interactive card" : "Post fallback";
-}
-
-function sourceLabel(source: BridgeSessionRecord["source"]): string {
-  return source === "bridge" ? "Bridge" : "Shell/Web";
-}
-
-function formatTimestamp(value?: string): string {
-  if (!value) return "-";
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return value;
-  return new Date(timestamp).toLocaleString("zh-CN", { hour12: false });
-}
-
-function renderSecretRow(label: string, value: BridgeSecretsMaskView["telegram"]["botToken"]) {
+function matchConnectorLog(entry: string, connector: BridgeConnectorConfig) {
+  const lower = entry.toLowerCase();
   return (
-    <div key={label} className="bridge-secret-row">
-      <div className="bridge-secret-copy">
-        <strong>{label}</strong>
-        <small>{value.configured ? value.maskedValue ?? "***" : "未配置"}</small>
-      </div>
-      <span className={`bridge-secret-chip ${value.configured ? "configured" : "empty"}`}>
-        {value.configured ? "Configured" : "Missing"}
-      </span>
-    </div>
+    lower.includes(connector.id.toLowerCase()) ||
+    lower.includes(connector.label.toLowerCase()) ||
+    lower.includes(connector.platform)
   );
 }
 
-function formatErrorLine(errorCode?: string, message?: string): string {
-  const parts: string[] = [];
-  if (errorCode) parts.push(`[${errorCode}]`);
-  if (message) parts.push(message);
-  return parts.join(" ").trim();
-}
-
-function formatSessionSummary(session: BridgeSessionRecord): string {
-  const parts = [
-    session.sessionState ? `state ${session.sessionState}` : null,
-    session.workDir ? `dir ${session.workDir}` : null,
-    session.lastMessageAt ? `updated ${formatTimestamp(session.lastMessageAt)}` : null,
-  ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" | ") : "暂无附加信息。";
-}
-
-function formatRuntimeStateLabel(state: BridgeStatus["state"]): string {
-  switch (state) {
-    case "running":
-      return "就绪";
-    case "starting":
-    case "stopping":
-      return "进行中";
-    case "degraded":
-    case "crashed":
-      return "异常";
-    default:
-      return "待办";
+function renderSecretRows(secretsMask: BridgeConnectorSecretsMaskView | null) {
+  if (!secretsMask) {
+    return <p className="hint">当前还没有这个机器人的凭据掩码信息。</p>;
   }
-}
 
-function formatRuntimeStateTone(state: BridgeStatus["state"]): SectionTone {
-  switch (state) {
-    case "running":
-      return "success";
-    case "starting":
-    case "stopping":
-      return "warning";
-    case "degraded":
-    case "crashed":
-      return "danger";
-    default:
-      return "neutral";
+  if (secretsMask.platform === "telegram" && secretsMask.telegram) {
+    return (
+      <div className="bridge-secret-list">
+        <div className="bridge-secret-row">
+          <div className="bridge-secret-copy">
+            <strong>Telegram botToken</strong>
+            <small>
+              {secretsMask.telegram.botToken.configured
+                ? secretsMask.telegram.botToken.maskedValue ?? "***"
+                : "未配置"}
+            </small>
+          </div>
+          <span
+            className={`bridge-secret-chip ${
+              secretsMask.telegram.botToken.configured ? "configured" : "empty"
+            }`}
+          >
+            {secretsMask.telegram.botToken.configured ? "已配置" : "未配置"}
+          </span>
+        </div>
+      </div>
+    );
   }
-}
 
-function formatCountLabel(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+  if (secretsMask.platform === "feishu" && secretsMask.feishu) {
+    const rows = [
+      ["飞书 appId", secretsMask.feishu.appId],
+      ["飞书 appSecret", secretsMask.feishu.appSecret],
+      ["飞书 verificationToken", secretsMask.feishu.verificationToken],
+      ["飞书 encryptKey", secretsMask.feishu.encryptKey],
+    ] as const;
+    return (
+      <div className="bridge-secret-list">
+        {rows.map(([label, value]) => (
+          <div key={label} className="bridge-secret-row">
+            <div className="bridge-secret-copy">
+              <strong>{label}</strong>
+              <small>{value.configured ? value.maskedValue ?? "***" : "未配置"}</small>
+            </div>
+            <span
+              className={`bridge-secret-chip ${value.configured ? "configured" : "empty"}`}
+            >
+              {value.configured ? "已配置" : "未配置"}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <p className="hint">当前没有可展示的凭据掩码。</p>;
 }
 
 export function BridgeRuntimePanel({
-  settings,
+  connector,
   status,
   sessions,
   bindings,
@@ -202,315 +154,211 @@ export function BridgeRuntimePanel({
   recentErrors,
   secretsMask,
   busy,
-  onSettingsChange,
-  onSave,
-  onStart,
-  onStop,
-  onRestart,
   onRefreshStatus,
   onRefreshSessions,
   onRefreshBindings,
   onRefreshApprovals,
   onRefreshLogTail,
-  onRefreshSecretsMask,
   onOpenLogs,
   onImportSession,
   onClearBinding,
   onResetBindingSession,
+  onResetBindingToDefaultWorkDir,
   onResolveApproval,
-}: BridgeRuntimePanelProps) {
-  const [expandedSections, setExpandedSections] = useState<Record<BridgePanelSectionId, boolean>>({
-    runtime: true,
-    status: false,
-    sessions: false,
-    bindings: false,
-    approvals: false,
-    logs: false,
-  });
-  const isRunning =
-    status.state === "running" ||
-    status.state === "starting" ||
-    status.state === "degraded";
-
-  function toggleSection(sectionId: BridgePanelSectionId) {
-    setExpandedSections((current) => ({
-      ...current,
-      [sectionId]: !current[sectionId],
-    }));
-  }
-
-  function renderSection(
-    sectionId: BridgePanelSectionId,
-    title: string,
-    description: string,
-    statusLabel: string,
-    statusTone: SectionTone,
-    children: ReactNode,
-  ) {
-    const expanded = expandedSections[sectionId];
-    return (
-      <section className={`bridge-panel-section ${expanded ? "is-expanded" : ""}`}>
-        <ControlCenterCardHeader
-          title={title}
-          description={description}
-          statusLabel={statusLabel}
-          statusTone={statusTone}
-          collapsible
-          expanded={expanded}
-          onToggle={() => toggleSection(sectionId)}
-        />
-        {expanded ? <div className="bridge-panel-section-body">{children}</div> : null}
-      </section>
-    );
-  }
+}: Props) {
+  const connectorStatus = useMemo(
+    () => status.connectors.find((item) => item.connectorId === connector.id) ?? null,
+    [connector.id, status.connectors],
+  );
+  const connectorBindings = useMemo(
+    () => bindings.filter((item) => item.connectorId === connector.id),
+    [bindings, connector.id],
+  );
+  const connectorApprovals = useMemo(
+    () => approvals.filter((item) => item.connectorId === connector.id),
+    [approvals, connector.id],
+  );
+  const connectorSessionIds = useMemo(
+    () => new Set(connectorBindings.map((item) => item.kimiSessionId)),
+    [connectorBindings],
+  );
+  const connectorSessions = useMemo(
+    () => sessions.filter((item) => connectorSessionIds.has(item.sessionId)),
+    [connectorSessionIds, sessions],
+  );
+  const connectorRecentErrors = useMemo(() => {
+    const filtered = recentErrors.filter((entry) => matchConnectorLog(entry, connector));
+    if (filtered.length > 0) {
+      return filtered;
+    }
+    const fallback = [connectorStatus?.lastErrorCode, connectorStatus?.lastError]
+      .filter(Boolean)
+      .join(" ");
+    return fallback ? [fallback] : [];
+  }, [connector, connectorStatus?.lastError, connectorStatus?.lastErrorCode, recentErrors]);
+  const connectorLogs = useMemo(() => {
+    const filtered = logTail.filter((entry) => matchConnectorLog(entry, connector));
+    return filtered.length > 0 ? filtered : logTail.slice(-40);
+  }, [connector, logTail]);
 
   return (
     <div className="bridge-panel">
-      {renderSection(
-        "runtime",
-        "Bridge runtime",
-        "管理 sidecar 进程、端口、默认工作目录和渠道状态。",
-        formatRuntimeStateLabel(status.state),
-        formatRuntimeStateTone(status.state),
-        <>
-          <div className="cc-actions">
-            <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshStatus()} disabled={busy}>刷新状态</Button>
-            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshSessions()} disabled={busy}>刷新 sessions</Button>
-            <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
+      <section className="bridge-panel-section is-expanded">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>运行状态</h4>
+            <p>只显示当前机器人相关的连接状态、最近失败和运行时间。</p>
           </div>
+          <div className="cc-actions">
+            <Button
+              type="button"
+              icon={<RefreshCw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void Promise.all([onRefreshStatus(), onRefreshLogTail()])}
+              disabled={busy}
+            >
+              刷新诊断
+            </Button>
+          </div>
+        </div>
+        <div className="diagnostics-grid">
+          <article className="diag-item">
+            <span className="diag-label">机器人</span>
+            <strong>{connector.label}</strong>
+          </article>
+          <article className="diag-item">
+            <span className="diag-label">Connector ID</span>
+            <strong>{connector.id}</strong>
+          </article>
+          <article className="diag-item">
+            <span className="diag-label">平台</span>
+            <strong>{formatPlatform(connector.platform)}</strong>
+          </article>
+          <article className="diag-item">
+            <span className="diag-label">实时状态</span>
+            <strong>{formatConnectorState(connectorStatus?.state)}</strong>
+          </article>
+          <article className="diag-item">
+            <span className="diag-label">最近就绪</span>
+            <strong>{formatTs(connectorStatus?.lastReadyAt)}</strong>
+          </article>
+          <article className="diag-item">
+            <span className="diag-label">最近失败</span>
+            <strong>{formatTs(connectorStatus?.lastFailureAt)}</strong>
+          </article>
+        </div>
+        {connectorRecentErrors.length > 0 ? (
+          <div className="bridge-error-list">
+            {connectorRecentErrors.map((entry) => (
+              <div key={entry} className="bridge-error-card">
+                {entry}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">当前没有记录到该机器人的近期错误。</p>
+        )}
+      </section>
 
-          <div className="bridge-panel-group">
-            <div className="bridge-panel-group-label">
-              <span>常规配置</span>
-              <small>保存后会同步到 `bridge_settings.json`。</small>
-            </div>
+      <section className="bridge-panel-section is-expanded">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>绑定与会话</h4>
+            <p>这里可以查看当前机器人对应的绑定、已映射会话以及恢复动作。</p>
+          </div>
+          <div className="cc-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<RefreshCcw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void Promise.all([onRefreshBindings(), onRefreshSessions()])}
+              disabled={busy}
+            >
+              刷新绑定
+            </Button>
+          </div>
+        </div>
 
-            <div className="bridge-settings-grid">
-              <label className="bridge-switch-card">
-                <span className="bridge-switch-copy">
-                  <strong>Enable bridge</strong>
-                  <small>控制 sidecar 总开关。</small>
-                </span>
-                <input
-                  type="checkbox"
-                  className="cc-switch-input"
-                  checked={settings.enabled}
-                  onChange={(event) =>
-                    onSettingsChange({
-                      ...settings,
-                      enabled: event.currentTarget.checked,
-                    })
-                  }
-                />
-                <span className="cc-switch-track" aria-hidden />
-              </label>
-
-              <label className="bridge-port-card">
-                <span>Admin Port</span>
-                <Input value={String(settings.adminPort)} onChange={(event) => onSettingsChange({ ...settings, adminPort: Number(event.currentTarget.value) || 60110 })} inputMode="numeric" />
-              </label>
-
-              <label className="bridge-port-card">
-                <span>Feishu Reply Renderer</span>
-                <select className="ui-input" value={settings.feishuReplyRenderer} onChange={(event) => onSettingsChange({ ...settings, feishuReplyRenderer: event.currentTarget.value as FeishuReplyRenderer })}>
-                  <option value="interactive">{feishuReplyRendererLabel("interactive")}</option>
-                  <option value="post">{feishuReplyRendererLabel("post")}</option>
-                </select>
-                <small>普通模型回复默认建议使用 `interactive + lark_md`；`post` 仅作为兼容回退。</small>
-              </label>
-
-              <label className="bridge-switch-card">
-                <span className="bridge-switch-copy">
-                  <strong>Feishu Auto Approve</strong>
-                  <small>开启后，飞书对话会自动批准工具执行审批（WithAutoApprove）。</small>
-                </span>
-                <input
-                  type="checkbox"
-                  className="cc-switch-input"
-                  checked={settings.feishuAutoApprove}
-                  onChange={(event) =>
-                    onSettingsChange({
-                      ...settings,
-                      feishuAutoApprove: event.currentTarget.checked,
-                    })
-                  }
-                />
-                <span className="cc-switch-track" aria-hidden />
-              </label>
-
-              <label className="bridge-switch-card">
-                <span className="bridge-switch-copy">
-                  <strong>每次 Bridge 启动新建会话</strong>
-                  <small>开启后，Bridge 每次启动成功都会为现有 binding 生成并切换到新的会话。</small>
-                </span>
-                <input
-                  type="checkbox"
-                  className="cc-switch-input"
-                  checked={settings.resetBindingSessionOnBridgeStart}
-                  onChange={(event) =>
-                    onSettingsChange({
-                      ...settings,
-                      resetBindingSessionOnBridgeStart: event.currentTarget.checked,
-                    })
-                  }
-                />
-                <span className="cc-switch-track" aria-hidden />
-              </label>
-            </div>
-
-            <div className="bridge-channel-list">
-              {settings.channels.map((channel) => (
-                <label
-                  key={channel.platform}
-                  className="bridge-channel-card bridge-switch-card"
-                >
-                  <div className="bridge-channel-copy">
-                    <strong>{platformLabel(channel.platform)}</strong>
-                    <small>mode: {channel.mode}</small>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>当前绑定</h5>
+            <span className="cc-status-badge tone-neutral">{connectorBindings.length} 个</span>
+          </div>
+          {connectorBindings.length > 0 ? (
+            <div className="bridge-binding-list">
+              {connectorBindings.map((binding) => (
+                <div key={binding.bindingId} className="bridge-binding-card">
+                  <div className="bridge-binding-copy">
+                    <strong>{binding.connectorLabel || connector.label}</strong>
+                    <span>
+                      {binding.chatId}
+                      {binding.threadId ? ` / ${binding.threadId}` : ""}
+                    </span>
+                    <small>
+                      Session {binding.kimiSessionId}
+                      {binding.workDir ? ` | ${binding.workDir}` : ""}
+                    </small>
                   </div>
-                  <input
-                    type="checkbox"
-                    className="cc-switch-input"
-                    checked={channel.enabled}
-                    onChange={(event) =>
-                      onSettingsChange(
-                        updateChannelEnabled(
-                          settings,
-                          channel.platform,
-                          event.currentTarget.checked,
-                        ),
-                      )
-                    }
-                  />
-                  <span className="cc-switch-track" aria-hidden />
-                </label>
+                  <div className="bridge-approval-actions">
+                    <Button
+                      type="button"
+                      icon={<Plus size={14} />}
+                      className="cc-action-btn"
+                      onClick={() => void onResetBindingSession(binding.bindingId)}
+                      disabled={busy}
+                    >
+                      新建对话
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      icon={<Check size={14} />}
+                      className="cc-action-btn"
+                      onClick={() => void onResetBindingToDefaultWorkDir(binding.bindingId)}
+                      disabled={busy}
+                    >
+                      回到默认目录
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon={<Trash2 size={14} />}
+                      className="cc-action-btn"
+                      onClick={() => void onClearBinding(binding.bindingId)}
+                      disabled={busy}
+                    >
+                      清理绑定
+                    </Button>
+                  </div>
+                </div>
               ))}
             </div>
+          ) : (
+            <p className="hint">当前机器人还没有建立聊天绑定。</p>
+          )}
+        </div>
 
-            <div className="bridge-panel-subsection">
-              <div className="bridge-panel-subheader">
-                <h5>Work Dir Presets</h5>
-              </div>
-              <p className="hint">飞书 `/bridge cwd` 卡片会直接展示这些预设目录按钮。保存时会自动过滤空项，并按路径去重。</p>
-              {settings.workDirPresets.length > 0 ? (
-                <div className="bridge-preset-list">
-                  {settings.workDirPresets.map((preset, index) => (
-                    <div key={`preset-${index}`} className="bridge-preset-row">
-                      <div className="bridge-preset-fields">
-                        <label className="bridge-preset-field">
-                          <span>Name</span>
-                          <Input value={preset.name} onChange={(event) => onSettingsChange(updateWorkDirPreset(settings, index, { name: event.currentTarget.value }))} placeholder="例如 Repo" />
-                        </label>
-                        <label className="bridge-preset-field">
-                          <span>Path</span>
-                          <Input value={preset.path} onChange={(event) => onSettingsChange(updateWorkDirPreset(settings, index, { path: event.currentTarget.value }))} placeholder="例如 D:/workspace/repo" />
-                        </label>
-                      </div>
-                      <Button type="button" variant="ghost" icon={<Trash2 size={14} />} className="cc-action-btn" onClick={() => onSettingsChange(removeWorkDirPreset(settings, index))} disabled={busy}>删除</Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="hint">还没有工作目录预设。你可以添加常用目录，供飞书 `/bridge cwd` 直接点选。</p>
-              )}
-              <div className="bridge-action-row">
-                <Button type="button" variant="outline" icon={<Plus size={14} />} className="cc-action-btn" onClick={() => onSettingsChange(addWorkDirPreset(settings))} disabled={busy}>Add preset</Button>
-              </div>
-              {isRunning ? <p className="hint">如果 bridge 正在运行，保存后需要重启 bridge，飞书 `/bridge cwd` 卡片才会加载最新预设。</p> : null}
-            </div>
-
-            <div className="bridge-action-row">
-              <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onSave()} disabled={busy}>保存配置</Button>
-              <Button type="button" icon={<Play size={15} />} className="cc-action-btn" onClick={() => void onStart()} disabled={busy || isRunning}>Start</Button>
-            </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>关联会话</h5>
+            <span className="cc-status-badge tone-neutral">{connectorSessions.length} 个</span>
           </div>
-
-          <div className="bridge-danger-group">
-            <div className="bridge-panel-group-label is-danger">
-              <span>危险操作</span>
-              <small>会中断运行中的 bridge 或触发重连。</small>
-            </div>
-            <div className="bridge-action-row">
-              <Button type="button" variant="ghost" icon={<Square size={15} />} className="cc-action-btn" onClick={() => void onStop()} disabled={busy || !isRunning}>Stop</Button>
-              <Button type="button" variant="outline" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRestart()} disabled={busy}>Restart</Button>
-            </div>
-          </div>
-        </>,
-      )}
-
-      {renderSection(
-        "status",
-        "Status",
-        "当前 bridge 运行态与 sidecar 汇总信息。",
-        formatRuntimeStateLabel(status.state),
-        formatRuntimeStateTone(status.state),
-        <>
-          <div className="cc-actions">
-            <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshStatus()} disabled={busy}>刷新状态</Button>
-          </div>
-          <div className="diagnostics-grid">
-            <div className="diag-item"><span className="diag-label">PID</span><strong>{status.pid ?? "-"}</strong></div>
-            <div className="diag-item"><span className="diag-label">Version</span><strong>{status.version ?? "-"}</strong></div>
-            <div className="diag-item"><span className="diag-label">Admin Port</span><strong>{status.adminPort}</strong></div>
-            <div className="diag-item"><span className="diag-label">Bindings</span><strong>{status.bindings}</strong></div>
-            <div className="diag-item"><span className="diag-label">Pending Approvals</span><strong>{status.pendingApprovals}</strong></div>
-            <div className="diag-item"><span className="diag-label">Started At</span><strong>{status.startedAt ?? "-"}</strong></div>
-          </div>
-          {status.lastError || status.lastErrorCode ? <p className="bridge-error-text">{formatErrorLine(status.lastErrorCode, status.lastError)}</p> : null}
-          <div className="bridge-channel-statuses">
-            {status.channels.length > 0 ? (
-              status.channels.map((channel) => (
-                <div key={channel.platform} className="bridge-channel-status-card">
-                  <strong>{platformLabel(channel.platform)}</strong>
-                  <span>{channel.state}</span>
-                  <small>
-                    offset: {channel.lastOffset ?? "-"}
-                    {channel.lastError || channel.lastErrorCode ? ` | error: ${formatErrorLine(channel.lastErrorCode, channel.lastError)}` : ""}
-                  </small>
-                </div>
-              ))
-            ) : (
-              <p className="hint">bridge 未运行时不会返回实时 channel 状态。</p>
-            )}
-          </div>
-          <div className="bridge-panel-subsection">
-            <div className="bridge-panel-subheader">
-              <h5>最近错误摘要</h5>
-            </div>
-            {recentErrors.length > 0 ? (
-              <div className="bridge-error-list">
-                {recentErrors.map((entry) => (
-                  <div key={entry} className="bridge-error-card">{entry}</div>
-                ))}
-              </div>
-            ) : (
-              <p className="hint">最近没有采集到 bridge 错误摘要。</p>
-            )}
-          </div>
-        </>,
-      )}
-
-      {renderSection(
-        "sessions",
-        "Sessions",
-        "聚合显示 bridge-native session 与 shell/web session。",
-        formatCountLabel(sessions.length, "session"),
-        sessions.length > 0 ? "success" : "neutral",
-        <>
-          <div className="cc-actions">
-            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshSessions()} disabled={busy}>刷新 sessions</Button>
-          </div>
-          {sessions.length > 0 ? (
+          {connectorSessions.length > 0 ? (
             <div className="bridge-binding-list">
-              {sessions.map((session) => (
+              {connectorSessions.map((session) => (
                 <div key={`${session.source}:${session.sessionId}`} className="bridge-binding-card">
                   <div className="bridge-binding-copy">
                     <strong>{session.sessionId}</strong>
                     <span>
-                      {sourceLabel(session.source)}
+                      {session.source === "bridge" ? "Bridge" : "Shell/Web"}
                       {session.providerName ? ` / ${session.providerName}` : ""}
                     </span>
-                    <small>{formatSessionSummary(session)}</small>
+                    <small>
+                      {session.sessionState ?? "未记录"}
+                      {session.workDir ? ` | ${session.workDir}` : ""}
+                      {session.lastMessageAt ? ` | ${formatTs(session.lastMessageAt)}` : ""}
+                    </small>
                     {session.summary ? <p>{session.summary}</p> : null}
                   </div>
                   {session.importable ? (
@@ -525,12 +373,12 @@ export function BridgeRuntimePanel({
                             source: session.source,
                             sourceSessionId: session.sessionId,
                             workDir: session.workDir,
-                            summary: `Imported from shell/web session ${session.sessionId}`,
+                            summary: `从 ${connector.label} 关联会话 ${session.sessionId} 导入`,
                           })
                         }
                         disabled={busy}
                       >
-                        Import as bridge session
+                        导入为 Bridge 会话
                       </Button>
                     </div>
                   ) : null}
@@ -538,144 +386,129 @@ export function BridgeRuntimePanel({
               ))}
             </div>
           ) : (
-            <p className="hint">当前没有可展示的 session。bridge-native session 需要 bridge 运行；shell/web session 需要后端 workspace 可访问。</p>
+            <p className="hint">当前还没有可展示的关联会话。</p>
           )}
-        </>,
-      )}
+        </div>
+      </section>
 
-      {renderSection(
-        "bindings",
-        "Bindings",
-        "查看当前聊天绑定的 session / workdir 映射。",
-        formatCountLabel(bindings.length, "binding"),
-        bindings.length > 0 ? "success" : "neutral",
-        <>
-          <div className="cc-actions">
-            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshBindings()} disabled={busy}>刷新绑定</Button>
+      <section className="bridge-panel-section is-expanded">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>待处理审批</h4>
+            <p>审批列表已经按当前机器人过滤，不会混入其他 connector 的请求。</p>
           </div>
-          {bindings.length > 0 ? (
-            <>
-              <div className="bridge-binding-list">
-                {bindings.map((binding) => (
-                  <div key={binding.bindingId} className="bridge-binding-card">
-                    <div className="bridge-binding-copy">
-                      <strong>{binding.bindingId}</strong>
-                      <span>
-                        {platformLabel(binding.platform)} / {binding.chatId}
-                        {binding.threadId ? ` / ${binding.threadId}` : ""}
-                      </span>
-                      <small>
-                        session {binding.kimiSessionId}
-                        {binding.workDir ? ` | cwd ${binding.workDir}` : ""}
-                        {binding.lastInboundMessageId ? ` | last inbound ${binding.lastInboundMessageId}` : ""}
-                      </small>
-                    </div>
-                    <div className="bridge-approval-actions">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<Plus size={14} />}
-                        className="cc-action-btn"
-                        onClick={() => void onResetBindingSession(binding.bindingId)}
-                        disabled={busy}
-                      >
-                        新建并切换会话
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+          <div className="cc-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<RefreshCcw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onRefreshApprovals()}
+              disabled={busy}
+            >
+              刷新审批
+            </Button>
+          </div>
+        </div>
+        {connectorApprovals.length > 0 ? (
+          <div className="bridge-approval-list">
+            {connectorApprovals.map((approval) => (
+              <div key={approval.approvalId} className="bridge-approval-card">
+                <div className="bridge-approval-copy">
+                  <strong>{approval.connectorLabel || connector.label}</strong>
+                  <span>
+                    {approval.kimiSessionId} / {approval.requestKind}
+                  </span>
+                  <small>
+                    {approval.chatId}
+                    {approval.threadId ? ` / ${approval.threadId}` : ""}
+                    {` | ${formatTs(approval.createdAt)}`}
+                  </small>
+                  <p>{approval.prompt}</p>
+                </div>
+                <div className="bridge-approval-actions">
+                  <Button
+                    type="button"
+                    icon={<Check size={14} />}
+                    className="cc-action-btn"
+                    onClick={() => void onResolveApproval(approval.approvalId, "approved")}
+                    disabled={busy}
+                  >
+                    批准一次
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<RefreshCw size={14} />}
+                    className="cc-action-btn"
+                    onClick={() =>
+                      void onResolveApproval(approval.approvalId, "approved_for_session")
+                    }
+                    disabled={busy}
+                  >
+                    批准当前 Session
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<X size={14} />}
+                    className="cc-action-btn"
+                    onClick={() => void onResolveApproval(approval.approvalId, "rejected")}
+                    disabled={busy}
+                  >
+                    拒绝
+                  </Button>
+                </div>
               </div>
-              <div className="bridge-danger-group">
-                <div className="bridge-panel-group-label is-danger">
-                  <span>危险操作</span>
-                  <small>清理 binding 会断开当前会话映射。</small>
-                </div>
-                <div className="bridge-danger-action-list">
-                  {bindings.map((binding) => (
-                    <Button key={`clear-${binding.bindingId}`} type="button" variant="ghost" icon={<Trash2 size={14} />} className="cc-action-btn" onClick={() => void onClearBinding(binding.bindingId)} disabled={busy}>
-                      Clear {binding.bindingId}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="hint">暂无 bindings。bridge 停止时列表会显示为空。</p>
-          )}
-        </>,
-      )}
+            ))}
+          </div>
+        ) : (
+          <p className="hint">当前没有待处理审批。</p>
+        )}
+      </section>
 
-      {renderSection(
-        "approvals",
-        "Pending Approvals",
-        "支持 approve once / approve for session / reject。",
-        formatCountLabel(approvals.length, "approval"),
-        approvals.length > 0 ? "warning" : "neutral",
-        <>
+      <section className="bridge-panel-section is-expanded">
+        <div className="bridge-panel-header">
+          <div>
+            <h4>凭据与日志</h4>
+            <p>凭据只展示掩码，日志优先过滤到当前 connector，找不到时回退到全局尾部。</p>
+          </div>
           <div className="cc-actions">
-            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshApprovals()} disabled={busy}>刷新审批</Button>
+            <Button
+              type="button"
+              icon={<RefreshCw size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onRefreshLogTail()}
+              disabled={busy}
+            >
+              刷新日志
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<FolderOpen size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onOpenLogs()}
+            >
+              打开日志目录
+            </Button>
           </div>
-          {approvals.length > 0 ? (
-            <div className="bridge-approval-list">
-              {approvals.map((approval) => (
-                <div key={approval.approvalId} className="bridge-approval-card">
-                  <div className="bridge-approval-copy">
-                    <strong>{approval.approvalId}</strong>
-                    <span>
-                      {platformLabel(approval.platform)} / {approval.kimiSessionId}
-                    </span>
-                    <small>
-                      {approval.requestKind} | {approval.chatId}
-                      {approval.threadId ? ` / ${approval.threadId}` : ""}
-                    </small>
-                    <p>{approval.prompt}</p>
-                    <small>created {formatTimestamp(approval.createdAt)}</small>
-                  </div>
-                  <div className="bridge-approval-actions">
-                    <Button type="button" icon={<Check size={14} />} className="cc-action-btn" onClick={() => void onResolveApproval(approval.approvalId, "approved")} disabled={busy}>Approve once</Button>
-                    <Button type="button" variant="outline" icon={<RefreshCw size={14} />} className="cc-action-btn" onClick={() => void onResolveApproval(approval.approvalId, "approved_for_session")} disabled={busy}>Approve for session</Button>
-                    <Button type="button" variant="ghost" icon={<X size={14} />} className="cc-action-btn" onClick={() => void onResolveApproval(approval.approvalId, "rejected")} disabled={busy}>Reject</Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="hint">当前没有 pending approvals。</p>
-          )}
-        </>,
-      )}
-
-      {renderSection(
-        "logs",
-        "Logs & Secrets",
-        "查看 `bridge.log` 尾部内容与当前 token 掩码状态。",
-        formatCountLabel(logTail.length, "line"),
-        logTail.length > 0 ? "success" : "neutral",
-        <>
-          <div className="cc-actions">
-            <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshLogTail()} disabled={busy}>刷新日志</Button>
-            <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshSecretsMask()} disabled={busy}>刷新掩码</Button>
+        </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>凭据掩码</h5>
           </div>
-          <div className="bridge-panel-subsection">
-            <div className="bridge-panel-subheader">
-              <h5>Bridge Log Tail</h5>
-            </div>
-            <pre className="log-tail bridge-log-tail">{logTail.length > 0 ? logTail.join("\n") : "暂无 bridge.log 内容。"}</pre>
+          {renderSecretRows(secretsMask)}
+        </div>
+        <div className="bridge-panel-subsection">
+          <div className="bridge-panel-subheader">
+            <h5>相关日志</h5>
           </div>
-          <div className="bridge-panel-subsection">
-            <div className="bridge-panel-subheader">
-              <h5>Secrets Mask View</h5>
-            </div>
-            <div className="bridge-secret-list">
-              {renderSecretRow("Telegram botToken", secretsMask.telegram.botToken)}
-              {renderSecretRow("Feishu appId", secretsMask.feishu.appId)}
-              {renderSecretRow("Feishu appSecret", secretsMask.feishu.appSecret)}
-              {renderSecretRow("Feishu verificationToken", secretsMask.feishu.verificationToken)}
-              {renderSecretRow("Feishu encryptKey", secretsMask.feishu.encryptKey)}
-            </div>
-          </div>
-        </>,
-      )}
+          <pre className="log-tail bridge-log-tail">
+            {connectorLogs.length > 0 ? connectorLogs.join("\n") : "暂无 bridge.log 内容。"}
+          </pre>
+        </div>
+      </section>
     </div>
   );
 }

@@ -104,9 +104,9 @@ func (s *Service) sendArtifact(ctx context.Context, source *MessageEvent, artifa
 		return reliability.Wrap("payload_invalid", fmt.Errorf("artifact localPath is required"))
 	}
 	var (
-		request    SendMessageRequest
+		request     SendMessageRequest
 		uploadedKey string
-		err        error
+		err         error
 	)
 	switch artifact.Kind {
 	case domain.AttachmentKindImage:
@@ -199,6 +199,7 @@ func (s *Service) sendRecordedRequest(
 	if existing == nil {
 		_, err = s.store.RecordDeliveryEventIfAbsent(ctx, domain.DeliveryEvent{
 			EventID:         uuid.NewString(),
+			ConnectorID:     s.connectorID(),
 			Platform:        platformID,
 			ChatID:          strings.TrimSpace(request.ChatID),
 			ThreadID:        "",
@@ -231,7 +232,7 @@ func (s *Service) sendRecordedRequest(
 	if err := s.store.UpdateDeliveryEventSent(ctx, deliveryKey, targetMessageID); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	return nil

@@ -11,6 +11,13 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
+func testConnectors() []config.ConnectorConfig {
+	return []config.ConnectorConfig{
+		{ID: "telegram-default", Platform: "telegram", Label: "Telegram", Enabled: true, Mode: "polling"},
+		{ID: "feishu-default", Platform: "feishu", Label: "Feishu", Enabled: true, Mode: "websocket", FeishuAutoApprove: true, FeishuReplyRenderer: config.FeishuReplyRendererInteractive},
+	}
+}
+
 func TestOpenInitializesUserVersionAndWAL(t *testing.T) {
 	t.Parallel()
 
@@ -79,7 +86,7 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 		t.Fatalf("Open returned error: %v", err)
 	}
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if err := store.UpsertOffset(ctx, "telegram", "telegram_update", "42"); err != nil {
@@ -145,7 +152,7 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 	}
 	defer reopened.Close()
 
-	offset, ok, err := reopened.GetOffset(ctx, "telegram", "telegram_update")
+	offset, ok, err := reopened.GetOffset(ctx, "telegram-default", "telegram_update")
 	if err != nil {
 		t.Fatalf("GetOffset returned error: %v", err)
 	}
@@ -202,6 +209,123 @@ func TestOffsetsApprovalsDeliveryAndReopenRecovery(t *testing.T) {
 	}
 	if reinserted {
 		t.Fatalf("expected duplicate delivery key to be ignored")
+	}
+}
+
+func TestSyncConfiguredChannelsPrunesRemovedConnectorData(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	connectors := []config.ConnectorConfig{
+		{ID: "feishu-default", Platform: "feishu", Label: "Feishu A", Enabled: true, Mode: "websocket"},
+		{ID: "feishu-2", Platform: "feishu", Label: "Feishu B", Enabled: true, Mode: "websocket"},
+	}
+	if err := store.SyncConfiguredChannels(ctx, connectors); err != nil {
+		t.Fatalf("initial SyncConfiguredChannels returned error: %v", err)
+	}
+
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		if err := store.UpsertSession(ctx, domain.BridgeSession{
+			KimiSessionID: sessionID,
+			CreatedAt:     "2026-03-25T00:00:00Z",
+			UpdatedAt:     "2026-03-25T00:00:00Z",
+		}); err != nil {
+			t.Fatalf("UpsertSession(%s) returned error: %v", sessionID, err)
+		}
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID: "binding-a",
+		Key: domain.BindingKey{
+			ConnectorID: "feishu-default",
+			Platform:    "feishu",
+			ChatID:      "chat-a",
+		},
+		KimiSessionID: "session-a",
+		Source:        "auto",
+		CreatedAt:     "2026-03-25T00:00:00Z",
+		UpdatedAt:     "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding(binding-a) returned error: %v", err)
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID: "binding-b",
+		Key: domain.BindingKey{
+			ConnectorID: "feishu-2",
+			Platform:    "feishu",
+			ChatID:      "chat-b",
+		},
+		KimiSessionID: "session-b",
+		Source:        "auto",
+		CreatedAt:     "2026-03-25T00:00:00Z",
+		UpdatedAt:     "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateBinding(binding-b) returned error: %v", err)
+	}
+	if err := store.CreateApprovalTicket(ctx, domain.ApprovalTicket{
+		ApprovalID:         "approval-a",
+		ConnectorID:        "feishu-default",
+		KimiSessionID:      "session-a",
+		Platform:           "feishu",
+		ChatID:             "chat-a",
+		RequestKind:        "tool",
+		Prompt:             "approve a",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "approval-a",
+		CreatedAt:          "2026-03-25T00:00:00Z",
+		UpdatedAt:          "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket(approval-a) returned error: %v", err)
+	}
+	if err := store.CreateApprovalTicket(ctx, domain.ApprovalTicket{
+		ApprovalID:         "approval-b",
+		ConnectorID:        "feishu-2",
+		KimiSessionID:      "session-b",
+		Platform:           "feishu",
+		ChatID:             "chat-b",
+		RequestKind:        "tool",
+		Prompt:             "approve b",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "approval-b",
+		CreatedAt:          "2026-03-25T00:00:00Z",
+		UpdatedAt:          "2026-03-25T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket(approval-b) returned error: %v", err)
+	}
+
+	if err := store.SyncConfiguredChannels(ctx, connectors[:1]); err != nil {
+		t.Fatalf("pruning SyncConfiguredChannels returned error: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector channel to remain, got %+v", statuses)
+	}
+
+	bindings, err := store.ListBindings(ctx)
+	if err != nil {
+		t.Fatalf("ListBindings returned error: %v", err)
+	}
+	if len(bindings) != 1 || bindings[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector binding to remain, got %+v", bindings)
+	}
+
+	approvals, err := store.ListApprovals(ctx, "pending")
+	if err != nil {
+		t.Fatalf("ListApprovals returned error: %v", err)
+	}
+	if len(approvals) != 1 || approvals[0].ConnectorID != "feishu-default" {
+		t.Fatalf("expected only kept connector approval to remain, got %+v", approvals)
 	}
 }
 
@@ -323,10 +447,10 @@ func TestOpenMigratesV3DatabaseToLatestSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendTurnEvent returned error after migration: %v", err)
 	}
-	if err := store.CommitCheckpoint(ctx, "telegram", "telegram_update", "101", "101"); err != nil {
+	if err := store.CommitCheckpoint(ctx, "telegram-default", "telegram_update", "101", "101"); err != nil {
 		t.Fatalf("CommitCheckpoint returned error after migration: %v", err)
 	}
-	checkpoint, err := store.GetCheckpoint(ctx, "telegram", "telegram_update")
+	checkpoint, err := store.GetCheckpoint(ctx, "telegram-default", "telegram_update")
 	if err != nil {
 		t.Fatalf("GetCheckpoint returned error after migration: %v", err)
 	}
@@ -345,7 +469,7 @@ func TestListChannelStatusesHandlesNullHeartbeatColumn(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if _, err := store.db.ExecContext(
@@ -375,19 +499,19 @@ func TestChannelActivityApprovalLookupAndDeliveryStatus(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, config.DefaultSettings().Channels); err != nil {
+	if err := store.SyncConfiguredChannels(ctx, testConnectors()); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
-	if err := store.UpdateChannelState(ctx, "telegram", domain.ChannelStateReady, "", ""); err != nil {
+	if err := store.UpdateChannelState(ctx, "telegram-default", domain.ChannelStateReady, "", ""); err != nil {
 		t.Fatalf("UpdateChannelState returned error: %v", err)
 	}
-	if err := store.UpdateChannelOffset(ctx, "telegram", "100"); err != nil {
+	if err := store.UpdateChannelOffset(ctx, "telegram-default", "telegram_update", "100"); err != nil {
 		t.Fatalf("UpdateChannelOffset returned error: %v", err)
 	}
-	if err := store.TouchChannelInbound(ctx, "telegram", "2026-03-13T10:00:00Z"); err != nil {
+	if err := store.TouchChannelInbound(ctx, "telegram-default", "2026-03-13T10:00:00Z"); err != nil {
 		t.Fatalf("TouchChannelInbound returned error: %v", err)
 	}
-	if err := store.TouchChannelOutbound(ctx, "telegram", "2026-03-13T10:01:00Z"); err != nil {
+	if err := store.TouchChannelOutbound(ctx, "telegram-default", "2026-03-13T10:01:00Z"); err != nil {
 		t.Fatalf("TouchChannelOutbound returned error: %v", err)
 	}
 
@@ -473,15 +597,18 @@ func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) 
 	}
 	defer store.Close()
 
-	if err := store.SyncConfiguredChannels(ctx, []config.ChannelConfig{{
+	if err := store.SyncConfiguredChannels(ctx, []config.ConnectorConfig{{
+		ID:       "telegram-default",
 		Platform: "telegram",
+		Label:    "Telegram",
 		Enabled:  true,
+		Mode:     "polling",
 	}}); err != nil {
 		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
 	}
 	if err := store.UpdateChannelState(
 		ctx,
-		"telegram",
+		"telegram-default",
 		domain.ChannelStateError,
 		"invalid_credentials",
 		"telegram getMe failed (401): Unauthorized",
@@ -501,6 +628,71 @@ func TestChannelStatusPersistsErrorCodeAndMessageWithoutMigration(t *testing.T) 
 	}
 	if statuses[0].LastError != "telegram getMe failed (401): Unauthorized" {
 		t.Fatalf("expected persisted message, got %+v", statuses[0])
+	}
+}
+
+func TestChannelDiagnosticsPersistRecoveryFields(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SyncConfiguredChannels(ctx, []config.ConnectorConfig{{
+		ID:                  "feishu-default",
+		Platform:            "feishu",
+		Label:               "Feishu",
+		Enabled:             true,
+		Mode:                "websocket",
+		FeishuAutoApprove:   true,
+		FeishuReplyRenderer: config.FeishuReplyRendererInteractive,
+	}}); err != nil {
+		t.Fatalf("SyncConfiguredChannels returned error: %v", err)
+	}
+
+	lastReadyAt := "2026-03-20T01:00:00Z"
+	lastFailureAt := "2026-03-20T01:25:41Z"
+	lastFailureOperation := "long_connection"
+	lastFailureRetryable := true
+	consecutiveFailures := 2
+	nextRetryAt := "2026-03-20T01:25:43Z"
+	lastRecoveryAt := "2026-03-20T01:26:10Z"
+	recoveryHint := "host_connection_aborted"
+	if err := store.UpdateChannelDiagnostics(ctx, "feishu-default", domain.ChannelDiagnosticsUpdate{
+		State:                domain.ChannelStateDegraded,
+		LastErrorCode:        "transient_network",
+		LastError:            "wsasend aborted by host machine",
+		LastReadyAt:          &lastReadyAt,
+		LastFailureAt:        &lastFailureAt,
+		LastFailureOperation: &lastFailureOperation,
+		LastFailureRetryable: &lastFailureRetryable,
+		ConsecutiveFailures:  &consecutiveFailures,
+		NextRetryAt:          &nextRetryAt,
+		LastRecoveryAt:       &lastRecoveryAt,
+		RecoveryHint:         &recoveryHint,
+	}); err != nil {
+		t.Fatalf("UpdateChannelDiagnostics returned error: %v", err)
+	}
+
+	statuses, err := store.ListChannelStatuses(ctx)
+	if err != nil {
+		t.Fatalf("ListChannelStatuses returned error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected one channel status, got %+v", statuses)
+	}
+	status := statuses[0]
+	if status.LastReadyAt != lastReadyAt || status.LastFailureAt != lastFailureAt || status.LastRecoveryAt != lastRecoveryAt {
+		t.Fatalf("expected recovery timestamps to persist, got %+v", status)
+	}
+	if status.LastFailureOperation != lastFailureOperation || !status.LastFailureRetryable {
+		t.Fatalf("expected failure operation/retryable to persist, got %+v", status)
+	}
+	if status.ConsecutiveFailures != consecutiveFailures || status.NextRetryAt != nextRetryAt || status.RecoveryHint != recoveryHint {
+		t.Fatalf("expected recovery counters and hint to persist, got %+v", status)
 	}
 }
 

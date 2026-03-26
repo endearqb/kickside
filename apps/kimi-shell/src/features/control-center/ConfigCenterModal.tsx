@@ -1,13 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Eye,
-  EyeOff,
-  Plus,
-  RotateCcw,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { AlertTriangle, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import type {
   ConfigCenterSectionId,
   EnvOverrideStatus,
@@ -24,18 +16,12 @@ import type {
 import { PROVIDER_TYPE_OPTIONS } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
-type ConfigCenterModalProps = {
-  open: boolean;
-  busy: boolean;
+type ConfigCenterTaskContentProps = {
   dirty: boolean;
   view: KimiCliConfigCenterView | null;
   draft: KimiCliConfigCenterInput;
   onDraftChange: (next: KimiCliConfigCenterInput) => void;
-  onClose: () => void;
-  onSave: () => Promise<void>;
-  onReset: () => void;
   onOpenConfigDir: () => Promise<void>;
 };
 
@@ -47,13 +33,13 @@ const CONFIG_SECTIONS: Array<{
   description: string;
 }> = [
   { id: "overview", label: "概览", description: "配置路径与来源" },
-  { id: "providers", label: "Providers", description: "Provider 表" },
-  { id: "models", label: "Models", description: "Model 表" },
-  { id: "services", label: "Services", description: "Service 表" },
-  { id: "defaults", label: "Defaults", description: "默认策略" },
-  { id: "loop_control", label: "Loop Control", description: "循环控制" },
-  { id: "mcp_servers", label: "MCP Servers", description: "MCP 服务" },
-  { id: "env_overrides", label: "Env 覆盖", description: "环境变量优先级" },
+  { id: "providers", label: "提供方", description: "凭据与来源策略" },
+  { id: "models", label: "模型", description: "模型声明与能力" },
+  { id: "services", label: "服务", description: "服务入口与路由" },
+  { id: "defaults", label: "默认策略", description: "默认 provider、model 与编辑器" },
+  { id: "loop_control", label: "循环控制", description: "步数、重试与超时" },
+  { id: "mcp_servers", label: "MCP 服务", description: "MCP 服务列表" },
+  { id: "env_overrides", label: "环境变量覆盖", description: "运行时优先级" },
 ];
 
 function cloneDraft(input: KimiCliConfigCenterInput): KimiCliConfigCenterInput {
@@ -216,7 +202,7 @@ function validateTypedEntries(
   }
 }
 
-function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
+export function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
   const errors: string[] = [];
 
   const providerKeys = new Set<string>();
@@ -299,7 +285,7 @@ function buildBlockingErrors(draft: KimiCliConfigCenterInput): string[] {
   return errors;
 }
 
-function buildWarnings(
+export function buildWarnings(
   draft: KimiCliConfigCenterInput,
   envOverrides: EnvOverrideStatus[],
   backendWarnings: string[],
@@ -347,7 +333,7 @@ function KeyValueEditor({
                 next[index] = { ...next[index], key: event.currentTarget.value };
                 onChange(next);
               }}
-              placeholder="key"
+              placeholder="键名 key"
             />
             <Input
               value={entry.value}
@@ -356,7 +342,7 @@ function KeyValueEditor({
                 next[index] = { ...next[index], value: event.currentTarget.value };
                 onChange(next);
               }}
-              placeholder="value"
+              placeholder="值 value"
             />
             <Button
               type="button"
@@ -410,7 +396,7 @@ function TypedFieldEditor({
                 next[index] = { ...next[index], key: event.currentTarget.value };
                 onChange(next);
               }}
-              placeholder="field key"
+              placeholder="字段名 key"
             />
             <select
               className="ui-input cc-config-select"
@@ -449,7 +435,7 @@ function TypedFieldEditor({
                   next[index] = { ...next[index], value: event.currentTarget.value };
                   onChange(next);
                 }}
-                placeholder="value"
+                placeholder="值 value"
               />
             )}
             <Button
@@ -480,18 +466,13 @@ function TypedFieldEditor({
   );
 }
 
-export function ConfigCenterModal({
-  open,
-  busy,
+export function ConfigCenterTaskContent({
   dirty,
   view,
   draft,
   onDraftChange,
-  onClose,
-  onSave,
-  onReset,
   onOpenConfigDir,
-}: ConfigCenterModalProps) {
+}: ConfigCenterTaskContentProps) {
   const [activeSection, setActiveSection] = useState<ConfigCenterSectionId>("overview");
   const [sensitiveVisible, setSensitiveVisible] = useState<SensitiveMap>({});
 
@@ -500,26 +481,14 @@ export function ConfigCenterModal({
     () => buildWarnings(draft, view?.envOverrides ?? [], view?.warnings ?? []),
     [draft, view?.envOverrides, view?.warnings],
   );
+  const envOverrideCount = (view?.envOverrides ?? []).filter((entry) => entry.isSet).length;
+  const activeSectionMeta =
+    CONFIG_SECTIONS.find((section) => section.id === activeSection) ?? CONFIG_SECTIONS[0];
 
   function updateDraft(mutator: (next: KimiCliConfigCenterInput) => void) {
     const next = cloneDraft(draft);
     mutator(next);
     onDraftChange(next);
-  }
-
-  function requestClose() {
-    if (dirty && !window.confirm("存在未保存更改，确定关闭弹窗吗？")) {
-      return;
-    }
-    onClose();
-  }
-
-  async function handleSave() {
-    if (blockingErrors.length > 0) {
-      window.alert(`请先修复 ${blockingErrors.length} 个校验错误后再保存。`);
-      return;
-    }
-    await onSave();
   }
 
   function toggleSensitive(key: string) {
@@ -529,66 +498,8 @@ export function ConfigCenterModal({
     }));
   }
 
-  if (!open) {
-    return null;
-  }
-
   return (
-    <ControlCenterModalShell
-      open={open}
-      title="Provider API 配置中心"
-      description="全结构化编辑 `config.toml`，支持 CRUD 与环境变量覆盖检查。"
-      ariaLabel="配置中心"
-      className="cc-config-modal"
-      bodyClassName="cc-config-modal-scroll"
-      onRequestClose={requestClose}
-      footer={
-        <>
-          <div className="cc-config-footer-meta">
-            <span>校验错误：{blockingErrors.length}</span>
-            <span>告警：{warnings.length}</span>
-            {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
-          </div>
-          <div className="cc-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={requestClose}
-              disabled={busy}
-            >
-              取消
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn"
-              icon={<RotateCcw size={14} />}
-              onClick={onReset}
-              disabled={busy || !dirty}
-            >
-              重置
-            </Button>
-            <Button
-              type="button"
-              className="cc-action-btn"
-              icon={<Save size={14} />}
-              onClick={() => void handleSave()}
-              disabled={busy}
-            >
-              保存并完成
-            </Button>
-          </div>
-          {blockingErrors.length > 0 ? (
-            <ul className="cc-config-error-list">
-              {blockingErrors.slice(0, 8).map((error) => (
-                <li key={error}>{error}</li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      }
-    >
+    <>
       <div className="cc-config-meta">
         <p>
           配置文件：
@@ -607,7 +518,7 @@ export function ConfigCenterModal({
         </p>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           className="cc-action-btn"
           onClick={() => void onOpenConfigDir()}
         >
@@ -631,6 +542,37 @@ export function ConfigCenterModal({
         </aside>
 
         <div className="cc-config-content">
+            <section className="cc-config-panel cc-config-summary-panel">
+              <div className="cc-config-panel-head">
+                <div>
+                  <h4>{activeSectionMeta.label}</h4>
+                  <p className="hint">{activeSectionMeta.description}</p>
+                </div>
+              </div>
+              <div className="cc-config-summary-grid">
+                <article className="cc-config-summary-card">
+                  <span>当前区块</span>
+                  <strong>{activeSectionMeta.label}</strong>
+                  <small>{activeSection}</small>
+                </article>
+                <article className="cc-config-summary-card">
+                  <span>校验错误</span>
+                  <strong>{blockingErrors.length}</strong>
+                  <small>{blockingErrors.length > 0 ? "保存前需处理" : "当前可保存"}</small>
+                </article>
+                <article className="cc-config-summary-card">
+                  <span>环境变量覆盖</span>
+                  <strong>{envOverrideCount}</strong>
+                  <small>{envOverrideCount > 0 ? "运行时会覆盖部分值" : "当前未检测到覆盖"}</small>
+                </article>
+                <article className="cc-config-summary-card">
+                  <span>草稿状态</span>
+                  <strong>{dirty ? "未保存" : "已同步"}</strong>
+                  <small>{warnings.length > 0 ? `${warnings.length} 条提醒` : "当前没有额外提醒"}</small>
+                </article>
+              </div>
+            </section>
+
             {activeSection === "overview" && (
               <section className="cc-config-panel">
                 <h4>概览与来源</h4>
@@ -655,7 +597,7 @@ export function ConfigCenterModal({
             {activeSection === "providers" && (
               <section className="cc-config-panel">
                 <div className="cc-config-panel-head">
-                  <h4>Providers</h4>
+                  <h4>提供方</h4>
                   <Button
                     type="button"
                     variant="outline"
@@ -667,7 +609,7 @@ export function ConfigCenterModal({
                       })
                     }
                   >
-                    新增 Provider
+                    新增提供方
                   </Button>
                 </div>
                 <div className="cc-config-card-list">
@@ -683,7 +625,7 @@ export function ConfigCenterModal({
                     return (
                       <article key={`provider-${index}`} className="cc-config-card">
                         <header className="cc-config-card-head">
-                          <h5>Provider #{index + 1}</h5>
+                          <h5>提供方 #{index + 1}</h5>
                           <Button
                             type="button"
                             variant="ghost"
@@ -694,13 +636,13 @@ export function ConfigCenterModal({
                                 next.providers.splice(index, 1);
                               })
                             }
-                            aria-label="删除 Provider"
+                            aria-label="删除提供方"
                           />
                         </header>
 
                         <div className="cc-config-grid two">
                           <div className="cc-api-field">
-                            <label>Key</label>
+                            <label>键名 key</label>
                             <Input
                               value={provider.key}
                               onChange={(event) =>
@@ -712,7 +654,7 @@ export function ConfigCenterModal({
                             />
                           </div>
                           <div className="cc-api-field">
-                            <label>Type</label>
+                            <label>类型</label>
                             <select
                               className="ui-input cc-config-select"
                               value={typeSelectValue}
@@ -740,7 +682,7 @@ export function ConfigCenterModal({
                           </div>
                           {typeSelectValue === "custom" ? (
                             <div className="cc-api-field">
-                              <label>Custom Type</label>
+                              <label>自定义类型</label>
                               <Input
                                 value={provider.providerType ?? ""}
                                 onChange={(event) =>
@@ -749,19 +691,19 @@ export function ConfigCenterModal({
                                       event.currentTarget.value;
                                   })
                                 }
-                                placeholder="自定义 provider type"
+                                placeholder="自定义 provider 类型"
                               />
                             </div>
                           ) : null}
                           {[
-                            ["Base URL", "baseUrl"] as const,
-                            ["Region", "region"] as const,
-                            ["API Version", "apiVersion"] as const,
-                            ["Deployment", "deployment"] as const,
-                            ["Model Name", "modelName"] as const,
-                            ["App ID", "appId"] as const,
-                            ["Access Key ID", "accessKeyId"] as const,
-                            ["Auth Token", "authToken"] as const,
+                            ["基础地址", "baseUrl"] as const,
+                            ["区域", "region"] as const,
+                            ["API 版本", "apiVersion"] as const,
+                            ["部署名", "deployment"] as const,
+                            ["模型名", "modelName"] as const,
+                            ["应用 ID", "appId"] as const,
+                            ["访问密钥 ID", "accessKeyId"] as const,
+                            ["认证令牌", "authToken"] as const,
                           ].map(([label, field]) => (
                             <div key={field} className="cc-api-field">
                               <label>{label}</label>
@@ -780,7 +722,7 @@ export function ConfigCenterModal({
                             const visible = sensitiveVisible[secretKey] ?? false;
                             return (
                               <div key={field} className="cc-api-field">
-                                <label>{field === "apiKey" ? "API Key" : "Secret Access Key"}</label>
+                                <label>{field === "apiKey" ? "API 密钥" : "访问密钥 Secret Access Key"}</label>
                                 <div className="cc-secret-row">
                                   <Input
                                     type={visible ? "text" : "password"}
@@ -806,7 +748,7 @@ export function ConfigCenterModal({
                         </div>
 
                         <KeyValueEditor
-                          title="env"
+                          title="环境变量 env"
                           entries={provider.env}
                           onChange={(nextEntries) =>
                             updateDraft((next) => {
@@ -815,7 +757,7 @@ export function ConfigCenterModal({
                           }
                         />
                         <KeyValueEditor
-                          title="custom_headers"
+                          title="自定义请求头 custom_headers"
                           entries={provider.customHeaders}
                           onChange={(nextEntries) =>
                             updateDraft((next) => {
@@ -824,7 +766,7 @@ export function ConfigCenterModal({
                           }
                         />
                         <TypedFieldEditor
-                          title="extra_fields"
+                          title="附加字段 extra_fields"
                           fields={provider.extraFields}
                           onChange={(nextFields) =>
                             updateDraft((next) => {
@@ -842,7 +784,7 @@ export function ConfigCenterModal({
             {activeSection === "models" && (
               <section className="cc-config-panel">
                 <div className="cc-config-panel-head">
-                  <h4>Models</h4>
+                  <h4>模型</h4>
                   <Button
                     type="button"
                     variant="outline"
@@ -854,14 +796,14 @@ export function ConfigCenterModal({
                       })
                     }
                   >
-                    新增 Model
+                    新增模型
                   </Button>
                 </div>
                 <div className="cc-config-card-list">
                   {draft.models.map((model, index) => (
                     <article key={`model-${index}`} className="cc-config-card">
                       <header className="cc-config-card-head">
-                        <h5>Model #{index + 1}</h5>
+                        <h5>模型 #{index + 1}</h5>
                         <Button
                           type="button"
                           variant="ghost"
@@ -872,12 +814,12 @@ export function ConfigCenterModal({
                               next.models.splice(index, 1);
                             })
                           }
-                          aria-label="删除 Model"
+                          aria-label="删除模型"
                         />
                       </header>
                       <div className="cc-config-grid two">
                         <div className="cc-api-field">
-                          <label>Key</label>
+                          <label>键名 key</label>
                           <Input
                             value={model.key}
                             onChange={(event) =>
@@ -889,7 +831,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>Provider</label>
+                          <label>提供方 provider</label>
                           <Input
                             value={model.provider ?? ""}
                             onChange={(event) =>
@@ -901,7 +843,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>Model Name</label>
+                          <label>模型名称</label>
                           <Input
                             value={model.model ?? ""}
                             onChange={(event) =>
@@ -913,7 +855,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>max_context_size</label>
+                          <label>最大上下文 max_context_size</label>
                           <Input
                             value={model.maxContextSize ?? ""}
                             onChange={(event) =>
@@ -927,7 +869,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field cc-span-all">
-                          <label>capabilities（逗号或换行分隔）</label>
+                          <label>能力列表 capabilities（逗号或换行分隔）</label>
                           <textarea
                             className="ui-input cc-config-textarea"
                             value={joinStringList(model.capabilities)}
@@ -943,7 +885,7 @@ export function ConfigCenterModal({
                         </div>
                       </div>
                       <TypedFieldEditor
-                        title="extra_fields"
+                        title="附加字段 extra_fields"
                         fields={model.extraFields}
                         onChange={(nextFields) =>
                           updateDraft((next) => {
@@ -960,7 +902,7 @@ export function ConfigCenterModal({
             {activeSection === "services" && (
               <section className="cc-config-panel">
                 <div className="cc-config-panel-head">
-                  <h4>Services</h4>
+                  <h4>服务</h4>
                   <Button
                     type="button"
                     variant="outline"
@@ -972,14 +914,14 @@ export function ConfigCenterModal({
                       })
                     }
                   >
-                    新增 Service
+                    新增服务
                   </Button>
                 </div>
                 <div className="cc-config-card-list">
                   {draft.services.map((service, index) => (
                     <article key={`service-${index}`} className="cc-config-card">
                       <header className="cc-config-card-head">
-                        <h5>Service #{index + 1}</h5>
+                        <h5>服务 #{index + 1}</h5>
                         <Button
                           type="button"
                           variant="ghost"
@@ -990,12 +932,12 @@ export function ConfigCenterModal({
                               next.services.splice(index, 1);
                             })
                           }
-                          aria-label="删除 Service"
+                          aria-label="删除服务"
                         />
                       </header>
                       <div className="cc-config-grid two">
                         <div className="cc-api-field">
-                          <label>Key</label>
+                          <label>键名 key</label>
                           <Input
                             value={service.key}
                             onChange={(event) =>
@@ -1007,7 +949,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>Provider</label>
+                          <label>提供方 provider</label>
                           <Input
                             value={service.provider ?? ""}
                             onChange={(event) =>
@@ -1019,7 +961,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>Model</label>
+                          <label>模型 model</label>
                           <Input
                             value={service.model ?? ""}
                             onChange={(event) =>
@@ -1031,7 +973,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>Endpoint</label>
+                          <label>接口地址</label>
                           <Input
                             value={service.endpoint ?? ""}
                             onChange={(event) =>
@@ -1042,7 +984,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>API Key</label>
+                          <label>API 密钥</label>
                           <Input
                             type="password"
                             value={service.apiKey ?? ""}
@@ -1054,7 +996,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>timeout_ms</label>
+                          <label>超时 timeout_ms</label>
                           <Input
                             value={service.timeoutMs ?? ""}
                             onChange={(event) =>
@@ -1067,7 +1009,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>max_retries</label>
+                          <label>重试上限 max_retries</label>
                           <Input
                             value={service.maxRetries ?? ""}
                             onChange={(event) =>
@@ -1081,7 +1023,7 @@ export function ConfigCenterModal({
                         </div>
                       </div>
                       <TypedFieldEditor
-                        title="extra_fields"
+                        title="附加字段 extra_fields"
                         fields={service.extraFields}
                         onChange={(nextFields) =>
                           updateDraft((next) => {
@@ -1097,10 +1039,10 @@ export function ConfigCenterModal({
 
             {activeSection === "defaults" && (
               <section className="cc-config-panel">
-                <h4>Defaults</h4>
+                <h4>默认策略</h4>
                 <div className="cc-config-grid two">
                   <div className="cc-api-field">
-                    <label>provider</label>
+                    <label>默认提供方 provider</label>
                     <Input
                       value={draft.defaultProvider ?? ""}
                       onChange={(event) =>
@@ -1111,7 +1053,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>model</label>
+                    <label>默认模型 model</label>
                     <Input
                       value={draft.model ?? ""}
                       onChange={(event) =>
@@ -1122,7 +1064,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_model</label>
+                    <label>默认模型键 default_model</label>
                     <Input
                       value={draft.defaultModel ?? ""}
                       onChange={(event) =>
@@ -1133,7 +1075,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_service</label>
+                    <label>默认服务 default_service</label>
                     <Input
                       value={draft.defaultService ?? ""}
                       onChange={(event) =>
@@ -1144,7 +1086,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_editor</label>
+                    <label>默认编辑器 default_editor</label>
                     <Input
                       value={draft.defaultEditor ?? ""}
                       onChange={(event) =>
@@ -1155,7 +1097,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_yolo_mode</label>
+                    <label>默认 yolo 模式 default_yolo_mode</label>
                     <Input
                       value={draft.defaultYoloMode ?? ""}
                       onChange={(event) =>
@@ -1166,7 +1108,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_thinking_mode</label>
+                    <label>默认 thinking 模式 default_thinking_mode</label>
                     <Input
                       value={draft.defaultThinkingMode ?? ""}
                       onChange={(event) =>
@@ -1177,7 +1119,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>default_yolo</label>
+                    <label>默认 yolo 开关 default_yolo</label>
                     <select
                       className="ui-input cc-config-select"
                       value={
@@ -1198,7 +1140,7 @@ export function ConfigCenterModal({
                     </select>
                   </div>
                   <div className="cc-api-field">
-                    <label>default_thinking</label>
+                    <label>默认 thinking 开关 default_thinking</label>
                     <select
                       className="ui-input cc-config-select"
                       value={
@@ -1219,7 +1161,7 @@ export function ConfigCenterModal({
                     </select>
                   </div>
                   <div className="cc-api-field">
-                    <label>local_model_disable_auto_pull</label>
+                    <label>关闭本地模型自动拉取 local_model_disable_auto_pull</label>
                     <select
                       className="ui-input cc-config-select"
                       value={
@@ -1245,10 +1187,10 @@ export function ConfigCenterModal({
             )}
             {activeSection === "loop_control" && (
               <section className="cc-config-panel">
-                <h4>Loop Control</h4>
+                <h4>循环控制</h4>
                 <div className="cc-config-grid two">
                   <div className="cc-api-field">
-                    <label>enabled</label>
+                    <label>启用 enabled</label>
                     <select
                       className="ui-input cc-config-select"
                       value={
@@ -1269,7 +1211,7 @@ export function ConfigCenterModal({
                     </select>
                   </div>
                   <div className="cc-api-field">
-                    <label>max_steps</label>
+                    <label>最大步骤 max_steps</label>
                     <Input
                       value={draft.loopControl.maxSteps ?? ""}
                       onChange={(event) =>
@@ -1282,7 +1224,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>max_retries</label>
+                    <label>最大重试 max_retries</label>
                     <Input
                       value={draft.loopControl.maxRetries ?? ""}
                       onChange={(event) =>
@@ -1295,7 +1237,7 @@ export function ConfigCenterModal({
                     />
                   </div>
                   <div className="cc-api-field">
-                    <label>timeout_ms</label>
+                    <label>超时 timeout_ms</label>
                     <Input
                       value={draft.loopControl.timeoutMs ?? ""}
                       onChange={(event) =>
@@ -1309,7 +1251,7 @@ export function ConfigCenterModal({
                   </div>
                 </div>
                 <TypedFieldEditor
-                  title="extra_fields"
+                  title="附加字段 extra_fields"
                   fields={draft.loopControl.extraFields}
                   onChange={(nextFields) =>
                     updateDraft((next) => {
@@ -1323,7 +1265,7 @@ export function ConfigCenterModal({
             {activeSection === "mcp_servers" && (
               <section className="cc-config-panel">
                 <div className="cc-config-panel-head">
-                  <h4>MCP Servers</h4>
+                  <h4>MCP 服务</h4>
                   <Button
                     type="button"
                     variant="outline"
@@ -1335,14 +1277,14 @@ export function ConfigCenterModal({
                       })
                     }
                   >
-                    新增 MCP Server
+                    新增 MCP 服务
                   </Button>
                 </div>
                 <div className="cc-config-card-list">
                   {draft.mcpServers.map((server, index) => (
                     <article key={`mcp-${index}`} className="cc-config-card">
                       <header className="cc-config-card-head">
-                        <h5>MCP #{index + 1}</h5>
+                        <h5>MCP 服务 #{index + 1}</h5>
                         <Button
                           type="button"
                           variant="ghost"
@@ -1353,12 +1295,12 @@ export function ConfigCenterModal({
                               next.mcpServers.splice(index, 1);
                             })
                           }
-                          aria-label="删除 MCP Server"
+                          aria-label="删除 MCP 服务"
                         />
                       </header>
                       <div className="cc-config-grid two">
                         <div className="cc-api-field">
-                          <label>Key</label>
+                          <label>键名 key</label>
                           <Input
                             value={server.key}
                             onChange={(event) =>
@@ -1370,7 +1312,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>command</label>
+                          <label>启动命令 command</label>
                           <Input
                             value={server.command ?? ""}
                             onChange={(event) =>
@@ -1381,7 +1323,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>working_directory</label>
+                          <label>工作目录 working_directory</label>
                           <Input
                             value={server.workingDirectory ?? ""}
                             onChange={(event) =>
@@ -1393,7 +1335,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>timeout_ms</label>
+                          <label>超时 timeout_ms</label>
                           <Input
                             value={server.timeoutMs ?? ""}
                             onChange={(event) =>
@@ -1406,7 +1348,7 @@ export function ConfigCenterModal({
                           />
                         </div>
                         <div className="cc-api-field">
-                          <label>enabled</label>
+                          <label>启用 enabled</label>
                           <select
                             className="ui-input cc-config-select"
                             value={
@@ -1428,7 +1370,7 @@ export function ConfigCenterModal({
                           </select>
                         </div>
                         <div className="cc-api-field cc-span-all">
-                          <label>args（逗号或换行分隔）</label>
+                          <label>参数 args（逗号或换行分隔）</label>
                           <textarea
                             className="ui-input cc-config-textarea"
                             value={joinStringList(server.args)}
@@ -1444,7 +1386,7 @@ export function ConfigCenterModal({
                         </div>
                       </div>
                       <KeyValueEditor
-                        title="env"
+                        title="环境变量 env"
                         entries={server.env}
                         onChange={(nextEntries) =>
                           updateDraft((next) => {
@@ -1453,7 +1395,7 @@ export function ConfigCenterModal({
                         }
                       />
                       <TypedFieldEditor
-                        title="extra_fields"
+                        title="附加字段 extra_fields"
                         fields={server.extraFields}
                         onChange={(nextFields) =>
                           updateDraft((next) => {
@@ -1496,6 +1438,6 @@ export function ConfigCenterModal({
             )}
         </div>
       </div>
-    </ControlCenterModalShell>
+    </>
   );
 }

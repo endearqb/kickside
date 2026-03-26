@@ -32,6 +32,7 @@ func (o *Orchestrator) HandleInbound(
 	now := nowRFC3339()
 	turn := domain.BridgeTurn{
 		TurnID:           turnID,
+		ConnectorID:      inbound.ConnectorID,
 		KimiSessionID:    binding.KimiSessionID,
 		BindingID:        binding.BindingID,
 		Platform:         inbound.Platform,
@@ -54,6 +55,7 @@ func (o *Orchestrator) HandleInbound(
 		Kind:          EventTurnAccepted,
 		TurnID:        turnID,
 		KimiSessionID: binding.KimiSessionID,
+		ConnectorID:   inbound.ConnectorID,
 		Platform:      inbound.Platform,
 		ChatID:        inbound.ChatID,
 		ThreadID:      inbound.ThreadID,
@@ -82,6 +84,9 @@ func (o *Orchestrator) HandleInbound(
 		if event.KimiSessionID == "" {
 			event.KimiSessionID = binding.KimiSessionID
 		}
+		if event.ConnectorID == "" {
+			event.ConnectorID = inbound.ConnectorID
+		}
 		if event.Platform == "" {
 			event.Platform = inbound.Platform
 		}
@@ -107,6 +112,7 @@ func (o *Orchestrator) HandleInbound(
 		if event.Kind == EventApprovalRequested && o.approvals != nil {
 			if err := o.approvals.CreateApprovalTicket(ctx, domain.ApprovalTicket{
 				ApprovalID:         event.ApprovalID,
+				ConnectorID:        inbound.ConnectorID,
 				KimiSessionID:      binding.KimiSessionID,
 				TurnID:             turnID,
 				StepID:             approvalStepID(turnID, event.StepIndex),
@@ -195,6 +201,7 @@ func (o *Orchestrator) resolveOrCreateBinding(ctx context.Context, key domain.Bi
 func (o *Orchestrator) persistAndEmit(ctx context.Context, event TurnEvent, sink TurnEventSink) error {
 	if err := o.events.AppendTurnEvent(ctx, domain.TurnEventRecord{
 		EventID:        event.EventID,
+		ConnectorID:    event.ConnectorID,
 		TurnID:         event.TurnID,
 		KimiSessionID:  event.KimiSessionID,
 		Platform:       event.Platform,

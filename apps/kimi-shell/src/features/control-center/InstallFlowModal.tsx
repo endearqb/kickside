@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, RefreshCw, SquareTerminal } from "lucide-react";
+import { Copy, RefreshCw } from "lucide-react";
 import type {
   BackendState,
   InstallFlowCatalog,
@@ -12,10 +12,8 @@ import type {
   PowerShellPreflightSummary,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
-import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
 
-type InstallFlowModalProps = {
-  open: boolean;
+type InstallFlowTaskContentProps = {
   catalog: InstallFlowCatalog | null;
   session: InstallSessionSnapshot;
   probe: InstallProbeStatus | null;
@@ -24,14 +22,15 @@ type InstallFlowModalProps = {
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
-  onClose: () => void;
-  onRefreshProbe: () => Promise<unknown>;
+  kimiPathInput: string;
+  detectedKimiPath: string;
   onRefreshPowerShellPreflight: () => Promise<unknown>;
   onSourceChange: (source: InstallSource) => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
   onStartTask: (taskId: InstallTaskId) => Promise<void>;
-  onCancelTask: () => Promise<void>;
   onRestartBackend: () => Promise<void>;
+  onPickKimiPath: () => Promise<unknown>;
+  onSavePathAndRetry: () => Promise<unknown>;
   restartBusy: boolean;
 };
 
@@ -41,6 +40,81 @@ type TaskAvailability = {
 };
 
 type PreflightBadgeTone = "neutral" | "success" | "warning" | "danger";
+
+export function formatInstallSessionStatus(status: InstallSessionSnapshot["status"]): string {
+  switch (status) {
+    case "starting":
+      return "准备中";
+    case "running":
+      return "执行中";
+    case "cancelling":
+      return "取消中";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+    case "fallback_required":
+      return "需要手动处理";
+    default:
+      return "待开始";
+  }
+}
+
+export function formatInstallSessionTone(
+  status: InstallSessionSnapshot["status"],
+): PreflightBadgeTone {
+  switch (status) {
+    case "succeeded":
+      return "success";
+    case "failed":
+    case "fallback_required":
+      return "danger";
+    case "starting":
+    case "running":
+    case "cancelling":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
+
+export function formatInstallStage(stage: InstallSessionSnapshot["stage"]): string {
+  switch (stage) {
+    case "prepare":
+      return "准备";
+    case "execute_step":
+      return "执行步骤";
+    case "probe":
+      return "探测";
+    case "done":
+      return "完成";
+    default:
+      return "空闲";
+  }
+}
+
+function formatBackendStateLabel(state: BackendState | null): string {
+  switch (state) {
+    case "running":
+      return "运行中";
+    case "starting":
+      return "启动中";
+    case "stopping":
+      return "停止中";
+    case "crashed":
+      return "异常";
+    case "missing_kimi":
+      return "缺少 Kimi";
+    default:
+      return "未启动";
+  }
+}
+
+function formatInstallSourceLabel(source: InstallSource): string {
+  return source === "mirror" ? "镜像源" : "官方源";
+}
 
 function getPreflightKindMeta(kind?: PowerShellPreflightSummary["kind"]): {
   label: string;
@@ -106,8 +180,8 @@ function buildTaskCommands(task: InstallTaskDefinition | undefined, source: Inst
 }
 
 function statusLabel(value?: boolean) {
-  if (value === true) return "Ready";
-  if (value === false) return "Missing";
+  if (value === true) return "已就绪";
+  if (value === false) return "缺失";
   return "-";
 }
 
@@ -178,8 +252,7 @@ function buildLogsText(session: InstallSessionSnapshot) {
   return lines.join("\n");
 }
 
-export function InstallFlowModal({
-  open,
+export function InstallFlowTaskContent({
   catalog,
   session,
   probe,
@@ -188,87 +261,80 @@ export function InstallFlowModal({
   installSettings,
   installSettingsBusy,
   powershellPreflight,
-  onClose,
-  onRefreshProbe,
+  kimiPathInput,
+  detectedKimiPath,
   onRefreshPowerShellPreflight,
   onSourceChange,
   onSaveInstallSettings,
   onStartTask,
-  onCancelTask,
   onRestartBackend,
+  onPickKimiPath,
+  onSavePathAndRetry,
   restartBusy,
-}: InstallFlowModalProps) {
+}: InstallFlowTaskContentProps) {
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const [mirrorDraft, setMirrorDraft] = useState<InstallSettingsView>(installSettings);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const activeTask = useMemo(
     () => catalog?.tasks.find((task) => task.id === session.taskId),
     [catalog, session.taskId],
   );
+  const optionalTasks = catalog?.tasks.filter((task) => task.group === "optional") ?? [];
   const isBusy =
     session.status === "starting" ||
     session.status === "running" ||
     session.status === "cancelling";
-  const coreTasks = catalog?.tasks.filter((task) => task.group === "core") ?? [];
-  const optionalTasks = catalog?.tasks.filter((task) => task.group === "optional") ?? [];
-  const upgradeTasks = catalog?.tasks.filter((task) => task.group === "upgrade") ?? [];
+  const primaryTaskId: InstallTaskId = probe?.kimiReady ? "upgrade_kimi" : "quick_install_core";
+  const primaryTask = catalog?.tasks.find((task) => task.id === primaryTaskId);
+  const quickInstallAvailability = getTaskAvailability("quick_install_core", probe, isBusy);
+  const upgradeAvailability = getTaskAvailability("upgrade_kimi", probe, isBusy);
+  const activeTaskForCommands = activeTask ?? primaryTask;
   const currentStepCommand =
-    taskSteps(activeTask, installSource).find((step) => step.id === session.currentStepId)
+    taskSteps(activeTaskForCommands, installSource).find((step) => step.id === session.currentStepId)
       ?.command ?? "";
-  const fullTaskCommands = buildTaskCommands(activeTask, installSource);
+  const fullTaskCommands = buildTaskCommands(activeTaskForCommands, installSource);
   const logsText = buildLogsText(session);
   const activePreflight = session.powershellDiagnostic ?? powershellPreflight;
   const preflightKindMeta = getPreflightKindMeta(activePreflight?.kind);
-  const failureSummary =
-    session.status === "failed" ? session.failureSummary?.trim() || session.message?.trim() : "";
+  const sessionStatusLabel = formatInstallSessionStatus(session.status);
+  const sessionTone = formatInstallSessionTone(session.status);
+  const sessionStageLabel = formatInstallStage(session.stage);
   const showRestartAction =
     session.taskId === "upgrade_kimi" &&
     !isBusy &&
     session.status !== "idle" &&
     backendState !== "running" &&
     backendState !== "starting";
-  const restartHint = showRestartAction
-    ? session.status === "succeeded"
-      ? "升级前已停止应用后端以释放 kimi.exe。升级完成后请点击重启后端。"
-      : "升级前已停止应用后端以释放 kimi.exe。如需恢复使用，请点击重启后端。"
-    : "";
+  const failureSummary =
+    session.status === "failed" ? session.failureSummary?.trim() || session.message?.trim() : "";
+  const blockingMessages = [
+    !probe ? "等待环境检测完成后再执行安装或升级。" : "",
+    activePreflight && !activePreflight.smokeTestOk
+      ? "PowerShell 预检未通过，建议先处理执行策略。"
+      : "",
+    !probe?.kimiReady && kimiPathInput.trim()
+      ? "已填写本地 Kimi 路径，点击“保存路径并重试”后重新探测。"
+      : "",
+    session.fallbackReason?.trim() || "",
+    failureSummary,
+  ].filter(Boolean);
 
   useEffect(() => {
     setMirrorDraft(installSettings);
   }, [installSettings]);
 
   useEffect(() => {
-    if (!open) return;
+    if ((activePreflight && !activePreflight.smokeTestOk) || kimiPathInput.trim()) {
+      setAdvancedOpen(true);
+    }
+  }, [activePreflight, kimiPathInput]);
+
+  useEffect(() => {
     const node = consoleRef.current;
     if (node) {
       node.scrollTop = node.scrollHeight;
     }
-    }, [open, session.logs.length, failureSummary, restartHint]);
-
-  if (!open) {
-    return null;
-  }
-
-  const renderTaskButton = (
-    task: InstallTaskDefinition,
-    variant: "default" | "outline" | "ghost",
-  ) => {
-    const availability = getTaskAvailability(task.id, probe, isBusy);
-    return (
-      <div key={task.id} className="cc-install-task-item">
-        <Button
-          type="button"
-          variant={variant}
-          className="cc-action-btn"
-          onClick={() => void onStartTask(task.id)}
-          disabled={availability.disabled}
-          title={availability.reason}
-        >
-          {task.title}
-        </Button>
-        <p className="hint cc-install-task-hint">{availability.reason ?? " "}</p>
-      </div>
-    );
-  };
+  }, [session.logs.length, session.message, failureSummary, logsText]);
 
   const renderMirrorTextarea = (
     label: string,
@@ -288,46 +354,352 @@ export function InstallFlowModal({
   );
 
   return (
-    <ControlCenterModalShell
-      open={open}
-      title="安装与升级"
-      description="基础安装在应用内执行，可选增强项可能会打开外部管理员终端。"
-      ariaLabel="Install and upgrade"
-      className="cc-install-flow-modal"
-      bodyClassName="cc-install-flow-modal-body"
-      headerActions={
-        <Button
-          type="button"
-          variant="outline"
-          icon={<RefreshCw size={14} />}
-          className="cc-action-btn"
-          onClick={() => void onRefreshProbe()}
-        >
-          重新检测
-        </Button>
-      }
-      onRequestClose={onClose}
-      footer={
-        <>
-          <div className="cc-install-footer-meta">
-            <span>{session.title ?? "No active task"}</span>
-            <span>{session.status}</span>
-            <span>{session.stage}</span>
+    <>
+      <section className="cc-install-overview">
+        <div className="cc-install-overview-head">
+          <div className="cc-install-overview-copy">
+            <span className={`cc-status-badge tone-${sessionTone}`}>{sessionStatusLabel}</span>
+            <h4>安装 / 升级 Kimi CLI</h4>
+            <p>
+              {session.message?.trim() ||
+                primaryTask?.description ||
+                "先看状态，再决定是立即安装还是升级。"}
+            </p>
           </div>
-          <div className="cc-actions">
+        </div>
+
+        <div className="cc-install-overview-grid">
+          <article className="cc-install-overview-card">
+            <span>当前阶段</span>
+            <strong>{sessionStageLabel}</strong>
+            <small>{session.currentStepTitle ?? "等待选择任务"}</small>
+          </article>
+          <article className="cc-install-overview-card">
+            <span>后端状态</span>
+            <strong>{formatBackendStateLabel(backendState)}</strong>
+            <small>{showRestartAction ? "升级后需恢复后端" : "用于判断是否需要恢复运行环境"}</small>
+          </article>
+          <article className="cc-install-overview-card">
+            <span>当前来源</span>
+            <strong>{formatInstallSourceLabel(installSource)}</strong>
+            <small>{installSource === "mirror" ? "适合国内网络环境" : "优先使用官方地址"}</small>
+          </article>
+          <article className="cc-install-overview-card">
+            <span>Kimi CLI</span>
+            <strong>{statusLabel(probe?.kimiReady)}</strong>
+            <small>{detectedKimiPath || "尚未探测到可用路径"}</small>
+          </article>
+        </div>
+
+        {blockingMessages.length ? (
+          <ul className="cc-install-blocker-list">
+            {blockingMessages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+
+      <section className="cc-install-flow-section">
+        <div className="cc-install-console-head">
+          <div>
+            <h4>主操作区</h4>
+            <p>默认只保留一键安装、升级和详细安装入口，其余内容下沉到下方展开区。</p>
+          </div>
+          <div className="cc-install-flow-actions">
+            <Button
+              type="button"
+              className="cc-action-btn"
+              onClick={() => void onStartTask("quick_install_core")}
+              disabled={quickInstallAvailability.disabled}
+              title={quickInstallAvailability.reason}
+            >
+              一键安装 Kimi CLI
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="cc-action-btn"
+              onClick={() => void onStartTask("upgrade_kimi")}
+              disabled={upgradeAvailability.disabled}
+              title={upgradeAvailability.reason}
+            >
+              升级 Kimi
+            </Button>
             <Button
               type="button"
               variant="ghost"
               className="cc-action-btn"
-              onClick={onClose}
-              disabled={isBusy}
+              onClick={() => setAdvancedOpen((current) => !current)}
+              aria-expanded={advancedOpen}
             >
-              关闭
+              {advancedOpen ? "收起详细安装选项" : "打开详细安装选项"}
             </Button>
+          </div>
+        </div>
+        <div className="cc-install-primary-hints">
+          <p className="hint cc-install-task-hint">
+            一键安装：{quickInstallAvailability.reason ?? "补齐 uv / Python 3.13 / Kimi CLI 核心依赖。"}
+          </p>
+          <p className="hint cc-install-task-hint">
+            升级 Kimi：{upgradeAvailability.reason ?? "仅升级已安装的 Kimi CLI，不额外引入安装引导。"}
+          </p>
+        </div>
+
+        {advancedOpen ? (
+          <div className="cc-install-advanced-panel">
+            <div className="cc-install-mirror-config-card">
+              <div className="cc-install-console-head">
+                <div>
+                  <h4>安装来源</h4>
+                  <p>默认保持当前来源；只有需要切换官方源 / 镜像源时再展开这里。</p>
+                </div>
+              </div>
+              <div className="cc-install-flow-source" role="group" aria-label="安装来源">
+                <button
+                  type="button"
+                  className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
+                  onClick={() => onSourceChange("official")}
+                  disabled={isBusy}
+                >
+                  官方源
+                </button>
+                <button
+                  type="button"
+                  className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
+                  onClick={() => onSourceChange("mirror")}
+                  disabled={isBusy}
+                >
+                  镜像源
+                </button>
+              </div>
+            </div>
+
+            <div className="cc-install-console-head">
+              <div>
+                <h4>PowerShell 预检</h4>
+                <p>只在需要排障时展开，避免重复解释。</p>
+              </div>
+              <div className="cc-install-flow-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  icon={<RefreshCw size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => void onRefreshPowerShellPreflight()}
+                >
+                  重新预检
+                </Button>
+              </div>
+            </div>
+            <div className="cc-install-preflight-tags" aria-label="PowerShell 预检摘要">
+              <span className={`cc-install-preflight-tag is-${preflightKindMeta.tone}`}>
+                诊断: {preflightKindMeta.label}
+              </span>
+              <span
+                className={`cc-install-preflight-tag is-${
+                  activePreflight?.smokeTestOk ? "success" : "warning"
+                }`}
+              >
+                启动探测: {activePreflight?.smokeTestOk ? "通过" : "未通过"}
+              </span>
+              <span className="cc-install-preflight-tag is-neutral">
+                语言模式: {activePreflight?.languageMode ?? "未知"}
+              </span>
+              {(activePreflight?.executionPolicies ?? []).map((item) => (
+                <span
+                  key={`${item.scope}-${item.policy}`}
+                  className={`cc-install-preflight-tag is-${getExecutionPolicyTone(item.policy)}`}
+                >
+                  {item.scope}: {item.policy}
+                </span>
+              ))}
+              {activePreflight?.suggestedFix ? (
+                <span className="cc-install-preflight-tag is-warning cc-install-preflight-tag-code">
+                  建议: <code>{activePreflight.suggestedFix}</code>
+                </span>
+              ) : null}
+            </div>
+
+            {installSource === "mirror" ? (
+              <div className="cc-install-mirror-config-card">
+                <div className="cc-install-console-head">
+                  <div>
+                    <h4>镜像策略</h4>
+                    <p>预设优先，只有自定义时才展开完整配置。</p>
+                  </div>
+                  <div className="cc-install-flow-actions">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="cc-action-btn"
+                      onClick={() => void onSaveInstallSettings(mirrorDraft)}
+                      disabled={installSettingsBusy || isBusy}
+                    >
+                      保存镜像设置
+                    </Button>
+                  </div>
+                </div>
+                <label className="cc-install-mirror-field">
+                  <span>镜像预设</span>
+                  <select
+                    className="cc-install-mirror-select"
+                    value={mirrorDraft.mirrorPreset}
+                    onChange={(event) =>
+                      setMirrorDraft((current) => ({
+                        ...current,
+                        mirrorPreset: event.target.value as InstallSettingsView["mirrorPreset"],
+                        preferredSource: "mirror",
+                      }))
+                    }
+                    disabled={installSettingsBusy || isBusy}
+                  >
+                    <option value="mixed">清华后阿里</option>
+                    <option value="tuna">仅清华</option>
+                    <option value="aliyun">仅阿里</option>
+                    <option value="custom">自定义</option>
+                  </select>
+                </label>
+                {mirrorDraft.mirrorPreset === "custom" ? (
+                  <div className="cc-install-mirror-grid">
+                    {renderMirrorTextarea(
+                      "Git 发布页",
+                      mirrorDraft.customMirrorConfig.gitReleasePages,
+                      (next) =>
+                        setMirrorDraft((current) => ({
+                          ...current,
+                          customMirrorConfig: {
+                            ...current.customMirrorConfig,
+                            gitReleasePages: textToLines(next),
+                          },
+                        })),
+                    )}
+                    {renderMirrorTextarea(
+                      "uv 发布页",
+                      mirrorDraft.customMirrorConfig.uvReleasePages,
+                      (next) =>
+                        setMirrorDraft((current) => ({
+                          ...current,
+                          customMirrorConfig: {
+                            ...current.customMirrorConfig,
+                            uvReleasePages: textToLines(next),
+                          },
+                        })),
+                    )}
+                    {renderMirrorTextarea(
+                      "Python 安装器",
+                      mirrorDraft.customMirrorConfig.pythonInstallerUrls,
+                      (next) =>
+                        setMirrorDraft((current) => ({
+                          ...current,
+                          customMirrorConfig: {
+                            ...current.customMirrorConfig,
+                            pythonInstallerUrls: textToLines(next),
+                          },
+                        })),
+                    )}
+                    {renderMirrorTextarea(
+                      "PyPI Index",
+                      mirrorDraft.customMirrorConfig.pypiIndexUrls,
+                      (next) =>
+                        setMirrorDraft((current) => ({
+                          ...current,
+                          customMirrorConfig: {
+                            ...current.customMirrorConfig,
+                            pypiIndexUrls: textToLines(next),
+                          },
+                        })),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="cc-install-mirror-config-card">
+              <div className="cc-install-console-head">
+                <div>
+                  <h4>手动路径</h4>
+                  <p>当自动探测不到 Kimi 时，用这里补充本地路径。</p>
+                </div>
+                <div className="cc-install-flow-actions">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cc-action-btn"
+                    onClick={() => void onPickKimiPath()}
+                  >
+                    选择路径
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cc-action-btn"
+                    onClick={() => void onSavePathAndRetry()}
+                    disabled={!kimiPathInput.trim()}
+                  >
+                    保存路径并重试
+                  </Button>
+                </div>
+              </div>
+              <div className="cc-install-path-grid">
+                <article className="cc-install-overview-card">
+                  <span>当前输入</span>
+                  <strong>{kimiPathInput.trim() || "未填写"}</strong>
+                </article>
+                <article className="cc-install-overview-card">
+                  <span>最近探测</span>
+                  <strong>{detectedKimiPath || "未探测到路径"}</strong>
+                </article>
+              </div>
+            </div>
+
+            {optionalTasks.length ? (
+              <div className="cc-install-mirror-config-card">
+                <div className="cc-install-console-head">
+                  <div>
+                    <h4>可选增强</h4>
+                    <p>Git / Node.js 仅在需要时安装。</p>
+                  </div>
+                </div>
+                <div className="cc-install-task-list">
+                  {optionalTasks.map((task) => {
+                    const availability = getTaskAvailability(task.id, probe, isBusy);
+                    return (
+                      <div key={task.id} className="cc-install-task-item">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="cc-action-btn"
+                          onClick={() => void onStartTask(task.id)}
+                          disabled={availability.disabled}
+                          title={availability.reason}
+                        >
+                          {task.title}
+                        </Button>
+                        <p className="hint cc-install-task-hint">{availability.reason ?? " "}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="cc-install-flow-section">
+        <div className="cc-install-console-head">
+          <div>
+            <h4>内置终端</h4>
+            <p>
+              {session.title ?? "当前没有安装任务"} · {sessionStatusLabel} · {sessionStageLabel}
+            </p>
+          </div>
+          <div className="cc-install-console-toolbar">
             {showRestartAction ? (
               <Button
                 type="button"
-                variant="default"
+                variant="outline"
                 icon={<RefreshCw size={14} />}
                 className="cc-action-btn"
                 onClick={() => void onRestartBackend()}
@@ -339,248 +711,43 @@ export function InstallFlowModal({
             <Button
               type="button"
               variant="ghost"
-              icon={<SquareTerminal size={14} />}
+              icon={<Copy size={14} />}
               className="cc-action-btn"
-              onClick={() => void onCancelTask()}
-              disabled={!isBusy}
+              onClick={() => void copyText(currentStepCommand)}
+              disabled={!currentStepCommand}
             >
-              取消任务
+              复制当前步骤
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<Copy size={14} />}
+              className="cc-action-btn"
+              onClick={() => void copyText(fullTaskCommands)}
+              disabled={!fullTaskCommands}
+            >
+              复制任务命令
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<Copy size={14} />}
+              className="cc-action-btn"
+              onClick={() => void copyText(logsText)}
+              disabled={!logsText}
+            >
+              复制日志
             </Button>
           </div>
-        </>
-      }
-    >
-      <div className="cc-install-flow-source" role="group" aria-label="Install source">
-          <button
-            type="button"
-            className={`cc-source-switch-btn ${installSource === "official" ? "active" : ""}`}
-            onClick={() => onSourceChange("official")}
-            disabled={isBusy}
-          >
-            官方源
-          </button>
-          <button
-            type="button"
-            className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
-            onClick={() => onSourceChange("mirror")}
-            disabled={isBusy}
-          >
-            镜像源
-          </button>
-      </div>
-
-      <section className="cc-install-flow-section">
-          <div className="cc-install-console-head">
-            <div>
-              <h4>PowerShell 预检</h4>
-              <p>使用摘要标签展示脚本启动限制与语言模式。</p>
-            </div>
-            <div className="cc-install-flow-actions">
-              <Button
-                type="button"
-                variant="outline"
-                icon={<RefreshCw size={14} />}
-                className="cc-action-btn"
-                onClick={() => void onRefreshPowerShellPreflight()}
-              >
-                重新预检
-              </Button>
-            </div>
-          </div>
-          <div className="cc-install-preflight-tags" aria-label="PowerShell preflight summary">
-            <span className={`cc-install-preflight-tag is-${preflightKindMeta.tone}`}>
-              诊断: {preflightKindMeta.label}
-            </span>
-            <span
-              className={`cc-install-preflight-tag is-${activePreflight?.smokeTestOk ? "success" : "warning"}`}
-            >
-              Smoke Test: {activePreflight?.smokeTestOk ? "通过" : "未通过"}
-            </span>
-            <span className="cc-install-preflight-tag is-neutral">
-              LanguageMode: {activePreflight?.languageMode ?? "未知"}
-            </span>
-            {(activePreflight?.executionPolicies ?? []).map((item) => (
-              <span
-                key={`${item.scope}-${item.policy}`}
-                className={`cc-install-preflight-tag is-${getExecutionPolicyTone(item.policy)}`}
-              >
-                {item.scope}: {item.policy}
-              </span>
-            ))}
-            {activePreflight?.suggestedFix ? (
-              <span className="cc-install-preflight-tag is-warning cc-install-preflight-tag-code">
-                建议: <code>{activePreflight.suggestedFix}</code>
-              </span>
-            ) : null}
-          </div>
+        </div>
+        {failureSummary ? <p className="hint cc-install-error-summary">{failureSummary}</p> : null}
+        {showRestartAction ? (
+          <p className="hint">升级前已停止应用后端以释放 kimi.exe。升级完成后请点击“重启后端”。</p>
+        ) : null}
+        <pre ref={consoleRef} className="cc-install-console">
+          {logsText || session.message || "还没有采集到输出日志。"}
+        </pre>
       </section>
-
-      <section className="cc-install-flow-section">
-          <h4>环境状态</h4>
-          <div className="cc-install-status-grid">
-            <span>winget: {statusLabel(probe?.wingetReady)}</span>
-            <span>uv: {statusLabel(probe?.uvReady)}</span>
-            <span>Python 3.13: {statusLabel(probe?.python313Ready)}</span>
-            <span>Kimi CLI: {statusLabel(probe?.kimiReady)}</span>
-            <span>Git: {statusLabel(probe?.gitReady)}</span>
-            <span>Node.js: {statusLabel(probe?.nodeReady)}</span>
-            <span>Core Ready: {statusLabel(probe?.coreReady)}</span>
-          </div>
-      </section>
-
-      {installSource === "mirror" ? (
-        <section className="cc-install-flow-section">
-            <div className="cc-install-console-head">
-              <div>
-                <h4>镜像配置</h4>
-                <p>预设决定默认镜像列表；自定义模式可逐类填写 HTTPS 地址。</p>
-              </div>
-              <div className="cc-install-flow-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="cc-action-btn"
-                  onClick={() => void onSaveInstallSettings(mirrorDraft)}
-                  disabled={installSettingsBusy || isBusy}
-                >
-                  保存镜像配置
-                </Button>
-              </div>
-            </div>
-            <label className="cc-install-mirror-field">
-              <span>镜像预设</span>
-              <select
-                className="cc-install-mirror-select"
-                value={mirrorDraft.mirrorPreset}
-                onChange={(event) =>
-                  setMirrorDraft((current) => ({
-                    ...current,
-                    mirrorPreset: event.target.value as InstallSettingsView["mirrorPreset"],
-                    preferredSource: "mirror",
-                  }))
-                }
-                disabled={installSettingsBusy || isBusy}
-              >
-                <option value="mixed">清华后阿里</option>
-                <option value="tuna">仅清华</option>
-                <option value="aliyun">仅阿里</option>
-                <option value="custom">自定义</option>
-              </select>
-            </label>
-            {mirrorDraft.mirrorPreset === "custom" ? (
-              <div className="cc-install-mirror-grid">
-                {renderMirrorTextarea("Git 发布页", mirrorDraft.customMirrorConfig.gitReleasePages, (next) =>
-                  setMirrorDraft((current) => ({
-                    ...current,
-                    customMirrorConfig: {
-                      ...current.customMirrorConfig,
-                      gitReleasePages: textToLines(next),
-                    },
-                  }))
-                )}
-                {renderMirrorTextarea("uv 发布页", mirrorDraft.customMirrorConfig.uvReleasePages, (next) =>
-                  setMirrorDraft((current) => ({
-                    ...current,
-                    customMirrorConfig: {
-                      ...current.customMirrorConfig,
-                      uvReleasePages: textToLines(next),
-                    },
-                  }))
-                )}
-                {renderMirrorTextarea(
-                  "Python 安装器",
-                  mirrorDraft.customMirrorConfig.pythonInstallerUrls,
-                  (next) =>
-                    setMirrorDraft((current) => ({
-                      ...current,
-                      customMirrorConfig: {
-                        ...current.customMirrorConfig,
-                        pythonInstallerUrls: textToLines(next),
-                      },
-                    }))
-                )}
-                {renderMirrorTextarea("PyPI 索引", mirrorDraft.customMirrorConfig.pypiIndexUrls, (next) =>
-                  setMirrorDraft((current) => ({
-                    ...current,
-                    customMirrorConfig: {
-                      ...current.customMirrorConfig,
-                      pypiIndexUrls: textToLines(next),
-                    },
-                  }))
-                )}
-              </div>
-            ) : (
-              <p className="hint">当前使用内置预设镜像列表；切到“自定义”后可编辑具体 URL。</p>
-            )}
-        </section>
-      ) : null}
-
-      <section className="cc-install-flow-section">
-          <h4>基础安装</h4>
-          <div className="cc-install-task-list">
-            {coreTasks.map((task) => renderTaskButton(task, task.recommended ? "default" : "outline"))}
-          </div>
-      </section>
-
-      <section className="cc-install-flow-section">
-          <h4>升级与可选增强</h4>
-          <div className="cc-install-task-list">
-            {upgradeTasks.map((task) => renderTaskButton(task, "outline"))}
-            {optionalTasks.map((task) => renderTaskButton(task, "ghost"))}
-          </div>
-          {optionalTasks.length ? (
-            <p className="hint">Git / Node.js 为可选增强项，可能需要管理员权限。</p>
-          ) : null}
-      </section>
-
-      <section className="cc-install-flow-section">
-          <div className="cc-install-console-head">
-            <div>
-              <h4>控制台</h4>
-              <p>
-                {session.title ?? "No active task"} · {session.status} · {session.stage}
-              </p>
-            </div>
-            <div className="cc-install-flow-actions">
-              <Button
-                type="button"
-                variant="outline"
-                icon={<Copy size={14} />}
-                className="cc-action-btn"
-                onClick={() => void copyText(currentStepCommand)}
-                disabled={!currentStepCommand}
-              >
-                复制当前步骤
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<Copy size={14} />}
-                className="cc-action-btn"
-                onClick={() => void copyText(fullTaskCommands)}
-                disabled={!fullTaskCommands}
-              >
-                复制任务命令
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<Copy size={14} />}
-                className="cc-action-btn"
-                onClick={() => void copyText(logsText)}
-                disabled={!logsText}
-              >
-                复制日志
-              </Button>
-            </div>
-          </div>
-          {failureSummary ? <p className="hint cc-install-error-summary">{failureSummary}</p> : null}
-          {restartHint ? <p className="hint">{restartHint}</p> : null}
-          <pre ref={consoleRef} className="cc-install-console">
-            {logsText || session.message || "No logs yet."}
-          </pre>
-          {session.fallbackReason ? <p className="hint">{session.fallbackReason}</p> : null}
-      </section>
-    </ControlCenterModalShell>
+    </>
   );
 }

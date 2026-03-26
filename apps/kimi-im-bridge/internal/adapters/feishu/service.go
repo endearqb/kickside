@@ -22,6 +22,7 @@ type Service struct {
 	bindings     BindingRouter
 	runtime      RuntimeExecutor
 	orchestrator bridgecore.InboundExecutor
+	hostControl  HostController
 	store        ChannelStore
 	logger       Logger
 	delivery     *reliability.Executor
@@ -30,6 +31,9 @@ type Service struct {
 	started           bool
 	done              chan struct{}
 	currentCheckpoint string
+	lastReadyAt       string
+	consecutiveFails  int
+	recoveryPending   bool
 }
 
 func NewService(options Options) *Service {
@@ -46,6 +50,7 @@ func NewService(options Options) *Service {
 		bindings:     options.BindingRouter,
 		runtime:      options.Runtime,
 		orchestrator: options.Orchestrator,
+		hostControl:  options.HostControl,
 		store:        options.Store,
 		logger:       options.Logger,
 		delivery: reliability.NewExecutor(reliability.ExecutorOptions{
@@ -57,6 +62,12 @@ func NewService(options Options) *Service {
 }
 
 func (s *Service) Name() string {
+	if value := strings.TrimSpace(s.config.ConnectorLabel); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
 	return platformID
 }
 
@@ -68,13 +79,13 @@ func (s *Service) Done() <-chan struct{} {
 
 func (s *Service) Start(ctx context.Context) error {
 	if strings.TrimSpace(s.config.AppID) == "" || strings.TrimSpace(s.config.AppSecret) == "" {
-		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("feishu appId/appSecret are required"))
+		return s.failStart(ctx, "start", "invalid_credentials", fmt.Errorf("feishu appId/appSecret are required"))
 	}
 	if s.gateway == nil {
-		return s.failStart(ctx, "invalid_credentials", fmt.Errorf("feishu gateway is not configured"))
+		return s.failStart(ctx, "start", "invalid_credentials", fmt.Errorf("feishu gateway is not configured"))
 	}
 	if s.bindings == nil || (s.runtime == nil && s.orchestrator == nil) || s.store == nil {
-		return s.failStart(ctx, "unknown", fmt.Errorf("feishu adapter dependencies are incomplete"))
+		return s.failStart(ctx, "start", "unknown", fmt.Errorf("feishu adapter dependencies are incomplete"))
 	}
 
 	s.mu.Lock()
@@ -86,20 +97,21 @@ func (s *Service) Start(ctx context.Context) error {
 	s.done = make(chan struct{})
 	s.mu.Unlock()
 
-	if err := s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateConnecting, "", ""); err != nil {
+	if err := s.store.UpdateChannelState(ctx, s.connectorID(), domain.ChannelStateConnecting, "", ""); err != nil {
 		return s.abortStart(err)
 	}
+	s.logConnectionOpening("credential_probe", 1)
 	if err := s.gateway.ProbeCredentials(ctx); err != nil {
 		code := classifyFeishuError(err).Code
 		if code == "" {
 			code = "unknown"
 		}
-		return s.failAfterStart(ctx, code, err)
+		return s.failAfterStart(ctx, "credential_probe", code, err)
 	}
 
 	checkpoint, err := s.loadCheckpoint(ctx)
 	if err != nil {
-		return s.failAfterStart(ctx, "unknown", err)
+		return s.failAfterStart(ctx, "load_checkpoint", "unknown", err)
 	}
 	s.setCheckpoint(checkpoint)
 
@@ -119,6 +131,7 @@ func (s *Service) runLoop(ctx context.Context, done chan struct{}) {
 	}()
 
 	backoff := time.Second
+	attempt := 1
 	for {
 		select {
 		case <-ctx.Done():
@@ -126,6 +139,7 @@ func (s *Service) runLoop(ctx context.Context, done chan struct{}) {
 		default:
 		}
 
+		s.logConnectionOpening("long_connection", attempt)
 		err := s.gateway.Run(ctx, s)
 		if ctx.Err() != nil {
 			return
@@ -147,24 +161,43 @@ func (s *Service) runLoop(ctx context.Context, done chan struct{}) {
 		if !classification.Retryable {
 			backoffNext = 0
 		}
-		s.logf(
-			"channel event=failure platform=%s operation=long_connection errorCode=%s attempt=1 retryable=%t nextBackoffMs=%d err=%q",
-			platformID,
-			code,
-			classification.Retryable,
-			backoffNext.Milliseconds(),
-			err.Error(),
-		)
-		_ = s.store.UpdateChannelState(context.Background(), platformID, state, code, err.Error())
+		s.recordConnectionFailure(context.Background(), "long_connection", classification, err, state, attempt, backoffNext)
 		if state == domain.ChannelStateError || !reliability.SleepContext(ctx, backoff) {
 			return
 		}
 		backoff = nextBackoff(backoff)
+		attempt++
 	}
 }
 
 func (s *Service) OnReady(ctx context.Context) {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateReady, "", "")
+	now := time.Now().UTC().Format(time.RFC3339)
+	zero := 0
+	clearRetryAt := ""
+	hadRecovery, previousFailures, lastReadyAt := s.markReady(now)
+	update := domain.ChannelDiagnosticsUpdate{
+		State:               domain.ChannelStateReady,
+		LastErrorCode:       "",
+		LastError:           "",
+		LastReadyAt:         &now,
+		ConsecutiveFailures: &zero,
+		NextRetryAt:         &clearRetryAt,
+	}
+	if hadRecovery {
+		update.LastRecoveryAt = &now
+		s.logf(
+			"feishu connection recovered platform=%s operation=long_connection attempt=%d lastReadyAt=%s",
+			platformID,
+			previousFailures,
+			logValue(lastReadyAt),
+		)
+	}
+	_ = s.store.UpdateChannelDiagnostics(ctx, s.connectorID(), update)
+	s.logf(
+		"feishu connection ready platform=%s operation=long_connection attempt=1 lastReadyAt=%s",
+		platformID,
+		now,
+	)
 }
 
 func (s *Service) OnMessage(ctx context.Context, event *MessageEvent) error {
@@ -198,6 +231,7 @@ func (s *Service) OnCardAction(ctx context.Context, event *CardActionEvent) (*Ca
 
 func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) (bool, error) {
 	if command, key, ok := parseBridgeCommand(event); ok {
+		key.ConnectorID = s.connectorID()
 		if err := s.handleBridgeCommand(ctx, event, key, command); err != nil {
 			return false, err
 		}
@@ -208,7 +242,9 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if !ok {
 		return true, nil
 	}
-	if err := s.store.TouchChannelInbound(ctx, platformID, inbound.ReceivedAt); err != nil {
+	inbound.ConnectorID = s.connectorID()
+	key.ConnectorID = s.connectorID()
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), inbound.ReceivedAt); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
 	if strings.TrimSpace(inbound.Text) == "" && len(inbound.Attachments) > 0 {
@@ -230,6 +266,8 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	s.maybeSendAutoOnboarding(ctx, event, key, binding)
 
 	if s.orchestrator != nil {
+		contextualizedPrompt := s.applyBridgeSkillPromptContext(inbound.Text, *binding)
+		inbound.Text = contextualizedPrompt
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
 			AutoApprove:    s.config.AutoApprove,
@@ -261,7 +299,7 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	}
 
 	prompt := runtime.PromptRequest{
-		Prompt:      inbound.Text,
+		Prompt:      s.applyBridgeSkillPromptContext(inbound.Text, *binding),
 		WorkDir:     binding.WorkDir,
 		AutoApprove: s.config.AutoApprove,
 		Attachments: pendingAttachments,
@@ -305,6 +343,31 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Service) applyBridgeSkillPromptContext(prompt string, binding domain.SessionBinding) string {
+	if !s.config.BridgeOpsSkillEnabled {
+		return prompt
+	}
+
+	lines := []string{
+		"[bridge_context]",
+		fmt.Sprintf("platform=%s", strings.TrimSpace(binding.Key.Platform)),
+		fmt.Sprintf("chat_id=%s", strings.TrimSpace(binding.Key.ChatID)),
+		fmt.Sprintf("thread_id=%s", strings.TrimSpace(binding.Key.ThreadID)),
+		fmt.Sprintf("binding_id=%s", strings.TrimSpace(binding.BindingID)),
+		fmt.Sprintf("current_session_id=%s", strings.TrimSpace(binding.KimiSessionID)),
+		fmt.Sprintf("current_workdir=%s", strings.TrimSpace(binding.WorkDir)),
+	}
+	if authFile := strings.TrimSpace(s.config.BridgeOpsAuthFile); authFile != "" {
+		lines = append(lines, fmt.Sprintf("bridge_auth_file=%s", authFile))
+	}
+	lines = append(lines,
+		"[/bridge_context]",
+		"",
+		strings.TrimSpace(prompt),
+	)
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
@@ -412,7 +475,7 @@ func (s *Service) collectDoctorReport(ctx context.Context, key domain.BindingKey
 	}
 	var feishuStatus *domain.ChannelStatus
 	for index := range channelStatuses {
-		if strings.EqualFold(strings.TrimSpace(channelStatuses[index].Platform), platformID) {
+		if channelStatuses[index].ConnectorID == s.connectorID() {
 			status := channelStatuses[index]
 			feishuStatus = &status
 			break
@@ -444,16 +507,19 @@ func (s *Service) collectDoctorReport(ctx context.Context, key domain.BindingKey
 	activePresetName, activePresetPath := findPresetForPath(s.config.WorkDirPresets, effectiveWorkDir)
 
 	report := doctorReport{
-		BridgeState:      deriveBridgeState(feishuStatus),
-		Channel:          feishuStatus,
-		Binding:          binding,
-		Session:          session,
-		ActivePresetName: activePresetName,
-		ActivePresetPath: activePresetPath,
-		EffectiveWorkDir: effectiveWorkDir,
-		PendingApprovals: pendingApprovals,
-		ProbeStatus:      probeStatus,
-		ProbeError:       probeError,
+		BridgeState:           deriveBridgeState(feishuStatus),
+		Channel:               feishuStatus,
+		Binding:               binding,
+		Session:               session,
+		ActivePresetName:      activePresetName,
+		ActivePresetPath:      activePresetPath,
+		EffectiveWorkDir:      effectiveWorkDir,
+		PendingApprovals:      pendingApprovals,
+		ProbeStatus:           probeStatus,
+		ProbeError:            probeError,
+		ChannelAutoRecovering: channelIsAutoRecovering(feishuStatus),
+		BindingHealthy:        binding != nil,
+		SessionHealthy:        session != nil || binding == nil,
 	}
 	report.NextSteps = doctorNextSteps(report)
 	return report, nil
@@ -530,25 +596,52 @@ func deriveBridgeState(channel *domain.ChannelStatus) string {
 func doctorNextSteps(report doctorReport) []string {
 	steps := []string{}
 	if report.Binding == nil {
-		steps = append(steps, "Send a normal prompt or choose a session to create a binding for this chat.")
+		steps = append(steps, "先发送一条普通消息，或在 Sessions 面板里手动为当前聊天创建 binding。")
 	}
-	if report.ProbeStatus == "failed" {
-		steps = append(steps, "Re-check Feishu app credentials and long-connection settings in Control Center.")
+	if report.ProbeStatus == "failed" || hasRecoveryHint(report.Channel, "invalid_credentials") {
+		steps = append(steps, "检查控制中心中的 Feishu appId/appSecret 是否有效，并确认长连接配置仍然可用。")
 	}
-	if report.Channel != nil && report.Channel.State != domain.ChannelStateReady {
-		steps = append(steps, "Wait for the Feishu channel to become ready, or review the latest bridge diagnostics in Control Center.")
+	if hasRecoveryHint(report.Channel, "permission_denied") {
+		steps = append(steps, "检查飞书应用权限、事件订阅和长连接配置，确认机器人仍有接收消息的权限。")
+	}
+	if hasRecoveryHint(report.Channel, "host_connection_aborted") {
+		steps = append(steps, "这更像是本机连接被中断。优先检查本机网络、代理、VPN、防火墙或杀软，再观察 bridge 是否自动恢复。")
+	}
+	if report.ChannelAutoRecovering {
+		steps = append(steps, "当前 Feishu 通道正在自动恢复中，先等待下一次自动重试，不要把手动重启当成首选。")
+	} else if report.Channel != nil && report.Channel.State != domain.ChannelStateReady {
+		steps = append(steps, "Feishu 通道还没恢复到 ready，请先查看控制中心里的恢复诊断和最近错误。")
 	}
 	if report.PendingApprovals > 0 {
-		steps = append(steps, "Open approvals and resolve the pending requests before retrying blocked turns.")
+		steps = append(steps, "先处理当前聊天里的 pending approvals，再重试被阻塞的会话。")
+	}
+	if report.Channel != nil && report.Channel.State == domain.ChannelStateReady && report.Binding != nil {
+		steps = append(steps, "如果飞书已经 ready 但仍感觉“没回复”，先检查 binding、session、workdir 和 approvals，再决定是否重启。")
 	}
 	if len(steps) == 0 {
-		steps = append(steps, "Bridge looks healthy for this chat. Use Sessions or Workdir if you want to change context.")
+		steps = append(steps, "当前聊天的 bridge 状态看起来正常；如果需要换上下文，请使用 Sessions 或 Workdir。")
 	}
 	return steps
 }
 
+func channelIsAutoRecovering(channel *domain.ChannelStatus) bool {
+	if channel == nil {
+		return false
+	}
+	return channel.State != domain.ChannelStateReady &&
+		channel.LastFailureRetryable &&
+		strings.TrimSpace(channel.NextRetryAt) != ""
+}
+
+func hasRecoveryHint(channel *domain.ChannelStatus, hint string) bool {
+	if channel == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(channel.RecoveryHint), strings.TrimSpace(hint))
+}
+
 func (s *Service) loadCheckpoint(ctx context.Context) (string, error) {
-	value, ok, err := s.store.GetOffset(ctx, platformID, feishuOffsetKind)
+	value, ok, err := s.store.GetOffset(ctx, s.connectorID(), feishuOffsetKind)
 	if err != nil {
 		return "", fmt.Errorf("read feishu checkpoint: %w", err)
 	}
@@ -563,7 +656,7 @@ func (s *Service) advanceCheckpoint(ctx context.Context, eventID string) error {
 	if eventID == "" {
 		return nil
 	}
-	if err := s.store.UpdateChannelOffset(ctx, platformID, eventID); err != nil {
+	if err := s.store.UpdateChannelOffset(ctx, s.connectorID(), feishuOffsetKind, eventID); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	s.setCheckpoint(eventID)
@@ -588,24 +681,28 @@ func shouldSkipCheckpoint(checkpoint string, eventID string) bool {
 	return checkpoint != "" && checkpoint == eventID
 }
 
-func (s *Service) failStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
-	s.logf(
-		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
-		platformID,
-		code,
-		err.Error(),
+func (s *Service) failStart(ctx context.Context, operation string, code string, err error) error {
+	s.recordConnectionFailure(
+		ctx,
+		operation,
+		reliability.Classification{Code: code, Retryable: false},
+		err,
+		domain.ChannelStateError,
+		1,
+		0,
 	)
 	return err
 }
 
-func (s *Service) failAfterStart(ctx context.Context, code string, err error) error {
-	_ = s.store.UpdateChannelState(ctx, platformID, domain.ChannelStateError, code, err.Error())
-	s.logf(
-		"channel event=failure platform=%s operation=start errorCode=%s attempt=1 retryable=false nextBackoffMs=0 err=%q",
-		platformID,
-		code,
-		err.Error(),
+func (s *Service) failAfterStart(ctx context.Context, operation string, code string, err error) error {
+	s.recordConnectionFailure(
+		ctx,
+		operation,
+		reliability.Classification{Code: code, Retryable: false},
+		err,
+		domain.ChannelStateError,
+		1,
+		0,
 	)
 	return s.abortStart(err)
 }
@@ -625,6 +722,131 @@ func (s *Service) logf(format string, args ...any) {
 	if s.logger != nil {
 		s.logger.Printf(format, args...)
 	}
+}
+
+func (s *Service) connectorID() string {
+	if value := strings.TrimSpace(s.config.ConnectorID); value != "" {
+		return value
+	}
+	return platformID
+}
+
+func (s *Service) logConnectionOpening(operation string, attempt int) {
+	s.logf(
+		"feishu connection opening platform=%s operation=%s attempt=%d lastReadyAt=%s",
+		platformID,
+		strings.TrimSpace(operation),
+		attempt,
+		logValue(s.currentLastReadyAt()),
+	)
+}
+
+func (s *Service) recordConnectionFailure(
+	ctx context.Context,
+	operation string,
+	classification reliability.Classification,
+	err error,
+	state domain.ChannelRuntimeState,
+	attempt int,
+	nextBackoff time.Duration,
+) {
+	code := strings.TrimSpace(classification.Code)
+	if code == "" {
+		code = "unknown"
+	}
+	now := time.Now().UTC()
+	nowText := now.Format(time.RFC3339)
+	nextRetryAt := ""
+	if classification.Retryable && nextBackoff > 0 {
+		nextRetryAt = now.Add(nextBackoff).Format(time.RFC3339)
+	}
+	retryable := classification.Retryable
+	consecutiveFailures := s.markFailure(nowText)
+	recoveryHint := feishuRecoveryHint(code, err)
+	fingerprint := feishuFailureFingerprint(code, err)
+	update := domain.ChannelDiagnosticsUpdate{
+		State:                state,
+		LastErrorCode:        code,
+		LastError:            err.Error(),
+		LastFailureAt:        &nowText,
+		LastFailureOperation: &operation,
+		LastFailureRetryable: &retryable,
+		ConsecutiveFailures:  &consecutiveFailures,
+		NextRetryAt:          &nextRetryAt,
+		RecoveryHint:         &recoveryHint,
+	}
+	_ = s.store.UpdateChannelDiagnostics(ctx, s.connectorID(), update)
+	s.logf(
+		"feishu connection failure platform=%s operation=%s errorCode=%s retryable=%t attempt=%d backoffMs=%d nextRetryAt=%s lastReadyAt=%s failureFingerprint=%s err=%q",
+		platformID,
+		strings.TrimSpace(operation),
+		code,
+		retryable,
+		attempt,
+		nextBackoff.Milliseconds(),
+		logValue(nextRetryAt),
+		logValue(s.currentLastReadyAt()),
+		fingerprint,
+		err.Error(),
+	)
+	s.logf(
+		"channel event=failure platform=%s operation=%s errorCode=%s attempt=%d retryable=%t nextBackoffMs=%d err=%q",
+		platformID,
+		strings.TrimSpace(operation),
+		code,
+		attempt,
+		retryable,
+		nextBackoff.Milliseconds(),
+		err.Error(),
+	)
+	if retryable && nextRetryAt != "" {
+		s.logf(
+			"feishu connection retry scheduled platform=%s operation=%s errorCode=%s retryable=%t attempt=%d backoffMs=%d nextRetryAt=%s lastReadyAt=%s failureFingerprint=%s",
+			platformID,
+			strings.TrimSpace(operation),
+			code,
+			retryable,
+			attempt,
+			nextBackoff.Milliseconds(),
+			nextRetryAt,
+			logValue(s.currentLastReadyAt()),
+			fingerprint,
+		)
+	}
+}
+
+func (s *Service) markFailure(now string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recoveryPending = true
+	s.consecutiveFails++
+	return s.consecutiveFails
+}
+
+func (s *Service) markReady(now string) (bool, int, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	hadRecovery := s.recoveryPending || s.consecutiveFails > 0
+	previousFailures := s.consecutiveFails
+	lastReadyAt := s.lastReadyAt
+	s.lastReadyAt = strings.TrimSpace(now)
+	s.consecutiveFails = 0
+	s.recoveryPending = false
+	return hadRecovery, previousFailures, lastReadyAt
+}
+
+func (s *Service) currentLastReadyAt() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return strings.TrimSpace(s.lastReadyAt)
+}
+
+func logValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "(none)"
+	}
+	return value
 }
 
 func closedDone() chan struct{} {

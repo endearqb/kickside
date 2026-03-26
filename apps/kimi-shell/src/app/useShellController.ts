@@ -37,6 +37,10 @@ import type {
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
+  BridgeConnectorConfig,
+  BridgeConnectorSecretsInput,
+  FeishuConnectorOnboardingSession,
+  WeixinConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
@@ -46,6 +50,8 @@ import type {
   BridgeSettings,
   BridgeStatus,
   ContextMenuStatus,
+  ControlCenterTaskId,
+  ControlCenterTaskPayload,
   ControlSectionId,
   DiagnosticsInfo,
   InstallFlowCatalog,
@@ -59,6 +65,7 @@ import type {
   InstallSettingsView,
   InstallSource,
   InstallTaskId,
+  InstalledSkill,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   MainWindowCloseBehavior,
@@ -74,7 +81,17 @@ import type {
   Screen,
   ShellRoutePayload,
   PowerShellPreflightSummary,
+  SkillCenterSectionId,
+  StartFeishuConnectorOnboardingInput,
+  StartWeixinConnectorOnboardingInput,
   Theme,
+  SessionSkillState,
+  SkillApplyScope,
+  SkillDetail,
+  SkillProjectionRecord,
+  SkillRecommendation,
+  WorkspaceSkillProfile,
+  WorkspaceSkillRestoreResult,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
   WorkspaceLayoutMode,
@@ -83,6 +100,22 @@ import type {
   WorkspaceViewKind,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
+import {
+  applySkill,
+  getWorkspaceSkillProfile,
+  getWorkspaceSkillRecommendations,
+  getSkillDetail,
+  importSkillFromPath,
+  installSkillFromGit,
+  listActiveSessionSkills,
+  listGlobalSkills,
+  listInstalledSkills,
+  removeSkill,
+  setWorkspaceSkillPin,
+  setSkillTrust,
+  uninstallSkill,
+  updateSkill,
+} from "@/services/skillCenterService";
 
 const POLL_MS = 1000;
 const SHELL_ROUTE_EVENT = "shell-route";
@@ -104,10 +137,43 @@ let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type InstallAction = "dependencies" | "kimi" | "upgrade_kimi" | "nodejs";
+type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type BootHint = Pick<
   FrontendReadyAck,
   "backendState" | "workspaceUrl" | "startCycleId"
 >;
+
+function createDefaultBridgeConnector(
+  platform: "telegram" | "feishu" | "weixin",
+  index = 1,
+): BridgeConnectorConfig {
+  const base =
+    platform === "telegram" ? "telegram" : platform === "feishu" ? "feishu" : "weixin";
+  const label =
+    platform === "telegram"
+      ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
+      : platform === "feishu"
+        ? `飞书机器人 ${String(index).padStart(2, "0")}`
+        : `微信机器人 ${String(index).padStart(2, "0")}`;
+  return {
+    id: index <= 1 ? `${base}-default` : `${base}-${index}`,
+    platform,
+    enabled: false,
+    mode: platform === "feishu" ? "websocket" : "polling",
+    label,
+    defaultWorkDir: undefined,
+    resetBindingSessionOnStart: true,
+    feishuAutoApprove: platform === "feishu" ? true : undefined,
+    feishuReplyRenderer: platform === "feishu" ? "interactive" : undefined,
+  };
+}
+
+function getBridgePlatformConnectors(
+  settings: BridgeSettings,
+  platform: "telegram" | "feishu" | "weixin",
+): BridgeConnectorConfig[] {
+  return settings.connectors.filter((connector) => connector.platform === platform);
+}
 
 function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
   return {
@@ -192,19 +258,10 @@ function createDefaultBridgeSettings(): BridgeSettings {
     resetBindingSessionOnBridgeStart: true,
     defaultWorkDir: "",
     workDirPresets: [],
-    channels: [
-      {
-        platform: "telegram",
-        enabled: false,
-        mode: "polling",
-        accountLabel: "Telegram",
-      },
-      {
-        platform: "feishu",
-        enabled: false,
-        mode: "websocket",
-        accountLabel: "Feishu",
-      },
+    connectors: [
+      createDefaultBridgeConnector("telegram"),
+      createDefaultBridgeConnector("feishu"),
+      createDefaultBridgeConnector("weixin"),
     ],
   };
 }
@@ -214,12 +271,23 @@ function createDefaultBridgeStatus(): BridgeStatus {
     state: "stopped",
     adminPort: 60110,
     version: undefined,
-    channels: [],
+    connectors: [],
     pendingApprovals: 0,
     bindings: 0,
     lastErrorCode: undefined,
     lastError: undefined,
   };
+}
+
+function createEmptySessionSkillState(): SessionSkillState {
+  return {
+    appliedSkillIds: [],
+    projections: [],
+  };
+}
+
+function createEmptyWorkspaceSkillProfile(): WorkspaceSkillProfile | null {
+  return null;
 }
 
 function formatBridgeErrorEntry(
@@ -248,6 +316,7 @@ function formatBridgeErrorEntry(
 
 function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
   return {
+    connectors: [],
     telegram: {
       botToken: {
         configured: false,
@@ -267,14 +336,19 @@ function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
         configured: false,
       },
     },
+    weixin: {
+      botToken: {
+        configured: false,
+      },
+    },
   };
 }
 
 function getBridgeChannelEnabled(
   settings: BridgeSettings,
-  platform: "telegram" | "feishu",
+  platform: "telegram" | "feishu" | "weixin",
 ): boolean {
-  return settings.channels.find((channel) => channel.platform === platform)?.enabled ?? false;
+  return getBridgePlatformConnectors(settings, platform).some((connector) => connector.enabled);
 }
 
 function createDefaultBridgeOnboardingConfigInput(
@@ -302,18 +376,24 @@ function createBridgeOnboardingValidation(
   secretsMask: BridgeSecretsMaskView,
   dirty: boolean,
 ): BridgeOnboardingValidation {
-  const effectiveAppId =
-    hasBridgeDraftSecretValue(draft.feishu.appId) || secretsMask.feishu.appId.configured;
-  const effectiveAppSecret =
-    hasBridgeDraftSecretValue(draft.feishu.appSecret) ||
-    secretsMask.feishu.appSecret.configured;
+  const draftHasFeishuSecrets =
+    hasBridgeDraftSecretValue(draft.feishu.appId) &&
+    hasBridgeDraftSecretValue(draft.feishu.appSecret);
+  const savedHasFeishuSecrets =
+    secretsMask.connectors.some(
+      (connector) =>
+        connector.platform === "feishu" &&
+        connector.feishu?.appId.configured &&
+        connector.feishu?.appSecret.configured,
+    ) ||
+    (secretsMask.feishu.appId.configured && secretsMask.feishu.appSecret.configured);
   const wantsEnabled = draft.enabled || draft.feishuEnabled;
 
-  if (draft.feishuEnabled && (!effectiveAppId || !effectiveAppSecret)) {
+  if (draft.feishuEnabled && !draftHasFeishuSecrets && !savedHasFeishuSecrets) {
     return {
       canSave: false,
       canStart: false,
-      message: "启用 Feishu 前需要提供 appId 和 appSecret，或保留已有已配置值。",
+      message: "启用 Feishu 前需要至少一个已配置 appId/appSecret 的飞书机器人。",
     };
   }
 
@@ -364,7 +444,6 @@ export function useShellController() {
   );
   const [configCenterSnapshot, setConfigCenterSnapshot] =
     useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
-  const [configCenterOpen, setConfigCenterOpen] = useState(false);
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
@@ -383,9 +462,46 @@ export function useShellController() {
   const [bridgeBindings, setBridgeBindings] = useState<BindingRecord[]>([]);
   const [bridgeApprovals, setBridgeApprovals] = useState<BridgeApprovalRecord[]>([]);
   const [bridgeLogTail, setBridgeLogTail] = useState<string[]>([]);
+  const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
+  const [skillCenterBusy, setSkillCenterBusy] = useState(false);
+  const [skillCenterSearch, setSkillCenterSearch] = useState("");
+  const [skillCenterFilter, setSkillCenterFilter] = useState<
+    "all" | "session" | "global" | "pinned" | "untrusted" | "update_available"
+  >("all");
+  const [skillCenterSection, setSkillCenterSection] =
+    useState<SkillCenterSectionId>("manage");
+  const [skillCenterGitRepoUrl, setSkillCenterGitRepoUrl] = useState("");
+  const [skillCenterGitRef, setSkillCenterGitRef] = useState("");
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [selectedSkillDetail, setSelectedSkillDetail] = useState<SkillDetail | null>(
+    null,
+  );
+  const [globalSkillProjections, setGlobalSkillProjections] = useState<
+    SkillProjectionRecord[]
+  >([]);
+  const [activeSessionSkillState, setActiveSessionSkillState] =
+    useState<SessionSkillState>(() => createEmptySessionSkillState());
+  const [workspaceSkillProfile, setWorkspaceSkillProfile] =
+    useState<WorkspaceSkillProfile | null>(() => createEmptyWorkspaceSkillProfile());
+  const [workspaceRecentSkillIds, setWorkspaceRecentSkillIds] = useState<string[]>([]);
+  const [workspaceSkillRecommendations, setWorkspaceSkillRecommendations] = useState<
+    SkillRecommendation[]
+  >([]);
+  const [workspaceSkillRestoreResults, setWorkspaceSkillRestoreResults] = useState<
+    WorkspaceSkillRestoreResult[]
+  >([]);
+  const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
   const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
     () => createDefaultBridgeSecretsMaskView(),
   );
+  const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
+    useState<FeishuConnectorOnboardingSession | null>(null);
+  const [feishuConnectorOnboardingBusy, setFeishuConnectorOnboardingBusy] =
+    useState(false);
+  const [weixinConnectorOnboarding, setWeixinConnectorOnboarding] =
+    useState<WeixinConnectorOnboardingSession | null>(null);
+  const [weixinConnectorOnboardingBusy, setWeixinConnectorOnboardingBusy] =
+    useState(false);
   const [bridgeOnboardingDraft, setBridgeOnboardingDraft] =
     useState<BridgeOnboardingConfigInput>(() =>
       createDefaultBridgeOnboardingConfigInput(),
@@ -400,7 +516,6 @@ export function useShellController() {
   const [installAction, setInstallAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
-  const [installFlowOpen, setInstallFlowOpen] = useState(false);
   const [installFlowCatalog, setInstallFlowCatalog] =
     useState<InstallFlowCatalog | null>(null);
   const [installSessionSnapshot, setInstallSessionSnapshot] =
@@ -432,6 +547,10 @@ export function useShellController() {
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
   const [controlCenterModalOpen, setControlCenterModalOpen] = useState(false);
+  const [activeControlTask, setActiveControlTask] =
+    useState<ControlCenterTaskId | null>(null);
+  const [activeControlTaskPayload, setActiveControlTaskPayload] =
+    useState<ControlCenterTaskPayload | null>(null);
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
   const [listenersReady, setListenersReady] = useState(false);
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
@@ -682,6 +801,81 @@ export function useShellController() {
   function resetControlCenterNavigation() {
     setActiveControlSection("overview");
     setActiveRuntimePanel("paths");
+    setActiveControlTask(null);
+    setActiveControlTaskPayload(null);
+  }
+
+  function setControlCenterTask(
+    task: ControlCenterTaskId | null,
+    payload: ControlCenterTaskPayload | null = null,
+  ) {
+    setActiveControlTask(task);
+    setActiveControlTaskPayload(payload);
+  }
+
+  function closeActiveControlTask() {
+    if (activeControlTask === "config_center" && configCenterDirty) {
+      const confirmed = window.confirm("配置中心存在未保存更改，确定离开当前任务吗？");
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    if (
+      (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
+      skillCenterBusy
+    ) {
+      return false;
+    }
+
+    setControlCenterTask(null);
+    return true;
+  }
+
+  function requestCloseControlCenter() {
+    if (activeControlTask) {
+      return closeActiveControlTask();
+    }
+
+    if (screen === "workspace") {
+      setControlCenterModalOpen(false);
+      resetControlCenterNavigation();
+      return true;
+    }
+
+    resetControlCenterNavigation();
+    window.location.hash = "/loading";
+    setRouteHash(window.location.hash);
+    return true;
+  }
+
+  function dismissControlCenter() {
+    if (activeControlTask === "config_center" && configCenterDirty) {
+      const confirmed = window.confirm("配置中心存在未保存更改，确定关闭控制中心吗？");
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    if (
+      (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
+      skillCenterBusy
+    ) {
+      return false;
+    }
+
+    setControlCenterTask(null);
+
+    if (screen === "workspace") {
+      setControlCenterModalOpen(false);
+      resetControlCenterNavigation();
+      return true;
+    }
+
+    resetControlCenterNavigation();
+    window.location.hash = "/loading";
+    setRouteHash(window.location.hash);
+    return true;
   }
 
   function isWorkspaceReady(nextStatus: AppStatus | null | undefined) {
@@ -695,8 +889,6 @@ export function useShellController() {
   function navigateToWorkspaceAfterOnboarding() {
     setPendingWorkspaceEntryAfterOnboarding(false);
     if (controlCenterModalOpen) {
-      setConfigCenterOpen(false);
-      setInstallFlowOpen(false);
       setInstallCommandsOpen(false);
       resetControlCenterNavigation();
       setControlCenterModalOpen(false);
@@ -1000,13 +1192,15 @@ export function useShellController() {
     }
   }
 
-  async function refreshBridgeSessions() {
+  async function refreshBridgeSessions(options?: { silent?: boolean }) {
     try {
       const data = await invoke<BridgeSessionRecord[]>("list_bridge_sessions");
       setBridgeSessions(data);
       return data;
     } catch (error) {
-      setActionError(String(error));
+      if (!options?.silent) {
+        setActionError(String(error));
+      }
       return bridgeSessions;
     }
   }
@@ -1045,6 +1239,249 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       return bridgeSecretsMask;
+    }
+  }
+
+  async function refreshInstalledSkills(preferredSkillId?: string | null) {
+    const data = await listInstalledSkills();
+    setInstalledSkills(data);
+    const nextSelectedId =
+      preferredSkillId && data.some((skill) => skill.id === preferredSkillId)
+        ? preferredSkillId
+        : data[0]?.id ?? null;
+    setSelectedSkillId(nextSelectedId);
+    return { skills: data, selectedSkillId: nextSelectedId };
+  }
+
+  async function refreshSelectedSkillDetail(skillId?: string | null) {
+    if (!skillId?.trim()) {
+      setSelectedSkillDetail(null);
+      return null;
+    }
+    const detail = await getSkillDetail(skillId);
+    setSelectedSkillDetail(detail);
+    return detail;
+  }
+
+  async function refreshActiveSessionSkills() {
+    try {
+      const data = await listActiveSessionSkills();
+      setActiveSessionSkillState(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      const empty = createEmptySessionSkillState();
+      setActiveSessionSkillState(empty);
+      return empty;
+    }
+  }
+
+  async function refreshGlobalSkillProjections() {
+    try {
+      const data = await listGlobalSkills();
+      setGlobalSkillProjections(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      setGlobalSkillProjections([]);
+      return [];
+    }
+  }
+
+  async function refreshWorkspaceSkillProfileState(workspaceKey?: string) {
+    try {
+      const profile = await getWorkspaceSkillProfile(workspaceKey);
+      setWorkspaceSkillProfile(profile);
+      setWorkspaceRecentSkillIds(profile?.recentSkillIds ?? []);
+      return profile;
+    } catch (error) {
+      setActionError(String(error));
+      setWorkspaceSkillProfile(null);
+      setWorkspaceRecentSkillIds([]);
+      return null;
+    }
+  }
+
+  async function refreshWorkspaceSkillRecommendationsState(workspaceKey?: string) {
+    try {
+      const recommendations = await getWorkspaceSkillRecommendations(workspaceKey);
+      setWorkspaceSkillRecommendations(recommendations);
+      return recommendations;
+    } catch (error) {
+      setActionError(String(error));
+      setWorkspaceSkillRecommendations([]);
+      return [];
+    }
+  }
+
+  async function handleSaveBridgeConnectorSecrets(input: BridgeConnectorSecretsInput) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeSecretsMaskView>("save_bridge_connector_secrets", {
+        input,
+      });
+      setBridgeSecretsMask(data);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleStartFeishuConnectorOnboarding(connectorId: string) {
+    setFeishuConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "start_feishu_connector_onboarding",
+        {
+          input: {
+            connectorId,
+          } satisfies StartFeishuConnectorOnboardingInput,
+        },
+      );
+      setFeishuConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setFeishuConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function handleRefreshFeishuConnectorOnboardingStatus(sessionId: string) {
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "get_feishu_connector_onboarding_status",
+        { sessionId },
+      );
+      setFeishuConnectorOnboarding(data);
+      if (data.state === "succeeded") {
+        await Promise.all([
+          refreshBridgeSettings(),
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      }
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
+  }
+
+  async function handleCancelFeishuConnectorOnboarding(sessionId: string) {
+    setFeishuConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<FeishuConnectorOnboardingSession>(
+        "cancel_feishu_connector_onboarding",
+        { sessionId },
+      );
+      setFeishuConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setFeishuConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function handleStartWeixinConnectorOnboarding(connectorId: string) {
+    setWeixinConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "start_weixin_connector_onboarding",
+        {
+          input: {
+            connectorId,
+          } satisfies StartWeixinConnectorOnboardingInput,
+        },
+      );
+      setWeixinConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWeixinConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function handleRefreshWeixinConnectorOnboardingStatus(sessionId: string) {
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "get_weixin_connector_onboarding_status",
+        { sessionId },
+      );
+      setWeixinConnectorOnboarding(data);
+      if (data.state === "succeeded") {
+        await Promise.all([
+          refreshBridgeSettings(),
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      }
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    }
+  }
+
+  async function handleCancelWeixinConnectorOnboarding(sessionId: string) {
+    setWeixinConnectorOnboardingBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<WeixinConnectorOnboardingSession>(
+        "cancel_weixin_connector_onboarding",
+        { sessionId },
+      );
+      setWeixinConnectorOnboarding(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWeixinConnectorOnboardingBusy(false);
+    }
+  }
+
+  async function refreshSkillCenterState(preferredSkillId?: string | null) {
+    try {
+      const [{ selectedSkillId: nextSelectedId }, globalState, sessionState] =
+        await Promise.all([
+          refreshInstalledSkills(preferredSkillId ?? selectedSkillId),
+          refreshGlobalSkillProjections(),
+          refreshActiveSessionSkills(),
+        ]);
+      await Promise.all([
+        refreshSelectedSkillDetail(nextSelectedId),
+        refreshWorkspaceSkillProfileState(),
+        refreshWorkspaceSkillRecommendationsState(),
+      ]);
+      return {
+        selectedSkillId: nextSelectedId,
+        globalState,
+        sessionState,
+      };
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
     }
   }
 
@@ -1557,18 +1994,6 @@ export function useShellController() {
     return catalog;
   }
 
-  async function refreshInstallSessionSnapshot() {
-    const snapshot = await invoke<InstallSessionSnapshot>("get_install_session_snapshot");
-    setInstallSessionSnapshot(snapshot);
-    if (snapshot.probe) {
-      setInstallProbe(snapshot.probe);
-    }
-    if (snapshot.powershellDiagnostic) {
-      setPowershellPreflight(snapshot.powershellDiagnostic);
-    }
-    return snapshot;
-  }
-
   useEffect(() => {
     if (!tauriRuntime) {
       return;
@@ -1729,6 +2154,14 @@ export function useShellController() {
       ),
     [bridgeOnboardingDirty, bridgeOnboardingDraft, bridgeSecretsMask],
   );
+  const bridgeSettingsDirty = useMemo(
+    () => JSON.stringify(bridgeSettingsSnapshot) !== JSON.stringify(bridgeSettings),
+    [bridgeSettings, bridgeSettingsSnapshot],
+  );
+  const bridgeIsRunning =
+    bridgeStatus.state === "running" ||
+    bridgeStatus.state === "starting" ||
+    bridgeStatus.state === "degraded";
 
   useEffect(() => {
     // Keep onboarding draft synced with persisted settings unless the user is actively editing.
@@ -1800,12 +2233,135 @@ export function useShellController() {
   ]);
 
   useEffect(() => {
+    void refreshActiveSessionSkills();
+  }, [status?.activeSessionId, status?.activeSessionWorkDir]);
+
+  useEffect(() => {
+    const visible =
+      activeControlSection === "skill_center" &&
+      (screen === "control_center" || controlCenterModalOpen);
+    if (!visible) {
+      return;
+    }
+    void refreshSkillCenterState();
+  }, [
+      activeControlSection,
+      controlCenterModalOpen,
+      screen,
+      status?.activeSessionId,
+      status?.activeSessionWorkDir,
+      status?.effectiveWorkDir,
+  ]);
+
+  useEffect(() => {
+    const workspaceKey =
+      status?.activeSessionWorkDir?.trim() || status?.effectiveWorkDir?.trim() || "";
+    const sessionId = status?.activeSessionId?.trim() || "";
+    const pinnedSkillIds = workspaceSkillProfile?.pinnedSkillIds ?? [];
+    const statusSignature = pinnedSkillIds
+      .map((skillId) => {
+        const installed = installedSkills.find((skill) => skill.id === skillId);
+        const applied = activeSessionSkillState.appliedSkillIds.includes(skillId);
+        return `${skillId}:${installed?.trusted ? "trusted" : "untrusted"}:${applied ? "applied" : "idle"}`;
+      })
+      .join("|");
+
+    if (!workspaceKey || !sessionId) {
+      workspaceSkillAutoRestoreKeyRef.current = null;
+      setWorkspaceSkillRestoreResults([]);
+      return;
+    }
+    if (pinnedSkillIds.length === 0) {
+      workspaceSkillAutoRestoreKeyRef.current = `${sessionId}::${workspaceKey}::empty`;
+      setWorkspaceSkillRestoreResults([]);
+      return;
+    }
+
+    const runKey = `${sessionId}::${workspaceKey}::${statusSignature}`;
+    if (workspaceSkillAutoRestoreKeyRef.current === runKey) {
+      return;
+    }
+    workspaceSkillAutoRestoreKeyRef.current = runKey;
+
+    let cancelled = false;
+    void (async () => {
+      const results: WorkspaceSkillRestoreResult[] = [];
+      let appliedCount = 0;
+      for (const skillId of pinnedSkillIds) {
+        const skill = installedSkills.find((item) => item.id === skillId);
+        if (!skill) {
+          results.push({
+            skillId,
+            status: "missing_skill",
+            detail: "已固定的 Skill 不再存在，无法自动恢复。",
+          });
+          continue;
+        }
+        if (activeSessionSkillState.appliedSkillIds.includes(skillId)) {
+          results.push({
+            skillId,
+            status: "skipped_already_applied",
+            detail: "这个 Skill 已经应用到当前工作区。",
+          });
+          continue;
+        }
+        if (!skill.trusted) {
+          results.push({
+            skillId,
+            status: "skipped_untrusted",
+            detail: "这个 Skill 尚未信任，只加入推荐，不会自动应用。",
+          });
+          continue;
+        }
+
+        try {
+          await applySkill(skillId, "session_kimi");
+          appliedCount += 1;
+          results.push({
+            skillId,
+            status: "applied",
+            detail: "已自动恢复到当前工作区。",
+          });
+        } catch (error) {
+          results.push({
+            skillId,
+            status: "failed",
+            detail: String(error),
+          });
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+      setWorkspaceSkillRestoreResults(results);
+      if (appliedCount > 0) {
+        try {
+          await refreshSkillCenterState(selectedSkillId);
+        } catch {
+          // keep per-skill restore results visible even if the follow-up refresh fails
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSessionSkillState.appliedSkillIds,
+    installedSkills,
+    selectedSkillId,
+    status?.activeSessionId,
+    status?.activeSessionWorkDir,
+    status?.effectiveWorkDir,
+    workspaceSkillProfile?.pinnedSkillIds,
+  ]);
+
+  useEffect(() => {
     if (screen === "workspace" || keepControlCenterForUpgrade) {
       return;
     }
     setControlCenterModalOpen(false);
-    setConfigCenterOpen(false);
-    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }, [keepControlCenterForUpgrade, screen]);
@@ -2004,19 +2560,16 @@ export function useShellController() {
   }
 
   async function handleOpenConfigCenterModal() {
+    setActionError(null);
     setConfigCenterBusy(true);
     try {
       await loadKimiCliConfigCenter();
-      setConfigCenterOpen(true);
+      setControlCenterTask("config_center");
     } catch (error) {
       setActionError(String(error));
     } finally {
       setConfigCenterBusy(false);
     }
-  }
-
-  function handleCloseConfigCenterModal() {
-    setConfigCenterOpen(false);
   }
 
   function handleConfigCenterDraftChange(next: KimiCliConfigCenterInput) {
@@ -2037,7 +2590,7 @@ export function useShellController() {
       });
       await loadKimiCliConfigCenter();
       await refreshOnboarding();
-      setConfigCenterOpen(false);
+      setControlCenterTask(null);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2108,6 +2661,24 @@ export function useShellController() {
     }
   }
 
+  async function handlePickBridgeConnectorDefaultWorkDir(connectorId: string) {
+    try {
+      const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
+      const selected = await open({
+        title: `Select default work directory for ${connector?.label ?? connectorId}`,
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        return selected;
+      }
+      return null;
+    } catch (error) {
+      setActionError(String(error));
+      return null;
+    }
+  }
+
   async function handleSaveWorkDirAndRestart() {
     setActionBusy(true);
     setActionError(null);
@@ -2146,29 +2717,33 @@ export function useShellController() {
     setBridgeOnboardingDraftTouched(true);
   }
 
-  async function handleSaveBridgeOnboarding() {
+  async function saveBridgeOnboardingInternal() {
     if (!bridgeOnboardingValidation.canSave) {
-      setActionError(
+      throw new Error(
         bridgeOnboardingValidation.message ?? "当前 IM Bridge 配置不完整，无法保存。",
       );
-      return;
     }
 
+    const input: BridgeOnboardingConfigInput = {
+      ...bridgeOnboardingDraft,
+      enabled: true,
+      feishuEnabled: true,
+    };
+    const saved = await invoke<BridgeSettings>("save_bridge_onboarding_config", {
+      input,
+    });
+    setBridgeSettings(saved);
+    setBridgeSettingsSnapshot(saved);
+    setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(saved));
+    setBridgeOnboardingDraftTouched(false);
+    return saved;
+  }
+
+  async function handleSaveBridgeOnboarding() {
     setBridgeBusy(true);
     setActionError(null);
     try {
-      const input: BridgeOnboardingConfigInput = {
-        ...bridgeOnboardingDraft,
-        enabled: true,
-        feishuEnabled: true,
-      };
-      const saved = await invoke<BridgeSettings>("save_bridge_onboarding_config", {
-        input,
-      });
-      setBridgeSettings(saved);
-      setBridgeSettingsSnapshot(saved);
-      setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(saved));
-      setBridgeOnboardingDraftTouched(false);
+      await saveBridgeOnboardingInternal();
       await Promise.all([refreshBridgeStatus(), refreshBridgeSecretsMask()]);
     } catch (error) {
       setActionError(String(error));
@@ -2177,31 +2752,208 @@ export function useShellController() {
     }
   }
 
+  async function saveBridgeSettingsInternal(options?: {
+    showRestartNotice?: boolean;
+  }): Promise<BridgeSettings> {
+    const showRestartNotice = options?.showRestartNotice ?? true;
+    const presetsChanged =
+      JSON.stringify(bridgeSettingsSnapshot.workDirPresets ?? []) !==
+      JSON.stringify(bridgeSettings.workDirPresets ?? []);
+    const feishuAutoApproveChanged =
+      bridgeSettingsSnapshot.feishuAutoApprove !== bridgeSettings.feishuAutoApprove;
+    const saved = await invoke<BridgeSettings>("save_bridge_settings", {
+      input: bridgeSettings,
+    });
+    setBridgeSettings(saved);
+    setBridgeSettingsSnapshot(saved);
+    await refreshBridgeStatus();
+    if (
+      showRestartNotice &&
+      bridgeIsRunning &&
+      (presetsChanged || feishuAutoApproveChanged)
+    ) {
+      window.alert(
+        "Bridge 配置已保存。重启 bridge 后，飞书工作目录预设和 Auto Approve 变更才会生效。",
+      );
+    }
+    return saved;
+  }
+
   async function handleSaveBridgeSettings() {
+    try {
+      await handlePersistBridgeSettings();
+    } catch {
+      return;
+    }
+  }
+
+  async function handlePersistBridgeSettings(options?: {
+    showRestartNotice?: boolean;
+  }) {
     setBridgeBusy(true);
     setActionError(null);
     try {
-      const bridgeIsRunning =
-        bridgeStatus.state === "running" ||
-        bridgeStatus.state === "starting" ||
-        bridgeStatus.state === "degraded";
-      const presetsChanged =
-        JSON.stringify(bridgeSettingsSnapshot.workDirPresets ?? []) !==
-        JSON.stringify(bridgeSettings.workDirPresets ?? []);
-      const feishuAutoApproveChanged =
-        bridgeSettingsSnapshot.feishuAutoApprove !==
-        bridgeSettings.feishuAutoApprove;
+      return await saveBridgeSettingsInternal(options);
+    } catch (error) {
+      setActionError(`保存 Bridge 配置失败：${String(error)}`);
+      throw error;
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleToggleBridgeConnectorEnabled(
+    connectorId: string,
+    enabled: boolean,
+  ) {
+    setBridgeBusy(true);
+    setActionError(null);
+    const previousSettings = JSON.parse(JSON.stringify(bridgeSettings)) as BridgeSettings;
+    const nextSettings = {
+      ...previousSettings,
+      connectors: previousSettings.connectors.map((connector) =>
+        connector.id === connectorId ? { ...connector, enabled } : connector,
+      ),
+    };
+    const shouldRestart =
+      bridgeStatus.state === "running" ||
+      bridgeStatus.state === "starting" ||
+      bridgeStatus.state === "degraded";
+
+    setBridgeSettings(nextSettings);
+
+    try {
       const saved = await invoke<BridgeSettings>("save_bridge_settings", {
-        input: bridgeSettings,
+        input: nextSettings,
       });
       setBridgeSettings(saved);
       setBridgeSettingsSnapshot(saved);
-      await refreshBridgeStatus();
-      if (bridgeIsRunning && (presetsChanged || feishuAutoApproveChanged)) {
-        window.alert(
-          "Bridge 配置已保存。重启 bridge 后，飞书工作目录预设和 Auto Approve 变更才会生效。",
-        );
+
+      let restartError: string | null = null;
+      if (shouldRestart) {
+        try {
+          const restarted = await invoke<BridgeStatus>("restart_bridge");
+          setBridgeStatus(restarted);
+        } catch (error) {
+          restartError = String(error);
+        }
       }
+
+      let refreshError: string | null = null;
+      try {
+        await Promise.all([
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      } catch (error) {
+        refreshError = String(error);
+      }
+
+      if (restartError || refreshError) {
+        const details = [
+          restartError ? `重启 Bridge 失败：${restartError}` : null,
+          refreshError ? `刷新 Bridge 状态失败：${refreshError}` : null,
+        ]
+          .filter(Boolean)
+          .join("；");
+        setActionError(`机器人开关已保存。${details}`);
+      }
+    } catch (error) {
+      setBridgeSettings(previousSettings);
+      setActionError(`切换机器人开关失败：${String(error)}`);
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleDeleteBridgeConnector(connectorId: string) {
+    setBridgeBusy(true);
+    setActionError(null);
+    const shouldRestart =
+      bridgeStatus.state === "running" ||
+      bridgeStatus.state === "starting" ||
+      bridgeStatus.state === "degraded";
+
+    try {
+      const saved = await invoke<BridgeSettings>("delete_bridge_connector", {
+        connectorId,
+      });
+      setBridgeSettings(saved);
+      setBridgeSettingsSnapshot(saved);
+
+      let restartError: string | null = null;
+      if (shouldRestart) {
+        try {
+          const restarted = await invoke<BridgeStatus>("restart_bridge");
+          setBridgeStatus(restarted);
+        } catch (error) {
+          restartError = String(error);
+        }
+      }
+
+      let refreshError: string | null = null;
+      try {
+        await Promise.all([
+          refreshBridgeStatus(),
+          refreshBridgeSessions(),
+          refreshBridgeBindings(),
+          refreshBridgeApprovals(),
+          refreshBridgeLogTail(),
+          refreshBridgeSecretsMask(),
+        ]);
+      } catch (error) {
+        refreshError = String(error);
+      }
+
+      if (restartError || refreshError) {
+        const details = [
+          restartError ? `重启 Bridge 失败：${restartError}` : null,
+          refreshError ? `刷新 Bridge 状态失败：${refreshError}` : null,
+        ]
+          .filter(Boolean)
+          .join("；");
+        setActionError(`机器人已删除。${details}`);
+      }
+      return saved;
+    } catch (error) {
+      setActionError(`删除机器人失败：${String(error)}`);
+      throw error;
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleRunBridgePrimaryAction(mode: BridgePrimaryActionMode) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      if (mode === "save_enable" || bridgeOnboardingDirty) {
+        await saveBridgeOnboardingInternal();
+      }
+      if (bridgeSettingsDirty) {
+        await saveBridgeSettingsInternal({ showRestartNotice: false });
+      }
+
+      if (mode === "start") {
+        const data = await invoke<BridgeStatus>("start_bridge");
+        setBridgeStatus(data);
+      } else if (mode === "apply_restart") {
+        const data = await invoke<BridgeStatus>("restart_bridge");
+        setBridgeStatus(data);
+      }
+
+      await Promise.all([
+        refreshBridgeStatus(),
+        refreshBridgeSessions(),
+        refreshBridgeBindings(),
+        refreshBridgeApprovals(),
+        refreshBridgeLogTail(),
+        refreshBridgeSecretsMask(),
+      ]);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2287,6 +3039,24 @@ export function useShellController() {
         refreshBridgeBindings(),
         refreshBridgeSessions(),
         refreshBridgeStatus(),
+      ]);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
+  async function handleResetBridgeBindingToDefaultWorkDir(bindingId: string) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      await invoke("reset_bridge_binding_to_default_work_dir", { bindingId });
+      await Promise.all([
+        refreshBridgeBindings(),
+        refreshBridgeSessions(),
+        refreshBridgeStatus(),
+        refreshBridgeLogTail(),
       ]);
     } catch (error) {
       setActionError(String(error));
@@ -2426,7 +3196,6 @@ export function useShellController() {
       if (snapshot.powershellDiagnostic) {
         setPowershellPreflight(snapshot.powershellDiagnostic);
       }
-      setInstallFlowOpen(true);
       await refreshOnboarding();
     } catch (error) {
       setActionError(String(error));
@@ -2447,26 +3216,6 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
     }
-  }
-
-  async function handleOpenInstallFlow() {
-    setActionError(null);
-    try {
-      await Promise.all([
-        refreshInstallProbe(),
-        refreshInstallSettings(),
-        refreshInstallFlowCatalog(),
-        refreshInstallSessionSnapshot(),
-        refreshPowerShellPreflight(),
-      ]);
-      setInstallFlowOpen(true);
-    } catch (error) {
-      setActionError(String(error));
-    }
-  }
-
-  function handleCloseInstallFlow() {
-    setInstallFlowOpen(false);
   }
 
   async function handleQuickInstallCore() {
@@ -2637,21 +3386,265 @@ export function useShellController() {
 
   function closeControlCenterModal() {
     setControlCenterModalOpen(false);
-    setConfigCenterOpen(false);
-    setInstallFlowOpen(false);
     setInstallCommandsOpen(false);
     resetControlCenterNavigation();
   }
 
+  async function handleSelectSkill(skillId: string) {
+    setSelectedSkillId(skillId);
+    try {
+      await refreshSelectedSkillDetail(skillId);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  function openSkillCenter() {
+    setActionError(null);
+    setInstallCommandsOpen(false);
+    setActiveControlSection("skill_center");
+    setControlCenterTask(null);
+    if (screen === "workspace") {
+      setControlCenterModalOpen(true);
+      return;
+    }
+    if (screen !== "control_center") {
+      window.location.hash = "/control-center";
+      setRouteHash(window.location.hash);
+    }
+    void refreshSkillCenterState(selectedSkillId);
+  }
+
+  async function handleInstallSkillFromGit() {
+    setActionError(null);
+    setControlCenterTask("skill_git_import");
+  }
+
+  async function handleConfirmInstallSkillFromGit() {
+    const repoUrl = skillCenterGitRepoUrl.trim();
+    const gitRef = skillCenterGitRef.trim();
+    if (!repoUrl) {
+      setActionError("请输入 Skill Git 仓库地址。");
+      return;
+    }
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const installed = await installSkillFromGit(repoUrl, gitRef || undefined);
+      await refreshSkillCenterState(installed.id);
+      setControlCenterTask(null);
+      setSkillCenterGitRepoUrl("");
+      setSkillCenterGitRef("");
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleImportSkillFromPath() {
+    setActionError(null);
+    setControlCenterTask("skill_import");
+  }
+
+  async function handleConfirmImportSkillFromPath(mode: "directory" | "zip") {
+    setControlCenterTask(null);
+    setActionError(null);
+    try {
+      const selected = await open({
+        title: mode === "directory" ? "选择本地 Skill 目录" : "选择 Skill ZIP",
+        multiple: false,
+        directory: mode === "directory",
+        filters: mode === "zip" ? [{ name: "ZIP files", extensions: ["zip"] }] : undefined,
+      });
+      if (typeof selected !== "string") {
+        return;
+      }
+      setSkillCenterBusy(true);
+      try {
+        const installed = await importSkillFromPath(selected);
+        await refreshSkillCenterState(installed.id);
+      } catch (error) {
+        setActionError(String(error));
+      } finally {
+        setSkillCenterBusy(false);
+      }
+    } catch (error) {
+      setActionError(String(error));
+    }
+  }
+
+  async function handleOpenControlTask(
+    task: ControlCenterTaskId,
+    payload: ControlCenterTaskPayload | null = null,
+  ) {
+    switch (task) {
+      case "config_center":
+        await handleOpenConfigCenterModal();
+        return;
+      case "skill_git_import":
+        await handleInstallSkillFromGit();
+        return;
+      case "skill_import":
+        await handleImportSkillFromPath();
+        return;
+      case "bridge_connector_secrets":
+      case "bridge_runtime":
+        if (!payload?.connectorId) {
+          setActionError("缺少 connector 上下文，无法打开任务面。");
+          return;
+        }
+        setActionError(null);
+        setControlCenterTask(task, payload);
+        return;
+      default:
+        return;
+    }
+  }
+
+  function handleCloseControlTask() {
+    closeActiveControlTask();
+  }
+
+  async function handleSetSkillTrust(skillId: string, trusted: boolean) {
+    if (!trusted) {
+      const confirmed = window.confirm(
+        "取消信任会移除这个 Skill 当前所有受管投影，确定继续吗？",
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await setSkillTrust(skillId, trusted);
+      await refreshSkillCenterState(skillId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function ensureSkillTrusted(skillId: string) {
+    const target =
+      installedSkills.find((skill) => skill.id === skillId) ?? selectedSkillDetail?.skill;
+    if (target?.trusted) {
+      return;
+    }
+    const confirmed = window.confirm(
+      "首次应用前需要先信任这个 Skill。确认后将执行“信任并应用”。",
+    );
+    if (!confirmed) {
+      throw new Error("已取消信任并应用");
+    }
+    await setSkillTrust(skillId, true);
+  }
+
+  async function handleApplySkill(skillId: string, scope: SkillApplyScope) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await ensureSkillTrusted(skillId);
+      await applySkill(skillId, scope);
+      await refreshSkillCenterState(skillId);
+    } catch (error) {
+      const message = String(error);
+      if (message !== "Error: 已取消信任并应用" && message !== "已取消信任并应用") {
+        setActionError(message);
+      }
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleRemoveSkill(skillId: string, scope: SkillApplyScope) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await removeSkill(skillId, scope);
+      await refreshSkillCenterState(skillId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleSetWorkspaceSkillPin(skillId: string, pinned: boolean) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const profile = await setWorkspaceSkillPin(skillId, pinned);
+      setWorkspaceSkillProfile(profile);
+      setWorkspaceRecentSkillIds(profile.recentSkillIds ?? []);
+      await refreshWorkspaceSkillRecommendationsState();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleUpdateSkill(skillId: string) {
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      const updated = await updateSkill(skillId);
+      await refreshSkillCenterState(updated.id);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleUninstallSkill(skillId: string) {
+    const target =
+      installedSkills.find((skill) => skill.id === skillId) ?? selectedSkillDetail?.skill;
+    const label = target?.name || "这个 Skill";
+    const confirmed = window.confirm(
+      `确定卸载“${label}”吗？如果它仍应用在全局或 Session 中，系统会先阻止卸载。`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setActionError(null);
+    setSkillCenterBusy(true);
+    try {
+      await uninstallSkill(skillId);
+      await refreshSkillCenterState(selectedSkillId === skillId ? null : selectedSkillId);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setSkillCenterBusy(false);
+    }
+  }
+
+  async function handleRecoverWorkspaceSkill(skillId: string) {
+    setSkillCenterSection("workspace_insights");
+    await handleApplySkill(skillId, "session_kimi");
+  }
+
+  async function handleOpenSkillFromInsights(skillId: string) {
+    setSkillCenterSection("manage");
+    await handleSelectSkill(skillId);
+  }
+
   function openControlCenter() {
     if (screen === "workspace") {
-      setConfigCenterOpen(false);
       resetControlCenterNavigation();
       setControlCenterModalOpen(true);
       return;
     }
     window.location.hash = "/control-center";
     setRouteHash(window.location.hash);
+  }
+
+  function handleSkillCenterSectionChange(section: SkillCenterSectionId) {
+    setSkillCenterSection(section);
   }
 
   function backToStatus() {
@@ -2821,7 +3814,7 @@ export function useShellController() {
     };
 
     push(formatBridgeErrorEntry(bridgeStatus.lastErrorCode, bridgeStatus.lastError));
-    for (const channel of bridgeStatus.channels) {
+    for (const channel of bridgeStatus.connectors) {
       push(
         formatBridgeErrorEntry(
           channel.lastErrorCode,
@@ -2843,10 +3836,11 @@ export function useShellController() {
     return items;
   }, [
     bridgeLogTail,
-    bridgeStatus.channels,
+    bridgeStatus.connectors,
     bridgeStatus.lastError,
     bridgeStatus.lastErrorCode,
   ]);
+  const sessionSkillCount = activeSessionSkillState.appliedSkillIds.length;
 
   const uiBackendState =
     status?.state ?? (useBootHintWorkspace ? bootHint?.backendState : undefined);
@@ -2909,9 +3903,38 @@ export function useShellController() {
     bridgeLogTail,
     bridgeRecentErrors,
     bridgeSecretsMask,
+    feishuConnectorOnboarding,
+    feishuConnectorOnboardingBusy,
+    weixinConnectorOnboarding,
+    weixinConnectorOnboardingBusy,
+    installedSkills,
+    skillCenterBusy,
+    skillCenterSection,
+    setSkillCenterSection: handleSkillCenterSectionChange,
+    skillCenterGitRepoUrl,
+    setSkillCenterGitRepoUrl,
+    skillCenterGitRef,
+    setSkillCenterGitRef,
+    skillCenterSearch,
+    setSkillCenterSearch,
+    skillCenterFilter,
+    setSkillCenterFilter,
+    selectedSkillId,
+    selectedSkillDetail,
+    globalSkillProjections,
+    activeSessionSkillState,
+    workspaceSkillProfile,
+    workspaceRecentSkillIds,
+    workspaceSkillRecommendations,
+    workspaceSkillRestoreResults,
+    sessionSkillCount,
     bridgeOnboardingDraft,
     bridgeOnboardingDirty,
     bridgeOnboardingValidation,
+    bridgeSettingsDirty,
+    bridgePersistedConnectorIds: bridgeSettingsSnapshot.connectors.map(
+      (connector) => connector.id,
+    ),
     bridgeBusy,
     mainWindowCloseBehavior,
     mainWindowCloseDecisionRequest,
@@ -2930,6 +3953,8 @@ export function useShellController() {
     activeRuntimePanel,
     setActiveRuntimePanel,
     controlCenterModalOpen,
+    activeControlTask,
+    activeControlTaskPayload,
     tauriRuntime,
     screen,
     uiBackendState,
@@ -2943,7 +3968,6 @@ export function useShellController() {
     stepCompletion,
     configCenterView,
     configCenterDraft,
-    configCenterOpen,
     configCenterBusy,
     configCenterDirty,
     installProbe,
@@ -2957,10 +3981,9 @@ export function useShellController() {
       installSessionSnapshot.status === "cancelling",
     installAction,
     installMessage,
-    installFlowOpen,
     installFlowCatalog,
     installSessionSnapshot,
-    installCommandsOpen: installFlowOpen,
+    installCommandsOpen,
     installCommandsBusy: false,
     installCommandCatalog,
     refreshCoreState: async () => {
@@ -2975,6 +3998,7 @@ export function useShellController() {
     refreshBridgeApprovals,
     refreshBridgeLogTail,
     refreshBridgeSecretsMask,
+    refreshSkillCenterState,
     refreshInstallProbe,
     refreshInstallSettings,
     refreshPowerShellPreflight,
@@ -2989,8 +4013,8 @@ export function useShellController() {
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenKimiConfigDir,
-    handleOpenConfigCenterModal,
-    handleCloseConfigCenterModal,
+    handleOpenControlTask,
+    handleCloseControlTask,
     handleConfigCenterDraftChange,
     handleResetConfigCenterDraft,
     handleSaveKimiCliConfigCenter,
@@ -2998,18 +4022,31 @@ export function useShellController() {
     handleSavePathAndRetry,
     handlePickWorkDir,
     handlePickBridgeDefaultWorkDir,
+    handlePickBridgeConnectorDefaultWorkDir,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleBridgeSettingsChange,
     handleBridgeOnboardingDraftChange,
+    handleToggleBridgeConnectorEnabled,
+    handleDeleteBridgeConnector,
     handleSaveBridgeOnboarding,
     handleSaveBridgeSettings,
+    handlePersistBridgeSettings,
+    handleSaveBridgeConnectorSecrets,
+    handleStartFeishuConnectorOnboarding,
+    handleRefreshFeishuConnectorOnboardingStatus,
+    handleCancelFeishuConnectorOnboarding,
+    handleStartWeixinConnectorOnboarding,
+    handleRefreshWeixinConnectorOnboardingStatus,
+    handleCancelWeixinConnectorOnboarding,
+    handleRunBridgePrimaryAction,
     handleStartBridge,
     handleStopBridge,
     handleRestartBridge,
     handleImportBridgeSession,
     handleClearBridgeBinding,
     handleResetBridgeBindingSession,
+    handleResetBridgeBindingToDefaultWorkDir,
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
@@ -3017,19 +4054,29 @@ export function useShellController() {
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,
     handleInstallNodejs: handleInstallNodejsTask,
-    handleOpenInstallFlow,
-    handleCloseInstallFlow,
     handleStartInstallTask,
     handleCancelInstallTask,
-    handleOpenInstallCommands: handleOpenInstallFlow,
-    handleCloseInstallCommands: handleCloseInstallFlow,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,
+    handleSelectSkill,
+    handleOpenSkillFromInsights,
+    handleConfirmInstallSkillFromGit,
+    handleConfirmImportSkillFromPath,
+    handleSetSkillTrust,
+    handleApplySkill,
+    handleRemoveSkill,
+    handleSetWorkspaceSkillPin,
+    handleUpdateSkill,
+    handleUninstallSkill,
+    handleRecoverWorkspaceSkill,
     handleCompleteOnboarding,
     handleSkipOnboarding,
     openControlCenter,
     closeControlCenterModal,
+    requestCloseControlCenter,
+    dismissControlCenter,
+    openSkillCenter,
     backToStatus,
     handleStartWindowDrag,
     handleMinimizeWindow,

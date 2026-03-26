@@ -1,511 +1,452 @@
-# Shell IM Bridge Entry Restore Todo
+# Continued From Previous Todo
 
-## Hard Constraints
-
-- [x] Only restore Shell UI entry points for IM Bridge; keep the Feishu `/bridge` soft-hide behavior unchanged.
-- [x] Limit the code change to control-center navigation and overview entry visibility.
-
-## Implementation
-
-- [x] Re-add the `IM Bridge` tab in Control Center header navigation.
-- [x] Re-add the overview-side “打开 IM Bridge” task card.
-- [x] Restore control-section routing so selecting `bridge_center` opens the IM Bridge panel again.
+- [x] 将 `apps/kimi-im-bridge` 的配置、领域模型、store 和 admin payload 从单平台单实例升级为多 connector，并补齐 legacy 配置迁移。
+- [x] 将 `apps/kimi-shell/src-tauri` 的 bridge 类型、设置存储、命令和状态拼装升级为 connector 模型，并新增 connector CRUD / secret mask 命令。
+- [x] 将 `apps/kimi-shell` 前端控制器和控制中心 Bridge UI 改成完整 connector 管理：列表、详情、凭证、运行态、bindings / approvals 展示 connector 归属。
+- [x] 为多 connector 补充 Go / Rust / 前端构建级验证与关键回归测试。
 
 ## Validation
 
-- [x] Run `pnpm build` in `apps/kimi-shell`.
+- [x] 运行 `go test ./...`（`apps/kimi-im-bridge`，至少覆盖 config/store/app/admin/adapters 相关多 connector 场景）。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
 ## Retrospective
 
-- [x] Restored only the Shell-side IM Bridge navigation surfaces in Control Center; the Feishu `/bridge` text-command and legacy card-entry soft-hide remains unchanged.
-- [x] Validation passed with `pnpm build` in `apps/kimi-shell`; version-sync touched `package.json`, `Cargo.toml`, `Cargo.lock`, and `tauri.conf.json` again during the build.
+- [x] 记录为什么 bridge 的运行时主身份必须从 `platform` 提升为稳定 `connectorId`，以及哪些 legacy 字段继续保留作兼容。
 
----
+### Notes
 
-# Bridge Command Soft Hide Todo
+- [x] sidecar 里 `platform` 只适合表达“平台语义”，一旦进入 checkpoint、binding、approval、delivery、turn 这些需要长期追踪和持久化的链路，主键必须升级成稳定 `connectorId`，否则同平台多机器人会串线。
+- [x] 为了不打断现有 shell/Tauri 侧的单实例路径，这一轮在 Go 侧保留了少量兼容入口：legacy `channels` / 顶层 secrets 仍可读，store 也允许“单 connector 场景下用 platform 名命中默认 connector”。
 
-## Hard Constraints
+## Control Center Overview + Bridge Robot View (2026-03-23)
 
-- [x] Keep bridge runtime, binding, approval, and session internals intact; only remove user-facing `/bridge` and shell-management entry points.
-- [x] Preserve approval decision cards in Feishu so runtime approval flow still works.
-- [x] Avoid changing bridge admin API or persisted bridge settings/state formats.
+### Plan
 
-## Implementation
+- [x] 调整控制中心概览“待处理与提醒”逻辑：有阻塞时只显示阻塞列表，无阻塞时只显示 Agent 提示卡。
+- [x] 精简概览区文案与优先任务卡片：移除“当前没有阻塞项 / 可以继续推进”说明，以及“打开技能中心”卡片中的 meta 文案。
+- [x] 将 IM Bridge 主卡改成标题栏 `总览 / 飞书机器人` 双视图切换，默认进入总览。
+- [x] 删除 Bridge 技能跟随模式，改为 bridge-ops 首次自动安装到全局技能目录 `~/.config/agents/skills/bridge-ops`。
+- [x] 为飞书 connector 增加每机器人独立的默认工作目录和“启动时新建对话”设置，并让旧全局字段迁移到飞书 connector。
+- [x] 新增飞书机器人卡片视图：显示状态与错误摘要，支持机器人启用、自动审批、启动时新建对话、默认工作目录、保存并重启、连接与凭据、高级运行面板。
+- [x] 将“连接与凭据”“高级运行面板”收口为按 connector 作用域的弹窗，不影响现有全局 Bridge 启停语义。
 
-- [x] Disable Feishu text-command exposure for `/bridge ...` while keeping normal IM prompt flow unchanged.
-- [x] Downgrade legacy Feishu bridge panel/session/workdir card actions to a hidden-entry response so old cards cannot reopen management UI.
-- [x] Hide shell-side IM Bridge management entry points from visible navigation and overview cards without removing runtime status surfaces.
-- [x] Update focused Go/TS tests to match the hidden-entry behavior.
+### Validation
 
-## Validation
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`，确认 Bridge settings/store/manager 兼容迁移通过。
+- [x] 运行 `go test ./...`（`apps/kimi-im-bridge`），确认 shell 侧启动参数调整未破坏 sidecar 契约。
+- [x] 运行 `pnpm -C apps/kimi-shell build`，确认控制中心与 Bridge 双视图改动可干净构建。
+- [ ] 手工检查概览页无阻塞时只显示 Agent 提示、有阻塞时不显示 Agent 提示。
+- [ ] 手工检查 IM Bridge 标题栏双视图切换、飞书机器人卡片保存、connector 凭据弹窗、运行面板弹窗的基本链路。
 
-- [x] Run focused Go tests for Feishu adapter command/card behavior.
-- [x] Run `pnpm build` in `apps/kimi-shell`.
+### Retrospective
 
-## Retrospective
+- [x] 记录本轮概览精简与 Bridge 机器人化视图暴露出的全局/connector 配置边界，以及 legacy `skillsMode` 的最终清理点。
 
-- [x] `/bridge` text commands are no longer intercepted in Feishu; they now fall back to the normal IM prompt path, while runtime/session/binding/approval internals stay in place.
-- [x] Legacy bridge management card callbacks (`bridge_show_panel`, session switching, workdir preset/clear) now collapse into a hidden-entry card so old chat cards cannot reopen management UI.
-- [x] Control Center no longer exposes the `IM Bridge` tab or overview jump card, but dashboard/status surfaces and background bridge runtime remain untouched.
-- [x] Validation passed with `go test ./internal/adapters/feishu` and `pnpm build` in `apps/kimi-shell`; the frontend build again triggered version-sync noise in `package.json`, `Cargo.toml`, `Cargo.lock`, and `tauri.conf.json`.
+### Notes
 
----
+- [x] Bridge 的“应用启动自动拉起”继续保留在全局 `autoStart`，而机器人是否参与运行统一落在 connector 级 `enabled`；这样总览和机器人卡片的职责边界更清晰，不会再出现两个语义重复的“自动启动”开关。
+- [x] legacy `skillsMode` 仍可从旧配置读取，但归一化后固定为 `Disabled` 且保存时不再回写；真正的 `bridge-ops` 目录来源已经收口到用户全局技能目录，避免默认工作目录切换带来的隐式副作用。
 
-# Control Center / IM Bridge Interaction Cleanup Todo
+## Rounded App Icon Regeneration (2026-03-23)
 
-## Hard Constraints
+### Plan
 
-- [x] Keep existing bridge admin/runtime APIs and persisted `BridgeSettings` / `BridgeStatus` wire shape unchanged.
-- [x] Limit behavior changes to control-center UX, shell status chip rendering, onboarding dirty/save handling, and focused Rust test coverage.
-- [x] Reuse existing Tauri dialog and `open_folder` capabilities for IM default work-dir actions; do not add new commands.
+- [x] 新增本地图标母版生成脚本：基于 `apps/kimi-shell/src-tauri/icons/moonki.png` 产出圆角透明外轮廓的 `1024x1024` 母版 PNG。
+- [x] 用新母版统一重生成 `apps/kimi-shell/src-tauri/icons` 下 Tauri/Windows 所需的多尺寸图标资源，保持现有文件名与打包入口不变。
+- [x] 补充可复用的执行说明，让后续替换源图时可以重复使用同一流程。
 
-## Implementation
+### Validation
 
-- [x] Change onboarding progress and auth-card completion to count 4 cards, with login/API completion treated as one card.
-- [x] Update dashboard hero to show backend state plus IM final state, and remove the latest excerpt card.
-- [x] Normalize footer IM chip sizing and labels so success displays `IM Running`.
-- [x] Refactor `BridgeRuntimePanel` into collapsible sections with only the first section expanded by default.
-- [x] Add IM default work-dir input actions in the first bridge runtime card: browse directory and open current folder.
-- [x] Fix IM bridge onboarding auto-start dirty detection and keep auto-start persisted across restart.
-- [x] Add/update focused Rust assertions for onboarding auto-start persistence.
-- [x] Collapse the entire outer “Bridge 运行面板” card by default and move `IM Default Work Dir` controls into the main IM Bridge panel.
+- [x] 运行母版生成脚本，确认输出文件存在且为 `1024x1024` PNG。
+- [x] 运行 `pnpm --dir apps/kimi-shell tauri icon <master-png>`，确认 `icon.ico`、`icon.icns`、`32x32.png`、`128x128.png`、`128x128@2x.png` 与 `Square*Logo.png` 已更新。
+- [x] 检查 `16/24/32/48/64/128/256` 缩略尺寸，确认图形未贴边、月牙尖端与 `K` 仍可辨识。
+- [ ] 运行 `pnpm --dir apps/kimi-shell tauri build`，验证打包产物表面图标；当前被工作区里既有的 TypeScript 构建错误阻塞，未能完成。
 
-## Validation
+### Retrospective
 
-- [x] Run `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`.
-- [x] Run `pnpm build` in `apps/kimi-shell`.
-- [x] Note remaining manual desktop validation for dashboard, bridge accordion, and auto-start-on-relaunch behavior.
-- [x] Re-run `pnpm build` after moving the IM default work-dir controls and folding the outer runtime panel.
+- [x] 记录本轮圆角图标方案对 Windows 多表面图标一致性和后续维护流程的约束。
 
-## Retrospective
+### Notes
 
-- Quick setup progress now follows the 4 visible onboarding cards instead of mixing card UX with the old 5-step backend checklist, so auth completion is no longer double-counted.
-- Dashboard hero was simplified to backend state plus IM final state, and the IM runtime panel now uses collapsible cards with a dedicated default-workdir browse/open-folder flow.
-- The auto-start regression came from frontend dirty-state logic, not Rust persistence; adding `autoStart` to onboarding dirty detection fixed the toggle reset while Rust coverage now rechecks the saved round-trip.
-- Validation completed with `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture` and `pnpm build`; desktop click-through for dashboard visuals, accordion defaults, and relaunch auto-start still needs one manual smoke pass.
-- Follow-up adjustment: the outer `Bridge 运行面板` card is now collapsed by default, while `IM Default Work Dir` has been promoted into the main IM Bridge panel so users can edit it without opening the advanced runtime panel.
-# Control Center Editorial Redesign Todo
+- [x] 图标维护流程固定为“两步”：先运行 `apps/kimi-shell/scripts/generate_rounded_icon.ps1` 生成 `moonki-rounded-master.png`，再运行 `pnpm --dir apps/kimi-shell tauri icon src-tauri/icons/moonki-rounded-master.png` 批量覆盖各平台图标资源。
+- [x] Windows 图标一致性不能只看 `icon.ico`；本轮同步更新了 `bundle.icon` 引用的 PNG、`Square*Logo.png`、`StoreLogo.png` 以及移动端衍生资源，避免打包后不同表面出现新旧图标混用。
+- [x] `pnpm --dir apps/kimi-shell tauri build` 当前被现有前端类型错误阻塞：`src/App.tsx` 缺少 `ControlCenterViewProps` 所需回调，`src/features/control-center/ControlCenterView.tsx` 仍有 `skillsMode` 类型不匹配与未使用声明，需先修复这些与本次图标无关的问题后再做安装器/快捷方式实机验收。
 
-## Hard Constraints
+## IM Bridge 总览卡片化 + 运行面板裁切修复 (2026-03-24)
 
-- [x] Keep `useShellController` action signatures and control-center props stable.
-- [x] Preserve fullscreen and workspace modal control-center behavior.
-- [x] Keep modal shells fixed-header/fixed-footer with body-only scrolling.
+### Plan
 
-## Implementation
+- [x] 为 IM Bridge 总览补充简洁机器人卡片列表，保留全局状态与主操作。
+- [x] 为机器人卡片增加即时生效的启用 switch，并在控制器中封装保存/必要重启/刷新/失败回滚。
+- [x] 将 Bridge 二级弹窗改为 portal 渲染，并补齐运行面板滚动与高度链，修复遮挡裁切。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 做静态验证，并补充回顾记录。
 
-- [x] Restructure the control center overview into an editorial dashboard with health summary, priority tasks, and quick actions.
-- [x] Rework onboarding into a progress-driven layout with a visible step rail and focused detail panel.
-- [x] Reframe runtime/diagnostics into a summary-first flow with expandable deep-dive panels.
-- [x] Refresh shared control-center headers, modal shells, and status badges to use one coherent visual language.
-- [x] Introduce control-center-specific design tokens, typography, surfaces, and motion in `App.css`.
-- [x] Differentiate fullscreen/full and modal/dashboard presentations without changing core behaviors.
+### Validation
 
-## Validation
+- [x] 总览可展示 0/1/多机器人卡片，且顺序稳定。
+- [ ] 机器人主开关在 Bridge 停止/运行两种状态下都按预期即时生效。
+- [ ] 高级运行面板在控制中心全屏与工作区 modal 两种模式下都不再被裁切，内容可滚动到底。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-- [x] Run a frontend build for `apps/kimi-shell`.
-- [ ] Verify the redesigned control center still renders across overview, onboarding, runtime, fullscreen, and modal surfaces.
-- [x] Review responsive behavior and state mapping for success, warning, running, and error states.
+### Retrospective
 
-## Retrospective
+- [x] 记录本轮对“总览即时操作”和“二级 modal portal 化”的边界经验。
 
-- 控制中心现在改成了“编辑化仪表台”结构：概览页先给健康摘要和任务入口，设置页改成步骤轨道，运行页先给风险摘要再进入深挖面板。
-- 展示层重组集中在 `ControlCenterView.tsx` 和 `App.css`，没有改 `useShellController` 的动作签名，也没有动后端接口。
-- `pnpm build` 已通过；仍缺桌面端真实窗口下的 fullscreen / workspace modal 手点验收。
+### Notes
 
----
+- [x] 总览里的即时开关必须拥有独立的保存/重启/回滚链路；否则它会退化成“看起来像 switch，实际上还是草稿表单”的伪即时操作。
+- [x] 控制中心这种“modal 里再开 modal”的结构，不能只靠提高 `z-index` 解决遮挡；只要外层存在 `overflow`、滤镜或独立 containing block，就应优先用 portal 把二级弹窗提升到 `document.body`。
 
-# Feishu Image/File/Interactive Integration Todo
+## Kimi Code 鉴权配置定位 (2026-03-24)
 
-# Feishu Reply Card Title Cleanup Todo
+### Plan
 
-## Hard Constraints
+- [x] 找到控制中心或运行时里与 Kimi Code / provider / config center 相关的配置入口与保存命令。
+- [x] 追踪 Tauri/Rust 侧如何读取、落盘、传递这些配置，确认优先级是环境变量、配置文件还是运行时参数。
+- [x] 核对当前仓库和本机默认配置目录中可能实际生效的文件位置，定位“当前 Kimi Code 实际读的是哪份鉴权配置”。
+- [x] 输出结论和排查建议，并把结果记录回本节。
 
-- [x] Keep existing Feishu interactive reply delivery and fallback behavior unchanged; only remove the visible reply-card title text.
-- [x] Limit the code change to the reply-card renderer and its focused regression tests.
+### Validation
 
-## Implementation
+- [x] 至少给出一条从 UI/命令入口到最终配置文件或环境变量的完整调用链。
+- [x] 至少给出一个本机可直接检查的绝对路径或命令，帮助确认当前生效配置。
 
-- [x] Locate the interactive reply-card title generation path used by normal IM bridge replies.
-- [x] Remove the `Kimi reply` / `Kimi reply (n/N)` title text from normal reply cards.
-- [x] Update focused Go tests to assert the new card header behavior.
+### Retrospective
 
-## Validation
+- [x] 记录这次定位里发现的配置优先级或多处配置源带来的混淆点。
 
-- [x] Run focused Go tests for the Feishu sender reply-card path.
+### Notes
 
-## Retrospective
+- [x] 控制中心 `Provider API` 面板通过前端 `handleOpenConfigCenterModal -> invoke("load_kimi_cli_config_center")` 读取配置，保存时走 `invoke("save_kimi_cli_config_center")`；Rust 侧对应 `lib.rs -> backend_manager.rs`。
+- [x] `backend_manager::resolve_kimi_config_dir()` 直接把 Kimi CLI 配置目录解析为用户主目录下的 `~/.kimi`，当前实现没有额外的“自定义 config path”旁路；配置文件固定为 `~/.kimi/config.toml`。
+- [x] `spawn_backend_process()` 启动 `kimi web` 时只注入 `PYTHONIOENCODING` / `PYTHONUTF8`，没有单独注入 API key 或 base URL；因此鉴权仍由 `kimi.exe` 自己按继承环境变量 + `~/.kimi/config.toml` 决定。
+- [x] 当前本机 `%APPDATA%\\com.kimi.shell\\settings.json` 中 `kimiPath` 为 `null`，所以桌面壳通过 `which::which("kimi")` / PATH 定位可执行文件；本机实际命中 `C:\\Users\\endea\\.local\\bin\\kimi.exe`。
+- [x] 当前 shell 进程里 `KIMI_PROVIDER`、`KIMI_API_KEY`、`MOONSHOT_API_KEY`、`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`ANTHROPIC_API_KEY`、`AZURE_OPENAI_API_KEY`、`AZURE_OPENAI_ENDPOINT` 都未设置，因此没有环境变量覆盖，实际生效配置来自 `C:\\Users\\endea\\.kimi\\config.toml`。
+- [x] 本机 `C:\\Users\\endea\\.kimi\\config.toml` 存在且包含顶层 `provider = "kimi-for-coding"`、`model = "kimi-for-coding"`，同时定义了 `[providers.kimi-for-coding]` 与 `[providers."managed:kimi-code"]`，两者都指向 `https://api.kimi.com/coding/v1`；若出现 `401 Invalid Authentication`，应优先检查这份文件里对应 provider/service 的 `api_key` / oauth 条目。
+- [x] 这类问题最容易混淆的点不在桌面壳自己的 `settings.json`，而在“shell 只负责启动 `kimi.exe`，真正的 provider 凭证优先级由 `kimi.exe` 继承环境变量再回落到 `~/.kimi/config.toml`”。
 
-- Normal Feishu interactive replies now send a body-only card payload without `header.title`, so the visible `Kimi reply` label is gone while markdown content and chunk splitting remain unchanged.
-- Updated sender- and service-level tests to assert the new no-header shape and to keep coverage on interactive reply delivery.
-- Verified with `go test ./internal/adapters/feishu`.
+## Bridge-ops `summary` 缺失兼容修复 (2026-03-24)
 
-## Hard Constraints
+### Plan
 
-- [x] Keep the existing Go sidecar architecture and admin API lifecycle unchanged; no new Node/OpenClaw runtime.
-- [x] Use additive SQLite migration only for pending inbound attachments; keep existing bridge settings/secrets backward-compatible.
-- [x] Preserve existing `/bridge` command, approval-card, onboarding-card, and doctor-card behavior while moving normal Feishu replies to renderer-driven delivery.
+- [x] 在 `bridge_ops.ps1` 中新增可选字符串属性读取 helper，兼容缺失 `summary` 字段。
+- [x] 用 helper 替换 `Find-SessionCandidates`、`list-sessions`、`switch-session` 中对 `summary` 的直接访问。
+- [x] 运行 PowerShell 严格模式最小复现和脚本加载校验，确认缺失 `summary` 时不再抛错。
 
-## Implementation
+### Validation
 
-- [x] Add bridge-local attachment/artifact contracts across domain, runtime, bridgecore, and Kimi provider request types.
-- [x] Add pending inbound attachment persistence, expiry cleanup, and capped per-chat/thread caching in the bridge store.
-- [x] Extend Feishu inbound mapping to accept `image` and `file`, stage/download resources locally, and consume cached attachments on the next eligible text prompt.
-- [x] Extend the Feishu gateway/sender to upload and send `image`, `file`, and `interactive` replies with delivery metadata and fallback behavior.
-- [x] Switch bridge settings from `feishuReplyCards` to `feishuReplyRenderer` with backward-compatible normalization in Go, Rust, and TypeScript.
-- [x] Update the shell Bridge Runtime panel to use an explicit Feishu reply renderer selector instead of a boolean checkbox.
+- [x] 严格模式下直接访问缺失 `summary` 成员仍会复现原始错误，helper 路径返回空字符串。
+- [x] `bridge_ops.ps1` 可被 PowerShell 正常加载，修改后无语法错误。
+- [x] 缺失 `summary` 的 session 对象可完成候选匹配、`list-sessions` 输出和 `switch-session` 歧义候选输出。
+- [x] 使用本机真实 `bridge_auth_file` 实跑 `list-sessions`，确认 `/api/v1/sessions` 在缺失 `summary` / `sessionState` / 个别缺失 `workDir` 时脚本仍可成功返回。
 
-## Validation
+### Retrospective
 
-- [x] Run focused Go tests for store, config, Kimi provider, and Feishu adapter behavior.
-- [x] Run focused Rust tests for bridge settings persistence and normalization.
-- [x] Run a frontend build for the Bridge Runtime panel changes.
-- [ ] Note remaining manual Feishu smoke checks for image/file inbound and interactive reply delivery.
+- [x] 记录本轮对 Bridge Admin API 可选字段兼容边界的经验。
 
-## Retrospective
+### Notes
 
-- Normalized Feishu reply rendering onto an explicit renderer enum across Go/Rust/TS while preserving legacy `feishuReplyCards` read compatibility and avoiding config file churn on save.
-- Added staged inbound attachment caching plus multimodal prompt wiring without changing the existing sidecar runtime boundary; bridge-local artifact send now rides the current Feishu gateway/sender path.
-- Remaining validation is external to the repo: live Feishu smoke for image/file inbound, interactive chunking, and artifact upload/send behavior against a real tenant.
+- [x] Bridge Admin API 的 session payload 不能假设前端展示字段恒定存在；在当前环境里，`summary` 与 `sessionState` 全量缺失，且有个别 session 连 `workDir` 也缺失，脚本层必须把这些字段当作可选值处理。
+- [x] 这类 PowerShell 运维脚本在 `Set-StrictMode -Version Latest` 下会把“缺少字段”的兼容问题立刻升级成运行时异常；对外部 JSON 动态对象的可选字段读取应统一经由 helper，避免同类问题在列表、匹配、歧义输出、后续 patch body 里反复出现。
 
----
+## 飞书机器人自助开通 (2026-03-24)
 
-# Kimi IM Bridge Refactor Todo
+### Plan
 
-## Hard Constraints
+- [x] 在 `apps/kimi-shell/src-tauri` 新增飞书 onboarding 状态机，覆盖 init / begin / poll、内存会话、成功写入 connector secrets、成功后重启 bridge。
+- [x] 新增 Tauri 命令与前后端类型：启动、查询状态、取消飞书 onboarding。
+- [x] 在控制中心现有飞书机器人“连接与凭据”区域加入自助开通 UI：二维码/链接、轮询状态、失败重试、成功摘要，并保留手动凭据输入。
+- [x] 运行 Rust / 前端构建级验证，补充回顾与结果记录。
 
-- [x] Keep CLI flags and admin API behavior stable.
-- [x] Keep `go test ./...` green after each implementation phase.
-- [x] Use additive SQLite migrations only; no destructive schema rewrites.
+### Validation
 
-## Implementation
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+- [ ] 手工检查飞书机器人未配置凭据时可进入自助开通流，成功后掩码与 bridge 状态刷新。
+- [ ] 手工检查已有凭据场景下，手动保存入口与高级运行面板不回归。
 
-- [x] Add `internal/bridgecore` types, interfaces, and orchestrator.
-- [x] Add `internal/providers/kimi` and move provider/session orchestration there.
-- [x] Add `internal/adapterkit` shared inbound/checkpoint/approval contracts.
-- [x] Add `internal/platforms/{telegram,feishu}` and switch app wiring to them.
-- [x] Expand store/domain for turns, events, checkpoints, leases, and delivery metadata.
-- [x] Split `internal/app` into wiring and lifecycle responsibilities.
-- [x] Keep `internal/runtime` as an admin/debug compatibility facade.
-- [x] Add or update tests for bridgecore, provider, migrations, and app wiring.
-- [x] Run full package tests and verify migration coverage.
+### Retrospective
 
-## Review
+- [x] 记录飞书自助开通与现有 connector/config 存储边界的经验。
 
-- [x] Confirm app startup still initializes channels and reconciles pending approvals.
-- [x] Confirm Telegram and Feishu adapters only advance checkpoints after successful handling.
-- [x] Confirm turn/approval persistence keeps `turn_id` and `step_id`.
+### Notes
 
-## Retrospective
+- [x] 飞书自助开通不应再引入第二套 secrets 存储；最终写回仍必须复用现有 connector secrets 文件，否则“自助创建”和“手动填写”会彼此漂移。
+- [x] 手动凭据保存链路若按“有输入字段就整体覆盖 feishu secrets”处理，会误清空已有 `verificationToken/encryptKey`；这一轮已顺手收敛成“仅覆盖本次显式输入字段”的合并语义。
+- [x] 这次开通流只扩展 connector onboarding，不触碰 `kimi-im-bridge` 现有 binding/session 语义；这样成功后首次飞书消息仍沿用当前自动 binding 主链路，影响面最小。
 
-- Introduced `bridgecore` as the orchestration seam without breaking legacy adapter tests by making adapters accept either the old runtime path or the new orchestrator path.
-- Added additive migrations through schema version 7 so old databases can move forward without rebuilds.
-- Kept admin/debug behavior stable by leaving `internal/runtime` in place while production adapter wiring now flows through provider + bridgecore.
+## 控制中心去套娃弹窗 (2026-03-24)
 
----
+### Plan
 
-# Kimi Shell Control Center UI Todo
+- [x] 将控制中心深任务状态从多个 `xxxOpen` 布尔值收敛成统一的 `activeControlTask` / payload。
+- [x] 把配置中心、安装流、Bridge 详情和 Skill Git 导入从二级 modal 改造成控制中心内容区内任务页。
+- [x] 统一 `Esc` / 遮罩点击 / 未保存拦截逻辑，确保工作区模式下只保留一个控制中心 `dialog`。
+- [x] 运行前端构建验证，并记录回顾与剩余手工验证项。
 
-## Hard Constraints
+### Validation
 
-- [x] Keep backend commands, bridge/admin APIs, and Tauri window topology unchanged.
-- [x] Keep lightweight interactions inline in cards; heavy Bridge/API config must use dedicated modals.
-- [x] Keep modal structure consistent: fixed header + fixed footer + scrollable body only.
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+- [ ] 手工检查工作区模式打开控制中心后，进入配置中心 / 安装与升级 / Bridge 详情 / Skill Git 导入时页面内不再出现第二层 dialog。
+- [ ] 手工检查有未保存配置时，`Esc`、返回和遮罩点击不会直接丢失修改。
 
-## Implementation
+### Retrospective
 
-- [x] Flatten onboarding/settings cards so core fields are visible without accordion expansion.
-- [x] Remove the work-dir detail modal and keep work-dir editing directly in the card.
-- [x] Convert Bridge onboarding/detail flow into a dedicated Bridge config modal for config + secrets only.
-- [x] Add shared control-center modal shell and shared card header / status badge patterns.
-- [x] Update runtime Bridge panel to separate normal actions from danger actions and add clearer grouping labels.
-- [x] Rework install flow modal so only the body scrolls while header/footer remain fixed.
-- [x] Update responsive styles so fullscreen and workspace modal surfaces share one layout language.
+- [x] 记录本轮关于“控制中心总览层”和“深任务承载层”边界的经验。
 
-## Validation
+### Notes
 
-- [ ] Verify control center works in fullscreen and workspace modal surfaces.
-- [ ] Verify work-dir can be edited and saved inline without opening a modal.
-- [ ] Verify API config and Bridge config only edit sensitive settings through dedicated modals.
-- [ ] Verify modal `Escape` and overlay-close behavior still work with fixed header/footer shells.
-- [x] Run a frontend build and confirm no layout regressions in the touched control-center flows.
+- [x] 控制中心需要区分两种关闭语义：`Esc` / 返回属于“退一层任务导航”，而显式关闭按钮或遮罩点击属于“关闭整个控制中心”；如果把两者混成同一个动作，单层任务面会重新退化出 modal 套娃感。
+- [x] 将二级 modal 改成内容区任务面时，最稳的做法不是把旧组件硬塞进主页面，而是先收敛 controller 的任务状态，再把原 modal body/footer 抽成可嵌入内容组件；这样焦点、遮罩和未保存拦截才有单一真相源。
 
-## Retrospective
+## 飞书创建机器人前自动保存 connector (2026-03-24)
 
-- Shared `ControlCenterModalShell` now enforces one modal rule across config, install, and Bridge setup: fixed header, fixed footer, and body-only vertical scrolling.
-- Onboarding cards no longer mix accordion expansion with detail dialogs; lightweight actions stay inline, while API and Bridge heavy config are isolated in dedicated modals.
-- Bridge runtime actions are easier to parse after splitting normal operations from danger groups, which also keeps destructive actions away from the primary flow.
-- `pnpm build` 已通过；真实窗口的 fullscreen/workspace 双形态和手动交互 smoke 仍需在桌面端实际点检一次。
+### Plan
 
----
+- [x] 复用 `useShellController` 现有 `saveBridgeSettingsInternal()`，暴露给控制中心作为统一的 bridge settings 落盘入口。
+- [x] 调整 Feishu 官方流程“创建机器人”动作：若当前 connector 未持久化或 bridge settings 有未保存改动，先自动保存，再启动 onboarding。
+- [x] 区分“自动保存失败”和“onboarding 启动失败”的反馈，避免继续触发后端 `未找到 connector`。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并补充本节回顾与结果。
 
-# Bridge Status / Feishu Diagnostics Todo
+### Validation
 
-## Hard Constraints
+- [ ] 默认 Feishu connector 直接点击“创建机器人”仍可正常进入 onboarding。
+- [ ] 新增 Feishu connector 且未手动保存时，点击“创建机器人”会先自动保存再启动 onboarding。
+- [ ] 自动保存失败时停留在当前任务面，并给出明确错误，不继续请求 onboarding。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-- [x] Keep admin API routes and `BridgeStatus` JSON shape backward-compatible.
-- [x] Keep bridge start/stop lifecycle semantics unchanged: process stays alive if only status probing fails.
-- [x] Prefer root-cause visibility over optimistic UI fallback; degraded state must not masquerade as connecting.
+### Retrospective
 
-## Implementation
+- [x] 记录这次修复里“前端草稿 connector”和“后端持久化 connector”边界的经验。
 
-- [x] Make `apps/kimi-im-bridge/internal/app/app.go` return best-effort status snapshots even when some store reads fail.
-- [x] Add Go regression tests covering partial status snapshot failures and `/api/v1/status` returning `200`.
-- [x] Update `apps/kimi-shell/src-tauri/src/bridge_manager.rs` degraded fallback mapping so enabled channels resolve to `degraded`, not `connecting`.
-- [x] Add Rust tests covering local degraded status synthesis after status-probe failure.
-- [x] Add explicit Feishu startup-stage diagnostics for credential probe, endpoint fetch, websocket handshake, and long-connection failures.
-- [x] Adjust control-center Bridge copy so it no longer implies that saving credentials confirms Feishu platform connectivity.
+### Notes
 
-## Validation
+- [x] Feishu 官方 onboarding 这类依赖后端持久化配置的动作，不能直接消费前端草稿里的 `connectorId`；只要入口允许从草稿卡片直接发起，就必须先显式落盘或先做“已持久化”校验，否则后端严格查找会稳定报 `未找到 connector`。
 
-- [x] Run `go test ./internal/admin ./internal/app ./internal/store`.
-- [x] Run Rust bridge-manager targeted tests.
-- [x] Verify degraded snapshots now surface `lastError*` and do not report Feishu as `connecting` when status probing fails.
+## 飞书机器人页保存入口与删除确认优化 (2026-03-24)
 
-## Retrospective
+### Plan
 
-- Sidecar `Status()` now treats channel listings and counters as independent best-effort reads, so `/api/v1/status` no longer collapses to HTTP 500 when SQLite snapshotting is partially unavailable.
-- Shell local fallback now synthesizes degraded channel states from settings whenever runtime probing fails in a degraded/crashed state, which removes the misleading `Bridge Degraded + Feishu Connecting` combination.
-- Feishu startup diagnostics now separate credential probe, endpoint fetch, and websocket handshake failures in `bridge.log`, and the control-center copy no longer implies that saved credentials alone prove platform connectivity.
+- [x] 将飞书机器人页每张卡片内的“保存并重启 / 保存设置”收敛到 Bridge 标题栏统一入口。
+- [x] 修正飞书机器人配置页在控制中心页面与 modal 场景下的横向溢出，确保不再出现横向滚动条。
+- [x] 为“删除机器人”补充确认弹窗；确认后自动执行删除、保存并在 Bridge 运行中时重启。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录结果。
 
----
+### Validation
 
-# Feishu IM Bridge UX / Sessions / Startup Diagnostics Todo
+- [ ] 飞书机器人页只保留标题栏统一保存入口，单卡片不再出现独立保存按钮。
+- [ ] 飞书机器人配置页在窄窗口与 modal 中不再出现横向滚动条。
+- [ ] 点击“删除机器人”会先确认；确认后完成删除保存，并在 Bridge 运行时自动重启。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-## Hard Constraints
+### Retrospective
 
-- [x] Keep the existing Go bridge architecture and admin shutdown lifecycle; do not introduce a new Node runtime or detached background daemon flow.
-- [x] Keep persisted approval correlation fields (`turn_id`, `step_id`) intact across new approval UX changes.
-- [x] Treat `shell-web` sessions as discoverable/importable only; never bind them as if they were bridge-native sessions.
+- [x] 记录这次整理里“全局保存动作”和“单机器人动作”边界的经验。
 
-## Implementation
+### Notes
 
-- [x] Add bridge-native session listing and binding workdir update support to the bridge store/domain/admin API.
-- [x] Add Feishu bridge management commands and card-based responses for help, sessions, cwd, and approvals.
-- [x] Rebuild Feishu approval cards to render structured summaries and expose approve once / approve for session / reject actions.
-- [x] Add session aggregation in shell/runtime so bridge-native and shell/web sessions can be surfaced with clear source labels.
-- [x] Add `defaultWorkDir` to shell bridge settings and preserve it across Rust/TS/JSON round-trips.
-- [x] Capture bridge startup stdout/stderr tails and surface structured startup-failure diagnostics in shell runtime/control center.
+- [x] 飞书机器人页里的“保存/重启”属于整个 `bridgeSettings` 草稿的统一提交动作，不应伪装成单卡片局部保存；真正适合留在卡片里的应该是“连接与凭据 / 高级运行 / 删除”这类明确作用于单个机器人且可独立理解的动作。
+- [x] 单层控制中心并不排斥危险操作确认；像“删除机器人”这种会立即改写持久化配置的动作，保留轻量确认弹窗比继续堆卡片内次级按钮更清晰，也更符合先确认再执行保存/重启的心智模型。
 
-## Validation
+## IM Bridge 与快速设置 UIUX 精简改造 (2026-03-24)
 
-- [x] Run focused Go tests for store/admin/Feishu adapter/session behavior.
-- [x] Run focused Rust tests for bridge manager/settings/session aggregation behavior.
-- [x] Run targeted frontend validation or build for the touched control-center flow.
-- [ ] Manually verify Feishu command/card flows, approval card readability, and startup-failure surfacing.
+### Plan
 
-## Retrospective
+- [x] 删除 IM Bridge 内部总览 / 机器人双视图，改成单页机器人工作台，并统一“连接与凭据”任务面宽度。
+- [x] 打通全部 connector 的自定义名称保存与回显链路，确保卡片、任务面、运行面板和 bridge DTO 使用一致显示名。
+- [x] 将快速设置的安装 / 升级流从任务面改成右侧详情区内联执行，并精简步骤轨与详情层级。
+- [x] 运行前端构建验证，并补充手工回归项与回顾记录。
 
-- Feishu bridge 现在先识别 `/bridge ...` 管理命令，再回落到普通 mention prompt 流程；这让 session/cwd/approval 管理不再和模型对话路径耦合。
-- 飞书审批卡片不再被错误降级成 text/post 发送，结合结构化摘要提取和 `Approve for session` 动作后，pending approvals 不再把原始 JSON 直接暴露给用户。
-- 飞书卡片回调更新现在显式返回 `card_json` 而不是 `raw`，避免审批按钮点击后因回调卡片更新载荷不被接受而出现通用错误码。
-- Shell 侧把 `defaultWorkDir`、bridge-native sessions、shell/web sessions 和启动失败日志尾部整合进同一块控制中心面板；其中 shell/web session 目前只允许“导入为新的 bridge session”，避免误绑异构 session id。
-- 已完成 `go test ./...`、`cargo test --manifest-path src-tauri/Cargo.toml`、`pnpm build`；飞书真机卡片交互和桌面端手点 smoke 仍需补一次人工验收。
+### Validation
 
----
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+- [ ] 手工检查 IM Bridge 页面不再出现内部总览或机器人 tab，进入后直接看到机器人工作台。
+- [ ] 手工检查“连接与凭据”任务面宽度与标准详情弹层一致，不再明显宽于快速设置详情面。
+- [ ] 手工检查飞书 / Telegram 机器人名称编辑后，会在卡片、任务面标题、运行面板标题和 bridge 相关记录中保持一致，重启后仍持久化。
+- [ ] 手工检查快速设置点击外层 `升级 Kimi` 后，右侧详情区直接展开内置终端并开始执行，不再打开独立安装任务面。
+- [ ] 手工检查 1280px / 1024px / 768px / 640px 下无横向溢出、按钮不打架、终端可滚动。
 
-# Bridge WorkDir Sync / Feishu Markdown Todo
+### Retrospective
 
-## Hard Constraints
+- [x] 记录本轮关于“单页机器人工作台”和“快速设置内联执行面”的信息架构边界经验。
 
-- [x] Keep bridge runtime lifecycle unchanged unless a work-dir sync fix strictly requires config persistence updates.
-- [x] Preserve existing bridge settings compatibility; explicit bridge-specific work-dir overrides must still win over app defaults.
-- [x] Keep Feishu normal chat replies compatible with current `post/text` fallback while clarifying markdown limitations honestly.
+### Notes
 
-## Implementation
+- [x] IM Bridge 进入“单页机器人工作台”后，最稳的边界是“页面只负责机器人级管理，运行排障仍留给独立高级运行面板”；否则列表页会重新膨胀回总览 + 详情的双重信息架构。
+- [x] 快速设置改成右侧详情区内联执行后，安装/升级终端必须直接绑定外层步骤详情，而不是再借一个 `install_flow` 任务页承载；只要重新引入中间任务面，外层 `升级 Kimi` CTA 和执行反馈就会再次脱节。
 
-- [x] Make bridge `defaultWorkDir` follow the app `work_dir` when bridge is still inheriting the app default or currently unset.
-- [x] Update shell `save_work_dir` flow so changing the app work directory also persists the bridge default-follow behavior.
-- [x] Add clearer IM bridge work-dir command aliases/help text so Feishu users can directly add/remove per-chat work directories.
-- [x] Add focused tests for work-dir sync and Feishu command parsing aliases.
+## IM Bridge 卡片、安装页与预加载标题栏统一调整 (2026-03-25)
 
-## Validation
+### Plan
 
-- [x] Run focused Rust tests for bridge settings/work-dir sync.
-- [x] Run focused Go tests for Feishu command parsing/help behavior.
+- [x] 为 IM Bridge 机器人卡片补齐工作区目录选择 / 跟随应用默认目录 / 删除机器人动作，并接入自定义删除确认弹层。
+- [x] 统一“连接与凭据”与“高级运行面板”任务面的宽度、间距和视觉层级，使其与 IM Bridge 主页面风格一致。
+- [x] 调整安装 Kimi 详情区默认主操作布局，仅默认显示一键安装 / 升级 / 详细安装入口，并修复展开后的滚动链。
+- [x] 对齐预加载页标题栏高度与主窗口标题栏，并运行前端构建验证。
 
-## Retrospective
+### Validation
 
-- Bridge 现在把 app 的 `work_dir` 当作全局默认来源：bridge 默认目录为空时会自动继承它，且只有在 bridge 之前本来就在跟随 app 默认目录时，app 改目录才会继续联动更新。
-- 飞书里已经能直接按聊天“增删工作目录”了；这次把命令别名补成了更直观的 `/bridge cwd add <path>` 和 `/bridge cwd remove`，并在帮助卡片里明确了它们与全局默认目录的关系。
-- 已完成 `go test ./internal/adapters/feishu -v`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`pnpm build`。
+- [ ] 机器人卡片可显示当前工作区目录，选择新目录后会即时保存；Bridge 运行中自动重启并刷新状态。
+- [ ] 已设置自定义目录的机器人可回退到“跟随应用默认目录”。
+- [ ] 删除机器人先显示自定义确认弹层；确认后完成删除保存，并在 Bridge 运行时自动重启。
+- [ ] “连接与凭据”与“高级运行面板”任务面宽度一致，且 1280px / 1024px / 768px / 640px 下无异常横向溢出。
+- [ ] 安装页默认仅显示一键安装 / 升级 / 详细安装入口；展开详细安装选项后可完整纵向滚动，不再遮挡内容。
+- [ ] 预加载窗口标题栏高度与主窗口标题栏一致。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
----
+### Retrospective
 
-# Feishu Reply Card Mode Todo
+- [x] 记录本轮关于“单机器人即时动作”和“详情区滚动链”边界的经验。
 
-## Hard Constraints
+### Notes
 
-- [x] Keep Feishu normal replies backward-compatible by making card rendering opt-in.
-- [x] Preserve bridge settings compatibility across Go bridge, Rust store, and TS UI round-trips.
-- [x] Reuse existing Feishu interactive card primitives instead of introducing a new message transport path.
+- [x] 机器人卡片上的“选择工作区 / 跟随应用默认目录 / 删除机器人”这类单机器人动作，最稳的实现方式是复用同一条“更新草稿 -> 持久化配置 -> 运行中按需重启 -> 刷新 Bridge 状态”的链路；否则卡片级即时动作和页级统一保存会很快分叉成两套行为。
+- [x] 详情区折叠面板一旦承载安装终端、预检和高级选项，滚动不能只补在最内层组件上，必须沿着 `detail card -> body -> main column` 整条父级链路一起补 `min-height: 0` 与 `overflow-y: auto`，否则小窗口下内容仍会被父容器裁掉。
 
-## Implementation
+## 快速设置布局与 Bridge 卡片头部修正 (2026-03-25)
 
-- [x] Add a persisted `feishuReplyCards` bridge setting and expose it in shell control center.
-- [x] Thread the new setting into the Go bridge app wiring and Feishu adapter config.
-- [x] Make normal Feishu model replies optionally send `interactive` cards with `lark_md`, while keeping current `post/text` fallback when disabled.
-- [x] Add focused regression coverage for reply-mode selection and bridge settings normalization.
+### Plan
 
-## Validation
+- [x] 将快速设置左侧步骤卡片收紧为单行信息布局，并让状态标签与步骤名称在同一行显示。
+- [x] 去掉快速设置右侧详情区上层标题栏，只保留“操作与详情”内容卡。
+- [x] 修正 IM Bridge 机器人启用开关的即时视觉反馈，移除卡片头部的系统名称与标题栏冗余说明。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录本轮经验。
 
-- [x] Run focused Go tests for Feishu sender/config behavior.
-- [x] Run focused Rust tests for bridge settings persistence.
-- [x] Run a frontend build for the updated bridge runtime panel.
+### Validation
 
-## Retrospective
+- [ ] 快速设置左侧步骤卡片改为单行，状态标签与名称同行显示。
+- [ ] 快速设置右侧详情区不再显示上层“当前步骤”标题栏。
+- [ ] IM Bridge 卡片头部不再显示 connector 系统名称，启用开关点击后可立即看到目标状态。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-- 普通 Feishu 模型回复现在可以按设置切到 `interactive` 卡片模式，沿用已有 `buildCard + lark_md` 组件，因此命令卡片、审批卡片和普通回复最终都走同一套渲染语义。
-- `feishuReplyCards` 已经贯通到 Go bridge 配置、Rust `bridge_settings.json`、TypeScript UI 类型和控制中心面板，旧配置缺少该字段时会安全回落到 `false`。
-- 卡片模式对长回复会按较小分片大小拆成多张卡片，并带上 `Kimi reply (n/N)` 标题；关闭开关时仍保持原来的 `post/text` fallback，不影响现有聊天。
-- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`。
+### Retrospective
 
----
+- [x] 记录本轮关于“步骤列表信息密度”和“即时开关反馈”边界的经验。
 
-# Feishu WorkDir Presets Todo
+### Notes
 
-## Hard Constraints
+- [x] 快速设置这种步骤导航列表的核心任务是“扫一眼知道现在该点哪一步”，因此标题、简短动作提示和状态应该压缩到一条扫描线上；右侧详情再承担解释和操作，才能避免左右两栏都在重复说同一件事。
+- [x] 即时开关类控件不能把视觉反馈完全押注在异步保存完成后的外部状态回流上；对于“点击即保存”的机器人启停操作，前端需要先给出明确的目标态，再用持久化结果兜底确认或回滚。
 
-- [x] Keep bridge settings backward-compatible; missing `workDirPresets` must safely fall back to an empty list.
-- [x] Preserve current `/bridge cwd set|add|clear|remove` text-command behavior while adding preset buttons.
-- [x] Do not add runtime hot-reload for presets; saving while bridge is running should only warn that restart is required for Feishu card freshness.
+## Telegram 入口下线与快速设置左栏收口 (2026-03-25)
 
-## Implementation
+### Plan
 
-- [x] Add `workDirPresets` to Go bridge config, Rust settings store, and TypeScript bridge settings types with trim/filter/dedupe normalization.
-- [x] Extend the Bridge Runtime panel with add/remove preset rows and a save-time restart hint for running bridge sessions.
-- [x] Extend Feishu `/bridge cwd` cards to show preset buttons, highlight the active preset, and keep a clear-current-workdir action.
-- [x] Add Feishu card callback handling for preset apply/clear and update the card in place after the click.
+- [x] 暂时下线 Telegram 机器人的 Bridge 页面入口与卡片显示，仅保留 Feishu 机器人可见入口。
+- [x] 过滤运行诊断中 Telegram 相关的风险摘要文案，避免下线后仍在主诊断卡片中暴露。
+- [x] 移除快速设置左侧步骤栏里的安装 / 升级按钮，仅保留步骤导航与底部统一动作。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录结果。
 
-## Validation
+### Validation
 
-- [x] Run focused Go tests for config normalization and Feishu cwd card/callback behavior.
-- [x] Run focused Rust tests for bridge settings preset normalization.
-- [x] Run a frontend build for the Bridge Runtime panel changes.
+- [ ] IM Bridge 页面不再显示 Telegram 机器人卡片，新增机器人入口只创建 Feishu 机器人。
+- [ ] 运行诊断的风险摘要不再显示 Telegram 相关提示。
+- [ ] 快速设置左侧列表不再出现安装 / 升级按钮。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-## Retrospective
+### Retrospective
 
-- `workDirPresets` 现在已经贯通到 Go bridge、Rust `bridge_settings.json` 和 TypeScript 控制中心类型，保存时会统一做 trim、空值过滤和按路径去重，旧配置缺字段时安全回落为空列表。
-- 控制中心 Bridge Runtime 面板新增了可编辑的预设目录列表，支持逐行新增/删除；如果 bridge 正在运行，保存成功后会提示需要重启 bridge，飞书 `/bridge cwd` 卡片才会加载最新预设。
-- 飞书 `/bridge cwd` 现在会同时显示默认目录、当前 binding workdir、选中的 preset，以及可点击的 preset 按钮和 `Clear current workdir` 操作；点按钮后卡片会原地刷新高亮状态。
-- 已完成 `go test ./internal/adapters/feishu ./internal/config`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store -- --nocapture`、`pnpm build`；真实飞书点击 smoke 仍需手工补一轮。
+- [x] 记录本轮关于“临时下线入口”和“步骤导航去操作化”的经验。
 
----
+### Notes
 
-# OpenClaw-Lark Interaction Absorption Todo
+- [x] 临时下线某一渠道时，不能只隐藏“新增”按钮；列表展示、标题派生文案和风险摘要也要一起收口，否则用户会继续从状态提示里感知到一个已经无法操作的渠道。
+- [x] 快速设置左栏的职责是导航而不是执行；把安装 / 升级按钮留在步骤详情区而不是步骤列表里，能显著降低左右两栏同时争抢主操作的问题。
 
-## Hard Constraints
+## 飞书多机器人凭据掩码串写排查与修复 (2026-03-25)
 
-- [x] Keep the current Go Feishu adapter architecture and sidecar lifecycle unchanged; no Node runtime or detached daemon work.
-- [x] Keep `/bridge help|sessions|cwd|approvals` backward-compatible while adding `start` and `doctor`.
-- [x] Use additive SQLite migration only for binding onboarding metadata, and keep admin bindings JSON backward-compatible.
+### Plan
 
-## Implementation
+- [x] 排查飞书多机器人“已保存凭据掩码相同”的真实数据来源，确认是否为 UI 串线还是 secrets 写入覆盖。
+- [x] 修复多机器人场景下旧 Bridge onboarding 保存路径对机器人级凭据的串写风险，并补测试覆盖。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证，并记录结论与现场数据判断。
 
-- [x] Add binding onboarding persistence fields plus a migration and store/router support for reading/updating onboarding state.
-- [x] Extend Feishu bridge commands with `/bridge start`, `/bridge doctor`, and a shared `bridge_show_panel` card action.
-- [x] Add onboarding cards with DM auto-send, group manual-send behavior, and quick actions into sessions/cwd/approvals/doctor.
-- [x] Add doctor report/card generation that reuses bridge status, binding/session state, pending approvals, and a live Feishu credential probe.
-- [x] Update Rust/TS binding record types if needed so new admin fields round-trip safely.
+### Validation
 
-## Validation
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
+- [x] 本机 `bridge_settings.json` 确认当前存在两个启用中的飞书机器人：`feishu-default` / `feishu-2`。
+- [x] 本机 `bridge_secrets.json` 确认问题发生时两个飞书 connector 的真实 `appId/appSecret` 已被写成同一套值，并非仅前端掩码显示串线。
 
-- [x] Run focused Go tests for store migrations, Feishu command parsing/cards, onboarding gating, and doctor behavior.
-- [x] Run targeted Rust tests if binding record shape changes require shell client coverage.
-- [ ] Manually verify DM auto-onboarding, group `/bridge start`, and `/bridge doctor` card refresh in Feishu.
+### Retrospective
 
-## Retrospective
+- [x] 记录本轮关于“legacy 根级 secrets 镜像”不能回写覆盖 connector 级 secrets 的经验。
 
-- 这次没有把 openclaw-lark 的 runtime 搬进来，而是把最有价值的三层模式吸收到现有 Go Feishu adapter：统一 `/bridge` 命令入口、首次 welcome/onboarding 卡片、以及可原地刷新的 doctor 自诊断卡片。
-- onboarding 元数据现在按 binding 持久化在 SQLite 里，采用加法式 `0008` 迁移补了 `onboarded_at` 和 `onboarding_version`，这样 DM 首次自动欢迎和未来版本化重引导都不再依赖内存状态。
-- `bridge_show_panel` 把 help/start/sessions/cwd/approvals/doctor 六类卡片统一到一条 callback 链路，避免每个新面板都要单独发明 action 类型；同时继续沿用现有 `card_json` 原地更新路径。
-- doctor 卡片复用了现有 bridge store + Feishu gateway 轻量 credential probe，默认给安全摘要和下一步建议，详情按按钮展开，不暴露 secrets 或原始日志尾部。
-- 已完成 `go test ./internal/adapters/feishu ./internal/store ./internal/admin`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_manager -- --nocapture`、`pnpm build`；真实 Feishu 会话的 DM/group smoke 仍需手工点一轮。
+### Notes
 
----
+- [x] `normalize_bridge_secrets()` 这类兼容旧字段的迁移逻辑，若同时承担“根级镜像回填”职责，必须保证只补空值、不能覆盖已有 connector secrets；否则一旦根级镜像来源于另一个 connector，就会在后续 normalize 时把默认 connector 脏写成相同凭据。
+- [x] 多机器人场景下，任何“全局 onboarding 保存”都不能再默默写入某一个具体机器人；只要存在多个飞书机器人，就应明确要求用户去对应机器人的“连接与凭据”里维护凭据。
 
-# Feishu Tools Doc Todo
+## IM Bridge 机器人关闭/删除与多机器人绑定修复 (2026-03-25)
 
-## Hard Constraints
+### Plan
 
-- [x] 文档只覆盖仓库里已经落地的飞书 IM Bridge 能力，不预写未来功能。
-- [x] `tools.md` 放在项目根目录，采用“使用者手册 + 开发者附录”的双层结构。
-- [x] 命令、卡片按钮、审批决策值、触发条件必须与当前实现完全一致。
+- [x] 修复 bridge binding 更新接口的返回契约，避免启动时 session 轮换导致 restart 失败。
+- [x] 为 sidecar 启动同步补上已删除 connector 的关联数据清理，并让删除机器人同步清理本地保存的 connector secrets。
+- [x] 收紧多机器人 binding / session 规则，禁止不同 binding 共享同一个活动 Kimi session。
+- [x] 调整前端机器人关闭/删除状态流，将“设置已保存”和“重启失败”拆开提示。
+- [x] 运行针对性的 Go / Rust / 前端构建验证并记录结果。
 
-## Implementation
+### Validation
 
-- [x] 新增根目录 `tools.md`，说明飞书侧前置配置、入口规则、普通对话行为和回复模式。
-- [x] 在 `tools.md` 中列出 `/bridge help|start|sessions|use|cwd|approvals|doctor` 及其别名、示例和返回结果。
-- [x] 在 `tools.md` 中写清 onboarding、session 切换、workdir preset、clear workdir、approval resolve、panel switch 等卡片交互。
-- [x] 在 `tools.md` 中补充开发者附录，说明 `mapMessageToInbound`、`parseBridgeCommand`、`stripExplicitSummon`、card actions 和 reply 渲染策略。
+- [x] 运行 `go test ./internal/admin ./internal/app ./internal/binding ./internal/store`。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_settings_store`。
+- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bridge_http_client`。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-## Validation
+### Retrospective
 
-- [x] 逐项对照 `commands_cards.go`、`approval.go`、`service.go`、`sender.go`，静态核对文档与实现一致。
-- [x] 对照手工测试运行手册，确认文档没有声称支持未验证或不存在的飞书能力。
+- [x] 记录本轮关于“删除 connector 不能只删 settings/secrets”以及“binding PATCH 契约要双端锁死”的经验。
 
-## Retrospective
+### Notes
 
-- 新增的 `tools.md` 现在把飞书侧“怎么用”和“代码里怎么实现”放在同一份入口文档里，适合同时给使用者和开发者使用。
-- 文档明确限定在当前已实现能力内：文本消息、`/bridge` 命令、交互卡片、审批、workdir、doctor；没有把文件上传、图片输入或未来 OpenClaw/Lark 演进提前写进去。
-- 已完成静态核对，重点对齐了命令解析、群聊显式召唤、card action、审批决策值、reply card 开关，以及手工运行手册中已经定义的 Feishu 验证边界；本次未运行自动化测试，因为改动仅涉及文档与任务记录。
+- [x] 机器人删除如果只改 `bridge_settings.json` 而不在 sidecar 启动同步里清理同 connector 的 bindings / approvals / channel cache，下一次重启后仍会把已删除机器人的历史运行态带回来，表现成“入口没了但状态还在”。
+- [x] 桌面端和 sidecar 共用的 admin 接口一旦出现“调用方期待完整记录、服务端只回 status”这种半契约错配，最容易在 restart / recovery 这种低频链路里潜伏；这类接口必须用两端测试直接锁住响应形状。
 
----
+## 控制中心快速设置与 Bridge 子任务面样式修复 (2026-03-25)
 
-# Bridge Sandbox YOLO Research Todo
+### Plan
 
-## Hard Constraints
+- [x] 修复快速设置左侧第一张步骤卡片 hover 时被滚动容器上边缘裁切的问题。
+- [x] 修复安装页右侧 Kimi 状态卡内长路径文本溢出卡片的问题。
+- [x] 移除 IM Bridge 子任务面右上角关闭按钮，仅保留返回入口。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证前端改动。
 
-- [x] 只依据 `kimi cli` 与 `kimi-agent-sdk-go` 官方仓库中的文档、代码、issue/README 等公开信息下结论，不混入非官方二手说法。
-- [x] 明确区分“CLI 本身是否支持 sandbox yolo”与“bridge 接入 IM 对话时是否暴露/继承该能力”。
-- [x] 如果官方仓库没有直接写明，需要标注为基于代码/接口行为的推断，而不是当成已承诺能力。
+### Validation
 
-## Implementation
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-- [x] 查询 `kimi cli` 官方仓库中 sandbox、approval、yolo、bridge/IM 相关说明与实现。
-- [x] 查询 `kimi-agent-sdk-go` 官方仓库中 sandbox、approval、yolo、bridge/IM 相关说明与实现。
-- [x] 交叉比对两边接口，判断 bridge 连接飞书 IM 对话时，sandbox 下是否可以使用 yolo 模式，以及是否存在前提或缺口。
+### Retrospective
 
-## Validation
+- [x] 记录本轮关于“滚动容器内 hover 位移”和“子任务面关闭入口层级”的经验。
 
-- [x] 保存关键来源链接与日期，确保最终结论可追溯。
-- [x] 将“明确支持 / 明确不支持 / 仓库未体现”三类证据分别归档到回顾里。
+### Notes
 
-## Retrospective
+- [x] 带 `overflow: auto` 的步骤列表如果对子项做 `translateY` hover 动效，顶部至少要预留少量内边距，否则第一张卡片会在 hover 时被容器边界裁掉，看起来像被上方遮挡。
+- [x] IM Bridge 的连接与凭据 / 高级运行面板属于桥内子任务面，右上角再放一个“关闭控制中心”会和左上角返回形成重复退出语义；这里保留返回比双出口更清晰。
 
-- 调研基线：`MoonshotAI/kimi-cli` 已拉到 `a304a0dc609293bde79a921e42751dda6d635ae9`（2026-03-17），`MoonshotAI/kimi-agent-sdk` 已拉到 `c207267072a6cdd084b75f6d0f167e14fb34be56`（2026-03-02）。
-- 明确支持：`kimi-cli` 官方文档明确支持 `--yolo / --auto-approve / default_yolo`，且文档直接写明“在安全隔离环境中”可启用 YOLO；源码 `src/kimi_cli/soul/approval.py` 中 `self._state.yolo` 为真时会直接 `return True`，即跳过审批。
-- 明确支持：`kimi-agent-sdk` Go SDK 官方文档要求默认必须处理 `ApprovalRequest`，但同时在 `guides/go/approval-requests.md` 和 `go/option.go` 明确提供 `kimi.WithAutoApprove()`，其实现就是向 CLI 追加 `--auto-approve`。
-- 仓库未体现：两边官方仓库对 `Feishu` / `Lark` / `IM bridge` 关键字检索均无匹配，因此“bridge 连接飞书 IM 对话时”并不是官方单独承诺的场景，只能基于 CLI + Go SDK 的通用能力推断。
-- 基于接口行为的推断：如果 IM bridge 底层是用 Go SDK/CLI 起会话，那么在 sandbox 场景下可以开启 YOLO；方式要么是启动 CLI 时传 `--yolo/--auto-approve`，要么在 Go SDK 里用 `kimi.WithAutoApprove()`。这样 approval 事件会在 CLI 层被自动放行，而不是继续抛到 IM。
-- 对当前仓库的附加核对：本项目 `apps/kimi-im-bridge/internal/providers/kimi/sdk_driver.go` 与 `apps/kimi-im-bridge/internal/runtime/sdk_driver.go` 已经在 `request.AutoApprove` 为真时调用 `WithAutoApprove()`；因此现在飞书里仍看到 approval，说明更可能是当前会话/bridge 请求没有把 `AutoApprove` 打开，而不是官方能力缺失。
+## IM Bridge 新建机器人 connectorId 唯一化 (2026-03-25)
 
----
+### Plan
 
-# Feishu AutoApprove Wiring Todo
+- [x] 将控制中心“新建机器人”的 connectorId 生成规则改成不复用的唯一 ID。
+- [x] 保持机器人显示名称继续使用人类可读的顺序标题，不把唯一 ID 暴露成主展示名。
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证前端保存链路。
 
-## Hard Constraints
+### Validation
 
-- [x] 新增 `feishuAutoApprove` 必须保持现有 bridge 配置向后兼容，旧 `bridge_settings.json` 缺字段时默认启用（`true`）。
-- [x] 仅影响 Feishu 通道，不改变 Telegram 的审批行为。
-- [x] 修复 session 持久化时 `autoApprove` 被覆盖为 `false` 的问题，保证 UI 与实际执行一致。
+- [x] 运行 `pnpm -C apps/kimi-shell build`。
 
-## Implementation
+### Retrospective
 
-- [x] 扩展 Go sidecar 配置模型：`BridgeSettings` / 默认值 / 归一化支持 `feishuAutoApprove=true`。
-- [x] 扩展 Rust+TS bridge settings 类型、默认值与归一化逻辑，保证前后端字段一致。
-- [x] 在 Feishu adapter 配置中加入 `AutoApprove`，并在 `HandleInbound` 调用时传递 `HandleOptions.AutoApprove`。
-- [x] 在 app adapter 构造阶段将 `settings.feishuAutoApprove` 注入 Feishu 配置。
-- [x] 在 `bridgecore.Orchestrator` 与 legacy runtime 路径补齐 `AutoApprove` 透传/持久化，防止覆盖为 false。
-- [x] 在 Bridge Runtime 面板新增 “Feishu Auto Approve” 开关，并在运行中改动该开关时提示需重启 bridge。
+- [x] 记录本轮关于“内部身份唯一化”和“显示名顺序编号解耦”的经验。
 
-## Validation
+### Notes
 
-- [x] Go config 单测：默认值与旧配置缺字段回填为 true。
-- [x] Feishu adapter 单测：断言 orchestrator `HandleOptions.AutoApprove` 与配置一致。
-- [x] Orchestrator/Runtime 单测：断言 session upsert 保存的 `AutoApprove` 与入参一致。
-- [x] Rust `bridge_settings_store` 单测：默认值、读旧配置回填、save/load 往返不丢字段。
-- [x] 前端构建或类型检查通过，确保 `BridgeSettings` 新字段不破坏现有调用。
+- [x] 机器人 `connectorId` 是内部身份，不应同时承担“给人看的顺序编号”职责；一旦删除后再复用 `feishu-2` 这类短 id，历史 bindings 就会被新机器人误继承。
+- [x] 更稳的做法是：`connectorId` 只负责唯一性，显示名继续用“飞书机器人 01 / Eleven”这类人类可读标题，两者必须解耦。
 
 ## Retrospective
 

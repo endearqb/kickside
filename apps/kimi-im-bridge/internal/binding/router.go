@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
@@ -81,6 +82,37 @@ func (r *Router) ClearBinding(ctx context.Context, bindingID string) error {
 }
 
 func (r *Router) Rebind(ctx context.Context, bindingID string, kimiSessionID string) error {
+	kimiSessionID = strings.TrimSpace(kimiSessionID)
+	if kimiSessionID == "" {
+		return fmt.Errorf("kimi session id is required")
+	}
+
+	current, err := r.store.GetBindingByID(ctx, bindingID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("binding %s not found", bindingID)
+	}
+
+	bindings, err := r.store.ListBindings(ctx)
+	if err != nil {
+		return err
+	}
+	for _, existing := range bindings {
+		if strings.TrimSpace(existing.BindingID) == strings.TrimSpace(bindingID) {
+			continue
+		}
+		if strings.TrimSpace(existing.KimiSessionID) != kimiSessionID {
+			continue
+		}
+		return fmt.Errorf(
+			"kimi session %s is already bound to %s; each robot binding must keep an isolated session",
+			kimiSessionID,
+			existing.BindingID,
+		)
+	}
+
 	now := nowRFC3339()
 	if err := r.store.UpsertSession(ctx, domain.BridgeSession{
 		KimiSessionID: kimiSessionID,
@@ -106,6 +138,10 @@ func (r *Router) UpdateBindingWorkDir(ctx context.Context, bindingID string, wor
 
 func (r *Router) UpdateBindingOnboarding(ctx context.Context, bindingID string, onboardingVersion string) error {
 	return r.store.UpdateBindingOnboarding(ctx, bindingID, onboardingVersion)
+}
+
+func (r *Router) UpdateBindingContextToken(ctx context.Context, bindingID string, contextToken string) error {
+	return r.store.UpdateBindingContextToken(ctx, bindingID, contextToken)
 }
 
 func (r *Router) MarkInboundConsumed(ctx context.Context, bindingID string, messageID string) (bool, error) {
@@ -134,7 +170,7 @@ func (r *Router) IsDuplicateApproval(ctx context.Context, dedupeKey string) (boo
 }
 
 func makeBindingID(key domain.BindingKey) string {
-	sum := sha1.Sum([]byte(key.Platform + "|" + key.AccountID + "|" + key.ChatID + "|" + key.ThreadID))
+	sum := sha1.Sum([]byte(key.ConnectorID + "|" + key.Platform + "|" + key.AccountID + "|" + key.ChatID + "|" + key.ThreadID))
 	return "binding-" + hex.EncodeToString(sum[:8])
 }
 

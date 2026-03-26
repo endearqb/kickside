@@ -6,5 +6,7 @@ type Config = legacy.Config
 type Options = legacy.Options
 type Service = legacy.Service
 type WorkDirPreset = legacy.WorkDirPreset
+type HostController = legacy.HostController
 
 var NewService = legacy.NewService
+var NewHostControlClient = legacy.NewHostControlClient

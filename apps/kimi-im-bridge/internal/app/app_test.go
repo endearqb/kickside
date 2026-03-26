@@ -95,8 +95,8 @@ func TestNewStatusHandlesFreshDatabaseChannelRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error for fresh database: %v", err)
 	}
-	if len(status.Channels) != 2 {
-		t.Fatalf("expected fresh database status to include configured channels, got %+v", status.Channels)
+	if len(status.Channels) != 0 {
+		t.Fatalf("expected fresh database status to start without connectors, got %+v", status.Channels)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
@@ -147,5 +148,41 @@ func TestResolveOrCreateRebindAndClear(t *testing.T) {
 	}
 	if cleared != nil {
 		t.Fatalf("expected binding to be removed after clear")
+	}
+}
+
+func TestRebindRejectsSessionAlreadyUsedByAnotherBinding(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer st.Close()
+
+	router := NewRouter(st)
+	firstKey := domain.BindingKey{ConnectorID: "feishu-default", Platform: "feishu", ChatID: "chat-1"}
+	secondKey := domain.BindingKey{ConnectorID: "feishu-2", Platform: "feishu", ChatID: "chat-2"}
+
+	first, _, err := router.ResolveOrCreate(ctx, firstKey, func(_ context.Context, _ domain.BindingKey) (string, error) {
+		return "session-a", nil
+	})
+	if err != nil {
+		t.Fatalf("ResolveOrCreate(first) returned error: %v", err)
+	}
+	second, _, err := router.ResolveOrCreate(ctx, secondKey, func(_ context.Context, _ domain.BindingKey) (string, error) {
+		return "session-b", nil
+	})
+	if err != nil {
+		t.Fatalf("ResolveOrCreate(second) returned error: %v", err)
+	}
+
+	err = router.Rebind(ctx, second.BindingID, first.KimiSessionID)
+	if err == nil {
+		t.Fatalf("expected rebind conflict when another binding already uses the session")
+	}
+	if got := err.Error(); got == "" || !strings.Contains(got, "already bound") {
+		t.Fatalf("expected session conflict error, got %v", err)
 	}
 }

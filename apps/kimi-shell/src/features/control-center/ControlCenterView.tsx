@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   Check,
   ChevronRight,
   Eraser,
-  FileText,
   FolderOpen,
-  Info,
   KeyRound,
   LayoutDashboard,
   Minus,
@@ -15,7 +13,7 @@ import {
   RefreshCcw,
   RefreshCw,
   SlidersHorizontal,
-  Square,
+  Sparkles,
   X,
 } from "lucide-react";
 import type {
@@ -23,29 +21,44 @@ import type {
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
+  BridgeConnectorConfig,
+  BridgeConnectorSecretsInput,
+  FeishuConnectorOnboardingSession,
+  WeixinConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
   BridgeOnboardingValidation,
+  BridgePlatform,
   BridgeSessionImportInput,
   BridgeSessionRecord,
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
+  ControlCenterTaskId,
+  ControlCenterTaskPayload,
   ControlCenterSurface,
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
   InstallFlowCatalog,
-  InstallCommandCatalog,
   InstallSettingsView,
   InstallProbeStatus,
   InstallSessionSnapshot,
   InstallTaskId,
+  InstalledSkill,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   MainWindowCloseBehavior,
   OnboardingStatus,
   PowerShellPreflightSummary,
   RuntimePanelId,
+  SessionSkillState,
+  SkillApplyScope,
+  SkillCenterSectionId,
+  SkillDetail,
+  SkillProjectionRecord,
+  SkillRecommendation,
+  WorkspaceSkillProfile,
+  WorkspaceSkillRestoreResult,
 } from "@/app/types";
 import { formatLoginState } from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
@@ -53,17 +66,41 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import { ControlCenterCardHeader } from "@/features/control-center/ControlCenterCardHeader";
-import { ConfigCenterModal } from "@/features/control-center/ConfigCenterModal";
-import { InstallFlowModal } from "@/features/control-center/InstallFlowModal";
-import { ControlCenterModalShell } from "@/features/control-center/ControlCenterModalShell";
+import {
+  buildBlockingErrors,
+  buildWarnings,
+  ConfigCenterTaskContent,
+} from "@/features/control-center/ConfigCenterModal";
+import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
+import {
+  InstallFlowTaskContent,
+} from "@/features/control-center/InstallFlowModal";
+import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
+type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type OnboardingCardId =
   | "install"
   | "context_menu"
   | "auth"
   | "work_dir";
+
+type BridgeConnectorSecretDraft = {
+  botToken: string;
+  appId: string;
+  appSecret: string;
+  verificationToken: string;
+  encryptKey: string;
+  weixinBaseUrl: string;
+  weixinAccountId: string;
+  weixinOwnerUserId: string;
+};
+
+type BridgeDeleteConfirmState = {
+  connectorId: string;
+  connectorLabel: string;
+};
 
 type ControlCenterViewProps = {
   surface: ControlCenterSurface;
@@ -86,18 +123,44 @@ type ControlCenterViewProps = {
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
   bridgeOnboardingDirty: boolean;
   bridgeOnboardingValidation: BridgeOnboardingValidation;
+  bridgeSettingsDirty: boolean;
+  bridgePersistedConnectorIds: string[];
   bridgeSessions: BridgeSessionRecord[];
   bridgeBindings: BindingRecord[];
   bridgeApprovals: BridgeApprovalRecord[];
   bridgeLogTail: string[];
   bridgeRecentErrors: string[];
   bridgeSecretsMask: BridgeSecretsMaskView;
+  feishuConnectorOnboarding: FeishuConnectorOnboardingSession | null;
+  feishuConnectorOnboardingBusy: boolean;
+  weixinConnectorOnboarding: WeixinConnectorOnboardingSession | null;
+  weixinConnectorOnboardingBusy: boolean;
   bridgeBusy: boolean;
+  installedSkills: InstalledSkill[];
+  skillCenterBusy: boolean;
+  skillCenterSearch: string;
+  skillCenterFilter:
+    | "all"
+    | "session"
+    | "global"
+    | "pinned"
+    | "untrusted"
+    | "update_available";
+  skillCenterSection: SkillCenterSectionId;
+  skillCenterGitRepoUrl: string;
+  skillCenterGitRef: string;
+  selectedSkillId: string | null;
+  selectedSkillDetail: SkillDetail | null;
+  globalSkillProjections: SkillProjectionRecord[];
+  activeSessionSkillState: SessionSkillState;
+  workspaceSkillProfile: WorkspaceSkillProfile | null;
+  workspaceRecentSkillIds: string[];
+  workspaceSkillRecommendations: SkillRecommendation[];
+  workspaceSkillRestoreResults: WorkspaceSkillRestoreResult[];
   kimiPathInput: string;
   workDirInput: string;
   configCenterView: KimiCliConfigCenterView | null;
   configCenterDraft: KimiCliConfigCenterInput;
-  configCenterOpen: boolean;
   configCenterBusy: boolean;
   configCenterDirty: boolean;
   installProbe: InstallProbeStatus | null;
@@ -105,12 +168,10 @@ type ControlCenterViewProps = {
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
-  installFlowOpen: boolean;
   installFlowCatalog: InstallFlowCatalog | null;
   installSessionSnapshot: InstallSessionSnapshot;
-  installCommandsOpen: boolean;
-  installCommandsBusy: boolean;
-  installCommandCatalog: InstallCommandCatalog | null;
+  activeTask: ControlCenterTaskId | null;
+  activeTaskPayload: ControlCenterTaskPayload | null;
   setActiveControlSection: (section: ControlSectionId) => void;
   setActiveRuntimePanel: (panel: RuntimePanelId) => void;
   onWorkDirInputChange: (value: string) => void;
@@ -119,11 +180,31 @@ type ControlCenterViewProps = {
   onRefreshContextMenuStatus: () => Promise<void>;
   onRefreshBridgeSettings: () => Promise<BridgeSettings>;
   onRefreshBridgeStatus: () => Promise<BridgeStatus>;
-  onRefreshBridgeSessions: () => Promise<BridgeSessionRecord[]>;
+  onRefreshBridgeSessions: (options?: { silent?: boolean }) => Promise<BridgeSessionRecord[]>;
   onRefreshBridgeBindings: () => Promise<BindingRecord[]>;
   onRefreshBridgeApprovals: () => Promise<BridgeApprovalRecord[]>;
   onRefreshBridgeLogTail: () => Promise<string[]>;
   onRefreshBridgeSecretsMask: () => Promise<BridgeSecretsMaskView>;
+  onSaveBridgeConnectorSecrets: (input: BridgeConnectorSecretsInput) => Promise<void>;
+  onStartFeishuConnectorOnboarding: (
+    connectorId: string,
+  ) => Promise<FeishuConnectorOnboardingSession>;
+  onRefreshFeishuConnectorOnboardingStatus: (
+    sessionId: string,
+  ) => Promise<FeishuConnectorOnboardingSession>;
+  onCancelFeishuConnectorOnboarding: (
+    sessionId: string,
+  ) => Promise<FeishuConnectorOnboardingSession>;
+  onStartWeixinConnectorOnboarding: (
+    connectorId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
+  onRefreshWeixinConnectorOnboardingStatus: (
+    sessionId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
+  onCancelWeixinConnectorOnboarding: (
+    sessionId: string,
+  ) => Promise<WeixinConnectorOnboardingSession>;
+  onRefreshSkillCenterState: () => Promise<unknown>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
   onRefreshOnboarding: () => Promise<void>;
   onClose: () => void;
@@ -137,22 +218,53 @@ type ControlCenterViewProps = {
   onDisableContextMenu: () => Promise<void>;
   onProbeLogin: () => Promise<void>;
   onPickWorkDir: () => Promise<void>;
-  onPickBridgeDefaultWorkDir: () => Promise<void>;
+  onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<string | null>;
   onSaveWorkDirAndRestart: () => Promise<void>;
   onClearWorkDir: () => Promise<void>;
   onBridgeSettingsChange: (next: BridgeSettings) => void;
   onBridgeOnboardingDraftChange: (next: BridgeOnboardingConfigInput) => void;
-  onSaveBridgeOnboarding: () => Promise<void>;
-  onSaveBridgeSettings: () => Promise<void>;
-  onStartBridge: () => Promise<void>;
+  onToggleBridgeConnectorEnabled: (connectorId: string, enabled: boolean) => Promise<void>;
+  onDeleteBridgeConnector: (connectorId: string) => Promise<BridgeSettings>;
+  onPersistBridgeSettings: (options?: {
+    showRestartNotice?: boolean;
+  }) => Promise<BridgeSettings>;
+  onRunBridgePrimaryAction: (mode: BridgePrimaryActionMode) => Promise<void>;
   onStopBridge: () => Promise<void>;
   onRestartBridge: () => Promise<void>;
   onImportBridgeSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
   onResetBridgeBindingSession: (bindingId: string) => Promise<void>;
+  onResetBridgeBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
-  onOpenConfigCenterModal: () => Promise<void>;
-  onCloseConfigCenterModal: () => void;
+  onSkillCenterSearchChange: (value: string) => void;
+  onSkillCenterFilterChange: (
+    value:
+      | "all"
+      | "session"
+      | "global"
+      | "pinned"
+      | "untrusted"
+      | "update_available",
+  ) => void;
+  onSkillCenterSectionChange: (value: SkillCenterSectionId) => void;
+  onSkillCenterGitRepoUrlChange: (value: string) => void;
+  onSkillCenterGitRefChange: (value: string) => void;
+  onSelectSkill: (skillId: string) => Promise<void>;
+  onOpenSkillFromInsights: (skillId: string) => Promise<void>;
+  onOpenTask: (
+    task: ControlCenterTaskId,
+    payload?: ControlCenterTaskPayload | null,
+  ) => Promise<void>;
+  onCloseTask: () => void;
+  onConfirmInstallSkillFromGit: () => Promise<void>;
+  onConfirmImportSkillFromPath: (mode: "directory" | "zip") => Promise<void>;
+  onSetSkillTrust: (skillId: string, trusted: boolean) => Promise<void>;
+  onApplySkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
+  onRemoveSkill: (skillId: string, scope: SkillApplyScope) => Promise<void>;
+  onSetWorkspaceSkillPin: (skillId: string, pinned: boolean) => Promise<void>;
+  onUpdateSkill: (skillId: string) => Promise<void>;
+  onUninstallSkill: (skillId: string) => Promise<void>;
+  onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
   onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
   onResetConfigCenterDraft: () => void;
   onSaveKimiCliConfigCenter: () => Promise<void>;
@@ -166,12 +278,8 @@ type ControlCenterViewProps = {
   onInstallKimi: () => Promise<void>;
   onUpgradeKimi: () => Promise<void>;
   onInstallNodejs: () => Promise<void>;
-  onOpenInstallFlow: () => Promise<void>;
-  onCloseInstallFlow: () => void;
   onStartInstallTask: (taskId: InstallTaskId) => Promise<void>;
   onCancelInstallTask: () => Promise<void>;
-  onOpenInstallCommands: () => Promise<void>;
-  onCloseInstallCommands: () => void;
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;
@@ -203,279 +311,12 @@ const controlSections: Array<{
     label: "IM Bridge",
     icon: <Play size={15} />,
   },
+  {
+    id: "skill_center",
+    label: "技能中心",
+    icon: <Sparkles size={15} />,
+  },
 ];
-
-function BridgeConfigModal({
-  open,
-  busy,
-  dirty,
-  titleLabel,
-  draft,
-  validation,
-  status,
-  secretsMask,
-  onClose,
-  onDraftChange,
-  onSave,
-  onStartBridge,
-  onRefreshStatus,
-  onRefreshSecretsMask,
-}: {
-  open: boolean;
-  busy: boolean;
-  dirty: boolean;
-  titleLabel: string;
-  draft: BridgeOnboardingConfigInput;
-  validation: BridgeOnboardingValidation;
-  status: BridgeStatus;
-  secretsMask: BridgeSecretsMaskView;
-  onClose: () => void;
-  onDraftChange: (next: BridgeOnboardingConfigInput) => void;
-  onSave: () => Promise<void>;
-  onStartBridge: () => Promise<void>;
-  onRefreshStatus: () => Promise<BridgeStatus>;
-  onRefreshSecretsMask: () => Promise<BridgeSecretsMaskView>;
-}) {
-  function requestClose() {
-    if (dirty && !window.confirm("Bridge 配置存在未保存更改，确定关闭弹窗吗？")) {
-      return;
-    }
-    onClose();
-  }
-
-  const feishuStatus =
-    status.channels.find((channel) => channel.platform === "feishu")?.state ?? "idle";
-
-  async function handleSaveAndStartBridge() {
-    await onSave();
-    await onStartBridge();
-    await onRefreshStatus();
-  }
-
-  return (
-    <ControlCenterModalShell
-      open={open}
-      title={titleLabel}
-      description="在这里维护 Bridge 与 Feishu 长连接配置；保存凭据只代表 sidecar 可以尝试连接，平台是否检测到应用连接仍要看长连接和权限是否真正建立。"
-      ariaLabel={titleLabel}
-      className="cc-bridge-config-modal"
-      bodyClassName="cc-bridge-config-body"
-      onRequestClose={requestClose}
-      headerActions={
-        <Button
-          type="button"
-          variant="outline"
-          icon={<RefreshCw size={14} />}
-          className="cc-action-btn"
-          onClick={() => {
-            void Promise.all([onRefreshStatus(), onRefreshSecretsMask()]);
-          }}
-          disabled={busy}
-        >
-          刷新状态
-        </Button>
-      }
-      footer={
-        <>
-          <div className="cc-config-footer-meta">
-            <span>Bridge（网关）: {formatBridgeRuntimeStateLabel(status.state)}</span>
-            <span>Feishu（飞书通道）: {formatBridgeChannelStateLabel(feishuStatus)}</span>
-            {dirty ? <span className="unsaved">存在未保存变更</span> : <span className="saved">已同步</span>}
-          </div>
-          <div className="cc-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={requestClose}
-              disabled={busy}
-            >
-              关闭
-            </Button>
-            <Button
-              type="button"
-              icon={<Check size={15} />}
-              className="cc-action-btn"
-              onClick={() => void onSave()}
-              disabled={busy || !dirty || !validation.canSave}
-            >
-              保存配置（Save）
-            </Button>
-            <Button
-              type="button"
-              icon={<Play size={15} />}
-              className="cc-action-btn"
-              onClick={() => void handleSaveAndStartBridge()}
-              disabled={busy || !validation.canSave}
-            >
-              保存并启动（Save & Start）
-            </Button>
-          </div>
-        </>
-      }
-    >
-      <div className="diagnostics-grid cc-bridge-onboarding-status-grid">
-        <div className="diag-item">
-          <span className="diag-label">Bridge 状态（Bridge State）</span>
-          <strong>{formatBridgeRuntimeStateLabel(status.state)}</strong>
-        </div>
-        <div className="diag-item">
-          <span className="diag-label">Feishu 通道（Feishu Channel）</span>
-          <strong>{formatBridgeChannelStateLabel(feishuStatus)}</strong>
-        </div>
-        <div className="diag-item">
-          <span className="diag-label">Bridge 开关（Bridge Enabled）</span>
-          <strong>{draft.enabled ? "就绪" : "待办"}</strong>
-        </div>
-        <div className="diag-item">
-          <span className="diag-label">Feishu 开关（Feishu Enabled）</span>
-          <strong>{draft.feishuEnabled ? "就绪" : "待办"}</strong>
-        </div>
-      </div>
-
-      <div className="cc-bridge-onboarding-switches">
-        <label className="bridge-switch-card">
-          <span className="bridge-switch-copy">
-            <strong>启用 Bridge（Enable Bridge）</strong>
-            <small>保存后写入总开关，启动需点击“保存并启动”。</small>
-          </span>
-          <input
-            type="checkbox"
-            className="cc-switch-input"
-            checked={draft.enabled}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                enabled: event.currentTarget.checked,
-              })
-            }
-          />
-          <span className="cc-switch-track" aria-hidden />
-        </label>
-
-        <label className="bridge-switch-card">
-          <span className="bridge-switch-copy">
-            <strong>启用 Feishu（Enable Feishu）</strong>
-            <small>启用时需要有效的 appId 和 appSecret；飞书后台显示已连接还取决于长连接和应用权限。</small>
-          </span>
-          <input
-            type="checkbox"
-            className="cc-switch-input"
-            checked={draft.feishuEnabled}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                feishuEnabled: event.currentTarget.checked,
-                enabled: event.currentTarget.checked || draft.enabled,
-              })
-            }
-          />
-          <span className="cc-switch-track" aria-hidden />
-        </label>
-      </div>
-
-      <div className="cc-bridge-onboarding-grid">
-        <label className="cc-bridge-onboarding-field">
-          <span>appId</span>
-          <Input
-            value={draft.feishu.appId ?? ""}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                feishu: {
-                  ...draft.feishu,
-                  appId: event.currentTarget.value,
-                },
-              })
-            }
-            placeholder="cli_a1b2c3d4"
-          />
-        </label>
-        <label className="cc-bridge-onboarding-field">
-          <span>appSecret</span>
-          <Input
-            type="password"
-            value={draft.feishu.appSecret ?? ""}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                feishu: {
-                  ...draft.feishu,
-                  appSecret: event.currentTarget.value,
-                },
-              })
-            }
-            placeholder="请输入飞书 app secret"
-          />
-        </label>
-        <label className="cc-bridge-onboarding-field">
-          <span>verificationToken（可选）</span>
-          <Input
-            value={draft.feishu.verificationToken ?? ""}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                feishu: {
-                  ...draft.feishu,
-                  verificationToken: event.currentTarget.value,
-                },
-              })
-            }
-            placeholder="事件订阅 token；当前长连接模式可留空"
-          />
-        </label>
-        <label className="cc-bridge-onboarding-field">
-          <span>encryptKey（可选）</span>
-          <Input
-            type="password"
-            value={draft.feishu.encryptKey ?? ""}
-            onChange={(event) =>
-              onDraftChange({
-                ...draft,
-                feishu: {
-                  ...draft.feishu,
-                  encryptKey: event.currentTarget.value,
-                },
-              })
-            }
-            placeholder="事件订阅 encrypt key；当前长连接模式可留空"
-          />
-        </label>
-      </div>
-
-      <div className="bridge-panel-subsection">
-        <div className="bridge-panel-subheader">
-          <h5>密钥掩码视图（Secrets Mask View）</h5>
-        </div>
-        <div className="bridge-secret-list">
-          {renderBridgeOnboardingSecretRow("Feishu appId（应用 ID）", secretsMask.feishu.appId)}
-          {renderBridgeOnboardingSecretRow("Feishu appSecret（应用密钥）", secretsMask.feishu.appSecret)}
-          {renderBridgeOnboardingSecretRow(
-            "Feishu verificationToken（校验令牌）",
-            secretsMask.feishu.verificationToken,
-          )}
-          {renderBridgeOnboardingSecretRow("Feishu encryptKey（加密密钥）", secretsMask.feishu.encryptKey)}
-        </div>
-      </div>
-
-      <p
-        className={`hint cc-step-meta cc-bridge-onboarding-message ${
-          validation.canSave ? "" : "is-error"
-        }`}
-      >
-        {validation.message ?? "保存后可回到卡片直接启动或停止 bridge。"}
-      </p>
-      <p className="hint cc-step-meta">
-        当前 Feishu 通道使用长连接模式。`verificationToken` 和 `encryptKey` 仅在你同时接入事件订阅回调时需要，不决定当前长连接能否建连。
-      </p>
-      {status.state === "stopped" ? (
-        <p className="hint cc-step-meta">
-          当前 Bridge 为停止态（Stopped）。请点击“保存并启动（Save & Start）”启动服务。
-        </p>
-      ) : null}
-    </ControlCenterModalShell>
-  );
-}
 
 function RuntimePanel({
   active,
@@ -501,96 +342,214 @@ function RuntimePanel({
   );
 }
 
-function getBridgeChannelStatus(status: BridgeStatus, platform: "telegram" | "feishu") {
-  return status.channels.find((channel) => channel.platform === platform);
-}
-
-function formatBridgeRuntimeStateLabel(state: BridgeStatus["state"]): string {
-  switch (state) {
-    case "running":
-      return "就绪";
-    case "starting":
-    case "stopping":
-      return "进行中";
-    case "degraded":
-    case "crashed":
-      return "异常";
-    default:
-      return "待办";
-  }
-}
-
-function formatBridgeChannelStateLabel(state: string): string {
-  switch (state) {
-    case "ready":
-      return "就绪";
-    case "connecting":
-      return "进行中";
-    case "degraded":
-    case "error":
-      return "异常";
-    default:
-      return "待办";
-  }
-}
-
-function formatImFinalStatusLabel(status: BridgeStatus, feishuEnabled: boolean): string {
-  if (feishuEnabled) {
-    const feishuStatus = getBridgeChannelStatus(status, "feishu")?.state ?? "idle";
-    return formatBridgeChannelStateLabel(feishuStatus);
-  }
-  return formatBridgeRuntimeStateLabel(status.state);
-}
-
 function hasLatinLetters(value: string): boolean {
   return /[A-Za-z]/.test(value);
 }
 
 function getBridgeDisplayName(settings: BridgeSettings): string {
-  const feishuEnabled = settings.channels.some(
-    (channel) => channel.platform === "feishu" && channel.enabled,
+  const weixinEnabled = settings.connectors.some(
+    (connector) => connector.platform === "weixin" && connector.enabled,
   );
-  const telegramEnabled = settings.channels.some(
-    (channel) => channel.platform === "telegram" && channel.enabled,
+  const feishuEnabled = settings.connectors.some(
+    (connector) => connector.platform === "feishu" && connector.enabled,
   );
-  if (feishuEnabled && !telegramEnabled) {
+  if (weixinEnabled) {
+    return "微信";
+  }
+  if (feishuEnabled) {
     return "飞书";
   }
-  if (telegramEnabled && !feishuEnabled) {
-    return "Telegram";
-  }
   return "IM Bridge";
-}
-
-function formatBridgeDisplayNameLabel(displayName: string, suffix: string): string {
-  return hasLatinLetters(displayName) ? `${displayName} ${suffix}` : `${displayName}${suffix}`;
 }
 
 function formatOpenBridgeDisplayName(displayName: string): string {
   return hasLatinLetters(displayName) ? `打开 ${displayName}` : `打开${displayName}`;
 }
 
-function formatOpenBridgeDisplayNameLabel(displayName: string, suffix: string): string {
-  return hasLatinLetters(displayName)
-    ? `打开 ${displayName} ${suffix}`
-    : `打开${displayName}${suffix}`;
+function createEmptyBridgeConnectorSecretDraft(): BridgeConnectorSecretDraft {
+  return {
+    botToken: "",
+    appId: "",
+    appSecret: "",
+    verificationToken: "",
+    encryptKey: "",
+    weixinBaseUrl: "",
+    weixinAccountId: "",
+    weixinOwnerUserId: "",
+  };
 }
 
-function renderBridgeOnboardingSecretRow(
-  label: string,
-  value: BridgeSecretsMaskView["telegram"]["botToken"],
+function bridgePlatformLabel(platform: BridgePlatform): string {
+  if (platform === "telegram") {
+    return "Telegram";
+  }
+  if (platform === "weixin") {
+    return "微信";
+  }
+  return "飞书";
+}
+
+function defaultBridgeConnectorLabel(platform: BridgePlatform, index: number): string {
+  if (platform === "telegram") {
+    return `Telegram 机器人 ${String(index).padStart(2, "0")}`;
+  }
+  if (platform === "weixin") {
+    return `微信机器人 ${String(index).padStart(2, "0")}`;
+  }
+  return `飞书机器人 ${String(index).padStart(2, "0")}`;
+}
+
+function generateUniqueBridgeConnectorId(
+  platform: BridgePlatform,
+  existingIds: Set<string>,
+): string {
+  const idBase =
+    platform === "telegram" ? "telegram" : platform === "weixin" ? "weixin" : "feishu";
+
+  while (true) {
+    const randomPart =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID().replace(/-/g, "").slice(0, 12)
+        : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.slice(0, 12);
+    const nextId = `${idBase}-${randomPart.toLowerCase()}`;
+    if (!existingIds.has(nextId)) {
+      return nextId;
+    }
+  }
+}
+
+function findBridgeConnectorRecentError(
+  connector: BridgeConnectorConfig,
+  connectorStatus: BridgeStatus["connectors"][number] | null,
+  recentErrors: string[],
 ) {
   return (
-    <div key={label} className="bridge-secret-row">
-      <div className="bridge-secret-copy">
-        <strong>{label}</strong>
-        <small>{value.configured ? value.maskedValue ?? "***" : "未配置"}</small>
-      </div>
-      <span className={`bridge-secret-chip ${value.configured ? "configured" : "empty"}`}>
-        {value.configured ? "Configured" : "Missing"}
-      </span>
-    </div>
+    connectorStatus?.lastError ||
+    connectorStatus?.lastErrorCode ||
+    recentErrors.find(
+      (entry) =>
+        entry.includes(connector.id) ||
+        entry.includes(connector.label) ||
+        entry.includes(connector.platform),
+    ) ||
+    ""
   );
+}
+
+function formatBridgeConnectorStateLabel(
+  value: BridgeStatus["connectors"][number]["state"] | "idle",
+): string {
+  switch (value) {
+    case "connecting":
+      return "连接中";
+    case "ready":
+      return "就绪";
+    case "degraded":
+      return "降级";
+    case "error":
+      return "异常";
+    default:
+      return "待机";
+  }
+}
+
+function formatBridgeTimestamp(value?: string): string {
+  if (!value) {
+    return "未记录";
+  }
+  return Number.isNaN(Date.parse(value))
+    ? value
+    : new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function isFeishuOnboardingActive(
+  session: FeishuConnectorOnboardingSession | null,
+): boolean {
+  return (
+    session?.state === "awaiting_scan" || session?.state === "polling"
+  );
+}
+
+function formatFeishuOnboardingStateLabel(
+  state: FeishuConnectorOnboardingSession["state"],
+): string {
+  switch (state) {
+    case "awaiting_scan":
+      return "等待扫码";
+    case "polling":
+      return "等待授权";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "expired":
+      return "已过期";
+    case "cancelled":
+      return "已取消";
+    default:
+      return "未开始";
+  }
+}
+
+function formatFeishuOnboardingTone(
+  state: FeishuConnectorOnboardingSession["state"],
+): "success" | "warning" | "danger" | "neutral" {
+  switch (state) {
+    case "succeeded":
+      return "success";
+    case "awaiting_scan":
+    case "polling":
+      return "warning";
+    case "failed":
+    case "expired":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+function isWeixinOnboardingActive(
+  session: WeixinConnectorOnboardingSession | null,
+): boolean {
+  return session?.state === "awaiting_scan" || session?.state === "polling";
+}
+
+function formatWeixinOnboardingStateLabel(
+  state: WeixinConnectorOnboardingSession["state"],
+): string {
+  switch (state) {
+    case "awaiting_scan":
+      return "等待扫码";
+    case "polling":
+      return "等待登录";
+    case "succeeded":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "expired":
+      return "已过期";
+    case "cancelled":
+      return "已取消";
+    default:
+      return "未开始";
+  }
+}
+
+function formatWeixinOnboardingTone(
+  state: WeixinConnectorOnboardingSession["state"],
+): "success" | "warning" | "danger" | "neutral" {
+  switch (state) {
+    case "succeeded":
+      return "success";
+    case "awaiting_scan":
+    case "polling":
+      return "warning";
+    case "failed":
+    case "expired":
+      return "danger";
+    default:
+      return "neutral";
+  }
 }
 
 export function ControlCenterView({
@@ -614,18 +573,38 @@ export function ControlCenterView({
   bridgeOnboardingDraft,
   bridgeOnboardingDirty,
   bridgeOnboardingValidation,
+  bridgeSettingsDirty,
+  bridgePersistedConnectorIds,
   bridgeSessions,
   bridgeBindings,
   bridgeApprovals,
   bridgeLogTail,
   bridgeRecentErrors,
   bridgeSecretsMask,
+  feishuConnectorOnboarding,
+  feishuConnectorOnboardingBusy,
+  weixinConnectorOnboarding,
+  weixinConnectorOnboardingBusy,
   bridgeBusy,
+  installedSkills,
+  skillCenterBusy,
+  skillCenterSearch,
+  skillCenterFilter,
+  skillCenterSection,
+  skillCenterGitRepoUrl,
+  skillCenterGitRef,
+  selectedSkillId,
+  selectedSkillDetail,
+  globalSkillProjections,
+  activeSessionSkillState,
+  workspaceSkillProfile,
+  workspaceRecentSkillIds,
+  workspaceSkillRecommendations,
+  workspaceSkillRestoreResults,
   kimiPathInput,
   workDirInput,
   configCenterView,
   configCenterDraft,
-  configCenterOpen,
   configCenterBusy,
   configCenterDirty,
   installProbe,
@@ -633,12 +612,10 @@ export function ControlCenterView({
   installSettings,
   installSettingsBusy,
   powershellPreflight,
-  installFlowOpen,
   installFlowCatalog,
   installSessionSnapshot,
-  installCommandsOpen,
-  installCommandsBusy,
-  installCommandCatalog,
+  activeTask,
+  activeTaskPayload,
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
@@ -652,6 +629,14 @@ export function ControlCenterView({
   onRefreshBridgeApprovals,
   onRefreshBridgeLogTail,
   onRefreshBridgeSecretsMask,
+  onSaveBridgeConnectorSecrets,
+  onStartFeishuConnectorOnboarding,
+  onRefreshFeishuConnectorOnboardingStatus,
+  onCancelFeishuConnectorOnboarding,
+  onStartWeixinConnectorOnboarding,
+  onRefreshWeixinConnectorOnboardingStatus,
+  onCancelWeixinConnectorOnboarding,
+  onRefreshSkillCenterState,
   onRefreshInstallProbe,
   onRefreshOnboarding,
   onClose,
@@ -665,22 +650,40 @@ export function ControlCenterView({
   onDisableContextMenu,
   onProbeLogin,
   onPickWorkDir,
-  onPickBridgeDefaultWorkDir,
+  onPickBridgeConnectorDefaultWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
   onBridgeSettingsChange,
   onBridgeOnboardingDraftChange,
-  onSaveBridgeOnboarding,
-  onSaveBridgeSettings,
-  onStartBridge,
+  onToggleBridgeConnectorEnabled,
+  onDeleteBridgeConnector,
+  onPersistBridgeSettings,
+  onRunBridgePrimaryAction,
   onStopBridge,
   onRestartBridge,
   onImportBridgeSession,
   onClearBridgeBinding,
   onResetBridgeBindingSession,
+  onResetBridgeBindingToDefaultWorkDir,
   onResolveBridgeApproval,
-  onOpenConfigCenterModal,
-  onCloseConfigCenterModal,
+  onSkillCenterSearchChange,
+  onSkillCenterFilterChange,
+  onSkillCenterSectionChange,
+  onSkillCenterGitRepoUrlChange,
+  onSkillCenterGitRefChange,
+  onSelectSkill,
+  onOpenSkillFromInsights,
+  onOpenTask,
+  onCloseTask,
+  onConfirmInstallSkillFromGit,
+  onConfirmImportSkillFromPath,
+  onSetSkillTrust,
+  onApplySkill,
+  onRemoveSkill,
+  onSetWorkspaceSkillPin,
+  onUpdateSkill,
+  onUninstallSkill,
+  onRecoverWorkspaceSkill,
   onConfigCenterDraftChange,
   onResetConfigCenterDraft,
   onSaveKimiCliConfigCenter,
@@ -692,12 +695,8 @@ export function ControlCenterView({
   onInstallKimi,
   onUpgradeKimi,
   onInstallNodejs,
-  onOpenInstallFlow,
-  onCloseInstallFlow,
   onStartInstallTask,
   onCancelInstallTask,
-  onOpenInstallCommands,
-  onCloseInstallCommands,
   onCompleteOnboarding,
   onSkipOnboarding,
   onOpenExternalUrl,
@@ -705,32 +704,37 @@ export function ControlCenterView({
 }: ControlCenterViewProps) {
   const [authCardView, setAuthCardView] = useState<"login" | "api">("login");
   const [installProbeRequested, setInstallProbeRequested] = useState(false);
-  const [bridgeConfigOpen, setBridgeConfigOpen] = useState(false);
-  const [selectedBindingId, setSelectedBindingId] = useState("");
-  const [bridgeReadyHintOpen, setBridgeReadyHintOpen] = useState(false);
+  const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
+  const [bridgeOverviewPendingConnectorId, setBridgeOverviewPendingConnectorId] =
+    useState<string | null>(null);
+  const [bridgeOverviewPendingEnabled, setBridgeOverviewPendingEnabled] = useState<
+    Record<string, boolean>
+  >({});
+  const [bridgeConnectorSecretDraft, setBridgeConnectorSecretDraft] =
+    useState<BridgeConnectorSecretDraft>(() => createEmptyBridgeConnectorSecretDraft());
+  const [bridgeConnectorLabelDraft, setBridgeConnectorLabelDraft] = useState("");
+  const [bridgeConnectorTaskError, setBridgeConnectorTaskError] = useState<string | null>(null);
+  const [bridgeDeleteConfirm, setBridgeDeleteConfirm] =
+    useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
   const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
-  const [bridgeRuntimePanelExpanded, setBridgeRuntimePanelExpanded] = useState(false);
   const [mainCloseBehaviorSaving, setMainCloseBehaviorSaving] = useState(false);
   const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
-  const bridgeReadyHintRef = useRef<HTMLDivElement | null>(null);
-  void installCommandsOpen;
-  void installCommandsBusy;
-  void installCommandCatalog;
+  void installAction;
+  void bridgeOnboardingDraft;
+  void bridgeOnboardingValidation;
+  void onBridgeOnboardingDraftChange;
+  void onRunBridgePrimaryAction;
+  void onStopBridge;
+  void onCancelInstallTask;
   void onInstallDependencies;
   void onInstallKimi;
   void onUpgradeKimi;
   void onInstallNodejs;
-  void onOpenInstallCommands;
-  void onCloseInstallCommands;
+  void onRefreshSkillCenterState;
   const installPathDisplay =
     onboarding?.detectedKimiPath?.trim() ?? kimiPathInput.trim();
-  const installSummary = onboarding?.kimiInstalled
-    ? `已检测到：${installPathDisplay || "kimi"}`
-    : installPathDisplay
-      ? `已选择：${installPathDisplay}`
-      : "尚未检测到 Kimi CLI，请先安装后点击浏览选择可执行文件路径。";
   const recentInstallSummary = installSessionSnapshot.title
     ? `${installSessionSnapshot.title}: ${installSessionSnapshot.message ?? installSessionSnapshot.status}`
     : null;
@@ -744,17 +748,94 @@ export function ControlCenterView({
     bridgeStatus.state === "running" ||
     bridgeStatus.state === "starting" ||
     bridgeStatus.state === "degraded";
-  const feishuChannelStatus = getBridgeChannelStatus(bridgeStatus, "feishu");
   const bridgeEnabled = bridgeSettings.enabled;
-  const feishuEnabled = bridgeSettings.channels.find(
-    (channel) => channel.platform === "feishu",
-  )?.enabled ?? false;
+  const feishuEnabled = bridgeSettings.connectors.some(
+    (connector) => connector.platform === "feishu" && connector.enabled,
+  );
   const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
-  const bridgeFinalStatusTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "最终状态");
+  const bridgeFinalStatusTitle = "飞书最终状态";
   const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
-  const bridgeRuntimePanelTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "运行面板");
-  const bridgeConfigTitle = formatBridgeDisplayNameLabel(bridgeDisplayName, "配置");
-  const openBridgeConfigTitle = formatOpenBridgeDisplayNameLabel(bridgeDisplayName, "配置");
+  const bridgeTaskConnectorId =
+    activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
+      ? activeTaskPayload?.connectorId ?? null
+      : null;
+  const effectiveSelectedBridgeConnectorId = bridgeTaskConnectorId ?? selectedBridgeConnectorId;
+  const isBridgeConnectorSecretsTask = activeTask === "bridge_connector_secrets";
+  const isBridgeRuntimeTask = activeTask === "bridge_runtime";
+  const isConfigCenterTask = activeTask === "config_center";
+  const isSkillGitImportTask = activeTask === "skill_git_import";
+  const isSkillImportTask = activeTask === "skill_import";
+  const selectedBridgeConnector =
+    bridgeSettings.connectors.find(
+      (connector) => connector.id === effectiveSelectedBridgeConnectorId,
+    ) ?? null;
+  const selectedBridgeConnectorStatus =
+    bridgeStatus.connectors.find(
+      (connector) => connector.connectorId === effectiveSelectedBridgeConnectorId,
+    ) ?? null;
+  const selectedBridgeConnectorSecrets =
+    bridgeSecretsMask.connectors.find(
+      (connector) => connector.connectorId === effectiveSelectedBridgeConnectorId,
+    ) ?? null;
+  const selectedFeishuOnboarding =
+    selectedBridgeConnector?.platform === "feishu" &&
+    feishuConnectorOnboarding?.connectorId === selectedBridgeConnector.id
+      ? feishuConnectorOnboarding
+      : null;
+  const selectedWeixinOnboarding =
+    selectedBridgeConnector?.platform === "weixin" &&
+    weixinConnectorOnboarding?.connectorId === selectedBridgeConnector.id
+      ? weixinConnectorOnboarding
+      : null;
+  const selectedFeishuSecretsConfigured = Boolean(
+    selectedBridgeConnectorSecrets?.feishu?.appId.configured &&
+      selectedBridgeConnectorSecrets?.feishu?.appSecret.configured,
+  );
+  const selectedWeixinSecretsConfigured = Boolean(
+    selectedBridgeConnectorSecrets?.weixin?.botToken.configured &&
+      selectedBridgeConnectorSecrets?.weixin?.ownerUserId,
+  );
+  const selectedBridgeConnectorPersisted = Boolean(
+    selectedBridgeConnector &&
+      bridgePersistedConnectorIds.includes(selectedBridgeConnector.id),
+  );
+  const sortedBridgeConnectors = useMemo(() => {
+    const platformPriority: Record<BridgePlatform, number> = {
+      weixin: 0,
+      feishu: 1,
+      telegram: 2,
+    };
+    return [...bridgeSettings.connectors].sort((left, right) => {
+      const leftStatus =
+        bridgeStatus.connectors.find((item) => item.connectorId === left.id) ?? null;
+      const rightStatus =
+        bridgeStatus.connectors.find((item) => item.connectorId === right.id) ?? null;
+      const leftHasIssue = Boolean(
+        findBridgeConnectorRecentError(left, leftStatus, bridgeRecentErrors) ||
+          leftStatus?.state === "error" ||
+          leftStatus?.state === "degraded",
+      );
+      const rightHasIssue = Boolean(
+        findBridgeConnectorRecentError(right, rightStatus, bridgeRecentErrors) ||
+          rightStatus?.state === "error" ||
+          rightStatus?.state === "degraded",
+      );
+      if (left.enabled !== right.enabled) {
+        return left.enabled ? -1 : 1;
+      }
+      if (leftHasIssue !== rightHasIssue) {
+        return leftHasIssue ? -1 : 1;
+      }
+      if (left.platform !== right.platform) {
+        return platformPriority[left.platform] - platformPriority[right.platform];
+      }
+      return left.label.localeCompare(right.label, "zh-CN");
+    });
+  }, [bridgeRecentErrors, bridgeSettings.connectors, bridgeStatus.connectors]);
+  const visibleBridgeConnectors = useMemo(
+    () => sortedBridgeConnectors,
+    [sortedBridgeConnectors],
+  );
   const mainWindowCloseBehaviorOptions: Array<{
     value: MainWindowCloseBehavior;
     label: string;
@@ -763,8 +844,6 @@ export function ControlCenterView({
     { value: "exit", label: "直接退出应用" },
     { value: "minimize_to_tray", label: "最小化到系统托盘" },
   ];
-  const bridgeOnboardingStartDisabled =
-    bridgeBusy || isBridgeRunning || !bridgeOnboardingValidation.canStart;
   const installStatusLabel = onboarding?.kimiInstalled ? "就绪" : "待办";
   const installStatusTone = onboarding?.kimiInstalled ? "success" : "warning";
   const contextMenuStatusLabel = !runtimeContextMenuSupported
@@ -785,6 +864,47 @@ export function ControlCenterView({
       : "neutral";
   const workDirStatusLabel = effectiveWorkDir ? "就绪" : "待办";
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
+
+  useEffect(() => {
+    if (
+      !isBridgeConnectorSecretsTask ||
+      !selectedFeishuOnboarding ||
+      !isFeishuOnboardingActive(selectedFeishuOnboarding)
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void onRefreshFeishuConnectorOnboardingStatus(selectedFeishuOnboarding.sessionId);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [
+    isBridgeConnectorSecretsTask,
+    onRefreshFeishuConnectorOnboardingStatus,
+    selectedFeishuOnboarding,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isBridgeConnectorSecretsTask ||
+      !selectedWeixinOnboarding ||
+      !isWeixinOnboardingActive(selectedWeixinOnboarding)
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void onRefreshWeixinConnectorOnboardingStatus(selectedWeixinOnboarding.sessionId);
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [
+    isBridgeConnectorSecretsTask,
+    onRefreshWeixinConnectorOnboardingStatus,
+    selectedWeixinOnboarding,
+  ]);
+
+  useEffect(() => {
+    setBridgeConnectorTaskError(null);
+  }, [activeTask, effectiveSelectedBridgeConnectorId]);
+
   const bridgeStatusLabel =
     bridgeStatus.state === "running"
       ? "就绪"
@@ -801,15 +921,6 @@ export function ControlCenterView({
       : bridgeStatus.state === "starting"
         ? "warning"
         : bridgeStatus.state === "crashed"
-          ? "danger"
-          : "neutral";
-  const feishuRuntimeState = feishuChannelStatus?.state ?? "idle";
-  const feishuRuntimeTone =
-    feishuRuntimeState === "ready"
-      ? "success"
-      : feishuRuntimeState === "connecting" || feishuRuntimeState === "degraded"
-        ? "warning"
-        : feishuRuntimeState === "error"
           ? "danger"
           : "neutral";
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
@@ -849,60 +960,17 @@ export function ControlCenterView({
   }, [activeControlSection]);
 
   useEffect(() => {
-    if (activeControlSection !== "bridge_center") {
-      setBridgeRuntimePanelExpanded(false);
-    }
-  }, [activeControlSection]);
-
-  useEffect(() => {
-    if (!bridgeOnboardingValidation.canStart && bridgeReadyHintOpen) {
-      setBridgeReadyHintOpen(false);
-    }
-  }, [bridgeOnboardingValidation.canStart, bridgeReadyHintOpen]);
-
-  useEffect(() => {
-    if (!bridgeReadyHintOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) {
-        return;
-      }
-      if (!bridgeReadyHintRef.current?.contains(target)) {
-        setBridgeReadyHintOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setBridgeReadyHintOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [bridgeReadyHintOpen]);
-
-  useEffect(() => {
-    if (bridgeBindings.length === 0) {
-      if (selectedBindingId) {
-        setSelectedBindingId("");
-      }
-      return;
-    }
     if (
-      !selectedBindingId ||
-      !bridgeBindings.some((binding) => binding.bindingId === selectedBindingId)
+      !selectedBridgeConnectorId ||
+      !visibleBridgeConnectors.some((item) => item.id === selectedBridgeConnectorId)
     ) {
-      setSelectedBindingId(bridgeBindings[0]?.bindingId ?? "");
+      setSelectedBridgeConnectorId(visibleBridgeConnectors[0]?.id ?? null);
     }
-  }, [bridgeBindings, selectedBindingId]);
+  }, [selectedBridgeConnectorId, visibleBridgeConnectors]);
+
+  useEffect(() => {
+    setBridgeConnectorLabelDraft(selectedBridgeConnector?.label ?? "");
+  }, [selectedBridgeConnector?.id, selectedBridgeConnector?.label]);
 
   useEffect(() => {
     if (installProbe) {
@@ -933,6 +1001,19 @@ export function ControlCenterView({
       disabled={installBusy}
     >
       重新检测
+    </Button>
+  );
+  const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
+  const installPrimaryActionLabel = installReady ? "升级 Kimi" : "一键安装 Kimi CLI";
+  const installPrimaryAction = (
+    <Button
+      type="button"
+      icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
+      className="cc-action-btn"
+      onClick={() => void onStartInstallTask(installPrimaryTaskId)}
+      disabled={installBusy}
+    >
+      {installPrimaryActionLabel}
     </Button>
   );
 
@@ -977,7 +1058,7 @@ export function ControlCenterView({
         type="button"
         icon={<Check size={14} />}
         className="cc-action-btn"
-        onClick={() => void onOpenConfigCenterModal()}
+        onClick={() => void onOpenTask("config_center")}
         disabled={actionBusy || configCenterBusy}
       >
         打开配置中心弹窗
@@ -1080,10 +1161,9 @@ export function ControlCenterView({
 
   async function handleSelectBridgeSection() {
     try {
+      await Promise.all([onRefreshBridgeSettings(), onRefreshBridgeStatus()]);
       await Promise.all([
-        onRefreshBridgeSettings(),
-        onRefreshBridgeStatus(),
-        onRefreshBridgeSessions(),
+        onRefreshBridgeSessions({ silent: true }),
         onRefreshBridgeBindings(),
         onRefreshBridgeApprovals(),
         onRefreshBridgeLogTail(),
@@ -1091,6 +1171,14 @@ export function ControlCenterView({
       ]);
     } finally {
       setActiveControlSection("bridge_center");
+    }
+  }
+
+  async function handleSelectSkillCenterSection() {
+    try {
+      await onRefreshSkillCenterState();
+    } finally {
+      setActiveControlSection("skill_center");
     }
   }
 
@@ -1107,7 +1195,334 @@ export function ControlCenterView({
       await handleSelectBridgeSection();
       return;
     }
+    if (section === "skill_center") {
+      await handleSelectSkillCenterSection();
+      return;
+    }
     await handleSelectRuntimePanel("core");
+  }
+
+  function updateBridgeConnector(
+    connectorId: string,
+    patch: Partial<BridgeConnectorConfig>,
+  ) {
+    const primaryFeishuId =
+      bridgeSettings.connectors.find((connector) => connector.platform === "feishu")?.id ?? null;
+    const nextConnectors = bridgeSettings.connectors.map((connector) =>
+      connector.id === connectorId ? { ...connector, ...patch } : connector,
+    );
+    const nextSettings: BridgeSettings = {
+      ...bridgeSettings,
+      connectors: nextConnectors,
+    };
+    if (primaryFeishuId === connectorId) {
+      if (patch.feishuAutoApprove !== undefined) {
+        nextSettings.feishuAutoApprove = patch.feishuAutoApprove;
+      }
+      if (patch.feishuReplyRenderer !== undefined) {
+        nextSettings.feishuReplyRenderer = patch.feishuReplyRenderer;
+      }
+    }
+    onBridgeSettingsChange(nextSettings);
+  }
+
+  function addBridgeConnector(platform: BridgePlatform) {
+    const existingIds = new Set(bridgeSettings.connectors.map((connector) => connector.id));
+    let index = 1;
+    while (
+      bridgeSettings.connectors.some(
+        (connector) =>
+          connector.platform === platform &&
+          connector.label === defaultBridgeConnectorLabel(platform, index),
+      )
+    ) {
+      index += 1;
+    }
+    const nextConnector: BridgeConnectorConfig = {
+      id: generateUniqueBridgeConnectorId(platform, existingIds),
+      platform,
+      enabled: false,
+      mode: platform === "feishu" ? "websocket" : "polling",
+      label: defaultBridgeConnectorLabel(platform, index),
+      defaultWorkDir: bridgeSettings.defaultWorkDir,
+      resetBindingSessionOnStart: true,
+      feishuAutoApprove: platform === "feishu" ? true : undefined,
+      feishuReplyRenderer: platform === "feishu" ? "interactive" : undefined,
+    };
+    onBridgeSettingsChange({
+      ...bridgeSettings,
+      connectors: [...bridgeSettings.connectors, nextConnector],
+    });
+    setSelectedBridgeConnectorId(nextConnector.id);
+  }
+
+  async function handleApplyBridgeRobotSettings(nextSelectedConnectorId?: string | null) {
+    setBridgeConnectorTaskError(null);
+    await onPersistBridgeSettings({ showRestartNotice: false });
+    if (isBridgeRunning) {
+      await onRestartBridge();
+      await Promise.all([
+        onRefreshBridgeStatus(),
+        onRefreshBridgeBindings(),
+        onRefreshBridgeApprovals(),
+        onRefreshBridgeSessions({ silent: true }),
+      ]);
+    }
+    if (nextSelectedConnectorId !== undefined) {
+      setSelectedBridgeConnectorId(nextSelectedConnectorId);
+    }
+  }
+
+  async function handleDeleteBridgeRobot(connectorId: string) {
+    const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
+    if (!connector) {
+      return;
+    }
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeConnectorTaskError(null);
+    setBridgeDeleteConfirm({
+      connectorId,
+      connectorLabel: connector.label,
+    });
+  }
+
+  function closeBridgeDeleteConfirm() {
+    setBridgeDeleteConfirm(null);
+  }
+
+  async function handleConfirmDeleteBridgeRobot() {
+    if (!bridgeDeleteConfirm) {
+      return;
+    }
+    const { connectorId } = bridgeDeleteConfirm;
+    const nextConnectors = bridgeSettings.connectors.filter((item) => item.id !== connectorId);
+    const nextSelectedConnectorId =
+      selectedBridgeConnectorId === connectorId
+        ? nextConnectors[0]?.id ?? null
+        : selectedBridgeConnectorId;
+    setBridgeConnectorTaskError(null);
+
+    try {
+      await onDeleteBridgeConnector(connectorId);
+      setSelectedBridgeConnectorId(nextSelectedConnectorId);
+      setBridgeDeleteConfirm(null);
+    } catch (error) {
+      setBridgeConnectorTaskError(`删除机器人失败：${String(error)}`);
+    }
+  }
+
+  async function handleBridgeConnectorWorkDirChange(
+    connectorId: string,
+    nextWorkDir: string | undefined,
+  ) {
+    const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
+    if (!connector) {
+      return;
+    }
+    const normalizedWorkDir = nextWorkDir?.trim() || undefined;
+    const currentWorkDir = connector.defaultWorkDir?.trim() || undefined;
+    if (normalizedWorkDir === currentWorkDir) {
+      return;
+    }
+
+    const previousSettings = bridgeSettings;
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeOverviewPendingConnectorId(connectorId);
+    setBridgeConnectorTaskError(null);
+    updateBridgeConnector(connectorId, { defaultWorkDir: normalizedWorkDir });
+
+    try {
+      await handleApplyBridgeRobotSettings(connectorId);
+    } catch (error) {
+      onBridgeSettingsChange(previousSettings);
+      setSelectedBridgeConnectorId(selectedBridgeConnectorId);
+      setBridgeConnectorTaskError(`保存机器人工作区失败：${String(error)}`);
+    } finally {
+      setBridgeOverviewPendingConnectorId((current) =>
+        current === connectorId ? null : current,
+      );
+    }
+  }
+
+  async function handlePickBridgeConnectorWorkDir(connectorId: string) {
+    const selected = await onPickBridgeConnectorDefaultWorkDir(connectorId);
+    if (typeof selected !== "string") {
+      return;
+    }
+    await handleBridgeConnectorWorkDirChange(connectorId, selected);
+  }
+
+  function openBridgeConnectorSecretsModal(connectorId: string) {
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
+    void onOpenTask("bridge_connector_secrets", { connectorId });
+  }
+
+  function openBridgeConnectorRuntimeModal(connectorId: string) {
+    setSelectedBridgeConnectorId(connectorId);
+    void onOpenTask("bridge_runtime", { connectorId });
+  }
+
+  async function handleImmediateBridgeConnectorToggle(
+    connectorId: string,
+    enabled: boolean,
+  ) {
+    setSelectedBridgeConnectorId(connectorId);
+    setBridgeOverviewPendingConnectorId(connectorId);
+    setBridgeOverviewPendingEnabled((current) => ({ ...current, [connectorId]: enabled }));
+    try {
+      await onToggleBridgeConnectorEnabled(connectorId, enabled);
+    } finally {
+      setBridgeOverviewPendingConnectorId((current) =>
+        current === connectorId ? null : current,
+      );
+      setBridgeOverviewPendingEnabled((current) => {
+        const next = { ...current };
+        delete next[connectorId];
+        return next;
+      });
+    }
+  }
+
+  async function handleSaveBridgeConnectorSecretDraft() {
+    if (!selectedBridgeConnector) {
+      return;
+    }
+    const normalizedLabel = bridgeConnectorLabelDraft.trim();
+    if (!normalizedLabel) {
+      setBridgeConnectorTaskError("机器人名称不能为空。");
+      return;
+    }
+    if (normalizedLabel.length > 32) {
+      setBridgeConnectorTaskError("机器人名称不能超过 32 个字符。");
+      return;
+    }
+
+    setBridgeConnectorTaskError(null);
+
+    try {
+      const shouldNormalizeLabel = selectedBridgeConnector.label !== normalizedLabel;
+      const shouldPersistSettings =
+        bridgeSettingsDirty || !selectedBridgeConnectorPersisted || shouldNormalizeLabel;
+
+      if (shouldNormalizeLabel) {
+        updateBridgeConnector(selectedBridgeConnector.id, { label: normalizedLabel });
+        setBridgeConnectorLabelDraft(normalizedLabel);
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 0);
+        });
+      }
+
+      if (shouldPersistSettings) {
+        await onPersistBridgeSettings({ showRestartNotice: false });
+      }
+
+      await onSaveBridgeConnectorSecrets({
+        connectorId: selectedBridgeConnector.id,
+        telegram: {
+          botToken: bridgeConnectorSecretDraft.botToken.trim() || undefined,
+        },
+        feishu: {
+          appId: bridgeConnectorSecretDraft.appId.trim() || undefined,
+          appSecret: bridgeConnectorSecretDraft.appSecret.trim() || undefined,
+          verificationToken:
+            bridgeConnectorSecretDraft.verificationToken.trim() || undefined,
+          encryptKey: bridgeConnectorSecretDraft.encryptKey.trim() || undefined,
+        },
+        weixin: {
+          botToken: bridgeConnectorSecretDraft.botToken.trim() || undefined,
+          baseUrl: bridgeConnectorSecretDraft.weixinBaseUrl.trim() || undefined,
+          accountId: bridgeConnectorSecretDraft.weixinAccountId.trim() || undefined,
+          ownerUserId: bridgeConnectorSecretDraft.weixinOwnerUserId.trim() || undefined,
+        },
+      });
+
+      if (isBridgeRunning) {
+        await onRestartBridge();
+      }
+
+      await Promise.all([
+        onRefreshBridgeSettings(),
+        onRefreshBridgeStatus(),
+        onRefreshBridgeBindings(),
+        onRefreshBridgeApprovals(),
+        onRefreshBridgeSecretsMask(),
+        onRefreshBridgeSessions({ silent: true }),
+      ]);
+
+      setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
+      onCloseTask();
+    } catch (error) {
+      setBridgeConnectorTaskError(`保存并应用机器人配置失败：${String(error)}`);
+    }
+  }
+
+  async function handleStartSelectedFeishuOnboarding() {
+    if (!selectedBridgeConnector || selectedBridgeConnector.platform !== "feishu") {
+      return;
+    }
+    setBridgeConnectorTaskError(null);
+    const connectorId = selectedBridgeConnector.id;
+    const shouldPersistBeforeOnboarding =
+      bridgeSettingsDirty || !selectedBridgeConnectorPersisted;
+
+    if (shouldPersistBeforeOnboarding) {
+      try {
+        await onPersistBridgeSettings({ showRestartNotice: false });
+      } catch (error) {
+        setBridgeConnectorTaskError(
+          `保存当前机器人配置失败，未启动飞书创建流程：${String(error)}`,
+        );
+        return;
+      }
+    }
+
+    try {
+      await onStartFeishuConnectorOnboarding(connectorId);
+    } catch (error) {
+      setBridgeConnectorTaskError(`启动飞书创建流程失败：${String(error)}`);
+    }
+  }
+
+  async function handleCancelSelectedFeishuOnboarding() {
+    if (!selectedFeishuOnboarding) {
+      return;
+    }
+    await onCancelFeishuConnectorOnboarding(selectedFeishuOnboarding.sessionId);
+  }
+
+  async function handleStartSelectedWeixinOnboarding() {
+    if (!selectedBridgeConnector || selectedBridgeConnector.platform !== "weixin") {
+      return;
+    }
+    setBridgeConnectorTaskError(null);
+    const connectorId = selectedBridgeConnector.id;
+    const shouldPersistBeforeOnboarding =
+      bridgeSettingsDirty || !selectedBridgeConnectorPersisted;
+
+    if (shouldPersistBeforeOnboarding) {
+      try {
+        await onPersistBridgeSettings({ showRestartNotice: false });
+      } catch (error) {
+        setBridgeConnectorTaskError(
+          `保存当前机器人配置失败，未启动微信扫码流程：${String(error)}`,
+        );
+        return;
+      }
+    }
+
+    try {
+      await onStartWeixinConnectorOnboarding(connectorId);
+    } catch (error) {
+      setBridgeConnectorTaskError(`启动微信扫码流程失败：${String(error)}`);
+    }
+  }
+
+  async function handleCancelSelectedWeixinOnboarding() {
+    if (!selectedWeixinOnboarding) {
+      return;
+    }
+    await onCancelWeixinConnectorOnboarding(selectedWeixinOnboarding.sessionId);
   }
 
   function renderContextMenuStepContent() {
@@ -1187,342 +1602,53 @@ export function ControlCenterView({
     );
   }
 
-  function renderBridgeStepContent() {
-    const bridgeDefaultWorkDir = bridgeSettings.defaultWorkDir?.trim() ?? "";
-    const hasBridgeBindings = bridgeBindings.length > 0;
-    const bridgeReadyLongHint =
-      "现在只能说明 sidecar 可以尝试建立飞书长连接，是否被平台识别为已连接仍取决于长连接和应用权限。";
-    return (
-      <div className="cc-step-main">
-        <div className="cc-bridge-onboarding-tag-row">
-          <span className={`cc-status-badge tone-${bridgeRuntimeTone}`}>
-            Bridge 运行：{formatBridgeRuntimeStateLabel(bridgeStatus.state)}
-          </span>
-          <span className={`cc-status-badge tone-${feishuRuntimeTone}`}>
-            飞书通道：{formatBridgeChannelStateLabel(feishuRuntimeState)}
-          </span>
-          <span className={`cc-status-badge tone-${bridgeOnboardingDraft.enabled ? "success" : "neutral"}`}>
-            Bridge 开关：{bridgeOnboardingDraft.enabled ? "就绪" : "待办"}
-          </span>
-          <span className={`cc-status-badge tone-${bridgeOnboardingDraft.feishuEnabled ? "success" : "neutral"}`}>
-            飞书开关：{bridgeOnboardingDraft.feishuEnabled ? "就绪" : "待办"}
-          </span>
-        </div>
-        <div className="cc-bridge-onboarding-switches">
-          <label className="bridge-switch-card">
-            <span className="bridge-switch-copy">
-              <strong>自动启动（Auto Start）</strong>
-            </span>
-            <input
-              type="checkbox"
-              className="cc-switch-input"
-              checked={bridgeOnboardingDraft.autoStart}
-              onChange={(event) =>
-                onBridgeOnboardingDraftChange({
-                  ...bridgeOnboardingDraft,
-                  autoStart: event.currentTarget.checked,
-                })
-              }
-            />
-            <span className="cc-switch-track" aria-hidden />
-          </label>
-
-          <label className="bridge-switch-card">
-            <span className="bridge-switch-copy">
-              <strong>飞书自动审批</strong>
-            </span>
-            <input
-              type="checkbox"
-              className="cc-switch-input"
-              checked={bridgeSettings.feishuAutoApprove}
-              onChange={(event) =>
-                onBridgeSettingsChange({
-                  ...bridgeSettings,
-                  feishuAutoApprove: event.currentTarget.checked,
-                })
-              }
-            />
-            <span className="cc-switch-track" aria-hidden />
-          </label>
-
-          <label className="bridge-switch-card">
-            <span className="bridge-switch-copy">
-              <strong>每次 Bridge 启动新建会话</strong>
-            </span>
-            <input
-              type="checkbox"
-              className="cc-switch-input"
-              checked={bridgeSettings.resetBindingSessionOnBridgeStart}
-              onChange={(event) =>
-                onBridgeSettingsChange({
-                  ...bridgeSettings,
-                  resetBindingSessionOnBridgeStart: event.currentTarget.checked,
-                })
-              }
-            />
-            <span className="cc-switch-track" aria-hidden />
-          </label>
-        </div>
-
-        <div className="cc-bridge-resource-row">
-          <div className="bridge-port-card cc-bridge-binding-card">
-            <span>当前绑定</span>
-            <div className="cc-bridge-binding-row">
-              <select
-                className="ui-input"
-                value={selectedBindingId}
-                onChange={(event) => setSelectedBindingId(event.currentTarget.value)}
-                disabled={bridgeBusy || !hasBridgeBindings}
-              >
-                {hasBridgeBindings ? (
-                  bridgeBindings.map((binding) => (
-                    <option key={binding.bindingId} value={binding.bindingId}>
-                      {binding.bindingId} ({binding.platform})
-                    </option>
-                  ))
-                ) : (
-                  <option value="">暂无 binding</option>
-                )}
-              </select>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<Plus size={14} />}
-                className="cc-action-btn cc-bridge-binding-reset-btn"
-                onClick={() => {
-                  if (!selectedBindingId) {
-                    return;
-                  }
-                  void onResetBridgeBindingSession(selectedBindingId);
-                }}
-                disabled={bridgeBusy || !selectedBindingId}
-              >
-                新建并切换会话
-              </Button>
-            </div>
-            <small>仅重置当前绑定会话，保持绑定与工作目录不变。</small>
-          </div>
-
-          <div className="bridge-port-card cc-bridge-default-workdir-card">
-            <span>IM 默认工作目录</span>
-            <div className="bridge-inline-path-row">
-              <Input
-                value={bridgeSettings.defaultWorkDir ?? ""}
-                onChange={(event) =>
-                  onBridgeSettingsChange({
-                    ...bridgeSettings,
-                    defaultWorkDir: event.currentTarget.value,
-                  })
-                }
-                placeholder="留空时跟随应用工作目录，例如 D:/workspace"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="cc-action-btn cc-inline-btn"
-                onClick={() => void onPickBridgeDefaultWorkDir()}
-                disabled={bridgeBusy}
-              >
-                浏览
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                icon={<FolderOpen size={14} />}
-                className="cc-inline-icon-btn"
-                onClick={() => void onOpenFolder(bridgeDefaultWorkDir)}
-                disabled={bridgeBusy || !bridgeDefaultWorkDir}
-                aria-label="打开 IM 默认工作目录"
-                title="打开 IM 默认工作目录"
-              />
-            </div>
-            <small>留空时，IM Bridge 会跟随应用设置里的默认工作目录。</small>
-          </div>
-        </div>
-
-        {bridgeOnboardingValidation.canStart ? (
-          <div className="cc-bridge-ready-hint" ref={bridgeReadyHintRef}>
-            <p className="hint cc-step-meta cc-bridge-onboarding-message cc-bridge-ready-hint-line">
-              配置已就绪
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                icon={<Info size={14} />}
-                className="cc-inline-icon-btn cc-bridge-ready-info-btn"
-                onClick={() => setBridgeReadyHintOpen((current) => !current)}
-                aria-label="查看连接说明"
-                aria-expanded={bridgeReadyHintOpen}
-                title="查看连接说明"
-              />
-            </p>
-            {bridgeReadyHintOpen ? (
-              <div className="cc-bridge-ready-popover" role="status">
-                {bridgeReadyLongHint}
-              </div>
-            ) : null}
-          </div>
-        ) : (
-          <p className="hint cc-step-meta cc-bridge-onboarding-message is-error">
-            {bridgeOnboardingValidation.message ??
-              "配置保存后，可直接在这里启动或停止 bridge。"}
-          </p>
-        )}
-
-        <div className="cc-step-secondary-actions">
-          <Button
-            type="button"
-            icon={<Check size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onSaveBridgeOnboarding()}
-            disabled={bridgeBusy || !bridgeOnboardingValidation.canSave}
-          >
-            保存并启用
-          </Button>
-          <Button
-            type="button"
-            icon={<Play size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onStartBridge()}
-            disabled={bridgeOnboardingStartDisabled}
-          >
-            启动（Start）
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            icon={<RefreshCw size={15} />}
-            className="cc-action-btn"
-            onClick={() => {
-              void Promise.all([
-                onRefreshBridgeSettings(),
-                onRefreshBridgeStatus(),
-                onRefreshBridgeSecretsMask(),
-              ]);
-            }}
-            disabled={bridgeBusy}
-          >
-            刷新状态
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="cc-action-btn"
-            onClick={() => void onSaveBridgeSettings()}
-            disabled={bridgeBusy}
-          >
-            保存 IM 目录
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="cc-action-btn"
-            onClick={() => setBridgeConfigOpen(true)}
-            disabled={bridgeBusy}
-          >
-            {openBridgeConfigTitle}
-          </Button>
-        </div>
-        <div className="cc-danger-group">
-          <div className="cc-danger-group-label">
-            <span>危险操作</span>
-          </div>
-          <div className="cc-step-secondary-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              icon={<Square size={15} />}
-              className="cc-action-btn"
-              onClick={() => void onStopBridge()}
-              disabled={bridgeBusy || !isBridgeRunning}
-            >
-              停止（Stop）
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              icon={<RefreshCcw size={15} />}
-              className="cc-action-btn"
-              onClick={() => void onRestartBridge()}
-              disabled={bridgeBusy}
-            >
-              重启（Restart）
-            </Button>
-          </div>
-        </div>
-        {bridgeStatus.state === "stopped" ? (
-          <p className="hint cc-step-meta">
-            Bridge 仍为停止态（Stopped）。请先确认“Bridge 开关”已启用，再点击“启动（Start）”。
-          </p>
-        ) : null}
-        {bridgeOnboardingDirty ? <p className="hint cc-step-meta">存在未保存配置，请先保存并启用。</p> : null}
-      </div>
-    );
-  }
-
   const onboardingSteps: Array<{
     id: OnboardingCardId;
     index: string;
-    eyebrow: string;
     title: string;
+    actionLabel: string;
     statusLabel: string;
     statusTone: "neutral" | "success" | "warning" | "danger";
-    progressLabel: string;
     complete: boolean;
     primaryAction: ReactNode;
   }> = [
     {
       id: "install",
       index: "01",
-      eyebrow: "Base",
-      title: "安装 Kimi CLI",
+      title: "安装 / 升级 Kimi CLI",
+      actionLabel: installPrimaryActionLabel,
       statusLabel: installStatusLabel,
       statusTone: installStatusTone,
-      progressLabel: `${installReady ? 1 : 0}/1`,
       complete: installReady,
-      primaryAction: (
-        <Button
-          type="button"
-          icon={<Plus size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onOpenInstallFlow()}
-          disabled={installBusy}
-        >
-          打开安装与升级
-        </Button>
-      ),
+      primaryAction: installPrimaryAction,
     },
     {
       id: "context_menu",
       index: "02",
-      eyebrow: "Explorer",
       title: "资源管理器右键菜单",
+      actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
       statusLabel: contextMenuStatusLabel,
       statusTone: contextMenuStatusTone,
-      progressLabel: `${contextMenuReady ? 1 : 0}/1`,
       complete: contextMenuReady,
       primaryAction: contextMenuPrimaryAction,
     },
     {
       id: "auth",
       index: "03",
-      eyebrow: "Access",
       title: "登录与 Provider API",
+      actionLabel: authReady ? "已就绪" : "完成登录或配置 API",
       statusLabel: authStatusLabel,
       statusTone: authStatusTone,
-      progressLabel: `${authReady ? 1 : 0}/1`,
       complete: authReady,
       primaryAction: authPrimaryAction,
     },
     {
       id: "work_dir",
       index: "04",
-      eyebrow: "Workspace",
       title: "默认工作目录",
+      actionLabel: workDirReady ? "已设置" : "设置默认工作目录",
       statusLabel: workDirStatusLabel,
       statusTone: workDirStatusTone,
-      progressLabel: `${workDirReady ? 1 : 0}/1`,
       complete: workDirReady,
       primaryAction: workDirPrimaryAction,
     },
@@ -1536,14 +1662,19 @@ export function ControlCenterView({
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
     diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
     bridgeRecentErrors[0] ? `Bridge：${bridgeRecentErrors[0]}` : null,
-  ].filter((item): item is string => Boolean(item));
+  ]
+    .filter((item): item is string => Boolean(item))
+    .filter((item) => !/telegram/i.test(item));
   const condensedLogPreview =
     diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0
       ? diagnostics.backendLogTail.slice(-2).join("\n")
       : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
-  const imFinalStatusLabel = formatImFinalStatusLabel(bridgeStatus, feishuEnabled);
+  const enabledBridgeRobotCount = bridgeSettings.connectors.filter(
+    (connector) => connector.platform === "feishu" && connector.enabled,
+  ).length;
+  const imFinalStatusLabel = `已启用 ${enabledBridgeRobotCount} 个机器人`;
   const overviewBriefs = [
     !installReady ? "Kimi CLI 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
@@ -1553,6 +1684,9 @@ export function ControlCenterView({
     configCenterDirty ? "配置中心存在未保存修改。" : null,
     bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
   ].filter((item): item is string => Boolean(item));
+  const pendingOverviewCount = overviewBriefs.length;
+  const overviewPrimaryMessage =
+    overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、IM Bridge 和技能应用。";
 
   function renderOverviewSection() {
     return (
@@ -1560,7 +1694,9 @@ export function ControlCenterView({
         <section className="cc-card cc-hero-card">
           <div className="cc-hero-layout">
             <div className="cc-hero-main">
-              <span className="cc-kicker">Control Center</span>
+              <span className="cc-kicker">状态总览</span>
+              <h2>控制中心当前状态</h2>
+              <p className="cc-hero-copy">{overviewPrimaryMessage}</p>
               <div className="cc-hero-status-strip">
                 <article className="cc-signal-card">
                   <span>后端状态</span>
@@ -1569,6 +1705,16 @@ export function ControlCenterView({
                 <article className="cc-signal-card">
                   <span>{bridgeFinalStatusTitle}</span>
                   <strong>{imFinalStatusLabel}</strong>
+                </article>
+                <article className="cc-signal-card">
+                  <span>快速设置进度</span>
+                  <strong>
+                    {completedOnboardingCards}/{onboardingSteps.length}
+                  </strong>
+                </article>
+                <article className="cc-signal-card">
+                  <span>待处理项</span>
+                  <strong>{pendingOverviewCount === 0 ? "无" : `${pendingOverviewCount} 项`}</strong>
                 </article>
               </div>
               <div className="cc-actions cc-hero-actions">
@@ -1610,9 +1756,9 @@ export function ControlCenterView({
 
             <aside className="cc-hero-aside">
               <div className="cc-editorial-note">
-                <span className="cc-kicker">Priority Deck</span>
+                <span className="cc-kicker">当前重点</span>
                 <h3>{activeOnboardingStep.title}</h3>
-                <p>{overviewBriefs[0] ?? "当前无阻塞项"}</p>
+                <p>{overviewPrimaryMessage}</p>
                 <div className="cc-chip-row">
                   <span className={`cc-status-badge tone-${activeOnboardingStep.statusTone}`}>
                     {activeOnboardingStep.statusLabel}
@@ -1626,7 +1772,7 @@ export function ControlCenterView({
                     void handleOpenOnboardingEntry();
                   }}
                 >
-                  继续当前设置
+                  处理当前重点
                 </Button>
               </div>
             </aside>
@@ -1691,14 +1837,13 @@ export function ControlCenterView({
                     type="button"
                     className="cc-task-card"
                     onClick={() => {
-                      void handleOpenRuntimeEntry("logs");
+                      void handleSelectSkillCenterSection();
                     }}
                   >
-                    <span className="cc-task-card-icon"><FileText size={16} /></span>
+                    <span className="cc-task-card-icon"><Sparkles size={16} /></span>
                     <span className="cc-task-card-copy">
-                      <strong>查看最近日志</strong>
+                      <strong>打开技能中心</strong>
                     </span>
-                    <span className="cc-task-card-meta">Tail</span>
                   </button>
                 </div>
               </div>
@@ -1708,7 +1853,7 @@ export function ControlCenterView({
           <aside className="cc-overview-side-column">
             <section className="cc-card">
               <header className="cc-card-header">
-                <h3>简报</h3>
+                <h3>待处理与提醒</h3>
               </header>
               <div className="cc-card-body">
                 {overviewBriefs.length > 0 ? (
@@ -1723,7 +1868,7 @@ export function ControlCenterView({
                   <article className="cc-brief-tip-card">
                     <div className="cc-brief-tip-head">
                       <div className="cc-brief-tip-meta">
-                        <span className="cc-brief-tip-badge">随机提示</span>
+                        <span className="cc-brief-tip-badge">Agent 提示</span>
                         <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
                       </div>
                       <Button
@@ -1733,11 +1878,13 @@ export function ControlCenterView({
                         icon={<RefreshCw size={13} />}
                         className="cc-brief-tip-refresh"
                         onClick={() => setBriefTip(pickRandomAgentTip())}
-                        aria-label="刷新提示卡片"
+                        aria-label="刷新 Agent 使用提示"
                       />
                     </div>
-                    <strong className="cc-brief-tip-title">{briefTip.title}</strong>
-                    <p className="cc-brief-tip-body">{briefTip.body}</p>
+                    <div className="cc-brief-tip-article">
+                      <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
+                      <p className="cc-brief-tip-body">{briefTip.body}</p>
+                    </div>
                   </article>
                 )}
               </div>
@@ -1755,23 +1902,8 @@ export function ControlCenterView({
       <div className="cc-onboarding-editorial">
         <aside className="cc-card cc-onboarding-rail">
           <div className="cc-onboarding-rail-head">
-            <span className="cc-kicker">Quick Setup</span>
+            <span className="cc-kicker">设置流程</span>
             <h3>快速设置</h3>
-          </div>
-
-          <div className="cc-onboarding-progress-block">
-            <div className="cc-onboarding-progress-label">
-              <span>流程进度</span>
-              <strong>{completedOnboardingCards}/{onboardingSteps.length}</strong>
-            </div>
-            <div className="cc-onboarding-progress-track" aria-hidden>
-              <span
-                className="cc-onboarding-progress-fill"
-                style={{
-                  width: `${(completedOnboardingCards / onboardingSteps.length) * 100}%`,
-                }}
-              />
-            </div>
           </div>
 
           <div className="cc-onboarding-step-list" role="tablist" aria-label="快速设置步骤">
@@ -1787,12 +1919,13 @@ export function ControlCenterView({
                 >
                   <span className="cc-onboarding-step-index">{step.index}</span>
                   <span className="cc-onboarding-step-copy">
-                    <small>{step.eyebrow}</small>
                     <strong>{step.title}</strong>
-                  </span>
-                  <span className="cc-onboarding-step-meta">
-                    <span className={`cc-status-badge tone-${step.statusTone}`}>{step.statusLabel}</span>
-                    <span className="cc-quiet-chip">{step.progressLabel}</span>
+                    <small>{step.actionLabel}</small>
+                    <span
+                      className={`cc-status-badge cc-onboarding-step-status tone-${step.statusTone}`}
+                    >
+                      {step.statusLabel}
+                    </span>
                   </span>
                 </button>
               );
@@ -1812,27 +1945,7 @@ export function ControlCenterView({
               </Button>
               <Button
                 type="button"
-                variant="ghost"
-                icon={<ChevronRight size={15} />}
-                className="cc-action-btn"
-                onClick={() => void onSkipOnboarding()}
-                disabled={actionBusy}
-              >
-                暂时跳过
-              </Button>
-              <Button
-                type="button"
                 variant="outline"
-                icon={<RefreshCcw size={15} />}
-                className="cc-action-btn"
-                onClick={() => void onRetry()}
-                disabled={actionBusy}
-              >
-                重启后端
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
                 icon={<RefreshCw size={15} />}
                 className="cc-action-btn"
                 onClick={() => {
@@ -1845,84 +1958,69 @@ export function ControlCenterView({
                 }}
                 disabled={diagnosticsBusy || contextMenuBusy}
               >
-                刷新运行态数据
+                刷新状态
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                icon={<RefreshCcw size={15} />}
+                className="cc-action-btn"
+                onClick={() => void onRetry()}
+                disabled={actionBusy}
+              >
+                重启后端
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                icon={<ChevronRight size={15} />}
+                className="cc-action-btn"
+                onClick={() => void onSkipOnboarding()}
+                disabled={actionBusy}
+              >
+                暂时跳过
               </Button>
             </div>
           </section>
         </aside>
 
         <section className="cc-card cc-onboarding-detail-shell">
-          <div className="cc-onboarding-detail-intro">
-            <div>
-              <span className="cc-kicker">Now Editing</span>
-              <h2>{activeOnboardingStep.title}</h2>
-            </div>
-            <div className="cc-chip-row">
-              <span className={`cc-status-badge tone-${selectedStepTone}`}>
-                {activeOnboardingStep.statusLabel}
-              </span>
-              <span className="cc-quiet-chip">{activeOnboardingStep.progressLabel}</span>
-            </div>
-          </div>
-
           <section className="cc-card cc-step-detail-card">
             <ControlCenterCardHeader
-              title={`${activeOnboardingStep.index}. ${activeOnboardingStep.title}`}
+              eyebrow={`步骤 ${activeOnboardingStep.index}`}
+              title="操作与详情"
+              description={activeOnboardingStep.title}
               statusLabel={activeOnboardingStep.statusLabel}
               statusTone={selectedStepTone}
               primaryAction={activeOnboardingStep.primaryAction}
             />
-            <div className="cc-card-body cc-step-body cc-step-body-single">
+            <div className="cc-card-body cc-step-body cc-step-body-single cc-step-detail-scroll">
               <div className="cc-step-main">
                 {activeOnboardingStep.id === "install" ? (
                   <>
                     <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-                    <div className="cc-install-top-row">
-                      <p className="hint cc-step-summary cc-inline-path">{installSummary}</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="cc-action-btn cc-inline-btn"
-                        onClick={() => void onPickKimiPath()}
-                      >
-                        浏览
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<Check size={15} />}
-                        className="cc-action-btn"
-                        onClick={() => void onSavePathAndRetry()}
-                        disabled={actionBusy || !kimiPathInput.trim()}
-                      >
-                        保存路径并重启
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<FileText size={14} />}
-                        className="cc-action-btn"
-                        onClick={() =>
-                          void onOpenExternalUrl(
-                            "https://www.kimi.com/code/docs/kimi-cli/guides/getting-started.html",
-                          )
-                        }
-                      >
-                        打开官方文档
-                      </Button>
-                    </div>
-                    {recentInstallSummary ? <p className="hint cc-step-meta">{recentInstallSummary}</p> : null}
-                    {installBusy && installAction ? (
-                      <p className="hint cc-step-meta">
-                        当前动作：
-                        {installAction === "dependencies"
-                          ? "安装依赖"
-                          : installAction === "kimi"
-                            ? "安装 Kimi"
-                            : installAction === "upgrade_kimi"
-                              ? "升级 Kimi"
-                              : "安装 Node.js"}
-                      </p>
+                    <InstallFlowTaskContent
+                      catalog={installFlowCatalog}
+                      session={installSessionSnapshot}
+                      probe={installProbe}
+                      backendState={status?.state ?? null}
+                      installSource={installSource}
+                      installSettings={installSettings}
+                      installSettingsBusy={installSettingsBusy}
+                      powershellPreflight={powershellPreflight}
+                      kimiPathInput={kimiPathInput}
+                      detectedKimiPath={installPathDisplay}
+                      onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+                      onSourceChange={onInstallSourceChange}
+                      onSaveInstallSettings={onSaveInstallSettings}
+                      onStartTask={onStartInstallTask}
+                      onRestartBackend={onRetry}
+                      onPickKimiPath={onPickKimiPath}
+                      onSavePathAndRetry={onSavePathAndRetry}
+                      restartBusy={actionBusy}
+                    />
+                    {recentInstallSummary ? (
+                      <p className="hint cc-step-meta">{recentInstallSummary}</p>
                     ) : null}
                     {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
                   </>
@@ -1971,7 +2069,7 @@ export function ControlCenterView({
                             variant="outline"
                             icon={<Check size={14} />}
                             className="cc-action-btn"
-                            onClick={() => void onOpenConfigCenterModal()}
+                            onClick={() => void onOpenTask("config_center")}
                             disabled={configCenterBusy}
                           >
                             打开配置中心弹窗
@@ -2119,7 +2217,7 @@ export function ControlCenterView({
         <section className="cc-card runtime-accordion cc-runtime-deep-dive">
           <div className="cc-runtime-deep-dive-head">
             <div>
-              <span className="cc-kicker">Deep Dive</span>
+              <span className="cc-kicker">详细面板</span>
               <h3>运行面板</h3>
             </div>
           </div>
@@ -2219,61 +2317,1396 @@ export function ControlCenterView({
   }
 
   function renderBridgeSection() {
+    const bridgeHeaderControls = (
+      <div className="cc-bridge-title-controls">
+        <Button
+          type="button"
+          variant="outline"
+          icon={<RefreshCw size={15} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void Promise.all([
+              onRefreshBridgeSettings(),
+              onRefreshBridgeStatus(),
+              onRefreshBridgeBindings(),
+              onRefreshBridgeApprovals(),
+              onRefreshBridgeSecretsMask(),
+            ]);
+          }}
+          disabled={bridgeBusy}
+        >
+          刷新状态
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          icon={<FolderOpen size={15} />}
+          className="cc-action-btn"
+          onClick={() => void onOpenLogs()}
+        >
+          打开日志目录
+        </Button>
+      </div>
+    );
+
     return (
       <div className="cc-bridge-shell">
         <section className="cc-card">
-          <header className="cc-card-header">
-            <h3>{bridgeDisplayName}</h3>
-          </header>
-          <div className="cc-card-body cc-step-body cc-step-body-single">
-            {renderBridgeStepContent()}
-          </div>
-        </section>
-
-        <section className="cc-card">
           <ControlCenterCardHeader
-            title={bridgeRuntimePanelTitle}
-            description="展开后查看运行配置、sessions、bindings、审批和日志。"
+            title="IM Bridge"
+            titleControls={bridgeHeaderControls}
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
-            collapsible
-            expanded={bridgeRuntimePanelExpanded}
-            onToggle={() => setBridgeRuntimePanelExpanded((current) => !current)}
+            primaryAction={
+              <div className="cc-actions">
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("telegram")}
+                  disabled={bridgeBusy}
+                >
+                  新增 Telegram
+                </Button>
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("feishu")}
+                  disabled={bridgeBusy}
+                >
+                  新增飞书
+                </Button>
+                <Button
+                  type="button"
+                  icon={<Plus size={14} />}
+                  className="cc-action-btn"
+                  onClick={() => addBridgeConnector("weixin")}
+                  disabled={bridgeBusy}
+                >
+                  新增微信
+                </Button>
+              </div>
+            }
           />
-          {bridgeRuntimePanelExpanded ? (
-            <div className="cc-card-body">
-              <BridgeRuntimePanel
-                settings={bridgeSettings}
-                status={bridgeStatus}
-                sessions={bridgeSessions}
-                bindings={bridgeBindings}
-                approvals={bridgeApprovals}
-                logTail={bridgeLogTail}
-                recentErrors={bridgeRecentErrors}
-                secretsMask={bridgeSecretsMask}
-                busy={bridgeBusy}
-                onSettingsChange={onBridgeSettingsChange}
-                onSave={onSaveBridgeSettings}
-                onStart={onStartBridge}
-                onStop={onStopBridge}
-                onRestart={onRestartBridge}
-                onRefreshStatus={onRefreshBridgeStatus}
-                onRefreshSessions={onRefreshBridgeSessions}
-                onRefreshBindings={onRefreshBridgeBindings}
-                onRefreshApprovals={onRefreshBridgeApprovals}
-                onRefreshLogTail={onRefreshBridgeLogTail}
-                onRefreshSecretsMask={onRefreshBridgeSecretsMask}
-                onOpenLogs={onOpenLogs}
-                onImportSession={onImportBridgeSession}
-                onClearBinding={onClearBridgeBinding}
-                onResetBindingSession={onResetBridgeBindingSession}
-                onResolveApproval={onResolveBridgeApproval}
-              />
+          <div className="cc-card-body cc-step-body cc-step-body-single">
+            <div className="bridge-robot-list">
+              {visibleBridgeConnectors.length > 0 ? (
+                visibleBridgeConnectors.map((connector) => {
+                  const connectorStatus =
+                    bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ??
+                    null;
+                  const connectorSecrets =
+                    bridgeSecretsMask.connectors.find(
+                      (item) => item.connectorId === connector.id,
+                    ) ?? null;
+                  const connectorSecretsConfigured =
+                    connector.platform === "telegram"
+                      ? Boolean(connectorSecrets?.telegram?.botToken.configured)
+                      : connector.platform === "weixin"
+                        ? Boolean(
+                            connectorSecrets?.weixin?.botToken.configured &&
+                              connectorSecrets?.weixin?.ownerUserId,
+                          )
+                      : Boolean(
+                          connectorSecrets?.feishu?.appId.configured &&
+                            connectorSecrets?.feishu?.appSecret.configured,
+                        );
+                  const effectiveWorkDir =
+                    connector.defaultWorkDir?.trim() ||
+                    bridgeSettings.defaultWorkDir?.trim() ||
+                    status?.effectiveWorkDir?.trim() ||
+                    "";
+                  const recentConnectorError = findBridgeConnectorRecentError(
+                    connector,
+                    connectorStatus,
+                    bridgeRecentErrors,
+                  );
+                  const connectorBindings = bridgeBindings.filter(
+                    (item) => item.connectorId === connector.id,
+                  );
+                  const connectorApprovals = bridgeApprovals.filter(
+                    (item) => item.connectorId === connector.id,
+                  );
+                  const pendingToggle = bridgeOverviewPendingConnectorId === connector.id;
+                  const connectorEnabledValue = pendingToggle
+                    ? (bridgeOverviewPendingEnabled[connector.id] ?? connector.enabled)
+                    : connector.enabled;
+                  const connectorUsesCustomWorkDir = Boolean(connector.defaultWorkDir?.trim());
+                  return (
+                    <article key={connector.id} className="bridge-workbench-card">
+                      <div className="bridge-workbench-card-head">
+                        <div className="bridge-workbench-card-copy">
+                          <div className="bridge-workbench-card-title-row">
+                            <strong>{connector.label}</strong>
+                            <div className="bridge-robot-chip-row">
+                              <span
+                                className={`cc-status-badge tone-${
+                                  connector.enabled ? "success" : "neutral"
+                                }`}
+                              >
+                                {connector.enabled ? "已启用" : "未启用"}
+                              </span>
+                              <span
+                                className={`cc-status-badge tone-${
+                                  connectorStatus?.state === "error"
+                                    ? "danger"
+                                    : connectorStatus?.state === "degraded"
+                                      ? "warning"
+                                      : "neutral"
+                                }`}
+                              >
+                                {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="bridge-workbench-card-meta">
+                            <span>平台：{bridgePlatformLabel(connector.platform)}</span>
+                            <span>默认目录：{effectiveWorkDir || "跟随应用默认目录"}</span>
+                            <span>绑定：{connectorBindings.length}</span>
+                            <span>审批：{connectorApprovals.length}</span>
+                            <span>最近就绪：{formatBridgeTimestamp(connectorStatus?.lastReadyAt)}</span>
+                          </div>
+                        </div>
+                        <label className="bridge-switch-card bridge-workbench-card-toggle">
+                          <span className="bridge-switch-copy">
+                            <strong>机器人启用</strong>
+                            <small>
+                              {pendingToggle ? "正在应用配置..." : "切换后立即写入设置"}
+                            </small>
+                          </span>
+                          <input
+                            type="checkbox"
+                            className="cc-switch-input"
+                            checked={connectorEnabledValue}
+                            onChange={(event) => {
+                              void handleImmediateBridgeConnectorToggle(
+                                connector.id,
+                                event.currentTarget.checked,
+                              );
+                            }}
+                            disabled={bridgeBusy || pendingToggle}
+                          />
+                          <span className="cc-switch-track" aria-hidden />
+                        </label>
+                      </div>
+
+                      <div className="bridge-workbench-card-summary">
+                        <article className="bridge-workbench-summary-card">
+                          <span>绑定摘要</span>
+                          <strong>
+                            {connectorBindings.length > 0
+                              ? `${connectorBindings.length} 个会话`
+                              : "暂无绑定"}
+                          </strong>
+                        </article>
+                        <article className="bridge-workbench-summary-card">
+                          <span>审批摘要</span>
+                          <strong>
+                            {connectorApprovals.length > 0
+                              ? `${connectorApprovals.length} 条待处理`
+                              : "无待处理审批"}
+                          </strong>
+                        </article>
+                        <article className="bridge-workbench-summary-card">
+                          <span>凭据状态</span>
+                          <strong>{connectorSecretsConfigured ? "已配置" : "待配置"}</strong>
+                        </article>
+                      </div>
+
+                      <p className="bridge-workbench-card-error">
+                        {recentConnectorError || "当前没有记录到该机器人的最近错误。"}
+                      </p>
+
+                      <div className="bridge-port-card bridge-robot-workdir-card">
+                        <span>工作区目录</span>
+                        <strong>{effectiveWorkDir || "跟随应用默认目录"}</strong>
+                        <small>
+                          {connectorUsesCustomWorkDir
+                            ? "当前机器人使用独立工作区目录。"
+                            : "当前机器人继承应用默认工作目录。"}
+                        </small>
+                        <div className="bridge-inline-path-actions">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            icon={<FolderOpen size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void handlePickBridgeConnectorWorkDir(connector.id)}
+                            disabled={bridgeBusy || pendingToggle}
+                          >
+                            {pendingToggle ? "正在保存目录..." : "选择工作区"}
+                          </Button>
+                          {connectorUsesCustomWorkDir ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="cc-action-btn"
+                              onClick={() =>
+                                void handleBridgeConnectorWorkDirChange(connector.id, undefined)
+                              }
+                              disabled={bridgeBusy || pendingToggle}
+                            >
+                              跟随应用默认目录
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon={<FolderOpen size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void onOpenFolder(effectiveWorkDir)}
+                            disabled={!effectiveWorkDir || pendingToggle}
+                          >
+                            打开目录
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="bridge-workbench-card-actions">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<KeyRound size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => openBridgeConnectorSecretsModal(connector.id)}
+                          disabled={bridgeBusy}
+                        >
+                          {connectorSecretsConfigured ? "连接与凭据" : "创建机器人"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<LayoutDashboard size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => openBridgeConnectorRuntimeModal(connector.id)}
+                          disabled={bridgeBusy}
+                        >
+                          高级运行面板
+                        </Button>
+                      </div>
+
+                      <div className="bridge-danger-group">
+                        <div className="bridge-panel-group-label is-danger">
+                          <span>危险操作</span>
+                          <small>删除后会立即保存配置，并在运行中自动重启 IM Bridge。</small>
+                        </div>
+                        <div className="cc-actions">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon={<X size={14} />}
+                            className="cc-action-btn"
+                            onClick={() => void handleDeleteBridgeRobot(connector.id)}
+                            disabled={bridgeBusy}
+                          >
+                            删除机器人
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="bridge-robot-empty">
+                  <p>还没有飞书机器人。点击上方“新增机器人”即可创建第一张机器人卡片。</p>
+                </div>
+              )}
             </div>
-          ) : null}
+          </div>
         </section>
       </div>
     );
+  }
+
+  function renderSkillCenterSection() {
+    const skillCenterActions = (
+      <div className="skill-center-header-actions">
+        <Button
+          type="button"
+          icon={<Plus size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onOpenTask("skill_git_import");
+          }}
+          disabled={skillCenterBusy}
+        >
+          从 Git 安装
+        </Button>
+        <Button
+          type="button"
+          icon={<FolderOpen size={14} />}
+          className="cc-action-btn"
+          onClick={() => {
+            void onOpenTask("skill_import");
+          }}
+          disabled={skillCenterBusy}
+        >
+          导入本地 Skill
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "global" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "global" ? "all" : "global")
+          }
+        >
+          全局
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "session" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "session" ? "all" : "session")
+          }
+        >
+          当前工作区
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "pinned" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "pinned" ? "all" : "pinned")
+          }
+        >
+          Pin
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "untrusted" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(skillCenterFilter === "untrusted" ? "all" : "untrusted")
+          }
+        >
+          未信任
+        </Button>
+        <Button
+          type="button"
+          variant={skillCenterFilter === "update_available" ? "default" : "outline"}
+          className="cc-action-btn skill-center-filter-btn"
+          onClick={() =>
+            onSkillCenterFilterChange(
+              skillCenterFilter === "update_available" ? "all" : "update_available",
+            )
+          }
+        >
+          可更新
+        </Button>
+      </div>
+    );
+
+    return (
+      <section className="cc-card skill-center-card">
+        <ControlCenterCardHeader
+          title="技能中心"
+          titleMeta="Skill Center"
+          titleControls={
+            <div className="cc-inline-switch" role="group" aria-label="技能中心分区切换">
+              <button
+                type="button"
+                className={`cc-inline-switch-btn ${skillCenterSection === "manage" ? "active" : ""}`}
+                onClick={() => onSkillCenterSectionChange("manage")}
+                disabled={skillCenterBusy}
+              >
+                技能管理
+              </button>
+              <button
+                type="button"
+                className={`cc-inline-switch-btn ${skillCenterSection === "workspace_insights" ? "active" : ""}`}
+                onClick={() => onSkillCenterSectionChange("workspace_insights")}
+                disabled={skillCenterBusy}
+              >
+                工作区洞察
+              </button>
+            </div>
+          }
+          description="先安装到应用私有目录，再按需应用到当前工作区或用户全局。"
+          statusLabel={`${activeSessionSkillState.appliedSkillIds.length} 个当前工作区技能`}
+          primaryAction={skillCenterActions}
+        />
+        <div className="cc-card-body cc-skill-center-body">
+          <SkillCenterPanel
+            surface="page"
+            busy={skillCenterBusy}
+            section={skillCenterSection}
+            installedSkills={installedSkills}
+            selectedSkillId={selectedSkillId}
+            selectedSkillDetail={selectedSkillDetail}
+            globalSkillProjections={globalSkillProjections}
+            activeSessionSkillState={activeSessionSkillState}
+            workspaceSkillProfile={workspaceSkillProfile}
+            workspaceRecentSkillIds={workspaceRecentSkillIds}
+            workspaceSkillRecommendations={workspaceSkillRecommendations}
+            workspaceSkillRestoreResults={workspaceSkillRestoreResults}
+            currentWorkspaceLabel={status?.activeSessionWorkDir || effectiveWorkDir}
+            onSelectSkill={(skillId) => {
+              void onSelectSkill(skillId);
+            }}
+            onOpenSkillFromInsights={(skillId) => {
+              void onOpenSkillFromInsights(skillId);
+            }}
+            onSetTrust={(skillId, trusted) => {
+              void onSetSkillTrust(skillId, trusted);
+            }}
+            onApplySkill={(skillId, scope) => {
+              void onApplySkill(skillId, scope);
+            }}
+            onRemoveSkill={(skillId, scope) => {
+              void onRemoveSkill(skillId, scope);
+            }}
+            onSetPin={(skillId, pinned) => {
+              void onSetWorkspaceSkillPin(skillId, pinned);
+            }}
+            onUpdateSkill={(skillId) => {
+              void onUpdateSkill(skillId);
+            }}
+            onUninstallSkill={(skillId) => {
+              void onUninstallSkill(skillId);
+            }}
+            onRecoverWorkspaceSkill={(skillId) => {
+              void onRecoverWorkspaceSkill(skillId);
+            }}
+            search={skillCenterSearch}
+            filter={skillCenterFilter}
+            onSearchChange={onSkillCenterSearchChange}
+            onFilterChange={onSkillCenterFilterChange}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  const configBlockingErrors = useMemo(
+    () => buildBlockingErrors(configCenterDraft),
+    [configCenterDraft],
+  );
+  const configWarnings = useMemo(
+    () =>
+      buildWarnings(
+        configCenterDraft,
+        configCenterView?.envOverrides ?? [],
+        configCenterView?.warnings ?? [],
+      ),
+    [configCenterDraft, configCenterView?.envOverrides, configCenterView?.warnings],
+  );
+  function closeBridgeConnectorSecretsTask() {
+    const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
+    if (hasPendingDraft && !window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？")) {
+      return;
+    }
+    setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
+    onCloseTask();
+  }
+
+  function renderActiveTask() {
+    if (isConfigCenterTask) {
+      return (
+        <ControlCenterTaskSurface
+          title="Kimi CLI 配置中心"
+          description="按结构编辑 `config.toml`，优先查看摘要，再进入具体配置块。"
+          className="cc-config-modal"
+          bodyClassName="cc-config-modal-scroll"
+          onBack={onCloseTask}
+          onClose={onClose}
+          footer={
+            <>
+              <div className="cc-config-footer-meta">
+                <span>校验错误：{configBlockingErrors.length}</span>
+                <span>告警：{configWarnings.length}</span>
+                {configCenterDirty ? (
+                  <span className="unsaved">存在未保存变更</span>
+                ) : (
+                  <span className="saved">已同步</span>
+                )}
+              </div>
+              <div className="cc-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="cc-action-btn"
+                  icon={<RefreshCcw size={14} />}
+                  onClick={onResetConfigCenterDraft}
+                  disabled={configCenterBusy || !configCenterDirty}
+                >
+                  重置草稿
+                </Button>
+                <Button
+                  type="button"
+                  className="cc-action-btn"
+                  icon={<Check size={14} />}
+                  onClick={() => void onSaveKimiCliConfigCenter()}
+                  disabled={configCenterBusy || configBlockingErrors.length > 0}
+                >
+                  保存配置
+                </Button>
+              </div>
+              {configBlockingErrors.length > 0 ? (
+                <ul className="cc-config-error-list">
+                  {configBlockingErrors.slice(0, 8).map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </>
+          }
+        >
+          <ConfigCenterTaskContent
+            dirty={configCenterDirty}
+            view={configCenterView}
+            draft={configCenterDraft}
+            onDraftChange={onConfigCenterDraftChange}
+            onOpenConfigDir={onOpenKimiConfigDir}
+          />
+        </ControlCenterTaskSurface>
+      );
+    }
+
+    if (isBridgeConnectorSecretsTask) {
+      return (
+        <ControlCenterTaskSurface
+          title={
+            selectedBridgeConnector
+              ? `${selectedBridgeConnector.label} 连接与凭据`
+              : "连接与凭据"
+          }
+          description="先确认状态，再统一维护机器人名称、连接凭据和平台开通信息。"
+          className="cc-bridge-task-surface cc-bridge-connector-modal"
+          bodyClassName="cc-bridge-connector-body"
+          onBack={closeBridgeConnectorSecretsTask}
+          onClose={onClose}
+          showCloseButton={false}
+          headerActions={
+            <Button
+              type="button"
+              variant="outline"
+              icon={<RefreshCw size={14} />}
+              className="cc-action-btn"
+              onClick={() => void onRefreshBridgeSecretsMask()}
+              disabled={bridgeBusy}
+            >
+              刷新掩码
+            </Button>
+          }
+          footer={
+            <>
+              <div className="cc-config-footer-meta">
+                <span>{selectedBridgeConnector?.id ?? "未选择 connector"}</span>
+                <span>{selectedBridgeConnector?.label ?? "无机器人"}</span>
+                {bridgeSettingsDirty ? <span className="unsaved">存在未应用修改</span> : null}
+              </div>
+              <div className="cc-actions">
+                <Button
+                  type="button"
+                  icon={<Check size={15} />}
+                  className="cc-action-btn"
+                  onClick={() => void handleSaveBridgeConnectorSecretDraft()}
+                  disabled={bridgeBusy || !selectedBridgeConnector}
+                >
+                  保存并应用
+                </Button>
+              </div>
+            </>
+          }
+        >
+          {selectedBridgeConnector ? (
+            <div className="bridge-panel">
+              <div className="bridge-panel-subsection">
+                <div className="bridge-panel-subheader">
+                  <h5>状态摘要</h5>
+                  <span
+                    className={`cc-status-badge tone-${
+                      selectedBridgeConnectorStatus?.state === "error"
+                        ? "danger"
+                        : selectedBridgeConnectorStatus?.state === "degraded"
+                          ? "warning"
+                          : selectedBridgeConnector.enabled
+                            ? "success"
+                            : "neutral"
+                    }`}
+                  >
+                    {formatBridgeConnectorStateLabel(selectedBridgeConnectorStatus?.state ?? "idle")}
+                  </span>
+                </div>
+                <div className="diagnostics-grid">
+                  <article className="diag-item">
+                    <span className="diag-label">机器人</span>
+                    <strong>{selectedBridgeConnector.label}</strong>
+                  </article>
+                  <article className="diag-item">
+                    <span className="diag-label">Connector ID</span>
+                    <strong>{selectedBridgeConnector.id}</strong>
+                  </article>
+                  <article className="diag-item">
+                    <span className="diag-label">平台</span>
+                    <strong>{bridgePlatformLabel(selectedBridgeConnector.platform)}</strong>
+                  </article>
+                  <article className="diag-item">
+                    <span className="diag-label">最近就绪</span>
+                    <strong>{formatBridgeTimestamp(selectedBridgeConnectorStatus?.lastReadyAt)}</strong>
+                  </article>
+                </div>
+                <p className="hint">
+                  {findBridgeConnectorRecentError(
+                    selectedBridgeConnector,
+                    selectedBridgeConnectorStatus,
+                    bridgeRecentErrors,
+                  ) || "当前没有记录到该机器人的最近错误。"}
+                </p>
+              </div>
+
+              <div className="bridge-panel-subsection">
+                <div className="bridge-panel-subheader">
+                  <h5>机器人名称</h5>
+                  <span className="cc-status-badge tone-neutral">最多 32 字</span>
+                </div>
+                <label className="bridge-port-card bridge-connector-name-field">
+                  <span>显示名称</span>
+                  <Input
+                    value={bridgeConnectorLabelDraft}
+                    onChange={(event) => {
+                      const nextValue = event.currentTarget.value.slice(0, 32);
+                      setBridgeConnectorLabelDraft(nextValue);
+                      updateBridgeConnector(selectedBridgeConnector.id, { label: nextValue });
+                    }}
+                    onBlur={() => {
+                      const normalized = bridgeConnectorLabelDraft.trim();
+                      if (!normalized || normalized === bridgeConnectorLabelDraft) {
+                        return;
+                      }
+                      setBridgeConnectorLabelDraft(normalized);
+                      updateBridgeConnector(selectedBridgeConnector.id, { label: normalized });
+                    }}
+                    maxLength={32}
+                    aria-label="机器人名称"
+                    placeholder={
+                      selectedBridgeConnector.platform === "telegram"
+                        ? "Telegram 机器人名称"
+                        : selectedBridgeConnector.platform === "weixin"
+                          ? "微信机器人名称"
+                          : "飞书机器人名称"
+                    }
+                  />
+                  <small>保存后将同步到机器人卡片、运行面板和审批/绑定标题。</small>
+                </label>
+              </div>
+
+              <div className="bridge-panel-subsection">
+                <div className="bridge-panel-subheader">
+                  <h5>连接凭据</h5>
+                </div>
+                <div className="bridge-settings-grid">
+                  {selectedBridgeConnector.platform === "telegram" ? (
+                    <label className="bridge-port-card">
+                      <span>botToken</span>
+                      <Input
+                        value={bridgeConnectorSecretDraft.botToken}
+                        onChange={(event) =>
+                          setBridgeConnectorSecretDraft((current) => ({
+                            ...current,
+                            botToken: event.currentTarget.value,
+                          }))
+                        }
+                        placeholder="输入新的 Telegram bot token"
+                      />
+                      <small>留空则不覆盖现有已保存值。</small>
+                    </label>
+                  ) : selectedBridgeConnector.platform === "weixin" ? (
+                    <>
+                      <label className="bridge-port-card">
+                        <span>botToken</span>
+                        <Input
+                          type="password"
+                          value={bridgeConnectorSecretDraft.botToken}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              botToken: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="输入新的微信 bot token"
+                        />
+                        <small>扫码成功后会自动回填；手动保存时可覆盖。</small>
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>baseUrl</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinBaseUrl}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinBaseUrl: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="https://ilinkai.weixin.qq.com"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>accountId</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinAccountId}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinAccountId: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="扫码后自动写入"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>ownerUserId</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.weixinOwnerUserId}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              weixinOwnerUserId: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="扫码后自动写入 owner 用户 ID"
+                        />
+                        <small>V1 仅允许这个 owner 的私聊消息进入 bridge。</small>
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label className="bridge-port-card">
+                        <span>appId</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.appId}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              appId: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="cli_xxx"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>appSecret</span>
+                        <Input
+                          type="password"
+                          value={bridgeConnectorSecretDraft.appSecret}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              appSecret: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="输入新的 appSecret"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>verificationToken</span>
+                        <Input
+                          value={bridgeConnectorSecretDraft.verificationToken}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              verificationToken: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="事件订阅 token，可留空"
+                        />
+                      </label>
+                      <label className="bridge-port-card">
+                        <span>encryptKey</span>
+                        <Input
+                          type="password"
+                          value={bridgeConnectorSecretDraft.encryptKey}
+                          onChange={(event) =>
+                            setBridgeConnectorSecretDraft((current) => ({
+                              ...current,
+                              encryptKey: event.currentTarget.value,
+                            }))
+                          }
+                          placeholder="事件订阅 encrypt key，可留空"
+                        />
+                      </label>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="bridge-panel-subsection">
+                <div className="bridge-panel-subheader">
+                  <h5>已保存凭据掩码</h5>
+                </div>
+                <div className="bridge-secret-list">
+                  {selectedBridgeConnector.platform === "telegram" &&
+                  selectedBridgeConnectorSecrets?.telegram ? (
+                    <div className="bridge-secret-row">
+                      <div className="bridge-secret-copy">
+                        <strong>Telegram botToken</strong>
+                        <small>
+                          {selectedBridgeConnectorSecrets.telegram.botToken.configured
+                            ? selectedBridgeConnectorSecrets.telegram.botToken.maskedValue ?? "***"
+                            : "未配置"}
+                        </small>
+                      </div>
+                      <span
+                        className={`bridge-secret-chip ${
+                          selectedBridgeConnectorSecrets.telegram.botToken.configured
+                            ? "configured"
+                            : "empty"
+                        }`}
+                      >
+                        {selectedBridgeConnectorSecrets.telegram.botToken.configured
+                          ? "已配置"
+                          : "未配置"}
+                      </span>
+                    </div>
+                  ) : null}
+                  {selectedBridgeConnector.platform === "weixin" &&
+                  selectedBridgeConnectorSecrets?.weixin ? (
+                    <>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>微信 botToken</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.weixin.botToken.configured
+                              ? selectedBridgeConnectorSecrets.weixin.botToken.maskedValue ?? "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.weixin.botToken.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.weixin.botToken.configured
+                            ? "已配置"
+                            : "未配置"}
+                        </span>
+                      </div>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>微信账号元数据</strong>
+                          <small>
+                            baseUrl：
+                            {selectedBridgeConnectorSecrets.weixin.baseUrl ?? "未配置"} ·
+                            accountId：
+                            {selectedBridgeConnectorSecrets.weixin.accountId ?? "未配置"} ·
+                            owner：
+                            {selectedBridgeConnectorSecrets.weixin.ownerUserId ?? "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedWeixinSecretsConfigured ? "configured" : "empty"
+                          }`}
+                        >
+                          {selectedWeixinSecretsConfigured ? "已配置" : "未配置"}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                  {selectedBridgeConnector.platform === "feishu" &&
+                  selectedBridgeConnectorSecrets?.feishu ? (
+                    <>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>飞书 appId</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.feishu.appId.configured
+                              ? selectedBridgeConnectorSecrets.feishu.appId.maskedValue ?? "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.feishu.appId.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.feishu.appId.configured
+                            ? "已配置"
+                            : "未配置"}
+                        </span>
+                      </div>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>飞书 appSecret</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.feishu.appSecret.configured
+                              ? selectedBridgeConnectorSecrets.feishu.appSecret.maskedValue ?? "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.feishu.appSecret.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.feishu.appSecret.configured
+                            ? "已配置"
+                            : "未配置"}
+                        </span>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              {selectedBridgeConnector.platform === "feishu" ? (
+                <div className="bridge-panel-subsection">
+                  <div className="bridge-panel-subheader">
+                    <h5>飞书开通卡</h5>
+                    <span
+                      className={`cc-status-badge tone-${
+                        selectedFeishuOnboarding
+                          ? formatFeishuOnboardingTone(selectedFeishuOnboarding.state)
+                          : selectedFeishuSecretsConfigured
+                            ? "success"
+                            : "warning"
+                      }`}
+                    >
+                      {selectedFeishuOnboarding
+                        ? formatFeishuOnboardingStateLabel(selectedFeishuOnboarding.state)
+                        : selectedFeishuSecretsConfigured
+                          ? "已配置"
+                          : "待开通"}
+                    </span>
+                  </div>
+                  <div className="bridge-onboarding-card">
+                    <div className="bridge-onboarding-copy">
+                      <strong>
+                        {selectedFeishuSecretsConfigured
+                          ? "当前机器人已具备飞书凭据"
+                          : "用飞书官方流程创建并绑定机器人"}
+                      </strong>
+                      <p>
+                        应用会发起飞书官方托管创建页，扫码完成后自动保存 `appId/appSecret`
+                        并重启 IM Bridge。手动凭据输入仍保留在上方。
+                      </p>
+                    </div>
+                    <div className="bridge-onboarding-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Sparkles size={15} />}
+                        className="cc-action-btn"
+                        onClick={() => void handleStartSelectedFeishuOnboarding()}
+                        disabled={
+                          bridgeBusy ||
+                          feishuConnectorOnboardingBusy ||
+                          (Boolean(selectedFeishuOnboarding) &&
+                            isFeishuOnboardingActive(selectedFeishuOnboarding))
+                        }
+                      >
+                        {selectedFeishuOnboarding &&
+                        isFeishuOnboardingActive(selectedFeishuOnboarding)
+                          ? "等待扫码中"
+                          : selectedFeishuOnboarding &&
+                              selectedFeishuOnboarding.state !== "succeeded"
+                            ? "重新开始"
+                            : selectedFeishuSecretsConfigured
+                              ? "重新创建机器人"
+                              : "创建机器人"}
+                      </Button>
+                      {selectedFeishuOnboarding?.verificationUrl ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<ChevronRight size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onOpenExternalUrl(selectedFeishuOnboarding.verificationUrl ?? "")
+                          }
+                          disabled={feishuConnectorOnboardingBusy}
+                        >
+                          在浏览器打开
+                        </Button>
+                      ) : null}
+                      {selectedFeishuOnboarding ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<RefreshCw size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onRefreshFeishuConnectorOnboardingStatus(
+                              selectedFeishuOnboarding.sessionId,
+                            )
+                          }
+                          disabled={feishuConnectorOnboardingBusy}
+                        >
+                          刷新开通状态
+                        </Button>
+                      ) : null}
+                      {selectedFeishuOnboarding &&
+                      isFeishuOnboardingActive(selectedFeishuOnboarding) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<Eraser size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void handleCancelSelectedFeishuOnboarding()}
+                          disabled={feishuConnectorOnboardingBusy}
+                        >
+                          取消开通
+                        </Button>
+                      ) : null}
+                    </div>
+                    {selectedFeishuOnboarding?.qrSvg ? (
+                      <div className="bridge-onboarding-qr-shell">
+                        <div
+                          className="bridge-onboarding-qr"
+                          aria-label="飞书机器人开通二维码"
+                          dangerouslySetInnerHTML={{ __html: selectedFeishuOnboarding.qrSvg }}
+                        />
+                        <div className="bridge-onboarding-meta">
+                          <span>
+                            会话开始：{formatBridgeTimestamp(selectedFeishuOnboarding.startedAt)}
+                          </span>
+                          <span>
+                            截止时间：{formatBridgeTimestamp(selectedFeishuOnboarding.expiresAt)}
+                          </span>
+                          {selectedFeishuOnboarding.lastConfiguredAt ? (
+                            <span>
+                              最近配置：
+                              {formatBridgeTimestamp(selectedFeishuOnboarding.lastConfiguredAt)}
+                            </span>
+                          ) : null}
+                          {selectedFeishuOnboarding.appIdMasked ? (
+                            <span>已保存 appId：{selectedFeishuOnboarding.appIdMasked}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {selectedFeishuOnboarding?.detailMessage ? (
+                      <p className="hint">{selectedFeishuOnboarding.detailMessage}</p>
+                    ) : null}
+                    {selectedFeishuOnboarding?.errorMessage ? (
+                      <p className="hint bridge-error-text">
+                        {selectedFeishuOnboarding.errorMessage}
+                      </p>
+                    ) : null}
+                    {selectedFeishuOnboarding?.state === "succeeded" ? (
+                      <div className="bridge-onboarding-success-list">
+                        <span>1. 去飞书里找到这个机器人或刚创建的应用。</span>
+                        <span>2. 给机器人发送第一条私聊消息，或在群里 @ 它。</span>
+                        <span>3. 当前 bridge 会继续按现有 binding / session 机制自动工作。</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedBridgeConnector.platform === "weixin" ? (
+                <div className="bridge-panel-subsection">
+                  <div className="bridge-panel-subheader">
+                    <h5>微信扫码开通</h5>
+                    <span
+                      className={`cc-status-badge tone-${
+                        selectedWeixinOnboarding
+                          ? formatWeixinOnboardingTone(selectedWeixinOnboarding.state)
+                          : selectedWeixinSecretsConfigured
+                            ? "success"
+                            : "warning"
+                      }`}
+                    >
+                      {selectedWeixinOnboarding
+                        ? formatWeixinOnboardingStateLabel(selectedWeixinOnboarding.state)
+                        : selectedWeixinSecretsConfigured
+                          ? "已配置"
+                          : "待开通"}
+                    </span>
+                  </div>
+                  <div className="bridge-onboarding-card">
+                    <div className="bridge-onboarding-copy">
+                      <strong>
+                        {selectedWeixinSecretsConfigured
+                          ? "当前机器人已具备微信 owner 凭据"
+                          : "扫码绑定一个微信机器人"}
+                      </strong>
+                      <p>
+                        应用会拉起 iLink 兼容扫码流程，登录成功后自动保存 `botToken/baseUrl/accountId/ownerUserId`
+                        并重启 IM Bridge。V1 只支持 owner 私聊文本消息，不支持群聊和媒体。
+                      </p>
+                    </div>
+                    <div className="bridge-onboarding-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Sparkles size={15} />}
+                        className="cc-action-btn"
+                        onClick={() => void handleStartSelectedWeixinOnboarding()}
+                        disabled={
+                          bridgeBusy ||
+                          weixinConnectorOnboardingBusy ||
+                          (Boolean(selectedWeixinOnboarding) &&
+                            isWeixinOnboardingActive(selectedWeixinOnboarding))
+                        }
+                      >
+                        {selectedWeixinOnboarding &&
+                        isWeixinOnboardingActive(selectedWeixinOnboarding)
+                          ? "等待扫码中"
+                          : selectedWeixinOnboarding &&
+                              selectedWeixinOnboarding.state !== "succeeded"
+                            ? "重新开始"
+                            : selectedWeixinSecretsConfigured
+                              ? "重新扫码"
+                              : "开始扫码"}
+                      </Button>
+                      {selectedWeixinOnboarding?.verificationUrl ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<ChevronRight size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onOpenExternalUrl(selectedWeixinOnboarding.verificationUrl ?? "")
+                          }
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          在浏览器打开
+                        </Button>
+                      ) : null}
+                      {selectedWeixinOnboarding ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<RefreshCw size={15} />}
+                          className="cc-action-btn"
+                          onClick={() =>
+                            void onRefreshWeixinConnectorOnboardingStatus(
+                              selectedWeixinOnboarding.sessionId,
+                            )
+                          }
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          刷新开通状态
+                        </Button>
+                      ) : null}
+                      {selectedWeixinOnboarding &&
+                      isWeixinOnboardingActive(selectedWeixinOnboarding) ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<Eraser size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => void handleCancelSelectedWeixinOnboarding()}
+                          disabled={weixinConnectorOnboardingBusy}
+                        >
+                          取消开通
+                        </Button>
+                      ) : null}
+                    </div>
+                    {selectedWeixinOnboarding?.qrSvg ? (
+                      <div className="bridge-onboarding-qr-shell">
+                        <div
+                          className="bridge-onboarding-qr"
+                          aria-label="微信机器人开通二维码"
+                          dangerouslySetInnerHTML={{ __html: selectedWeixinOnboarding.qrSvg }}
+                        />
+                        <div className="bridge-onboarding-meta">
+                          <span>
+                            会话开始：{formatBridgeTimestamp(selectedWeixinOnboarding.startedAt)}
+                          </span>
+                          <span>
+                            截止时间：{formatBridgeTimestamp(selectedWeixinOnboarding.expiresAt)}
+                          </span>
+                          {selectedWeixinOnboarding.lastConfiguredAt ? (
+                            <span>
+                              最近配置：
+                              {formatBridgeTimestamp(selectedWeixinOnboarding.lastConfiguredAt)}
+                            </span>
+                          ) : null}
+                          {selectedWeixinOnboarding.accountId ? (
+                            <span>accountId：{selectedWeixinOnboarding.accountId}</span>
+                          ) : null}
+                          {selectedWeixinOnboarding.ownerUserId ? (
+                            <span>ownerUserId：{selectedWeixinOnboarding.ownerUserId}</span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {selectedWeixinOnboarding?.detailMessage ? (
+                      <p className="hint">{selectedWeixinOnboarding.detailMessage}</p>
+                    ) : null}
+                    {selectedWeixinOnboarding?.errorMessage ? (
+                      <p className="hint bridge-error-text">
+                        {selectedWeixinOnboarding.errorMessage}
+                      </p>
+                    ) : null}
+                    {selectedWeixinOnboarding?.state === "succeeded" ? (
+                      <div className="bridge-onboarding-success-list">
+                        <span>1. 用扫码成功的 owner 微信给机器人发送第一条私聊文本。</span>
+                        <span>2. bridge 会按当前 binding / session 机制建立会话并保存上下文。</span>
+                        <span>3. 其他用户、群聊和媒体消息在 V1 中会被明确忽略。</span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              {bridgeConnectorTaskError ? (
+                <p className="hint bridge-error-text">{bridgeConnectorTaskError}</p>
+              ) : null}
+
+              <div className="bridge-danger-group">
+                <div className="cc-danger-group-label">
+                  <strong>危险操作</strong>
+                  <span>删除后会立即保存配置，并在运行中自动重启 IM Bridge。</span>
+                </div>
+                <div className="cc-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<X size={15} />}
+                    className="cc-action-btn"
+                    onClick={() => void handleDeleteBridgeRobot(selectedBridgeConnector.id)}
+                    disabled={bridgeBusy}
+                  >
+                    删除机器人
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="hint">当前没有选中的机器人，无法编辑凭据。</p>
+          )}
+        </ControlCenterTaskSurface>
+      );
+    }
+
+    if (isBridgeRuntimeTask) {
+      return (
+        <ControlCenterTaskSurface
+          title={
+            selectedBridgeConnector
+              ? `${selectedBridgeConnector.label} 高级运行面板`
+              : "高级运行面板"
+          }
+          description="这个任务面只显示当前机器人相关的状态、绑定、审批、会话、日志和凭据掩码。"
+          className="cc-bridge-task-surface cc-bridge-runtime-modal"
+          bodyClassName="cc-bridge-runtime-body"
+          onBack={onCloseTask}
+          onClose={onClose}
+          showCloseButton={false}
+        >
+          {selectedBridgeConnector ? (
+            <BridgeRuntimePanel
+              connector={selectedBridgeConnector}
+              status={bridgeStatus}
+              sessions={bridgeSessions}
+              bindings={bridgeBindings}
+              approvals={bridgeApprovals}
+              logTail={bridgeLogTail}
+              recentErrors={bridgeRecentErrors}
+              secretsMask={selectedBridgeConnectorSecrets}
+              busy={bridgeBusy}
+              onRefreshStatus={onRefreshBridgeStatus}
+              onRefreshSessions={() => onRefreshBridgeSessions({ silent: true })}
+              onRefreshBindings={onRefreshBridgeBindings}
+              onRefreshApprovals={onRefreshBridgeApprovals}
+              onRefreshLogTail={onRefreshBridgeLogTail}
+              onOpenLogs={onOpenLogs}
+              onImportSession={onImportBridgeSession}
+              onClearBinding={onClearBridgeBinding}
+              onResetBindingSession={onResetBridgeBindingSession}
+              onResetBindingToDefaultWorkDir={onResetBridgeBindingToDefaultWorkDir}
+              onResolveApproval={onResolveBridgeApproval}
+            />
+          ) : (
+            <p className="hint">当前没有选中的机器人，无法展示运行面板。</p>
+          )}
+        </ControlCenterTaskSurface>
+      );
+    }
+
+    if (isSkillGitImportTask) {
+      return (
+        <ControlCenterTaskSurface
+          title="从 Git 安装 Skill"
+          description="输入仓库地址；Ref 可选，支持分支、tag 或 commit。"
+          className="cc-skill-task-surface"
+          onBack={onCloseTask}
+          onClose={onClose}
+          footer={
+            <div className="cc-actions">
+              <Button
+                type="button"
+                onClick={() => void onConfirmInstallSkillFromGit()}
+                disabled={skillCenterBusy}
+              >
+                从 Git 安装
+              </Button>
+            </div>
+          }
+        >
+          <div className="skill-center-dialog-fields cc-skill-task-fields">
+            <label className="skill-center-dialog-field">
+              <span>仓库地址</span>
+              <Input
+                value={skillCenterGitRepoUrl}
+                onChange={(event) => onSkillCenterGitRepoUrlChange(event.target.value)}
+                placeholder="https://github.com/owner/repo.git"
+                autoFocus
+              />
+            </label>
+            <label className="skill-center-dialog-field">
+              <span>Ref（可选）</span>
+              <Input
+                value={skillCenterGitRef}
+                onChange={(event) => onSkillCenterGitRefChange(event.target.value)}
+                placeholder="main / v1.0.0 / commit sha"
+              />
+            </label>
+          </div>
+        </ControlCenterTaskSurface>
+      );
+    }
+
+    if (isSkillImportTask) {
+      return (
+        <ControlCenterTaskSurface
+          title="导入本地 Skill"
+          description="选择要导入的来源类型，然后继续选择目录或 ZIP 文件。"
+          className="cc-skill-task-surface"
+          onBack={onCloseTask}
+          onClose={onClose}
+        >
+          <div className="skill-center-import-choice-grid">
+            <button
+              type="button"
+              className="skill-center-import-choice"
+              onClick={() => {
+                void onConfirmImportSkillFromPath("directory");
+              }}
+              disabled={skillCenterBusy}
+            >
+              <strong>导入目录</strong>
+              <span>选择包含 `SKILL.md` 的本地 Skill 目录。</span>
+            </button>
+            <button
+              type="button"
+              className="skill-center-import-choice"
+              onClick={() => {
+                void onConfirmImportSkillFromPath("zip");
+              }}
+              disabled={skillCenterBusy}
+            >
+              <strong>导入 ZIP</strong>
+              <span>选择本地 Skill ZIP 压缩包并导入。</span>
+            </button>
+          </div>
+        </ControlCenterTaskSurface>
+      );
+    }
+
+    return null;
   }
 
   return (
@@ -2281,16 +3714,12 @@ export function ControlCenterView({
       className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""}`}
     >
       <header className="cc-modal-header">
-        <div className="cc-modal-title">
-          <h3>控制中心</h3>
-        </div>
         <nav className="cc-header-tabs" aria-label="控制中心主导航">
           {controlSections.map((section) => (
             <Button
               key={section.id}
               type="button"
               variant="ghost"
-              size="sm"
               className={`cc-header-tab ${activeControlSection === section.id ? "active" : ""}`}
               icon={section.icon}
               onClick={() => {
@@ -2321,60 +3750,56 @@ export function ControlCenterView({
             isOnboardingSection ? "cc-main-onboarding" : ""
           }`}
         >
-          {activeControlSection === "overview" ? renderOverviewSection() : null}
-          {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
-          {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
-          {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
+          {activeTask ? (
+            renderActiveTask()
+          ) : (
+            <>
+              {activeControlSection === "overview" ? renderOverviewSection() : null}
+              {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
+              {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
+              {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
+              {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
+            </>
+          )}
         </div>
       </div>
-      <BridgeConfigModal
-        open={bridgeConfigOpen}
-        busy={bridgeBusy}
-        dirty={bridgeOnboardingDirty}
-        titleLabel={bridgeConfigTitle}
-        draft={bridgeOnboardingDraft}
-        validation={bridgeOnboardingValidation}
-        status={bridgeStatus}
-        secretsMask={bridgeSecretsMask}
-        onClose={() => setBridgeConfigOpen(false)}
-        onDraftChange={onBridgeOnboardingDraftChange}
-        onSave={onSaveBridgeOnboarding}
-        onStartBridge={onStartBridge}
-        onRefreshStatus={onRefreshBridgeStatus}
-        onRefreshSecretsMask={onRefreshBridgeSecretsMask}
-      />
-      <ConfigCenterModal
-        open={configCenterOpen}
-        busy={configCenterBusy || actionBusy}
-        dirty={configCenterDirty}
-        view={configCenterView}
-        draft={configCenterDraft}
-        onDraftChange={onConfigCenterDraftChange}
-        onClose={onCloseConfigCenterModal}
-        onSave={onSaveKimiCliConfigCenter}
-        onReset={onResetConfigCenterDraft}
-        onOpenConfigDir={onOpenKimiConfigDir}
-      />
-      <InstallFlowModal
-        open={installFlowOpen}
-        catalog={installFlowCatalog}
-        session={installSessionSnapshot}
-        probe={installProbe}
-        backendState={status?.state ?? null}
-        installSource={installSource}
-        installSettings={installSettings}
-        installSettingsBusy={installSettingsBusy}
-        powershellPreflight={powershellPreflight}
-        onClose={onCloseInstallFlow}
-        onRefreshProbe={onRefreshInstallProbe}
-        onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
-        onSourceChange={onInstallSourceChange}
-        onSaveInstallSettings={onSaveInstallSettings}
-        onStartTask={onStartInstallTask}
-        onCancelTask={onCancelInstallTask}
-        onRestartBackend={onRetry}
-        restartBusy={actionBusy}
-      />
+      {bridgeDeleteConfirm ? (
+        <div className="main-close-decision-overlay" role="presentation">
+          <div
+            className="main-close-decision-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`删除机器人 ${bridgeDeleteConfirm.connectorLabel}`}
+          >
+            <h3>删除机器人</h3>
+            <p>
+              {`确定删除机器人“${bridgeDeleteConfirm.connectorLabel}”吗？此操作会立即保存配置${
+                isBridgeRunning ? "并重启 IM Bridge" : ""
+              }。`}
+            </p>
+            <div className="main-close-decision-actions">
+              <button
+                type="button"
+                className="ui-btn ui-btn-default ui-btn-size-default"
+                onClick={closeBridgeDeleteConfirm}
+                disabled={bridgeBusy}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                onClick={() => {
+                  void handleConfirmDeleteBridgeRobot();
+                }}
+                disabled={bridgeBusy}
+              >
+                删除机器人
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -6,6 +6,8 @@ type CardStatusTone = "neutral" | "success" | "warning" | "danger";
 type ControlCenterCardHeaderProps = {
   eyebrow?: string;
   title: string;
+  titleMeta?: ReactNode;
+  titleControls?: ReactNode;
   description?: string;
   statusLabel: string;
   statusTone?: CardStatusTone;
@@ -18,6 +20,8 @@ type ControlCenterCardHeaderProps = {
 export function ControlCenterCardHeader({
   eyebrow,
   title,
+  titleMeta,
+  titleControls,
   description,
   statusLabel,
   statusTone = "neutral",
@@ -39,7 +43,13 @@ export function ControlCenterCardHeader({
           >
             <span className="cc-step-title-copy">
               {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
-              <h3 className="cc-step-title-line">{title}</h3>
+              <span className="cc-card-header-title-row">
+                <h3 className="cc-step-title-line">{title}</h3>
+                {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
+                {titleControls ? (
+                  <span className="cc-card-header-title-controls">{titleControls}</span>
+                ) : null}
+              </span>
               {description ? <p className="cc-step-inline-summary">{description}</p> : null}
             </span>
             <ChevronRight
@@ -50,7 +60,13 @@ export function ControlCenterCardHeader({
         ) : (
           <div className="cc-card-header-static-copy">
             {eyebrow ? <span className="cc-card-header-eyebrow">{eyebrow}</span> : null}
-            <h3>{title}</h3>
+            <div className="cc-card-header-title-row">
+              <h3>{title}</h3>
+              {titleMeta ? <span className="cc-card-header-title-meta">{titleMeta}</span> : null}
+              {titleControls ? (
+                <span className="cc-card-header-title-controls">{titleControls}</span>
+              ) : null}
+            </div>
             {description ? <p>{description}</p> : null}
           </div>
         )}

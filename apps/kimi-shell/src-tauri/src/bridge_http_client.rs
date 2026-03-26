@@ -45,6 +45,7 @@ struct AdminBridgeSessionRecord {
     session_state: Option<String>,
     lease_owner: Option<String>,
     lease_expires_at: Option<String>,
+    #[serde(default)]
     auto_approve: bool,
     provider_name: Option<String>,
     runtime_metadata_json: Option<String>,
@@ -276,6 +277,7 @@ mod tests {
         let status = client.get_status().expect("status should decode");
 
         assert_eq!(status.state, crate::types::BridgeRuntimeState::Running);
+        assert!(status.connectors.is_empty());
         assert_eq!(
             receiver
                 .recv()
@@ -412,6 +414,32 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "session-1");
         assert!(sessions[0].switchable);
+    }
+
+    #[test]
+    fn list_sessions_defaults_missing_auto_approve_to_false() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+
+        thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            let response = Response::from_string(
+                r#"{"items":[{"kimiSessionId":"session-2","workDir":"D:/repo","summary":"summary","createdAt":"2026-03-17T00:00:00Z","updatedAt":"2026-03-17T00:00:00Z"}]}"#,
+            )
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client =
+            BridgeHttpClient::new(address, "bridge-token").expect("client should be created");
+        let sessions = client.list_sessions().expect("sessions should decode");
+
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "session-2");
+        assert!(!sessions[0].auto_approve);
     }
 
     #[test]

@@ -21,14 +21,13 @@ use windows::core::{Interface, HSTRING, PWSTR};
 
 use crate::{
     app_state::AppState,
-    log_manager,
-    settings_store,
+    log_manager, settings_store,
     types::{
         MainWindowCloseBehavior, MainWindowCloseDecision, MainWindowCloseDecisionInput,
-        MainWindowCloseDecisionRequestPayload,
-        OpenRequestErrorPayload, PrefillChatPayload, PrefillStatusPayload, PrefillStatusState,
-        ShellRoutePayload, StartupFailureKind, StartupMonitorTargetRoute, StartupPhase,
-        SubmitPrefillAck, WebviewRuntimeKind, WorkspaceSessionBridgePayload,
+        MainWindowCloseDecisionRequestPayload, OpenRequestErrorPayload, PrefillChatPayload,
+        PrefillStatusPayload, PrefillStatusState, ShellRoutePayload, StartupFailureKind,
+        StartupMonitorTargetRoute, StartupPhase, SubmitPrefillAck, WebviewRuntimeKind,
+        WorkspaceSessionBridgePayload,
     },
 };
 
@@ -745,9 +744,7 @@ fn emit_main_window_close_decision_request(app: &AppHandle, source: &str) -> boo
         Err(error) => {
             log_manager::append_line(
                 app,
-                format!(
-                    "failed to emit main close decision request (source={source}): {error}"
-                ),
+                format!("failed to emit main close decision request (source={source}): {error}"),
             );
             false
         }
@@ -757,10 +754,7 @@ fn emit_main_window_close_decision_request(app: &AppHandle, source: &str) -> boo
 pub fn minimize_main_window_to_tray(app: &AppHandle, source: &str) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.hide();
-        log_manager::append_line(
-            app,
-            format!("main window hidden to tray (source={source})"),
-        );
+        log_manager::append_line(app, format!("main window hidden to tray (source={source})"));
     }
 }
 
@@ -841,7 +835,8 @@ pub fn apply_main_window_close_decision(
     }
 
     if input.remember {
-        let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+        let mut settings =
+            settings_store::load_or_default(app).map_err(|error| error.to_string())?;
         settings.main_window_close_behavior = match input.decision {
             MainWindowCloseDecision::Exit => MainWindowCloseBehavior::Exit,
             MainWindowCloseDecision::MinimizeToTray => MainWindowCloseBehavior::MinimizeToTray,

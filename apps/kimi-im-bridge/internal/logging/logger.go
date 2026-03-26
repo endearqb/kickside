@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type Logger struct {
@@ -24,7 +25,7 @@ func New(path string) (*Logger, error) {
 	}
 	return &Logger{
 		file:   file,
-		logger: log.New(file, "", log.LstdFlags|log.LUTC),
+		logger: log.New(file, "", 0),
 	}, nil
 }
 
@@ -34,7 +35,8 @@ func (l *Logger) Printf(format string, args ...any) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.logger.Printf(format, args...)
+	prefix := time.Now().Format("2006/01/02 15:04:05 -07:00 ")
+	l.logger.Printf(prefix+format, args...)
 }
 
 func (l *Logger) Close() error {

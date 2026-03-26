@@ -57,6 +57,7 @@ type TurnEvent struct {
 	Kind               EventKind
 	TurnID             string
 	KimiSessionID      string
+	ConnectorID        string
 	Platform           string
 	ChatID             string
 	ThreadID           string

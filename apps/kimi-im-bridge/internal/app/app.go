@@ -22,31 +22,36 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/logging"
 	feishuplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/feishu"
 	telegramplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/telegram"
+	weixinplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/weixin"
 	kimiprovider "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/providers/kimi"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
 
 type Options struct {
-	Version     string
-	ConfigPath  string
-	SecretsPath string
-	DBPath      string
-	LogFilePath string
-	AdminPort   int
-	AdminToken  string
+	Version          string
+	ConfigPath       string
+	SecretsPath      string
+	DBPath           string
+	LogFilePath      string
+	AdminPort        int
+	AdminToken       string
+	HostControlURL   string
+	HostControlToken string
+	SkillsDir        string
 }
 
 type Service struct {
-	options      Options
-	settings     config.BridgeSettings
-	secrets      config.BridgeSecrets
-	store        *store.Store
-	logger       *logging.Logger
-	bindings     *binding.Router
-	orchestrator *bridgecore.Orchestrator
-	provider     bridgecore.RuntimeProvider
-	runtimeSvc   *runtime.Service
+	options            Options
+	settings           config.BridgeSettings
+	secrets            config.BridgeSecrets
+	store              *store.Store
+	logger             *logging.Logger
+	bindings           *binding.Router
+	orchestrator       *bridgecore.Orchestrator
+	provider           bridgecore.RuntimeProvider
+	runtimeSvc         *runtime.Service
+	skillsAuthFilePath string
 
 	mu            sync.RWMutex
 	state         domain.BridgeRuntimeState
@@ -76,6 +81,7 @@ func New(options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	settings = config.ReconcileSettingsWithSecrets(settings, secrets)
 	logger, err := logging.New(options.LogFilePath)
 	if err != nil {
 		return nil, err
@@ -96,8 +102,19 @@ func New(options Options) (*Service, error) {
 		state:    domain.BridgeStateStopped,
 		stopCh:   make(chan struct{}),
 	}
+	if strings.TrimSpace(options.SkillsDir) != "" {
+		authFilePath, err := writeBridgeSkillsAuthFile(options)
+		if err != nil {
+			_ = service.Close()
+			return nil, err
+		}
+		service.skillsAuthFilePath = authFilePath
+	}
 	service.provider = kimiprovider.NewProvider(
-		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{}),
+		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{
+			SkillsDir:    strings.TrimSpace(options.SkillsDir),
+			AuthFilePath: service.skillsAuthFilePath,
+		}),
 		storeHandle,
 		storeHandle,
 	)
@@ -109,11 +126,14 @@ func New(options Options) (*Service, error) {
 		storeHandle,
 	)
 	service.runtimeSvc = runtime.NewService(
-		runtime.NewSDKDriver(runtime.SDKDriverOptions{}),
+		runtime.NewSDKDriver(runtime.SDKDriverOptions{
+			SkillsDir:    strings.TrimSpace(options.SkillsDir),
+			AuthFilePath: service.skillsAuthFilePath,
+		}),
 		storeHandle,
 		storeHandle,
 	)
-	if err := service.store.SyncConfiguredChannels(context.Background(), settings.Channels); err != nil {
+	if err := service.store.SyncConfiguredChannels(context.Background(), configuredConnectors(settings)); err != nil {
 		_ = service.Close()
 		return nil, err
 	}
@@ -157,7 +177,7 @@ func (s *Service) Start() error {
 	s.mu.Lock()
 	s.listener = listener
 	s.server = server
-	s.startedAt = time.Now().UTC().Format(time.RFC3339)
+	s.startedAt = time.Now().Format(time.RFC3339)
 	s.lastErrorCode = ""
 	s.lastError = ""
 	s.state = domain.BridgeStateRunning
@@ -230,6 +250,7 @@ func (s *Service) Close() error {
 	errRuntime := s.runtimeSvc.Close()
 	errStore := s.store.Close()
 	errLogger := s.logger.Close()
+	cleanupBridgeSkillsAuthFile(s.skillsAuthFilePath)
 	if errProvider != nil {
 		return errProvider
 	}
@@ -260,6 +281,7 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 			err,
 		)
 	}
+	channels = s.decorateStatuses(channels)
 	bindings, err := s.store.CountBindings(ctx)
 	if err != nil {
 		bindings = 0
@@ -306,12 +328,15 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 }
 
 func (s *Service) fallbackChannelStatuses(state domain.BridgeRuntimeState) []domain.ChannelStatus {
-	statuses := make([]domain.ChannelStatus, 0, len(s.settings.Channels))
-	for _, channel := range s.settings.Channels {
+	connectors := configuredConnectors(s.settings)
+	statuses := make([]domain.ChannelStatus, 0, len(connectors))
+	for _, channel := range connectors {
 		statuses = append(statuses, domain.ChannelStatus{
-			Platform: channel.Platform,
-			Enabled:  channel.Enabled,
-			State:    fallbackChannelState(channel.Enabled, state),
+			ConnectorID:    channel.ID,
+			ConnectorLabel: channel.Label,
+			Platform:       channel.Platform,
+			Enabled:        channel.Enabled,
+			State:          fallbackChannelState(channel.Enabled, state),
 		})
 	}
 	return statuses
@@ -351,7 +376,11 @@ func appendStatusSnapshotIssue(currentCode string, currentMessage string, stage 
 }
 
 func (s *Service) ListBindings(ctx context.Context) ([]domain.BindingRecord, error) {
-	return s.store.ListBindings(ctx)
+	items, err := s.store.ListBindings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.decorateBindingRecords(items), nil
 }
 
 func (s *Service) ListSessions(ctx context.Context) ([]domain.BridgeSession, error) {
@@ -359,7 +388,11 @@ func (s *Service) ListSessions(ctx context.Context) ([]domain.BridgeSession, err
 }
 
 func (s *Service) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
-	return s.store.ListApprovals(ctx, status)
+	items, err := s.store.ListApprovals(ctx, status)
+	if err != nil {
+		return nil, err
+	}
+	return s.decorateApprovals(items), nil
 }
 
 func (s *Service) ClearBinding(ctx context.Context, bindingID string) error {
@@ -370,9 +403,9 @@ func (s *Service) ClearBinding(ctx context.Context, bindingID string) error {
 	return nil
 }
 
-func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input domain.BindingUpdate) error {
+func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input domain.BindingUpdate) (domain.BindingRecord, error) {
 	if strings.TrimSpace(bindingID) == "" {
-		return fmt.Errorf("binding id is required")
+		return domain.BindingRecord{}, fmt.Errorf("binding id is required")
 	}
 
 	workDirWasSet := input.WorkDir != nil
@@ -382,22 +415,30 @@ func (s *Service) UpdateBinding(ctx context.Context, bindingID string, input dom
 	}
 
 	if strings.TrimSpace(input.KimiSessionID) == "" && !workDirWasSet {
-		return fmt.Errorf("binding update requires kimiSessionId or workDir")
+		return domain.BindingRecord{}, fmt.Errorf("binding update requires kimiSessionId or workDir")
 	}
 
 	if sessionID := strings.TrimSpace(input.KimiSessionID); sessionID != "" {
 		if err := s.bindings.Rebind(ctx, bindingID, sessionID); err != nil {
-			return err
+			return domain.BindingRecord{}, err
 		}
 		s.logger.Printf("binding rebound: %s -> %s", bindingID, sessionID)
 	}
 	if workDirWasSet {
 		if err := s.bindings.UpdateBindingWorkDir(ctx, bindingID, workDirValue); err != nil {
-			return err
+			return domain.BindingRecord{}, err
 		}
 		s.logger.Printf("binding workdir updated: %s -> %q", bindingID, workDirValue)
 	}
-	return nil
+
+	record, err := s.bindingRecordByID(ctx, bindingID)
+	if err != nil {
+		return domain.BindingRecord{}, err
+	}
+	if record == nil {
+		return domain.BindingRecord{}, fmt.Errorf("binding %s not found after update", bindingID)
+	}
+	return *record, nil
 }
 
 func (s *Service) ImportSession(ctx context.Context, input domain.SessionImportRequest) (domain.BridgeSession, error) {
@@ -489,7 +530,7 @@ func (s *Service) startAdapters() error {
 	adapters := []managedAdapter{}
 	errs := []string{}
 
-	for _, channel := range s.settings.Channels {
+	for _, channel := range configuredConnectors(s.settings) {
 		if !channel.Enabled {
 			continue
 		}
@@ -521,12 +562,14 @@ func (s *Service) startAdapters() error {
 	return nil
 }
 
-func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, error) {
+func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, error) {
 	switch strings.TrimSpace(strings.ToLower(channel.Platform)) {
 	case "telegram":
 		return telegramplatform.NewService(telegramplatform.Options{
 			Config: telegramplatform.Config{
-				BotToken:       secretTelegramBotToken(s.secrets),
+				ConnectorID:    channel.ID,
+				ConnectorLabel: channel.Label,
+				BotToken:       secretTelegramBotToken(s.secrets, channel.ID),
 				DefaultWorkDir: s.settings.DefaultWorkDir,
 			},
 			BindingRouter: s.bindings,
@@ -535,15 +578,42 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 			Logger:        s.logger,
 		}), nil
 	case "feishu":
+		var hostControl feishuplatform.HostController
+		if strings.TrimSpace(s.options.HostControlURL) != "" && strings.TrimSpace(s.options.HostControlToken) != "" {
+			hostControl = feishuplatform.NewHostControlClient(s.options.HostControlURL, s.options.HostControlToken)
+		}
 		return feishuplatform.NewService(feishuplatform.Options{
 			Config: feishuplatform.Config{
-				AppID:          secretFeishuAppID(s.secrets),
-				AppSecret:      secretFeishuAppSecret(s.secrets),
-				AutoApprove:    s.settings.FeishuAutoApprove,
+				ConnectorID:           channel.ID,
+				ConnectorLabel:        channel.Label,
+				AppID:                 secretFeishuAppID(s.secrets, channel.ID),
+				AppSecret:             secretFeishuAppSecret(s.secrets, channel.ID),
+				VerificationToken:     secretFeishuVerificationToken(s.secrets, channel.ID),
+				EncryptKey:            secretFeishuEncryptKey(s.secrets, channel.ID),
+				AutoApprove:           channel.FeishuAutoApprove,
+				DefaultWorkDir:        s.settings.DefaultWorkDir,
+				WorkDirPresets:        mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
+				ReplyRenderer:         channel.FeishuReplyRenderer,
+				AttachmentsDir:        filepath.Join(filepath.Dir(s.options.DBPath), "attachments", channel.ID),
+				BridgeOpsSkillEnabled: strings.TrimSpace(s.options.SkillsDir) != "",
+				BridgeOpsAuthFile:     s.skillsAuthFilePath,
+			},
+			BindingRouter: s.bindings,
+			Orchestrator:  s.orchestrator,
+			HostControl:   hostControl,
+			Store:         s.store,
+			Logger:        s.logger,
+		}), nil
+	case "weixin":
+		return weixinplatform.NewService(weixinplatform.Options{
+			Config: weixinplatform.Config{
+				ConnectorID:    channel.ID,
+				ConnectorLabel: channel.Label,
+				BotToken:       secretWeixinBotToken(s.secrets, channel.ID),
+				BaseURL:        secretWeixinBaseURL(s.secrets, channel.ID),
+				AccountID:      secretWeixinAccountID(s.secrets, channel.ID),
+				OwnerUserID:    secretWeixinOwnerUserID(s.secrets, channel.ID),
 				DefaultWorkDir: s.settings.DefaultWorkDir,
-				WorkDirPresets: mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
-				ReplyRenderer:  s.settings.FeishuReplyRenderer,
-				AttachmentsDir: filepath.Join(filepath.Dir(s.options.DBPath), "attachments", "feishu"),
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,
@@ -553,7 +623,7 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 	default:
 		if err := s.store.UpdateChannelState(
 			context.Background(),
-			channel.Platform,
+			channel.ID,
 			domain.ChannelStateError,
 			"unknown",
 			fmt.Sprintf("unsupported adapter platform %q", channel.Platform),
@@ -564,25 +634,155 @@ func (s *Service) buildAdapter(channel config.ChannelConfig) (managedAdapter, er
 	}
 }
 
-func secretTelegramBotToken(secrets config.BridgeSecrets) string {
-	if secrets.Telegram == nil {
+func secretTelegramBotToken(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Telegram == nil {
 		return ""
 	}
-	return strings.TrimSpace(secrets.Telegram.BotToken)
+	return strings.TrimSpace(connector.Telegram.BotToken)
 }
 
-func secretFeishuAppID(secrets config.BridgeSecrets) string {
-	if secrets.Feishu == nil {
+func secretFeishuAppID(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Feishu == nil {
 		return ""
 	}
-	return strings.TrimSpace(secrets.Feishu.AppID)
+	return strings.TrimSpace(connector.Feishu.AppID)
 }
 
-func secretFeishuAppSecret(secrets config.BridgeSecrets) string {
-	if secrets.Feishu == nil {
+func secretFeishuAppSecret(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Feishu == nil {
 		return ""
 	}
-	return strings.TrimSpace(secrets.Feishu.AppSecret)
+	return strings.TrimSpace(connector.Feishu.AppSecret)
+}
+
+func secretFeishuVerificationToken(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Feishu == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Feishu.VerificationToken)
+}
+
+func secretFeishuEncryptKey(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Feishu == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Feishu.EncryptKey)
+}
+
+func secretWeixinBotToken(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.BotToken)
+}
+
+func secretWeixinBaseURL(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.BaseURL)
+}
+
+func secretWeixinAccountID(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.AccountID)
+}
+
+func secretWeixinOwnerUserID(secrets config.BridgeSecrets, connectorID string) string {
+	connector, ok := secrets.Connectors[connectorID]
+	if !ok || connector.Weixin == nil {
+		return ""
+	}
+	return strings.TrimSpace(connector.Weixin.OwnerUserID)
+}
+
+func (s *Service) decorateBindingRecords(items []domain.BindingRecord) []domain.BindingRecord {
+	if len(items) == 0 {
+		return items
+	}
+	labels := s.connectorLabels()
+	for index := range items {
+		items[index].ConnectorLabel = labels[items[index].ConnectorID]
+	}
+	return items
+}
+
+func (s *Service) bindingRecordByID(ctx context.Context, bindingID string) (*domain.BindingRecord, error) {
+	binding, err := s.store.GetBindingByID(ctx, bindingID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil {
+		return nil, nil
+	}
+	record := domain.BindingRecord{
+		BindingID:            binding.BindingID,
+		ConnectorID:          binding.Key.ConnectorID,
+		Platform:             binding.Key.Platform,
+		AccountID:            binding.Key.AccountID,
+		ChatID:               binding.Key.ChatID,
+		ThreadID:             binding.Key.ThreadID,
+		KimiSessionID:        binding.KimiSessionID,
+		WorkDir:              binding.WorkDir,
+		OnboardedAt:          binding.OnboardedAt,
+		OnboardingVersion:    binding.OnboardingVersion,
+		CreatedAt:            binding.CreatedAt,
+		UpdatedAt:            binding.UpdatedAt,
+		LastInboundMessageID: binding.LastInboundMessageID,
+	}
+	decorated := s.decorateBindingRecords([]domain.BindingRecord{record})
+	return &decorated[0], nil
+}
+
+func (s *Service) decorateApprovals(items []domain.ApprovalTicket) []domain.ApprovalTicket {
+	if len(items) == 0 {
+		return items
+	}
+	labels := s.connectorLabels()
+	for index := range items {
+		items[index].ConnectorLabel = labels[items[index].ConnectorID]
+	}
+	return items
+}
+
+func (s *Service) decorateStatuses(items []domain.ChannelStatus) []domain.ChannelStatus {
+	if len(items) == 0 {
+		return items
+	}
+	labels := s.connectorLabels()
+	for index := range items {
+		items[index].ConnectorLabel = labels[items[index].ConnectorID]
+	}
+	return items
+}
+
+func (s *Service) connectorLabels() map[string]string {
+	connectors := configuredConnectors(s.settings)
+	labels := make(map[string]string, len(connectors))
+	for _, connector := range connectors {
+		labels[connector.ID] = connector.Label
+	}
+	return labels
+}
+
+func configuredConnectors(settings config.BridgeSettings) []config.ConnectorConfig {
+	if len(settings.Connectors) > 0 {
+		return settings.Connectors
+	}
+	if len(settings.Channels) > 0 {
+		return settings.Channels
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

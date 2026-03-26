@@ -68,7 +68,7 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 	if query == nil {
 		return true, nil
 	}
-	if err := s.store.TouchChannelInbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), ""); err != nil {
 		return false, reliability.Wrap("unknown", err)
 	}
 
@@ -87,7 +87,7 @@ func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bo
 	if ticket.Status != "pending" {
 		return true, s.answerCallback(ctx, query.ID, "already resolved")
 	}
-	if !approvalContextMatches(ticket, query) {
+	if !approvalContextMatches(ticket, query, s.connectorID()) {
 		return true, s.answerCallback(ctx, query.ID, "invalid approval context")
 	}
 
@@ -129,17 +129,20 @@ func (s *Service) answerCallback(ctx context.Context, callbackID string, text st
 	}); err != nil {
 		return err
 	}
-	if err := s.store.TouchChannelOutbound(ctx, platformID, ""); err != nil {
+	if err := s.store.TouchChannelOutbound(ctx, s.connectorID(), ""); err != nil {
 		return reliability.Wrap("unknown", err)
 	}
 	return nil
 }
 
-func approvalContextMatches(ticket *domain.ApprovalTicket, query *callbackQuery) bool {
+func approvalContextMatches(ticket *domain.ApprovalTicket, query *callbackQuery, connectorID string) bool {
 	if ticket == nil || query == nil || query.Message == nil {
 		return false
 	}
 	if ticket.Platform != platformID {
+		return false
+	}
+	if ticket.ConnectorID != "" && ticket.ConnectorID != connectorID {
 		return false
 	}
 	if ticket.ChatID != strconv.FormatInt(query.Message.Chat.ID, 10) {

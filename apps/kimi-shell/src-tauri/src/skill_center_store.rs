@@ -10,8 +10,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    DiscoveredSkillRecord, InstalledSkill, SessionSkillState, SkillDiscoverySnapshot,
-    SkillProjectionRecord, SkillSourceType, WorkspaceDiscoveryRoot, WorkspaceSkillProfile,
+    DiscoveredSkillRecord, InstalledSkill, SessionSkillState, SkillDiscoveryLocation,
+    SkillDiscoveryScope, SkillDiscoverySnapshot, SkillProjectionRecord, SkillSourceType,
+    WorkspaceDiscoveryRoot, WorkspaceSkillProfile,
 };
 
 const SKILL_CENTER_DIR_NAME: &str = "skill-center";
@@ -299,7 +300,11 @@ pub fn save_workspace_profiles(
 pub fn load_workspace_index(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot>> {
     ensure_layout(app)?;
     let file: WorkspaceIndexFile = read_json_or_default(&workspace_index_path(app)?)?;
-    Ok(file.workspaces)
+    Ok(file
+        .workspaces
+        .into_iter()
+        .map(normalize_workspace_root)
+        .collect())
 }
 
 pub fn save_workspace_index(
@@ -310,7 +315,11 @@ pub fn save_workspace_index(
     write_json(
         &workspace_index_path(app)?,
         &WorkspaceIndexFile {
-            workspaces: workspaces.to_vec(),
+            workspaces: workspaces
+                .iter()
+                .cloned()
+                .map(normalize_workspace_root)
+                .collect(),
         },
     )
 }
@@ -318,11 +327,11 @@ pub fn save_workspace_index(
 pub fn load_discovery_cache(app: &AppHandle) -> anyhow::Result<SkillDiscoverySnapshot> {
     ensure_layout(app)?;
     let file: DiscoveryCacheFile = read_json_or_default(&discovery_cache_path(app)?)?;
-    Ok(SkillDiscoverySnapshot {
+    Ok(normalize_discovery_snapshot(SkillDiscoverySnapshot {
         scanned_at: file.scanned_at.unwrap_or_default(),
         workspaces: file.workspaces,
         records: file.records,
-    })
+    }))
 }
 
 pub fn save_discovery_cache(
@@ -330,12 +339,13 @@ pub fn save_discovery_cache(
     snapshot: &SkillDiscoverySnapshot,
 ) -> anyhow::Result<()> {
     ensure_layout(app)?;
+    let normalized = normalize_discovery_snapshot(snapshot.clone());
     write_json(
         &discovery_cache_path(app)?,
         &DiscoveryCacheFile {
-            scanned_at: Some(snapshot.scanned_at.clone()),
-            workspaces: snapshot.workspaces.clone(),
-            records: snapshot.records.clone(),
+            scanned_at: Some(normalized.scanned_at.clone()),
+            workspaces: normalized.workspaces,
+            records: normalized.records,
         },
     )
 }
@@ -538,6 +548,29 @@ pub fn canonicalize_source_path(path: &Path) -> anyhow::Result<PathBuf> {
         .with_context(|| format!("failed to canonicalize source path: {}", path.display()))
 }
 
+pub fn normalize_display_path(path: &str) -> String {
+    let trimmed = path.trim();
+    #[cfg(windows)]
+    {
+        let without_extended = if let Some(rest) = trimmed.strip_prefix(r"\\?\UNC\") {
+            format!(r"\\{}", rest)
+        } else if let Some(rest) = trimmed.strip_prefix(r"\\?\") {
+            rest.to_string()
+        } else {
+            trimmed.to_string()
+        };
+        without_extended.replace('/', "\\")
+    }
+    #[cfg(not(windows))]
+    {
+        trimmed.to_string()
+    }
+}
+
+pub fn path_to_display_string(path: &Path) -> String {
+    normalize_display_path(&path.to_string_lossy())
+}
+
 pub fn user_home_dir() -> anyhow::Result<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -640,11 +673,61 @@ pub fn find_skill_mut<'a>(
 }
 
 pub fn normalize_workspace_key(path: &str) -> String {
-    let trimmed = path.trim().replace('/', "\\");
+    let trimmed = normalize_display_path(path);
     if cfg!(windows) {
         trimmed.trim_end_matches('\\').to_lowercase()
     } else {
         trimmed.trim_end_matches('\\').to_string()
+    }
+}
+
+fn normalize_workspace_root(root: WorkspaceDiscoveryRoot) -> WorkspaceDiscoveryRoot {
+    let path = normalize_display_path(&root.path);
+    let label = normalize_display_path(&root.label);
+    let id = match root.scope {
+        SkillDiscoveryScope::Workspace => normalize_workspace_key(&path),
+        SkillDiscoveryScope::UserHome => root.id,
+    };
+    WorkspaceDiscoveryRoot {
+        id,
+        scope: root.scope,
+        path,
+        label,
+        last_seen_at: root.last_seen_at,
+    }
+}
+
+fn normalize_discovery_snapshot(snapshot: SkillDiscoverySnapshot) -> SkillDiscoverySnapshot {
+    SkillDiscoverySnapshot {
+        scanned_at: snapshot.scanned_at,
+        workspaces: snapshot
+            .workspaces
+            .into_iter()
+            .map(normalize_workspace_root)
+            .collect(),
+        records: snapshot
+            .records
+            .into_iter()
+            .map(|record| DiscoveredSkillRecord {
+                canonical_path: normalize_display_path(&record.canonical_path),
+                locations: record
+                    .locations
+                    .into_iter()
+                    .map(|location| SkillDiscoveryLocation {
+                        container_path: normalize_display_path(&location.container_path),
+                        skill_path: normalize_display_path(&location.skill_path),
+                        workspace_id: location
+                            .workspace_id
+                            .map(|value| normalize_workspace_key(&value)),
+                        workspace_label: location
+                            .workspace_label
+                            .map(|value| normalize_display_path(&value)),
+                        ..location
+                    })
+                    .collect(),
+                ..record
+            })
+            .collect(),
     }
 }
 
@@ -812,9 +895,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        SkillDiscoveryContainerKind, SkillDiscoveryLocation, SkillDiscoveryScope,
-    };
+    use crate::types::{SkillDiscoveryContainerKind, SkillDiscoveryLocation, SkillDiscoveryScope};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempDir {
@@ -883,6 +964,22 @@ mod tests {
     }
 
     #[test]
+    fn normalize_display_path_strips_windows_extended_prefix() {
+        if cfg!(windows) {
+            assert_eq!(
+                normalize_display_path(r"\\?\D:\Temp\mdpad-tests"),
+                r"D:\Temp\mdpad-tests"
+            );
+            assert_eq!(
+                normalize_workspace_key(r"\\?\D:\Temp\mdpad-tests"),
+                normalize_workspace_key(r"D:\Temp\mdpad-tests")
+            );
+        } else {
+            assert_eq!(normalize_display_path("/tmp/demo"), "/tmp/demo");
+        }
+    }
+
+    #[test]
     fn copy_skill_source_skips_git_directory() {
         let temp = TempDir::new("copy-src");
         let source = temp.path.join("source");
@@ -908,10 +1005,7 @@ mod tests {
             workspace_label: Some("D:/repo".to_string()),
         };
 
-        let deduped = dedupe_discovery_locations(&[
-            location.clone(),
-            location,
-        ]);
+        let deduped = dedupe_discovery_locations(&[location.clone(), location]);
 
         assert_eq!(deduped.len(), 1);
     }
@@ -928,7 +1022,10 @@ mod tests {
 
         assert_eq!(
             key,
-            format!("discovered:{}", canonical.to_string_lossy().replace('\\', "/"))
+            format!(
+                "discovered:{}",
+                canonical.to_string_lossy().replace('\\', "/")
+            )
         );
     }
 }

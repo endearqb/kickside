@@ -223,3 +223,27 @@
 
 - [x] 当“洞察页”开始承担真实目录管理职责时，必须把“发现目录”和“目标目录管理”拆成两条清晰路径；继续把两者塞进同一个旧面板只会让筛选和动作语义互相打架。
 - [x] 工作区级 Skill 管理最稳的抽象不是复用 session/global projection，而是显式暴露 `workspace target + container inventory` 接口，让前端围绕真实目录状态组织交互。
+
+---
+
+# 暗色按钮统一 + 工作区刷新容错（2026-03-26）
+
+## Plan
+
+- [x] 统一暗色主题下共享按钮 token 和 disabled 样式，修复控制中心等页面的低对比按钮。
+- [x] 为 Skill Center 增加 Windows 路径去 `\\?\` 前缀的统一规范化，收口工作区持久化与前端返回路径。
+- [x] 让工作区 Skill 扫描与外部发现扫描在单个 `SKILL.md` 解析失败时跳过该项并记录日志，不阻断整次刷新。
+- [x] 补充 Rust 单测并运行针对性 `cargo test` / 前端构建验证，回填结果。
+
+## Validation
+
+- [ ] 暗色模式下默认/outline/ghost/destructive 按钮的默认态、hover、disabled 均保持清晰对比，不再出现白底浅字。
+- [x] Skill Center 的工作区目标、容器路径和发现路径已通过路径规范化逻辑与单测去除 `\\?\` 扩展前缀。
+- [x] 容器内存在损坏的 `SKILL.md` 时，单测已验证工作区扫描与 discovery 扫描会跳过坏项并保留合法 Skill。
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build` 通过。
+
+## Retrospective
+
+- [x] 暗色主题里的共享 CTA 不能依赖“light theme 反相”这种隐式 token 关系；一旦 `--primary` 在 dark 里被改成浅色，整套按钮会一起失去层级。
+- [x] 工作区路径的“文件系统真实路径”和“UI/持久化展示路径”必须分层处理；Windows `canonicalize` 产出的 `\\?\` 前缀适合底层操作，不适合直接进入状态文件和界面。
+- [x] 对工作区扫描这类聚合流程，单个 Skill 清单损坏应降级为可观测告警而不是整批失败，否则用户只会看到“刷新坏了”，定位成本很高。

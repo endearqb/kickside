@@ -2298,7 +2298,9 @@
 
 .ui-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.56;
+  opacity: 1;
+  box-shadow: none;
+  transform: none;
 }
 
 .ui-btn-default {
@@ -2310,14 +2312,26 @@
 .ui-btn-default:hover {
   background: color-mix(in srgb, var(--primary) 90%, #000);
   border-color: color-mix(in srgb, var(--primary) 90%, #000);
-  color: #fff;
+  color: var(--primary-foreground);
   box-shadow: 0 8px 16px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.ui-btn-default:disabled {
+  background: color-mix(in srgb, var(--primary) 42%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--chrome-border));
+  color: color-mix(in srgb, var(--primary-foreground) 72%, var(--text-secondary));
 }
 
 .ui-btn-outline {
   background: color-mix(in srgb, var(--surface) 84%, transparent);
   border-color: var(--input);
   color: var(--text-primary);
+}
+
+.ui-btn-outline:disabled {
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  border-color: color-mix(in srgb, var(--input) 72%, transparent);
+  color: color-mix(in srgb, var(--text-secondary) 84%, transparent);
 }
 
 .ui-btn-ghost {
@@ -2332,6 +2346,12 @@
   color: var(--text-primary);
 }
 
+.ui-btn-ghost:disabled {
+  background: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
+}
+
 .ui-btn-destructive {
   background: var(--error);
   border-color: var(--error);
@@ -2341,7 +2361,13 @@
 .ui-btn-destructive:hover {
   background: color-mix(in srgb, var(--error) 88%, #000);
   border-color: color-mix(in srgb, var(--error) 88%, #000);
-  color: #fff;
+  color: var(--destructive-foreground);
+}
+
+.ui-btn-destructive:disabled {
+  background: color-mix(in srgb, var(--error) 34%, var(--surface));
+  border-color: color-mix(in srgb, var(--error) 30%, var(--chrome-border));
+  color: color-mix(in srgb, var(--destructive-foreground) 74%, var(--text-secondary));
 }
 
 .ui-btn-size-default {
@@ -4748,7 +4774,7 @@ input:focus {
 .control-center-shell .ui-btn-default {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--primary-foreground);
 }
 
 .control-center-shell .ui-btn-outline {

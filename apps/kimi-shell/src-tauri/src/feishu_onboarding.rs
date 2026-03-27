@@ -1,9 +1,6 @@
-use std::sync::Arc;
-
 use anyhow::Context;
 use chrono::Utc;
 use qrcode::{render::svg, QrCode};
-use reqwest::blocking::Client;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use url::Url;
@@ -11,6 +8,7 @@ use url::Url;
 use crate::{
     app_state::{unix_time_millis, AppState, FeishuOnboardingRuntimeState},
     bridge_manager, bridge_settings_store,
+    onboarding_http,
     types::{
         BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
         BridgeTelegramSecrets, BridgeWeixinSecrets, FeishuConnectorOnboardingSession,
@@ -44,7 +42,7 @@ pub fn start(
         }
     }
 
-    let client = FeishuRegistrationClient::new(FEISHU_ACCOUNTS_BASE)?;
+    let client = FeishuRegistrationClient::new(app, FEISHU_ACCOUNTS_BASE);
     let init = client.init()?;
     if !init
         .supported_auth_methods
@@ -121,7 +119,7 @@ pub fn get_status(
         current.clone()
     };
 
-    let mut client = FeishuRegistrationClient::new(existing.poll_base_url.as_str())?;
+    let mut client = FeishuRegistrationClient::new(app, existing.poll_base_url.as_str());
     let mut poll = client.poll(existing.device_code.as_str())?;
     if matches!(
         poll.user_info
@@ -130,7 +128,7 @@ pub fn get_status(
         Some("lark")
     ) && existing.poll_base_url != LARK_ACCOUNTS_BASE
     {
-        client = FeishuRegistrationClient::new(LARK_ACCOUNTS_BASE)?;
+        client = FeishuRegistrationClient::new(app, LARK_ACCOUNTS_BASE);
         poll = client.poll(existing.device_code.as_str())?;
         update_poll_base_url(app, session_id, LARK_ACCOUNTS_BASE)?;
     }
@@ -435,20 +433,16 @@ fn rfc3339_from_unix_ms(value: u64) -> String {
 }
 
 struct FeishuRegistrationClient {
-    http: Client,
-    base_url: Arc<str>,
+    app: Option<AppHandle>,
+    base_url: String,
 }
 
 impl FeishuRegistrationClient {
-    fn new(base_url: &str) -> anyhow::Result<Self> {
-        let http = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .context("failed to build feishu onboarding http client")?;
-        Ok(Self {
-            http,
-            base_url: Arc::<str>::from(base_url.to_string()),
-        })
+    fn new(app: &AppHandle, base_url: &str) -> Self {
+        Self {
+            app: Some(app.clone()),
+            base_url: base_url.to_string(),
+        }
     }
 
     fn init(&self) -> anyhow::Result<InitResponse> {
@@ -475,20 +469,25 @@ impl FeishuRegistrationClient {
     where
         T: for<'de> Deserialize<'de>,
     {
-        let response = self
-            .http
-            .post(format!("{}/oauth/v1/app/registration", self.base_url))
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .form(pairs)
-            .send()
-            .context("failed to send feishu onboarding request")?;
-        let status = response.status();
-        let body = response
-            .text()
-            .context("failed to read feishu onboarding response")?;
-        serde_json::from_str::<T>(&body).with_context(|| {
-            format!("failed to parse feishu onboarding response (status={status}): {body}")
-        })
+        let operation = match pairs.first().map(|(key, value)| (*key, value.as_str())) {
+            Some(("action", "init")) => "init",
+            Some(("action", "begin")) => "begin",
+            Some(("action", "poll")) => "poll",
+            _ => "onboarding",
+        };
+        onboarding_http::post_form_json(
+            self.app.as_ref(),
+            "feishu",
+            operation,
+            format!("{}/oauth/v1/app/registration", self.base_url),
+            Vec::new(),
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), value.clone()))
+                .collect(),
+            std::time::Duration::from_secs(20),
+        )
+        .context("failed to send feishu onboarding request")
     }
 }
 
@@ -639,7 +638,10 @@ mod tests {
             }
         });
 
-        let client = FeishuRegistrationClient::new(base_url.as_str()).expect("client");
+        let client = FeishuRegistrationClient {
+            app: None,
+            base_url: base_url.clone(),
+        };
         let init = client.init().expect("init");
         assert_eq!(init.supported_auth_methods, vec!["client_secret"]);
         let begin = client.begin().expect("begin");

@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-
-type CardStatusTone = "neutral" | "success" | "warning" | "danger";
+import {
+  ControlCenterStatusBadge,
+  type ControlCenterStatusTone,
+} from "@/components/control-center/ControlCenterStatusBadge";
 
 type ControlCenterCardHeaderProps = {
   eyebrow?: string;
@@ -11,7 +13,7 @@ type ControlCenterCardHeaderProps = {
   titleControls?: ReactNode;
   description?: string;
   statusLabel: string;
-  statusTone?: CardStatusTone;
+  statusTone?: ControlCenterStatusTone;
   primaryAction?: ReactNode;
   collapsible?: boolean;
   expanded?: boolean;
@@ -94,9 +96,7 @@ export function ControlCenterCardHeader({
         )}
       </div>
       <div className="cc-card-header-actions">
-        <span className={`cc-status-badge tone-${statusTone}`} data-tone={statusTone}>
-          {statusLabel}
-        </span>
+        <ControlCenterStatusBadge tone={statusTone}>{statusLabel}</ControlCenterStatusBadge>
         {primaryAction}
       </div>
     </header>

@@ -12,6 +12,7 @@ import type {
   PowerShellPreflightSummary,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 
 type InstallFlowTaskContentProps = {
   catalog: InstallFlowCatalog | null;
@@ -358,7 +359,7 @@ export function InstallFlowTaskContent({
       <section className="cc-install-overview">
         <div className="cc-install-overview-head">
           <div className="cc-install-overview-copy">
-            <span className={`cc-status-badge tone-${sessionTone}`}>{sessionStatusLabel}</span>
+            <ControlCenterStatusBadge tone={sessionTone}>{sessionStatusLabel}</ControlCenterStatusBadge>
             <h4>安装 / 升级 Kimi CLI</h4>
             <p>
               {session.message?.trim() ||
@@ -751,3 +752,6 @@ export function InstallFlowTaskContent({
     </>
   );
 }
+
+
+

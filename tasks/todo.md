@@ -1,249 +1,77 @@
-# Continued From Previous Todo
-
-- [ ] 合并到 `main` 前先同步远端状态，避免基于过期 `main` 发版。
-- [ ] 发布说明与版本号必须与当前 `0.0.28` 保持一致，不夸大未落地的能力。
-- [ ] 推送时同时处理 `main` 与版本 tag，确保 release 可追溯。
-
-## Implementation
-
-- [x] 核对当前分支、远端、版本文件与已有 release notes。
-- [ ] 同步远端 `main` 并完成合并准备。
-- [ ] 运行关键校验并创建发布提交/版本 tag（如缺失）。
-- [ ] 推送 `main` 与 `v0.0.28`，整理简要中文更新说明。
-
-## Validation
-
-- [ ] 确认 `apps/kimi-shell/package.json` 与 `src-tauri/Cargo.toml` 版本均为 `0.0.28`。
-- [ ] 确认 `apps/kimi-shell/docs/release-notes-0.0.28.md` 可作为发布说明来源。
-- [ ] 确认远端已收到 `main` 最新提交与 `v0.0.28` tag。
-
-## Retrospective
-
-- [ ] 待完成发布后回填。
-
----
-
-# IM Bridge 双栏工作台改造（2026-03-26）
-
-## Plan
-
-- [x] 将 IM Bridge 主区改造成左侧机器人列表、右侧详情/任务面的双栏结构。
-- [x] 在标题栏增加全局一键停止、一键重启，并把“新建机器人”改成微信/飞书下拉菜单。
-- [x] 让 `bridge_connector_secrets` 和 `bridge_runtime` 只占据右栏，不再替换整个控制中心内容。
-- [x] 调整 `App.css` 中 Bridge 布局与响应式样式，保持和设计系统一致。
-- [x] 运行 `pnpm -C apps/kimi-shell build` 做构建验证。
-
-## Validation
-
-- [ ] 标题栏包含一键停止、一键重启和单一新建机器人入口。
-- [ ] 左栏切换机器人时右栏详情正确更新。
-- [ ] 连接与凭据、高级运行面板在右栏打开并可返回。
-- [ ] 多机器人和窄宽度下布局不裁切。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] Bridge 这次最稳的改法不是重做任务状态，而是保留 `selectedBridgeConnectorId + activeTaskPayload.connectorId` 两层选择语义，让右栏在详情态和任务态之间切换。
-- [x] “新建机器人”下拉只隐藏创建入口，不移除 Telegram 既有展示和数据兼容；这样不会把历史 connector 变成无法访问的孤儿状态。
-
----
-
-# Tauri 构建阻塞修复（2026-03-26）
-
-## Plan
-
-- [x] 补齐 `src-tauri/src/skill_center.rs` 中缺失的 workspace pin / recommendation / update / uninstall 能力。
-- [x] 修复 `feishu_onboarding.rs` 与 `skill_center.rs` 中因 DTO 升级导致的结构体初始化缺字段问题。
-- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell tauri build` 验证。
-
-## Validation
-
-- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
-- [x] `pnpm -C apps/kimi-shell tauri build` 通过。
-
-## Retrospective
-
-- [x] 这次失败点不是 IM Bridge 前端改造，而是 `src-tauri` 里 skill center 命令声明和实现脱节；先按编译错误把缺失符号补齐，能最快恢复发布链路。
-- [x] DTO 升级后最容易漏的是“默认字段”和“初始化器同步”，尤其是 `InstalledSkill`、`BridgeConnectorSecretsInput` 这类在多个模块里手写构造的结构体。
-
----
-
-# 0.0.31 Release Notes（2026-03-26）
-
-## Plan
-
-- [x] 参考现有版本说明格式与当前 `0.0.31` 已落地能力整理发布口径。
-- [x] 新建 `apps/kimi-shell/docs/release-notes-0.0.31.md` 并写入版本说明。
-- [x] 记录验证命令，确保 release notes 与实际产物一致。
-
-## Validation
-
-- [x] `apps/kimi-shell/docs/release-notes-0.0.31.md` 已保存。
-- [x] 文档版本号、发布日期、安装包名称与当前构建结果一致。
-
-## Retrospective
-
-- [x] 这次版本说明不能只写当前会话里的 UI 改动，还需要把多机器人、微信接入和 Skill Center 完整度提升合并成一个真实的 0.0.31 叙事。
-
----
-
-# Skill Center 外部发现与导入重构（2026-03-26）
-
-## Plan
-
-- [x] 为 Skill Center 增加应用级工作区索引与发现缓存，纳入主目录和已知 workspace 的 `.agents/skills`、`.codex/skills`、`.claude/skills`。
-- [x] 扩展 Rust 类型、存储层与命令接口，支持扫描发现、发现详情和从发现结果导入私有 Skill Center。
-- [x] 保持现有受管应用/移除链路不变，补充已安装 Skill 的外部来源展示与 discovered_import 刷新逻辑。
-- [x] 将“工作区洞察”改造成发现视图，支持重扫、过滤、查看来源和一键导入。
-- [x] 运行 Rust 测试与前端构建验证，修复回归并回填结论。
-
-## Validation
-
-- [x] `scan_discoverable_skills` 能返回主目录和工作区目录中的合法 Skill，并按物理来源折叠。
-- [x] `import_discovered_skill` 对同一 canonical 来源幂等，且导入后可在技能管理页看到来源位置。
-- [x] Skill Center 的“技能管理”现有应用/移除、信任、更新、卸载链路无回归。
-- [x] “工作区洞察”页面可展示发现列表、详情与导入按钮，空态和过滤状态正常。
-- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 这次重构最稳的落点是把“发现”与“受管应用”分成两条链路：外部目录只做扫描与导入，现有 apply/remove 投影完全不动，显著降低了回归面。
-- [x] 发现结果以 canonical skill root 聚合后，前端就能同时展示“同一 Skill 的多个暴露位置”和“是否已导入”，比按目录平铺更贴近用户心智。
-- [x] 工作区索引的关键不是做一次扫描，而是在 `effective_work_dir`、active session、workspace session API 和 open/bootstrap 路径上持续 upsert，这样发现中心才会越用越完整。
-
----
-
-# Skill Center 与概览页文案/统计精简（2026-03-26）
-
-## Plan
-
-- [x] 调整 Skill Center 标题栏为上下双层标题，`Skill Center` 默认显示在中文标题下方。
-- [x] 移除技能管理页标题栏筛选按钮，并将说明文案改为仅在标题栏 hover 时显示。
-- [x] 将工作区洞察的外部发现总览收敛到标题栏中部极简统计，移除内容区总览卡。
-- [x] 将概览页“飞书最终状态/快速设置进度”改为“IM机器人/技能总览”，并统一统计口径。
-- [x] 运行前端构建验证并回填结果。
-
-## Validation
-
-- [x] 技能中心标题下方显示 `Skill Center`，说明文案默认隐藏且 hover 标题栏时出现。
-- [x] 技能管理页标题栏不显示 `全局 / 当前工作区 / Pin / 未信任 / 可更新`。
-- [x] 工作区洞察标题栏中部显示 `已安装技能 / 已导入发现 / 外部发现总数`，内容区不再显示外部发现总览卡。
-- [x] 概览页显示 `IM机器人` 和 `技能总览` 两张新统计卡，且统计值口径正确。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 这轮最稳的方式不是继续堆 Skill Center panel 内的大卡，而是把“总览”收敛回标题栏，让内容区只负责列表和详情，视觉层级明显更清楚。
-- [x] `ControlCenterCardHeader` 只加可选能力而不改默认布局，能让 Skill Center 拿到“副标题下置 + hover 文案”，同时不影响其他控制中心卡片。
-- [x] 概览页的统计口径和工作区洞察标题栏复用同一组前端聚合值后，用户在不同页面看到的技能数字不再打架。
-
----
-
-# Skill Center 说明移除与技能总览卡压缩（2026-03-26）
-
-## Plan
-
-- [x] 移除 Skill Center 标题栏中的安装说明文案，以及对应的 hover 显示实现。
-- [x] 将概览页“技能总览”改为 2 行四宫格样式，缩小中文标签字重与字号。
-- [x] 运行前端构建验证并回填结果。
-
-## Validation
-
-- [x] Skill Center 标题栏仅保留双层标题，不再显示安装说明，也没有 hover 才出现文案的交互。
-- [x] 概览页“技能总览”以 2 行四宫格显示 3 个指标，中文标签字号已压缩。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 这类标题栏说明如果不是真正的长期信息，直接移除比做 hover reveal 更干净，也更符合控制中心的低噪声方向。
-- [x] 概览卡里密度更高的技能指标不适合继续塞成一句话，拆成小栅格后中文阅读效率和对齐感都明显更好。
-
----
-
-# 概览页发现技能口径调整（2026-03-26）
-
-## Plan
-
-- [x] 将概览页原“技能总览”卡调整为“发现技能”数量展示。
-- [x] 清理不再使用的四宫格结构和样式，保持实现简洁。
-- [x] 运行前端构建验证并回填结果。
-
-## Validation
-
-- [x] 概览页技能卡已改为 `发现技能`，只展示外部发现技能数量。
-- [x] 旧的四宫格结构与样式已移除，没有遗留无用选择器。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 这类概览卡如果用户只关心一个主指标，就不要为了“信息完整”硬塞聚合摘要；单值卡更符合概览层的扫读节奏。
-- [x] 当统计口径已经在其他页面完整展开时，概览页应该回到最短路径，只做入口级信号而不是重复解释。
-
----
-
-# 工作区洞察筛选下拉收口（2026-03-26）
-
-## Plan
-
-- [x] 将工作区洞察搜索栏中的 6 个筛选按钮改为搜索框后的 `范围`、`状态` 两个下拉。
-- [x] 保留原有筛选能力与状态映射，只调整信息架构和布局样式。
-- [x] 运行前端构建验证并回填结果。
-
-## Validation
-
-- [x] 工作区洞察搜索栏现在是 `搜索框 + 范围下拉 + 状态下拉`，不再显示 6 个筛选按钮。
-- [x] 原有 `全部范围 / 工作区 / 主目录` 与 `全部状态 / 待导入 / 已导入` 筛选能力保持不变。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 对枚举型筛选条件，按钮组一旦超过 4 个就会明显抬高工具栏噪声；收成带标签的下拉更适合控制中心这类高密度面板。
-- [x] 搜索栏旁边的辅助筛选应该围绕“先搜索，再收口范围”组织，避免用户在列表前先看到一排等权重按钮。
-
----
-
-# Skill Center 合并发现视图与工作区 Skill 管理重构（2026-03-26）
-
-## Plan
-
-- [x] 为 Skill Center 增加 workspace target / inventory 读写接口，支持按工作区与容器管理目录中的 Skill。
-- [x] 重构技能管理页，将外部发现合并进左侧技能目录列表，并通过搜索框后的工作区下拉切换上下文。
-- [x] 重做工作区洞察页为工作区 Skill 管理：左侧工作区目标，右侧容器化的已有 Skill / 可导入 Skill 管理。
-- [x] 运行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build`，回填验证与回顾。
-
-## Validation
-
-- [x] 后端已新增 workspace target / inventory / add / remove 接口，前端可按目标工作区和 `.agents / .codex / .claude` 容器管理目录中的 Skill。
-- [x] 技能管理页已通过搜索框后的“工作区”下拉合并显示技能中心安装项与对应范围内的外部发现，并对已导入发现做去重合并。
-- [x] 工作区洞察页已重做为“工作区 Skill 管理”：左侧工作区目标，右侧容器切换、已有 Skill 列表、从技能中心导入列表，以及工作区目录删除。
-- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过（122 passed）。
-- [x] `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 当“洞察页”开始承担真实目录管理职责时，必须把“发现目录”和“目标目录管理”拆成两条清晰路径；继续把两者塞进同一个旧面板只会让筛选和动作语义互相打架。
-- [x] 工作区级 Skill 管理最稳的抽象不是复用 session/global projection，而是显式暴露 `workspace target + container inventory` 接口，让前端围绕真实目录状态组织交互。
-
----
-
-# 暗色按钮统一 + 工作区刷新容错（2026-03-26）
-
-## Plan
-
-- [x] 统一暗色主题下共享按钮 token 和 disabled 样式，修复控制中心等页面的低对比按钮。
-- [x] 为 Skill Center 增加 Windows 路径去 `\\?\` 前缀的统一规范化，收口工作区持久化与前端返回路径。
-- [x] 让工作区 Skill 扫描与外部发现扫描在单个 `SKILL.md` 解析失败时跳过该项并记录日志，不阻断整次刷新。
-- [x] 补充 Rust 单测并运行针对性 `cargo test` / 前端构建验证，回填结果。
-
-## Validation
-
-- [ ] 暗色模式下默认/outline/ghost/destructive 按钮的默认态、hover、disabled 均保持清晰对比，不再出现白底浅字。
-- [x] Skill Center 的工作区目标、容器路径和发现路径已通过路径规范化逻辑与单测去除 `\\?\` 扩展前缀。
-- [x] 容器内存在损坏的 `SKILL.md` 时，单测已验证工作区扫描与 discovery 扫描会跳过坏项并保留合法 Skill。
-- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `pnpm -C apps/kimi-shell build` 通过。
-
-## Retrospective
-
-- [x] 暗色主题里的共享 CTA 不能依赖“light theme 反相”这种隐式 token 关系；一旦 `--primary` 在 dark 里被改成浅色，整套按钮会一起失去层级。
-- [x] 工作区路径的“文件系统真实路径”和“UI/持久化展示路径”必须分层处理；Windows `canonicalize` 产出的 `\\?\` 前缀适合底层操作，不适合直接进入状态文件和界面。
-- [x] 对工作区扫描这类聚合流程，单个 Skill 清单损坏应降级为可观测告警而不是整批失败，否则用户只会看到“刷新坏了”，定位成本很高。
+# 控制中心双栏与控件语言统一改造
+
+## Checklist
+- [x] 阅读 `DESIGN.md`、`tasks/lessons.md`，确认控制中心现状与注意事项
+- [x] 检查工作区脏文件边界，避免覆盖用户在 `tasks/` 下的历史整理
+- [x] 在 `src/components/control-center/` 新增共享原语组件与共享样式层
+- [x] 用共享原语重构快速安装任务面的状态徽标，并让共享样式层接管安装面板主视觉
+- [x] 用共享原语重构 IM Bridge 工作台与高级运行面板的关键控件（摘要卡、开关、状态区块）
+- [x] 用共享原语重构技能中心双栏工作台的关键控件（空态、状态徽标、容器切换、折叠卡）
+- [x] 调整 `ControlCenterCardHeader` 兼容共享状态视觉语言
+- [x] 运行前端构建验证
+- [x] 扩展 `ControlCenterWorkbenchLayout` 的 body class 接口，承载 Bridge / Skill Center 的内容区差异
+- [x] 将 `ControlCenterView.tsx` 中 Bridge 工作台从手写 `bridge-workbench-*` 骨架迁移到共享 `ControlCenterWorkbenchLayout`
+- [x] 将 `SkillCenterPanel.tsx` 中 `manage` 与 `workspace_insights` 的双栏骨架迁移到共享 `ControlCenterWorkbenchLayout`
+- [x] 清理 `App.css` 与 `control-center.css` 中旧双栏骨架的布局级兼容规则，仅保留业务块样式
+- [x] 重新执行 `pnpm -C apps/kimi-shell build` 验证迁移后的骨架与响应式未回归
+
+## Review
+- 改动摘要：新增 `src/components/control-center/` 共享原语与 `control-center.css`；Bridge Runtime、Bridge 工作台、Skill Center、Install Flow 已接入共享状态/卡片/切换器中的一部分；旧双栏骨架由共享样式层统一接管。
+- 验证结果：`pnpm -C apps/kimi-shell build` 已通过（无沙箱构建，用于放行 Vite/esbuild 子进程）。
+- 遗留风险：`ControlCenterWorkbenchLayout` 已落库但当前主要通过共享样式层接管旧双栏 DOM，后续若继续深挖可把 Skill Center / Bridge 的旧骨架完全替换成该组件。
+- 本轮收口：Bridge 主工作台和 Skill Center 的 `manage / workspace_insights` 已全部改为 `ControlCenterWorkbenchLayout` 承载 rail/detail、滚动区和空态；`ControlCenterWorkbenchLayout` 新增 `railBodyClassName` / `detailBodyClassName` 以适配业务内容密度。
+- 样式清理：删除了 `App.css` 与 `control-center.css` 中针对 `skill-center-manage`、`skill-center-workspace-layout`、`bridge-workbench-shell` 等旧骨架的布局级规则，保留列表项、详情块、工作区 item、Bridge 摘要卡等业务样式。
+- 最新验证：`pnpm -C apps/kimi-shell build` 于 2026-03-27 再次通过，未出现 TS 或 Vite 构建错误。
+- [ ] 运行桌面 / 窄宽度视觉 QA，截图核对 Bridge 与技能中心的骨架、层级和响应式
+
+## 技能中心工作区洞察页视觉修正
+
+### Checklist
+- [x] 阅读 `DESIGN.md`、`tasks/lessons.md`，确认这次视觉修正仍遵循控制中心既有语言
+- [x] 调整工作区洞察详情头部的标题/路径间距，并新增“打开工作区目录”的 icon 按钮
+- [x] 删除工作区洞察里的容器说明卡片，让容器切换直接衔接详情头部
+- [x] 修复“已有 Skill”列卡片在长内容下的横向溢出问题
+- [x] 透传 `onOpenFolder` 到 `SkillCenterPanel`，不改业务状态流
+- [x] 运行 `pnpm -C apps/kimi-shell build` 验证修改未回归
+
+### Review
+- 改动摘要：`workspace_insights` 详情头部改为更明确的标题/路径垂直节奏，并在状态 badge 后新增“在资源管理器中打开工作区”的紧凑图标按钮。
+- 结构精简：移除了工作区洞察详情里的容器说明卡片，让容器切换直接承接标题区，减少无效说明噪音。
+- 布局修复：为“已有 Skill / 从技能中心导入”两列及卡片内部文本补齐了 `min-width: 0`、换行与溢出约束，避免长名称、长描述和长路径把左列撑出容器。
+- 接口调整：`SkillCenterPanelProps` 新增 `onOpenFolder`，由 `ControlCenterView` 直接透传既有打开目录能力，没有新增业务状态或命令。
+- 验证结果：`pnpm -C apps/kimi-shell build` 于 2026-03-27 通过；中途捕获并修复了一处 `Promise<void>` 透传被 `void` 包裹导致的 TS 类型错误。
+
+## 技能管理左栏头部三列化改造
+
+### Checklist
+- [x] 阅读 `DESIGN.md`、`tasks/lessons.md`，确认头部收口仍符合控制中心的高密度工具栏语言
+- [x] 将技能管理左栏头部改成 `2:1:1` 三列布局，收口为搜索框、范围下拉、详情下拉/按钮
+- [x] 移除原有的筛选按钮行与非技能中心态的目录路径摘要卡
+- [x] 将技能中心态筛选改成单一下拉，不改原有 `filter` 逻辑
+- [x] 调整响应式样式，保证窄宽度下三列可自然堆叠
+- [x] 运行前端构建验证并回填结果
+
+### Review
+- 结构调整：技能管理左栏头部已改成单层三列工具栏，桌面下按 `2:1:1` 布局呈现搜索框、范围下拉、详情下拉/按钮，不再保留第二行辅助内容。
+- 交互收口：技能中心态的 `全部 / 全局 / 当前工作区 / 已固定 / 未信任 / 可更新` 已从按钮组改成单一下拉；非技能中心态则统一显示“重新扫描”按钮。
+- 信息减负：原来的目录路径摘要卡已从技能管理左栏头部移除，避免在高密度工具栏里重复暴露非必要说明。
+- 样式同步：新增了管理页头部专用网格与窄屏堆叠规则，并覆盖了旧搜索框的固定宽度，使其能正确占满 `2fr` 列。
+- 验证结果：`pnpm -C apps/kimi-shell exec tsc` 与 `pnpm -C apps/kimi-shell exec vite build` 于 2026-03-27 通过。
+
+## 机器人绑定恢复 + Skill 卡片布局修复
+
+### Checklist
+- [x] 阅读并确认微信 / 飞书 onboarding 与工作区洞察 Skill 卡片的现状实现
+- [x] 为 Rust onboarding 外呼提取共享 HTTP helper，补齐日志、超时与 Windows 兜底
+- [x] 修复微信 onboarding 状态兼容与成功后提示文案
+- [x] 为 Go 微信 adapter 增加瞬时网络错误有限重试与更清晰错误透传
+- [x] 调整工作区洞察“已有 Skill”卡片文案与布局，移除“查看技能中心”按钮
+- [x] 运行 `cargo test`、`go test`、`pnpm -C apps/kimi-shell build` 验证修改
+
+### Review
+- 绑定加固：新增 `apps/kimi-shell/src-tauri/src/onboarding_http.rs` 作为共享外呼 helper，统一了 `User-Agent`、连接/总超时、transport 分类日志，以及 Windows 原生 PowerShell `Invoke-WebRequest` 兜底。
+- 飞书流程：`feishu_onboarding.rs` 已改为通过共享 helper 执行 `init / begin / poll`，请求失败时会带上更具体的阶段和响应摘要；官方接口直连验证仍可用，桌面端在 transport 失败时会自动切到 Windows 原生请求。
+- 微信流程：`weixin_onboarding.rs` 的二维码获取与状态轮询均切到共享 helper，并补上了 `scaned / scanned` 双状态兼容；错误上下文也会包含具体阶段。
+- Bridge 稳定性：`apps/kimi-im-bridge/internal/adapters/weixin/service.go` 为微信 API 外呼补上了有限重试、非 2xx 响应体摘要和更明确的 attempt 信息，避免瞬时 EOF/timeout 让已绑定机器人看起来像失效。
+- UI 修复：`SkillCenterPanel.tsx` 已从“已有 Skill”卡片移除“查看技能中心”按钮，把“已关联技能中心”改成“已关联”，并为工作区洞察卡片引入单行省略的技能名和更稳定的头部布局；`App.css` 同步收紧了 action 区和溢出规则。
+- 验证结果：`go test ./...` 与 `pnpm -C apps/kimi-shell build` 于 2026-03-27 通过；Rust `cargo test --no-run` 已通过编译，`cargo test` 真正执行测试二进制时在当前 Windows 环境报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机运行时依赖问题，非本次代码编译错误。

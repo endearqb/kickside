@@ -70,6 +70,12 @@ import { formatLoginState } from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
+import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
+import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
+import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
+import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import { ControlCenterCardHeader } from "@/features/control-center/ControlCenterCardHeader";
 import {
@@ -264,11 +270,6 @@ type ControlCenterViewProps = {
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
   onAddInstalledSkillToWorkspaceTarget: (
     skillId: string,
-    targetId?: string | null,
-    containerKind?: SkillDiscoveryContainerKind,
-  ) => Promise<void> | void;
-  onRemoveWorkspaceTargetSkill: (
-    skillPathOrKey: string,
     targetId?: string | null,
     containerKind?: SkillDiscoveryContainerKind,
   ) => Promise<void> | void;
@@ -742,7 +743,6 @@ export function ControlCenterView({
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
   onAddInstalledSkillToWorkspaceTarget,
-  onRemoveWorkspaceTargetSkill,
   onConfirmInstallSkillFromGit,
   onConfirmImportSkillFromPath,
   onSetSkillTrust,
@@ -2569,19 +2569,26 @@ export function ControlCenterView({
             }
           />
           <div className="cc-card-body cc-step-body cc-step-body-single">
-            <div className="bridge-workbench-shell">
-              <aside className="bridge-workbench-rail">
+            <ControlCenterWorkbenchLayout
+              mode="stack-on-mobile"
+              railClassName="bridge-workbench-rail"
+              railBodyClassName="bridge-workbench-rail-list"
+              detailClassName="bridge-workbench-detail"
+              detailBodyClassName="bridge-workbench-detail-body"
+              railHeader={
                 <div className="bridge-workbench-rail-head">
                   <div>
                     <h4>机器人列表</h4>
                     <p>左侧挑选机器人，右侧查看详情或继续深入配置。</p>
                   </div>
-                  <span className="cc-status-badge tone-neutral">
+                  <ControlCenterStatusBadge tone="neutral">
                     {visibleBridgeConnectors.length} 个机器人
-                  </span>
+                  </ControlCenterStatusBadge>
                 </div>
-                {visibleBridgeConnectors.length > 0 ? (
-                  <div className="bridge-workbench-rail-list" role="list" aria-label="机器人列表">
+              }
+              rail={
+                visibleBridgeConnectors.length > 0 ? (
+                  <>
                     {visibleBridgeConnectors.map((connector) => {
                       const connectorStatus =
                         bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ??
@@ -2599,8 +2606,7 @@ export function ControlCenterView({
                         connector,
                         connectorSecrets,
                       );
-                      const isSelected =
-                        connector.id === effectiveSelectedBridgeConnectorId;
+                      const isSelected = connector.id === effectiveSelectedBridgeConnectorId;
                       return (
                         <button
                           key={connector.id}
@@ -2623,13 +2629,13 @@ export function ControlCenterView({
                               <strong>{connector.label}</strong>
                               <small>{bridgePlatformLabel(connector.platform)}</small>
                             </div>
-                            <span
-                              className={`cc-status-badge tone-${formatBridgeConnectorStateTone(
+                            <ControlCenterStatusBadge
+                              tone={formatBridgeConnectorStateTone(
                                 connectorStatus?.state ?? "idle",
-                              )}`}
+                              )}
                             >
                               {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
-                            </span>
+                            </ControlCenterStatusBadge>
                           </div>
                           <div className="bridge-workbench-list-item-meta">
                             <span>{connector.enabled ? "已启用" : "未启用"}</span>
@@ -2641,196 +2647,191 @@ export function ControlCenterView({
                         </button>
                       );
                     })}
-                  </div>
+                  </>
                 ) : (
-                  <div className="bridge-workbench-detail-empty">
-                    <p>还没有机器人。使用右上角“新建机器人”开始添加微信或飞书机器人。</p>
-                  </div>
-                )}
-              </aside>
-
-              <section className="bridge-workbench-detail">
-                {shouldRenderInlineBridgeTask ? (
+                  <ControlCenterEmptyState
+                    className="bridge-workbench-empty"
+                    title="还没有机器人"
+                    description="使用右上角“新建机器人”开始添加微信或飞书机器人。"
+                    icon={<Sparkles size={18} />}
+                  />
+                )
+              }
+              detail={
+                shouldRenderInlineBridgeTask ? (
                   renderActiveTask()
                 ) : selectedBridgeConnector ? (
-                  <div className="bridge-workbench-detail-content">
-                    <div className="bridge-workbench-detail-head">
-                      <div className="bridge-workbench-detail-copy">
-                        <div className="bridge-workbench-card-title-row">
-                          <strong>{selectedBridgeConnector.label}</strong>
-                          <div className="bridge-robot-chip-row">
-                            <span
-                              className={`cc-status-badge tone-${
-                                selectedBridgeConnectorEnabledValue ? "success" : "neutral"
-                              }`}
-                            >
-                              {selectedBridgeConnectorEnabledValue ? "已启用" : "未启用"}
-                            </span>
-                            <span
-                              className={`cc-status-badge tone-${formatBridgeConnectorStateTone(
-                                selectedBridgeConnectorStatus?.state ?? "idle",
-                              )}`}
-                            >
-                              {formatBridgeConnectorStateLabel(
-                                selectedBridgeConnectorStatus?.state ?? "idle",
-                              )}
-                            </span>
-                            <span
-                              className={`cc-status-badge tone-${
-                                selectedBridgeConnectorSecretsConfigured
-                                  ? "success"
-                                  : "warning"
-                              }`}
-                            >
-                              {selectedBridgeConnectorSecretsConfigured ? "凭据已配置" : "待配置凭据"}
+                  <div className="cc-control-detail-stack">
+                    <div className="bridge-workbench-card">
+                      <div className="bridge-workbench-card-head">
+                        <div className="bridge-workbench-card-copy">
+                          <div className="bridge-workbench-card-title-row">
+                            <strong>{selectedBridgeConnector.label}</strong>
+                            <div className="bridge-robot-chip-row">
+                              <ControlCenterStatusBadge
+                                tone={selectedBridgeConnectorEnabledValue ? "success" : "neutral"}
+                              >
+                                {selectedBridgeConnectorEnabledValue ? "已启用" : "未启用"}
+                              </ControlCenterStatusBadge>
+                              <ControlCenterStatusBadge
+                                tone={formatBridgeConnectorStateTone(
+                                  selectedBridgeConnectorStatus?.state ?? "idle",
+                                )}
+                              >
+                                {formatBridgeConnectorStateLabel(
+                                  selectedBridgeConnectorStatus?.state ?? "idle",
+                                )}
+                              </ControlCenterStatusBadge>
+                              <ControlCenterStatusBadge
+                                tone={
+                                  selectedBridgeConnectorSecretsConfigured ? "success" : "warning"
+                                }
+                              >
+                                {selectedBridgeConnectorSecretsConfigured
+                                  ? "凭据已配置"
+                                  : "待配置凭据"}
+                              </ControlCenterStatusBadge>
+                            </div>
+                          </div>
+                          <div className="bridge-workbench-card-meta">
+                            <span>平台：{bridgePlatformLabel(selectedBridgeConnector.platform)}</span>
+                            <span>Connector ID：{selectedBridgeConnector.id}</span>
+                            <span>绑定：{selectedBridgeConnectorBindings.length}</span>
+                            <span>审批：{selectedBridgeConnectorApprovals.length}</span>
+                            <span>
+                              最近就绪：
+                              {formatBridgeTimestamp(selectedBridgeConnectorStatus?.lastReadyAt)}
                             </span>
                           </div>
                         </div>
-                        <div className="bridge-workbench-card-meta">
-                          <span>平台：{bridgePlatformLabel(selectedBridgeConnector.platform)}</span>
-                          <span>Connector ID：{selectedBridgeConnector.id}</span>
-                          <span>绑定：{selectedBridgeConnectorBindings.length}</span>
-                          <span>审批：{selectedBridgeConnectorApprovals.length}</span>
-                          <span>
-                            最近就绪：
-                            {formatBridgeTimestamp(selectedBridgeConnectorStatus?.lastReadyAt)}
-                          </span>
-                        </div>
-                      </div>
-                      <label className="bridge-switch-card bridge-workbench-card-toggle">
-                        <span className="bridge-switch-copy">
-                          <strong>机器人启用</strong>
-                          <small>
-                            {selectedBridgeConnectorPendingToggle
+                        <ControlCenterToggleField
+                          className="bridge-workbench-card-toggle"
+                          label="机器人启用"
+                          description={
+                            selectedBridgeConnectorPendingToggle
                               ? "正在应用配置..."
-                              : "切换后立即写入设置"}
-                          </small>
-                        </span>
-                        <input
-                          type="checkbox"
-                          className="cc-switch-input"
+                              : "切换后立即写入设置"
+                          }
                           checked={selectedBridgeConnectorEnabledValue}
-                          onChange={(event) => {
+                          onChange={(checked) => {
                             void handleImmediateBridgeConnectorToggle(
                               selectedBridgeConnector.id,
-                              event.currentTarget.checked,
+                              checked,
                             );
                           }}
                           disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
+                          busy={selectedBridgeConnectorPendingToggle}
                         />
-                        <span className="cc-switch-track" aria-hidden />
-                      </label>
-                    </div>
+                      </div>
 
-                    <div className="bridge-workbench-card-summary">
-                      <article className="bridge-workbench-summary-card">
-                        <span>绑定摘要</span>
-                        <strong>
-                          {selectedBridgeConnectorBindings.length > 0
-                            ? `${selectedBridgeConnectorBindings.length} 个会话`
-                            : "暂无绑定"}
-                        </strong>
-                      </article>
-                      <article className="bridge-workbench-summary-card">
-                        <span>审批摘要</span>
-                        <strong>
-                          {selectedBridgeConnectorApprovals.length > 0
-                            ? `${selectedBridgeConnectorApprovals.length} 条待处理`
-                            : "无待处理审批"}
-                        </strong>
-                      </article>
-                      <article className="bridge-workbench-summary-card">
-                        <span>凭据状态</span>
-                        <strong>
-                          {selectedBridgeConnectorSecretsConfigured ? "已配置" : "待配置"}
-                        </strong>
-                      </article>
-                    </div>
-
-                    <p className="bridge-workbench-card-error">
-                      {selectedBridgeConnectorRecentError || "当前没有记录到该机器人的最近错误。"}
-                    </p>
-
-                    <div className="bridge-port-card bridge-robot-workdir-card">
-                      <span>工作区目录</span>
-                      <strong>
-                        {selectedBridgeConnectorEffectiveWorkDir || "跟随应用默认目录"}
-                      </strong>
-                      <small>
-                        {selectedBridgeConnectorUsesCustomWorkDir
-                          ? "当前机器人使用独立工作区目录。"
-                          : "当前机器人继承应用默认工作目录。"}
-                      </small>
-                      <div className="bridge-inline-path-actions">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          icon={<FolderOpen size={14} />}
-                          className="cc-action-btn"
-                          onClick={() =>
-                            void handlePickBridgeConnectorWorkDir(selectedBridgeConnector.id)
+                      <div className="bridge-workbench-card-summary">
+                        <ControlCenterMetricCard
+                          label="绑定摘要"
+                          value={
+                            selectedBridgeConnectorBindings.length > 0
+                              ? `${selectedBridgeConnectorBindings.length} 个会话`
+                              : "暂无绑定"
                           }
-                          disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
-                        >
-                          {selectedBridgeConnectorPendingToggle
-                            ? "正在保存目录..."
-                            : "选择工作区"}
-                        </Button>
-                        {selectedBridgeConnectorUsesCustomWorkDir ? (
+                        />
+                        <ControlCenterMetricCard
+                          label="审批摘要"
+                          value={
+                            selectedBridgeConnectorApprovals.length > 0
+                              ? `${selectedBridgeConnectorApprovals.length} 条待处理`
+                              : "无待处理审批"
+                          }
+                        />
+                        <ControlCenterMetricCard
+                          label="凭据状态"
+                          value={selectedBridgeConnectorSecretsConfigured ? "已配置" : "待配置"}
+                        />
+                      </div>
+
+                      <p className="bridge-workbench-card-error">
+                        {selectedBridgeConnectorRecentError || "当前没有记录到该机器人的最近错误。"}
+                      </p>
+
+                      <div className="bridge-port-card bridge-robot-workdir-card">
+                        <span>工作区目录</span>
+                        <strong>
+                          {selectedBridgeConnectorEffectiveWorkDir || "跟随应用默认目录"}
+                        </strong>
+                        <small>
+                          {selectedBridgeConnectorUsesCustomWorkDir
+                            ? "当前机器人使用独立工作区目录。"
+                            : "当前机器人继承应用默认工作目录。"}
+                        </small>
+                        <div className="bridge-inline-path-actions">
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="outline"
+                            icon={<FolderOpen size={14} />}
                             className="cc-action-btn"
                             onClick={() =>
-                              void handleBridgeConnectorWorkDirChange(
-                                selectedBridgeConnector.id,
-                                undefined,
-                              )
+                              void handlePickBridgeConnectorWorkDir(selectedBridgeConnector.id)
                             }
                             disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
                           >
-                            跟随应用默认目录
+                            {selectedBridgeConnectorPendingToggle
+                              ? "正在保存目录..."
+                              : "选择工作区"}
                           </Button>
-                        ) : null}
+                          {selectedBridgeConnectorUsesCustomWorkDir ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="cc-action-btn"
+                              onClick={() =>
+                                void handleBridgeConnectorWorkDirChange(
+                                  selectedBridgeConnector.id,
+                                  undefined,
+                                )
+                              }
+                              disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
+                            >
+                              跟随应用默认目录
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            icon={<FolderOpen size={14} />}
+                            className="cc-action-btn"
+                            onClick={() =>
+                              void onOpenFolder(selectedBridgeConnectorEffectiveWorkDir)
+                            }
+                            disabled={
+                              !selectedBridgeConnectorEffectiveWorkDir ||
+                              selectedBridgeConnectorPendingToggle
+                            }
+                          >
+                            打开目录
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="bridge-workbench-card-actions">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          icon={<KeyRound size={15} />}
+                          className="cc-action-btn"
+                          onClick={() => openBridgeConnectorSecretsModal(selectedBridgeConnector.id)}
+                          disabled={bridgeBusy}
+                        >
+                          {selectedBridgeConnectorSecretsConfigured ? "连接与凭据" : "创建机器人"}
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
-                          icon={<FolderOpen size={14} />}
+                          icon={<LayoutDashboard size={15} />}
                           className="cc-action-btn"
-                          onClick={() =>
-                            void onOpenFolder(selectedBridgeConnectorEffectiveWorkDir)
-                          }
-                          disabled={
-                            !selectedBridgeConnectorEffectiveWorkDir ||
-                            selectedBridgeConnectorPendingToggle
-                          }
+                          onClick={() => openBridgeConnectorRuntimeModal(selectedBridgeConnector.id)}
+                          disabled={bridgeBusy}
                         >
-                          打开目录
+                          高级运行面板
                         </Button>
                       </div>
-                    </div>
-
-                    <div className="bridge-workbench-card-actions">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<KeyRound size={15} />}
-                        className="cc-action-btn"
-                        onClick={() => openBridgeConnectorSecretsModal(selectedBridgeConnector.id)}
-                        disabled={bridgeBusy}
-                      >
-                        {selectedBridgeConnectorSecretsConfigured ? "连接与凭据" : "创建机器人"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        icon={<LayoutDashboard size={15} />}
-                        className="cc-action-btn"
-                        onClick={() => openBridgeConnectorRuntimeModal(selectedBridgeConnector.id)}
-                        disabled={bridgeBusy}
-                      >
-                        高级运行面板
-                      </Button>
                     </div>
 
                     <div className="bridge-danger-group">
@@ -2852,18 +2853,21 @@ export function ControlCenterView({
                       </div>
                     </div>
                   </div>
-                ) : (
-                  <div className="bridge-workbench-detail-empty">
-                    <span className="cc-kicker">Bridge 工作台</span>
-                    <strong>先创建一个机器人</strong>
-                    <p>
-                      机器人创建后会出现在左侧列表。你可以在这里查看状态、切换工作区目录，
-                      并把连接与凭据、高级运行面板继续打开到右侧内容区。
-                    </p>
-                  </div>
-                )}
-              </section>
-            </div>
+                ) : null
+              }
+              emptyDetail={
+                <ControlCenterEmptyState
+                  className="bridge-workbench-empty bridge-workbench-empty-detail"
+                  title={visibleBridgeConnectors.length > 0 ? "选择一个机器人" : "先创建一个机器人"}
+                  description={
+                    visibleBridgeConnectors.length > 0
+                      ? "从左侧列表选择机器人，查看状态、凭据和运行面板。"
+                      : "机器人创建后会出现在左侧列表。你可以在这里查看状态、切换工作区目录，并继续打开连接与凭据或高级运行面板。"
+                  }
+                  icon={<Sparkles size={18} />}
+                />
+              }
+            />
           </div>
         </section>
       </div>
@@ -2922,24 +2926,18 @@ export function ControlCenterView({
           titleMeta="Skill Center"
           titleControls={
             <div className="skill-center-title-controls">
-              <div className="cc-inline-switch" role="group" aria-label="技能中心分区切换">
-                <button
-                  type="button"
-                  className={`cc-inline-switch-btn ${skillCenterSection === "manage" ? "active" : ""}`}
-                  onClick={() => onSkillCenterSectionChange("manage")}
-                  disabled={skillCenterBusy}
-                >
-                  技能管理
-                </button>
-                <button
-                  type="button"
-                  className={`cc-inline-switch-btn ${skillCenterSection === "workspace_insights" ? "active" : ""}`}
-                  onClick={() => onSkillCenterSectionChange("workspace_insights")}
-                  disabled={skillCenterBusy}
-                >
-                  工作区洞察
-                </button>
-              </div>
+              <ControlCenterSegmentedControl
+                ariaLabel="技能中心分区切换"
+                className="cc-inline-switch"
+                itemClassName="cc-inline-switch-btn"
+                value={skillCenterSection}
+                onChange={(value) => onSkillCenterSectionChange(value)}
+                disabled={skillCenterBusy}
+                items={[
+                  { value: "manage", label: "技能管理" },
+                  { value: "workspace_insights", label: "工作区洞察" },
+                ]}
+              />
             </div>
           }
           titleMetaPlacement="below"
@@ -2996,11 +2994,9 @@ export function ControlCenterView({
             onSelectWorkspaceSkillContainer={(containerKind) => {
               onSelectWorkspaceSkillContainer(containerKind);
             }}
+            onOpenFolder={onOpenFolder}
             onAddInstalledSkillToWorkspaceTarget={(skillId, targetId, containerKind) => {
               void onAddInstalledSkillToWorkspaceTarget(skillId, targetId, containerKind);
-            }}
-            onRemoveWorkspaceTargetSkill={(skillPathOrKey, targetId, containerKind) => {
-              void onRemoveWorkspaceTargetSkill(skillPathOrKey, targetId, containerKind);
             }}
             onSetTrust={(skillId, trusted) => {
               void onSetSkillTrust(skillId, trusted);
@@ -4056,3 +4052,4 @@ export function ControlCenterView({
     </section>
   );
 }
+

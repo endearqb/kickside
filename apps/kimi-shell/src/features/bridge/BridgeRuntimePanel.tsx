@@ -20,6 +20,9 @@ import type {
   BridgeSessionRecord,
   BridgeStatus,
 } from "@/app/types";
+import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
+import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterSurfaceSection } from "@/components/control-center/ControlCenterSurfaceSection";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -203,12 +206,10 @@ export function BridgeRuntimePanel({
 
   return (
     <div className="bridge-panel">
-      <section className="bridge-panel-section is-expanded">
-        <div className="bridge-panel-header">
-          <div>
-            <h4>运行状态</h4>
-            <p>只显示当前机器人相关的连接状态、最近失败和运行时间。</p>
-          </div>
+      <ControlCenterSurfaceSection
+        title="运行状态"
+        description="只显示当前机器人相关的连接状态、最近失败和运行时间。"
+        actions={
           <div className="cc-actions">
             <Button
               type="button"
@@ -220,32 +221,25 @@ export function BridgeRuntimePanel({
               刷新诊断
             </Button>
           </div>
-        </div>
+        }
+        className="bridge-panel-section is-expanded"
+      >
         <div className="diagnostics-grid">
-          <article className="diag-item">
-            <span className="diag-label">机器人</span>
-            <strong>{connector.label}</strong>
-          </article>
-          <article className="diag-item">
-            <span className="diag-label">Connector ID</span>
-            <strong>{connector.id}</strong>
-          </article>
-          <article className="diag-item">
-            <span className="diag-label">平台</span>
-            <strong>{formatPlatform(connector.platform)}</strong>
-          </article>
-          <article className="diag-item">
-            <span className="diag-label">实时状态</span>
-            <strong>{formatConnectorState(connectorStatus?.state)}</strong>
-          </article>
-          <article className="diag-item">
-            <span className="diag-label">最近就绪</span>
-            <strong>{formatTs(connectorStatus?.lastReadyAt)}</strong>
-          </article>
-          <article className="diag-item">
-            <span className="diag-label">最近失败</span>
-            <strong>{formatTs(connectorStatus?.lastFailureAt)}</strong>
-          </article>
+          <ControlCenterMetricCard label="机器人" value={connector.label} />
+          <ControlCenterMetricCard label="Connector ID" value={connector.id} />
+          <ControlCenterMetricCard label="平台" value={formatPlatform(connector.platform)} />
+          <ControlCenterMetricCard
+            label="实时状态"
+            value={formatConnectorState(connectorStatus?.state)}
+          />
+          <ControlCenterMetricCard
+            label="最近就绪"
+            value={formatTs(connectorStatus?.lastReadyAt)}
+          />
+          <ControlCenterMetricCard
+            label="最近失败"
+            value={formatTs(connectorStatus?.lastFailureAt)}
+          />
         </div>
         {connectorRecentErrors.length > 0 ? (
           <div className="bridge-error-list">
@@ -258,14 +252,12 @@ export function BridgeRuntimePanel({
         ) : (
           <p className="hint">当前没有记录到该机器人的近期错误。</p>
         )}
-      </section>
+      </ControlCenterSurfaceSection>
 
-      <section className="bridge-panel-section is-expanded">
-        <div className="bridge-panel-header">
-          <div>
-            <h4>绑定与会话</h4>
-            <p>这里可以查看当前机器人对应的绑定、已映射会话以及恢复动作。</p>
-          </div>
+      <ControlCenterSurfaceSection
+        title="绑定与会话"
+        description="这里可以查看当前机器人对应的绑定、已映射会话以及恢复动作。"
+        actions={
           <div className="cc-actions">
             <Button
               type="button"
@@ -278,12 +270,14 @@ export function BridgeRuntimePanel({
               刷新绑定
             </Button>
           </div>
-        </div>
+        }
+        className="bridge-panel-section is-expanded"
+      >
 
         <div className="bridge-panel-subsection">
           <div className="bridge-panel-subheader">
             <h5>当前绑定</h5>
-            <span className="cc-status-badge tone-neutral">{connectorBindings.length} 个</span>
+            <ControlCenterStatusBadge>{connectorBindings.length} 个</ControlCenterStatusBadge>
           </div>
           {connectorBindings.length > 0 ? (
             <div className="bridge-binding-list">
@@ -342,7 +336,7 @@ export function BridgeRuntimePanel({
         <div className="bridge-panel-subsection">
           <div className="bridge-panel-subheader">
             <h5>关联会话</h5>
-            <span className="cc-status-badge tone-neutral">{connectorSessions.length} 个</span>
+            <ControlCenterStatusBadge>{connectorSessions.length} 个</ControlCenterStatusBadge>
           </div>
           {connectorSessions.length > 0 ? (
             <div className="bridge-binding-list">
@@ -385,18 +379,16 @@ export function BridgeRuntimePanel({
                 </div>
               ))}
             </div>
-          ) : (
-            <p className="hint">当前还没有可展示的关联会话。</p>
-          )}
+        ) : (
+          <p className="hint">当前还没有可展示的关联会话。</p>
+        )}
         </div>
-      </section>
+      </ControlCenterSurfaceSection>
 
-      <section className="bridge-panel-section is-expanded">
-        <div className="bridge-panel-header">
-          <div>
-            <h4>待处理审批</h4>
-            <p>审批列表已经按当前机器人过滤，不会混入其他 connector 的请求。</p>
-          </div>
+      <ControlCenterSurfaceSection
+        title="待处理审批"
+        description="审批列表已经按当前机器人过滤，不会混入其他 connector 的请求。"
+        actions={
           <div className="cc-actions">
             <Button
               type="button"
@@ -409,7 +401,9 @@ export function BridgeRuntimePanel({
               刷新审批
             </Button>
           </div>
-        </div>
+        }
+        className="bridge-panel-section is-expanded"
+      >
         {connectorApprovals.length > 0 ? (
           <div className="bridge-approval-list">
             {connectorApprovals.map((approval) => (
@@ -465,14 +459,12 @@ export function BridgeRuntimePanel({
         ) : (
           <p className="hint">当前没有待处理审批。</p>
         )}
-      </section>
+      </ControlCenterSurfaceSection>
 
-      <section className="bridge-panel-section is-expanded">
-        <div className="bridge-panel-header">
-          <div>
-            <h4>凭据与日志</h4>
-            <p>凭据只展示掩码，日志优先过滤到当前 connector，找不到时回退到全局尾部。</p>
-          </div>
+      <ControlCenterSurfaceSection
+        title="凭据与日志"
+        description="凭据只展示掩码，日志优先过滤到当前 connector，找不到时回退到全局尾部。"
+        actions={
           <div className="cc-actions">
             <Button
               type="button"
@@ -493,7 +485,9 @@ export function BridgeRuntimePanel({
               打开日志目录
             </Button>
           </div>
-        </div>
+        }
+        className="bridge-panel-section is-expanded"
+      >
         <div className="bridge-panel-subsection">
           <div className="bridge-panel-subheader">
             <h5>凭据掩码</h5>
@@ -508,7 +502,7 @@ export function BridgeRuntimePanel({
             {connectorLogs.length > 0 ? connectorLogs.join("\n") : "暂无 bridge.log 内容。"}
           </pre>
         </div>
-      </section>
+      </ControlCenterSurfaceSection>
     </div>
   );
 }

@@ -11,6 +11,7 @@ mod feishu_onboarding;
 mod install_manager;
 mod kimi_locator;
 mod log_manager;
+mod onboarding_http;
 mod open_request;
 mod port_manager;
 mod settings_store;

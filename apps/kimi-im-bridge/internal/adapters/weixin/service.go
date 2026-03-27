@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +28,7 @@ const (
 	weixinOffsetKind       = "weixin_get_updates_buf"
 	defaultLongPollTimeout = 35_000
 	defaultChannelVersion  = "kimi-im-bridge"
+	maxTransportAttempts   = 2
 )
 
 type BindingRouter interface {
@@ -434,29 +438,68 @@ func (c *Client) postJSON(ctx context.Context, path string, payload any, out any
 	if err != nil {
 		return fmt.Errorf("marshal weixin request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/"+path, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("build weixin request: %w", err)
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("AuthorizationType", "ilink_bot_token")
-	request.Header.Set("Authorization", "Bearer "+c.botToken)
-	request.Header.Set("X-WECHAT-UIN", randomWechatUIN())
-	response, err := c.httpClient.Do(request)
-	if err != nil {
-		return fmt.Errorf("request weixin api %s: %w", path, err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("weixin api %s returned %s", path, response.Status)
-	}
-	if out == nil {
+	for attempt := 1; attempt <= maxTransportAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/"+path, bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("build weixin request: %w", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("AuthorizationType", "ilink_bot_token")
+		request.Header.Set("Authorization", "Bearer "+c.botToken)
+		request.Header.Set("X-WECHAT-UIN", randomWechatUIN())
+
+		response, err := c.httpClient.Do(request)
+		if err != nil {
+			if ctx.Err() == nil && attempt < maxTransportAttempts && isRetryableWeixinTransportError(err) {
+				time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+				continue
+			}
+			return fmt.Errorf("request weixin api %s failed after %d attempt(s): %w", path, attempt, err)
+		}
+
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			snippet, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+			_ = response.Body.Close()
+			return fmt.Errorf("weixin api %s returned %s: %s", path, response.Status, sanitizeWeixinResponseSnippet(snippet))
+		}
+		if out == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			return nil
+		}
+		if err := json.NewDecoder(response.Body).Decode(out); err != nil {
+			_ = response.Body.Close()
+			return fmt.Errorf("decode weixin api %s response: %w", path, err)
+		}
+		_ = response.Body.Close()
 		return nil
 	}
-	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode weixin api %s response: %w", path, err)
+	return fmt.Errorf("request weixin api %s exhausted retries", path)
+}
+
+func isRetryableWeixinTransportError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
 	}
-	return nil
+	lower := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(lower, "unexpected eof") ||
+		strings.HasSuffix(lower, ": eof") ||
+		strings.Contains(lower, "connection reset") ||
+		strings.Contains(lower, "broken pipe") ||
+		strings.Contains(lower, "timeout")
+}
+
+func sanitizeWeixinResponseSnippet(body []byte) string {
+	snippet := strings.TrimSpace(string(body))
+	if snippet == "" {
+		return "(empty response body)"
+	}
+	snippet = strings.Join(strings.Fields(snippet), " ")
+	if len(snippet) > 240 {
+		return snippet[:240] + "..."
+	}
+	return snippet
 }
 
 type GetUpdatesRequest struct {

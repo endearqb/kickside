@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -123,5 +124,46 @@ func TestClientSendMessageUsesIlinkEndpointAndWrappedMessage(t *testing.T) {
 	}
 	if len(gotBody.Message.ItemList) != 1 || gotBody.Message.ItemList[0].TextItem == nil || gotBody.Message.ItemList[0].TextItem.Text != "hello" {
 		t.Fatalf("unexpected item list: %#v", gotBody.Message.ItemList)
+	}
+}
+
+func TestClientGetUpdatesRetriesUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatalf("response writer does not support hijack")
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Fatalf("hijack: %v", err)
+			}
+			_ = conn.Close()
+			return
+		}
+		_ = json.NewEncoder(w).Encode(GetUpdatesResponse{
+			Ret:           0,
+			GetUpdatesBuf: "retried-buf",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-retry")
+	resp, err := client.GetUpdates(context.Background(), GetUpdatesRequest{
+		GetUpdatesBuf: "prev",
+		BaseInfo:      defaultBaseInfo(),
+		TimeoutMS:     9999,
+	})
+	if err != nil {
+		t.Fatalf("expected retry to recover, got %v", err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts.Load())
+	}
+	if resp.GetUpdatesBuf != "retried-buf" {
+		t.Fatalf("unexpected response after retry: %#v", resp)
 	}
 }

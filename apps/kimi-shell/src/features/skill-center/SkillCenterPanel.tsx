@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronRight, Shield, ShieldOff, Sparkles } from "lucide-react";
+import { ChevronRight, FolderOpen, Shield, ShieldOff, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
   DiscoveredSkillRecord,
@@ -19,6 +19,11 @@ import type {
   WorkspaceSkillRestoreResult,
   WorkspaceSkillTarget,
 } from "@/app/types";
+import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
+import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
+import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterSurfaceSection } from "@/components/control-center/ControlCenterSurfaceSection";
+import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -67,13 +72,9 @@ type SkillCenterPanelProps = {
   onImportDiscoveredSkill: (discoveryId: string) => void;
   onSelectWorkspaceSkillTarget: (targetId: string) => void;
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
+  onOpenFolder: (path: string) => Promise<void>;
   onAddInstalledSkillToWorkspaceTarget: (
     skillId: string,
-    targetId?: string | null,
-    containerKind?: SkillDiscoveryContainerKind,
-  ) => void;
-  onRemoveWorkspaceTargetSkill: (
-    skillPathOrKey: string,
     targetId?: string | null,
     containerKind?: SkillDiscoveryContainerKind,
   ) => void;
@@ -106,7 +107,16 @@ function projectionForSkill(skillId: string, projections: SkillProjectionRecord[
 }
 
 function renderStatusChip(label: string, tone: "ready" | "muted" | "warning") {
-  return <span className={`skill-center-chip skill-center-chip-${tone}`}>{label}</span>;
+  const mappedTone =
+    tone === "ready" ? "success" : tone === "warning" ? "warning" : "neutral";
+  return (
+    <ControlCenterStatusBadge
+      tone={mappedTone}
+      className={`skill-center-chip skill-center-chip-${tone}`}
+    >
+      {label}
+    </ControlCenterStatusBadge>
+  );
 }
 
 function formatSkillSource(skill: InstalledSkill) {
@@ -177,23 +187,27 @@ function renderCollapsibleSection(
   content: ReactNode,
 ) {
   return (
-    <section className={`skill-center-collapsible ${expanded ? "is-open" : ""}`}>
-      <button
-        type="button"
-        className="skill-center-section-toggle"
-        onClick={onToggle}
-        aria-expanded={expanded}
-      >
-        <div className="skill-center-section-toggle-copy">
-          <h4>{title}</h4>
-        </div>
-        <ChevronRight
-          size={16}
-          className={`skill-center-section-toggle-icon ${expanded ? "is-open" : ""}`}
-        />
-      </button>
+    <ControlCenterSurfaceSection
+      className={`skill-center-collapsible ${expanded ? "is-open" : ""}`}
+      title={
+        <button
+          type="button"
+          className="skill-center-section-toggle"
+          onClick={onToggle}
+          aria-expanded={expanded}
+        >
+          <div className="skill-center-section-toggle-copy">
+            <h4>{title}</h4>
+          </div>
+          <ChevronRight
+            size={16}
+            className={`skill-center-section-toggle-icon ${expanded ? "is-open" : ""}`}
+          />
+        </button>
+      }
+    >
       {expanded ? <div className="skill-center-section-body">{content}</div> : null}
-    </section>
+    </ControlCenterSurfaceSection>
   );
 }
 
@@ -219,14 +233,13 @@ export function SkillCenterPanel({
   selectedWorkspaceSkillContainerKind,
   currentWorkspaceLabel,
   onSelectSkill,
-  onOpenSkillFromInsights,
   onSelectDiscoveredSkill,
   onScanDiscoveredSkills,
   onImportDiscoveredSkill,
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
+  onOpenFolder,
   onAddInstalledSkillToWorkspaceTarget,
-  onRemoveWorkspaceTargetSkill,
   onSetTrust,
   onApplySkill,
   onRemoveSkill,
@@ -482,6 +495,7 @@ export function SkillCenterPanel({
 
   const selectedWorkspaceTarget =
     workspaceSkillTargets.find((target) => target.id === selectedWorkspaceSkillTargetId) ?? null;
+  const selectedWorkspaceRootPath = selectedWorkspaceTarget?.rootPath.trim() ?? "";
   const selectedWorkspaceContainer =
     workspaceSkillInventory?.containers.find(
       (container) => container.containerKind === selectedWorkspaceSkillContainerKind,
@@ -523,94 +537,94 @@ export function SkillCenterPanel({
     { value: "untrusted", label: "未信任" },
     { value: "update_available", label: "可更新" },
   ];
+  const isSkillCenterManageContext = manageContextId === "skill_center";
 
   return (
     <div className={`skill-center skill-center-${surface}`}>
       <div className="skill-center-content">
         {section === "manage" ? (
-          <div className="skill-center-manage">
-            <div className="skill-center-sidebar">
+          <ControlCenterWorkbenchLayout
+            mode="stack-on-mobile"
+            railBodyClassName="skill-center-list"
+            detailBodyClassName="skill-center-detail-body"
+            railHeader={
               <div className="skill-center-toolbar">
-                <div className="skill-center-toolbar-row">
+                <div className="skill-center-manage-toolbar-grid">
                   <Input
                     className="skill-center-header-search"
                     value={search}
                     onChange={(event) => onSearchChange(event.target.value)}
                     placeholder={
-                      manageContextId === "skill_center"
+                      isSkillCenterManageContext
                         ? "搜索技能中心技能"
                         : "搜索技能、外部发现或来源位置"
                     }
                   />
-                  <label className="skill-center-context-field">
-                    <span>工作区</span>
+                  <select
+                    className="skill-center-select skill-center-manage-select"
+                    value={manageContextId}
+                    onChange={(event) => setManageContextId(event.target.value as ManageContextId)}
+                    disabled={busy}
+                    aria-label="技能管理范围"
+                  >
+                    <option value="skill_center">技能中心</option>
+                    <option value="current_workspace" disabled={!currentWorkspaceTarget}>
+                      {currentWorkspaceTarget ? "当前工作区" : "当前工作区（未识别）"}
+                    </option>
+                    <option value="user_home">主目录</option>
+                    {knownWorkspaceTargets.length > 0 ? (
+                      <optgroup label="已知工作区">
+                        {knownWorkspaceTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                  </select>
+                  {isSkillCenterManageContext ? (
                     <select
                       className="skill-center-select skill-center-manage-select"
-                      value={manageContextId}
-                      onChange={(event) => setManageContextId(event.target.value as ManageContextId)}
+                      value={filter}
+                      onChange={(event) =>
+                        onFilterChange(event.target.value as SkillCenterFilter)
+                      }
                       disabled={busy}
+                      aria-label="技能管理详情筛选"
                     >
-                      <option value="skill_center">技能中心</option>
-                      <option value="current_workspace" disabled={!currentWorkspaceTarget}>
-                        {currentWorkspaceTarget ? "当前工作区" : "当前工作区（未识别）"}
-                      </option>
-                      <option value="user_home">主目录</option>
-                      {knownWorkspaceTargets.length > 0 ? (
-                        <optgroup label="已知工作区">
-                          {knownWorkspaceTargets.map((target) => (
-                            <option key={target.id} value={target.id}>
-                              {target.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ) : null}
+                      {filterOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
-                  </label>
-                  {manageContextId !== "skill_center" ? (
+                  ) : (
                     <Button
                       type="button"
                       variant="outline"
+                      className="skill-center-manage-action"
                       onClick={onScanDiscoveredSkills}
                       disabled={busy}
                     >
                       重新扫描
                     </Button>
-                  ) : null}
+                  )}
                 </div>
-                {manageContextId === "skill_center" ? (
-                  <div className="skill-center-actions-inline">
-                    {filterOptions.map((option) => (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        variant={filter === option.value ? "default" : "outline"}
-                        onClick={() =>
-                          onFilterChange(filter === option.value ? "all" : option.value)
-                        }
-                        disabled={busy}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : manageTarget ? (
-                  <div className="skill-center-context-summary">
-                    <strong>{manageTarget.label}</strong>
-                    <span>{manageTarget.rootPath}</span>
-                  </div>
-                ) : null}
               </div>
-
-              <div className="skill-center-list">
+            }
+            rail={
+              <>
                 {manageEntries.length === 0 ? (
-                  <div className="skill-center-empty">
-                    <Sparkles size={16} />
-                    <p>
-                      {manageContextId === "skill_center"
-                        ? "还没有匹配的技能。"
-                        : "当前范围里还没有匹配的 Skill 或外部发现。"}
-                    </p>
-                  </div>
+                  <ControlCenterEmptyState
+                    className="skill-center-empty"
+                    title="还没有匹配结果"
+                    description={
+                      isSkillCenterManageContext
+                        ? "当前筛选条件下还没有匹配的技能。"
+                        : "当前范围里还没有匹配的 Skill 或外部发现。"
+                    }
+                    icon={<Sparkles size={16} />}
+                  />
                 ) : null}
                 {manageEntries.map((entry) => {
                   const isSelected =
@@ -695,11 +709,10 @@ export function SkillCenterPanel({
                     </button>
                   );
                 })}
-              </div>
-            </div>
-
-            <div className="skill-center-detail">
-              {selectedInstalledSkill ? (
+              </>
+            }
+            detail={
+              selectedInstalledSkill ? (
                 <>
                   <div className="skill-center-detail-header">
                     <div className="skill-center-detail-title">
@@ -1021,21 +1034,27 @@ export function SkillCenterPanel({
                     </div>
                   </div>
                 </>
-              ) : (
-                <div className="skill-center-empty skill-center-empty-detail">
-                  <Sparkles size={18} />
-                  <p>
-                    {manageContextId === "skill_center"
-                      ? "选择一个已安装技能，查看详情和应用状态。"
-                      : "选择一个技能或外部发现，查看导入、来源和应用状态。"}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+              ) : null
+            }
+            emptyDetail={
+              <ControlCenterEmptyState
+                className="skill-center-empty skill-center-empty-detail"
+                title="选择左侧条目开始查看"
+                description={
+                  manageContextId === "skill_center"
+                    ? "选择一个已安装技能，查看详情和应用状态。"
+                    : "选择一个技能或外部发现，查看导入、来源和应用状态。"
+                }
+                icon={<Sparkles size={18} />}
+              />
+            }
+          />
         ) : (
-          <div className="skill-center-workspace-layout">
-            <div className="skill-center-workspace-targets">
+          <ControlCenterWorkbenchLayout
+            mode="stack-on-mobile"
+            railBodyClassName="skill-center-list"
+            detailBodyClassName="skill-center-detail-body"
+            railHeader={
               <div className="skill-center-toolbar">
                 <Input
                   className="skill-center-header-search"
@@ -1044,12 +1063,16 @@ export function SkillCenterPanel({
                   placeholder="搜索工作区技能或技能中心已安装技能"
                 />
               </div>
-              <div className="skill-center-list">
+            }
+            rail={
+              <>
                 {workspaceSkillTargets.length === 0 ? (
-                  <div className="skill-center-empty">
-                    <Sparkles size={16} />
-                    <p>还没有可管理的工作区目标。</p>
-                  </div>
+                  <ControlCenterEmptyState
+                    className="skill-center-empty"
+                    title="还没有可管理的工作区目标"
+                    description="等工作区扫描结果建立后，这里会显示可管理的目标目录。"
+                    icon={<Sparkles size={16} />}
+                  />
                 ) : null}
                 {workspaceSkillTargets.map((target) => (
                   <button
@@ -1070,11 +1093,10 @@ export function SkillCenterPanel({
                     <code className="skill-center-list-projection">{target.rootPath}</code>
                   </button>
                 ))}
-              </div>
-            </div>
-
-            <div className="skill-center-detail">
-              {selectedWorkspaceTarget ? (
+              </>
+            }
+            detail={
+              selectedWorkspaceTarget ? (
                 <div className="skill-center-workspace-shell">
                   <div className="skill-center-detail-header">
                     <div className="skill-center-detail-title">
@@ -1085,42 +1107,41 @@ export function SkillCenterPanel({
                       {selectedWorkspaceTarget.readOnly
                         ? renderStatusChip("主目录只读", "warning")
                         : renderStatusChip("工作区可编辑", "ready")}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        icon={<FolderOpen size={14} />}
+                        className="cc-inline-icon-btn skill-center-open-folder-btn"
+                        onClick={() => void onOpenFolder(selectedWorkspaceRootPath)}
+                        disabled={!selectedWorkspaceRootPath || busy}
+                        aria-label="在资源管理器中打开工作区"
+                        title="在资源管理器中打开工作区"
+                      />
                     </div>
                   </div>
 
-                  <div className="skill-center-workspace-summary">
-                    <span>
-                      {selectedWorkspaceTarget.containerRoots
-                        .map((root) => formatDiscoveryContainer(root.containerKind))
-                        .join(" / ")}
-                    </span>
-                    <small>
-                      {selectedWorkspaceTarget.readOnly
-                        ? "当前目标仅展示已有 Skill，不提供导入或删除。"
-                        : "导入会把技能中心里的 Skill 复制到当前容器目录。"}
-                    </small>
-                  </div>
-
-                  <div className="skill-center-container-switch" role="tablist" aria-label="工作区 Skill 容器">
-                    {(["agents", "codex", "claude"] as SkillDiscoveryContainerKind[]).map((containerKind) => {
-                      const count =
-                        workspaceSkillInventory?.containers.find(
-                          (container) => container.containerKind === containerKind,
-                        )?.skills.length ?? 0;
-                      return (
-                        <button
-                          key={containerKind}
-                          type="button"
-                          className={`skill-center-container-switch-btn ${selectedWorkspaceSkillContainerKind === containerKind ? "active" : ""}`}
-                          onClick={() => onSelectWorkspaceSkillContainer(containerKind)}
-                          disabled={busy}
-                        >
-                          <span>{formatDiscoveryContainer(containerKind)}</span>
-                          <small>{count}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <ControlCenterSegmentedControl
+                    ariaLabel="工作区 Skill 容器"
+                    className="skill-center-container-switch"
+                    itemClassName="skill-center-container-switch-btn"
+                    value={selectedWorkspaceSkillContainerKind}
+                    onChange={(containerKind) => onSelectWorkspaceSkillContainer(containerKind)}
+                    disabled={busy}
+                    items={(["agents", "codex", "claude"] as SkillDiscoveryContainerKind[]).map(
+                      (containerKind) => {
+                        const count =
+                          workspaceSkillInventory?.containers.find(
+                            (container) => container.containerKind === containerKind,
+                          )?.skills.length ?? 0;
+                        return {
+                          value: containerKind,
+                          label: formatDiscoveryContainer(containerKind),
+                          description: `${count}`,
+                        };
+                      },
+                    )}
+                  />
 
                   <div className="skill-center-workspace-grid">
                     <section className="skill-center-workspace-section">
@@ -1137,11 +1158,13 @@ export function SkillCenterPanel({
                           {workspaceExistingSkills.map((skill) => (
                             <div key={skill.skillPath} className="skill-center-workspace-item">
                               <div className="skill-center-workspace-copy">
-                                <div className="skill-center-list-header">
-                                  <strong>{skill.name}</strong>
+                                <div className="skill-center-workspace-item-head">
+                                  <strong className="skill-center-item-name" title={skill.name}>
+                                    {skill.name}
+                                  </strong>
                                   <div className="skill-center-chip-row skill-center-chip-row-compact">
                                     {skill.matchedInstalledSkillId
-                                      ? renderStatusChip("已关联技能中心", "ready")
+                                      ? renderStatusChip("已关联", "ready")
                                       : renderStatusChip("目录内 Skill", "muted")}
                                   </div>
                                 </div>
@@ -1150,38 +1173,6 @@ export function SkillCenterPanel({
                                 </p>
                                 <code className="skill-center-list-projection">{skill.skillPath}</code>
                               </div>
-                              {!selectedWorkspaceTarget.readOnly ? (
-                                <div className="skill-center-workspace-actions">
-                                  {skill.matchedInstalledSkillId ? (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      onClick={() => onOpenSkillFromInsights(skill.matchedInstalledSkillId!)}
-                                      disabled={busy}
-                                    >
-                                      查看技能中心
-                                    </Button>
-                                  ) : null}
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() => {
-                                      const confirmed = window.confirm(
-                                        `确定从 ${selectedWorkspaceTarget.label} 删除“${skill.name}”吗？这只会删除当前目录中的 Skill。`,
-                                      );
-                                      if (!confirmed) return;
-                                      onRemoveWorkspaceTargetSkill(
-                                        skill.skillPath,
-                                        selectedWorkspaceTarget.id,
-                                        selectedWorkspaceSkillContainerKind,
-                                      );
-                                    }}
-                                    disabled={busy}
-                                  >
-                                    删除
-                                  </Button>
-                                </div>
-                              ) : null}
                             </div>
                           ))}
                         </div>
@@ -1202,8 +1193,10 @@ export function SkillCenterPanel({
                           {workspaceImportCandidates.map((skill) => (
                             <div key={skill.id} className="skill-center-workspace-item">
                               <div className="skill-center-workspace-copy">
-                                <div className="skill-center-list-header">
-                                  <strong>{skill.name}</strong>
+                                <div className="skill-center-workspace-item-head">
+                                  <strong className="skill-center-item-name" title={skill.name}>
+                                    {skill.name}
+                                  </strong>
                                   <div className="skill-center-chip-row skill-center-chip-row-compact">
                                     {skill.trusted
                                       ? renderStatusChip("已信任", "ready")
@@ -1237,14 +1230,17 @@ export function SkillCenterPanel({
                     </section>
                   </div>
                 </div>
-              ) : (
-                <div className="skill-center-empty skill-center-empty-detail">
-                  <Sparkles size={18} />
-                  <p>选择一个工作区目标，管理目录中的 Skill。</p>
-                </div>
-              )}
-            </div>
-          </div>
+              ) : null
+            }
+            emptyDetail={
+              <ControlCenterEmptyState
+                className="skill-center-empty skill-center-empty-detail"
+                title="选择一个工作区目标"
+                description="从左侧选择目标目录，管理目录中的 Skill。"
+                icon={<Sparkles size={18} />}
+              />
+            }
+          />
         )}
       </div>
     </div>

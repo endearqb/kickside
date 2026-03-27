@@ -1,13 +1,13 @@
 use anyhow::Context;
 use chrono::Utc;
 use qrcode::{render::svg, QrCode};
-use reqwest::blocking::Client;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, WeixinOnboardingRuntimeState},
     bridge_manager, bridge_settings_store,
+    onboarding_http,
     types::{
         BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
         BridgeTelegramSecrets, BridgeWeixinSecrets, StartWeixinConnectorOnboardingInput,
@@ -42,7 +42,7 @@ pub fn start(
         }
     }
 
-    let client = WeixinLoginClient::new(api_base_url.as_str())?;
+    let client = WeixinLoginClient::new(app, api_base_url.as_str());
     let qr = client.fetch_qr_code(DEFAULT_ILINK_BOT_TYPE)?;
     let qr_svg = render_qr_svg(&qr.qrcode_img_content)?;
     let started_at = now_rfc3339();
@@ -105,7 +105,7 @@ pub fn get_status(
         current.clone()
     };
 
-    let client = WeixinLoginClient::new(existing.api_base_url.as_str())?;
+    let client = WeixinLoginClient::new(app, existing.api_base_url.as_str());
     let status = client.poll_qr_status(existing.qrcode.as_str())?;
 
     let state = app.state::<AppState>();
@@ -126,7 +126,7 @@ pub fn get_status(
             current.error_message = None;
             current.detail_message = Some("等待微信完成扫码授权。".to_string());
         }
-        "scaned" => {
+        "scaned" | "scanned" => {
             current.state = WeixinConnectorOnboardingState::Polling;
             current.error_message = None;
             current.detail_message = Some("已扫码，请在微信中继续确认授权。".to_string());
@@ -376,57 +376,46 @@ fn rfc3339_from_unix_ms(value: u64) -> String {
 }
 
 struct WeixinLoginClient {
-    http: Client,
+    app: Option<AppHandle>,
     base_url: String,
 }
 
 impl WeixinLoginClient {
-    fn new(base_url: &str) -> anyhow::Result<Self> {
-        let http = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .context("failed to build weixin onboarding http client")?;
-        Ok(Self {
-            http,
+    fn new(app: &AppHandle, base_url: &str) -> Self {
+        Self {
+            app: Some(app.clone()),
             base_url: base_url.trim_end_matches('/').to_string(),
-        })
+        }
     }
 
     fn fetch_qr_code(&self, bot_type: &str) -> anyhow::Result<QRCodeResponse> {
-        let response = self
-            .http
-            .get(format!(
-                "{}/ilink/bot/get_bot_qrcode?bot_type={}",
-                self.base_url, bot_type
-            ))
-            .send()
-            .context("failed to fetch weixin qr code")?;
-        let status = response.status();
-        let body = response.text().context("failed to read qr code response")?;
-        if !status.is_success() {
-            anyhow::bail!("weixin qr code request failed (status={status}): {body}");
-        }
-        serde_json::from_str::<QRCodeResponse>(&body)
-            .with_context(|| format!("failed to parse weixin qr code response: {body}"))
+        onboarding_http::get_json(
+            self.app.as_ref(),
+            "weixin",
+            "qr_code",
+            format!("{}/ilink/bot/get_bot_qrcode?bot_type={}", self.base_url, bot_type),
+            vec![(
+                "iLink-App-ClientVersion".to_string(),
+                "1".to_string(),
+            )],
+            std::time::Duration::from_secs(20),
+        )
+        .context("failed to fetch weixin qr code")
     }
 
     fn poll_qr_status(&self, qrcode: &str) -> anyhow::Result<StatusResponse> {
-        let response = self
-            .http
-            .get(format!(
-                "{}/ilink/bot/get_qrcode_status?qrcode={}",
-                self.base_url, qrcode
-            ))
-            .header("iLink-App-ClientVersion", "1")
-            .send()
-            .context("failed to poll weixin qr status")?;
-        let status = response.status();
-        let body = response.text().context("failed to read qr status response")?;
-        if !status.is_success() {
-            anyhow::bail!("weixin qr status request failed (status={status}): {body}");
-        }
-        serde_json::from_str::<StatusResponse>(&body)
-            .with_context(|| format!("failed to parse weixin qr status response: {body}"))
+        onboarding_http::get_json(
+            self.app.as_ref(),
+            "weixin",
+            "qr_status",
+            format!("{}/ilink/bot/get_qrcode_status?qrcode={}", self.base_url, qrcode),
+            vec![(
+                "iLink-App-ClientVersion".to_string(),
+                "1".to_string(),
+            )],
+            std::time::Duration::from_secs(20),
+        )
+        .context("failed to poll weixin qr status")
     }
 }
 
@@ -470,7 +459,10 @@ mod tests {
             }
         });
 
-        let client = WeixinLoginClient::new(base_url.as_str()).expect("client");
+        let client = WeixinLoginClient {
+            app: None,
+            base_url: base_url.clone(),
+        };
         let qr = client.fetch_qr_code(DEFAULT_ILINK_BOT_TYPE).expect("qr");
         assert_eq!(qr.qrcode, "qr-1");
         let status = client.poll_qr_status("qr-1").expect("status");

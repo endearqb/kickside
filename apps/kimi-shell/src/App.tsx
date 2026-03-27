@@ -9,6 +9,7 @@ import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
+import "./components/control-center/control-center.css";
 
 function App() {
   const shell = useShellController();
@@ -213,7 +214,6 @@ function App() {
     onSelectWorkspaceSkillContainer: shell.handleSelectWorkspaceSkillContainer,
     onAddInstalledSkillToWorkspaceTarget:
       shell.handleAddInstalledSkillToWorkspaceTarget,
-    onRemoveWorkspaceTargetSkill: shell.handleRemoveWorkspaceTargetSkill,
     onOpenTask: shell.handleOpenControlTask,
     onCloseTask: shell.handleCloseControlTask,
     onConfirmInstallSkillFromGit: shell.handleConfirmInstallSkillFromGit,

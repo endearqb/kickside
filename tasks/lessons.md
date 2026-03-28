@@ -41,3 +41,14 @@
 - On Windows, if the app backend can hold the CLI binary being upgraded, stop that backend inside the upgrade task before running `uv tool upgrade`; otherwise `os error 32` file-lock failures are expected.
 - For in-app CLI verification steps, use the command syntax the installed tool actually supports. In this workspace, `kimi --version` works while `kimi -v` and `kimi version` fail.
 - If an install/upgrade flow intentionally stops the backend, do not let shell screen resolution fall back to the generic loading page and close the modal stack. Keep users in Control Center until they can inspect the result or restart the backend.
+- For Windows sidecar lifecycle management, do not treat `taskkill` as the primary stop path once the sidecar owns queues or approvals. Always provide a cooperative loopback/admin shutdown first, and use force-kill only as a bounded fallback.
+- When a persisted approval is expected to be resumable later, store the runtime correlation identifiers at creation time. For the IM bridge, `approval_requests` must keep `turn_id` and `step_id`, not just user-facing metadata.
+- 控制中心这类“外层固定壳 + 内层滚动正文”的页面，不能只给最内层内容区加 `overflow-y: auto`；必须沿着 `grid/flex` 父链同时补齐 `min-height: 0` 和明确高度约束，否则内容会把容器撑开，表现成“卡片显示不全且没有滚动条”。
+- 排查 bridge 失联时，如果日志里较晚出现 `bridge stopped/start`，必须先确认那是不是用户手动触发的恢复动作；不要把后续人工重启误判成根因，优先追前面的 `long_connection transient_network` 或更早的通道异常。
+- 当用户要求“做成 skill”来执行本地运维动作时，必须先确认这是“说明型 skill”还是“真正由 agent 在命令行里执行脚本的 CLI skill”；如果是后者，就不能停留在适配层原生拦截执行，而要把能力挂进实际 runtime session。
+- 对需要本地脚本访问 bridge/admin 凭证的 CLI skill，不能只依赖父进程环境变量继承；要提供显式参数或上下文传参，并保留环境变量作为兼容兜底，否则真实 agent/tool 链路里很容易出现“脚本能运行但拿不到 auth”的假失败。
+- 首次启动用的 `ensure_*` / `bootstrap_*` 初始化函数，不能通过会再次调用初始化函数本身的 `save_*` 包装器来落默认文件；缺文件场景会递归进入自身，在打包版里常表现为启动即栈溢出。
+- 控制中心这类信息密度高的标题栏，不要为了补充说明去加 hover reveal 文案；如果不是长期必须驻留的信息，就直接删掉。概览统计卡里的中文指标也不要硬塞成一句话，优先拆成小栅格保证扫读效率。
+- 如果用户明确把概览卡口径收敛到单一指标，就不要继续保留聚合卡或四宫格“信息增强”；概览层优先展示一个最重要的数量信号，其余细节留给下钻页面。
+- Skill Center / 控制中心这类高密度工具栏里，枚举筛选不要堆成一排按钮；超过 4 个选项时，优先改成搜索框后的带标签下拉（如“范围”“状态”），既保留能力又能明显降噪。
+- 当 Skill Center 的“工作区洞察”从只读发现页演变成真实目录管理页时，不要继续复用 discovery-only 的状态和动作；应尽快拆成“技能管理中的发现上下文切换”与“工作区目录 inventory 管理”两套明确模型。

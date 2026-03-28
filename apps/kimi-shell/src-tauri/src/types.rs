@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -12,6 +14,62 @@ pub enum BackendState {
     Crashed,
     Stopping,
     MissingKimi,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgePlatform {
+    Telegram,
+    Feishu,
+    Weixin,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeChannelMode {
+    Polling,
+    Websocket,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FeishuReplyRenderer {
+    Post,
+    #[default]
+    Interactive,
+}
+
+fn default_feishu_auto_approve() -> bool {
+    true
+}
+
+fn default_reset_binding_session_on_bridge_start() -> bool {
+    true
+}
+
+fn bridge_skills_mode_is_disabled(value: &BridgeSkillsMode) -> bool {
+    matches!(value, BridgeSkillsMode::Disabled)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeRuntimeState {
+    Stopped,
+    Starting,
+    Running,
+    Degraded,
+    Stopping,
+    Crashed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeChannelState {
+    Idle,
+    Connecting,
+    Ready,
+    Degraded,
+    Error,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,6 +85,22 @@ pub enum WebviewRuntimeKind {
 pub enum MainCreateMode {
     Auto,
     Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MainWindowCloseBehavior {
+    #[default]
+    Ask,
+    Exit,
+    MinimizeToTray,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MainWindowCloseDecision {
+    Exit,
+    MinimizeToTray,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -221,8 +295,15 @@ pub struct AppSettings {
     pub kimi_path: Option<String>,
     pub work_dir: Option<String>,
     pub hotkey: String,
+    pub main_window_close_behavior: MainWindowCloseBehavior,
     pub start_minimized_to_tray: bool,
     pub auto_restart_on_crash: bool,
+    #[serde(rename = "bridge_enabled")]
+    pub bridge_enabled: bool,
+    #[serde(rename = "bridge_auto_start")]
+    pub bridge_auto_start: bool,
+    #[serde(rename = "bridge_admin_port_override")]
+    pub bridge_admin_port_override: Option<u16>,
     pub onboarding_completed_version: u32,
     pub onboarding_step_acks: OnboardingStepAcks,
     pub preferred_install_source: InstallSource,
@@ -237,8 +318,12 @@ impl Default for AppSettings {
             kimi_path: None,
             work_dir: None,
             hotkey: "CmdOrCtrl+Shift+K".to_string(),
+            main_window_close_behavior: MainWindowCloseBehavior::Ask,
             start_minimized_to_tray: false,
             auto_restart_on_crash: false,
+            bridge_enabled: false,
+            bridge_auto_start: false,
+            bridge_admin_port_override: None,
             onboarding_completed_version: 0,
             onboarding_step_acks: OnboardingStepAcks::default(),
             preferred_install_source: InstallSource::Official,
@@ -246,6 +331,693 @@ impl Default for AppSettings {
             custom_mirror_config: InstallCustomMirrorConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainWindowCloseDecisionInput {
+    pub decision: MainWindowCloseDecision,
+    pub remember: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MainWindowCloseDecisionRequestPayload {
+    pub title: String,
+    pub message: String,
+    pub exit_label: String,
+    pub minimize_label: String,
+    pub remember_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConnectorConfig {
+    #[serde(default)]
+    pub id: String,
+    pub platform: BridgePlatform,
+    pub enabled: bool,
+    pub mode: BridgeChannelMode,
+    #[serde(default, alias = "accountLabel")]
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_work_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_binding_session_on_start: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_reply_renderer: Option<FeishuReplyRenderer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDirPreset {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSettings {
+    pub enabled: bool,
+    pub auto_start: bool,
+    pub admin_port: u16,
+    #[serde(default, skip_serializing_if = "bridge_skills_mode_is_disabled")]
+    pub skills_mode: BridgeSkillsMode,
+    #[serde(default)]
+    pub feishu_reply_renderer: FeishuReplyRenderer,
+    #[serde(default = "default_feishu_auto_approve")]
+    pub feishu_auto_approve: bool,
+    #[serde(default = "default_reset_binding_session_on_bridge_start")]
+    pub reset_binding_session_on_bridge_start: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feishu_reply_cards: Option<bool>,
+    pub default_work_dir: Option<String>,
+    #[serde(default)]
+    pub work_dir_presets: Vec<WorkDirPreset>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorConfig>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSkillsMode {
+    #[default]
+    Disabled,
+    FollowDefaultWorkDir,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeSessionSource {
+    Bridge,
+    ShellWeb,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionRecord {
+    pub source: BridgeSessionSource,
+    pub session_id: String,
+    pub work_dir: Option<String>,
+    pub last_message_at: Option<String>,
+    pub summary: Option<String>,
+    pub session_state: Option<String>,
+    pub lease_owner: Option<String>,
+    pub lease_expires_at: Option<String>,
+    pub auto_approve: bool,
+    pub provider_name: Option<String>,
+    pub runtime_metadata_json: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub switchable: bool,
+    pub importable: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionImportInput {
+    pub source: BridgeSessionSource,
+    pub source_session_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeTelegramSecrets {
+    pub bot_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeFeishuSecrets {
+    pub app_id: Option<String>,
+    pub app_secret: Option<String>,
+    pub verification_token: Option<String>,
+    pub encrypt_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeWeixinSecrets {
+    pub bot_token: Option<String>,
+    pub base_url: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecrets {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecrets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecrets>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weixin: Option<BridgeWeixinSecrets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeSecrets {
+    #[serde(default)]
+    pub connectors: BTreeMap<String, BridgeConnectorSecrets>,
+    pub telegram: BridgeTelegramSecrets,
+    pub feishu: BridgeFeishuSecrets,
+    pub weixin: BridgeWeixinSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeConnectorSecretsInput {
+    pub connector_id: String,
+    pub telegram: BridgeTelegramSecrets,
+    pub feishu: BridgeFeishuSecrets,
+    pub weixin: BridgeWeixinSecrets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartFeishuConnectorOnboardingInput {
+    pub connector_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeishuConnectorOnboardingState {
+    Idle,
+    AwaitingScan,
+    Polling,
+    Succeeded,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeishuConnectorOnboardingSession {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: FeishuConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub scanner_open_id: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub app_id_masked: Option<String>,
+    pub last_configured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWeixinConnectorOnboardingInput {
+    pub connector_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WeixinConnectorOnboardingState {
+    Idle,
+    AwaitingScan,
+    Polling,
+    Succeeded,
+    Failed,
+    Expired,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WeixinConnectorOnboardingSession {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: WeixinConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+    pub last_configured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeOnboardingFeishuInput {
+    pub app_id: Option<String>,
+    pub app_secret: Option<String>,
+    pub verification_token: Option<String>,
+    pub encrypt_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BridgeOnboardingConfigInput {
+    pub enabled: bool,
+    pub feishu_enabled: bool,
+    pub auto_start: bool,
+    pub feishu: BridgeOnboardingFeishuInput,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConnectorStatus {
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
+    pub platform: BridgePlatform,
+    pub enabled: bool,
+    pub state: BridgeChannelState,
+    pub last_heartbeat_at: Option<String>,
+    pub last_inbound_at: Option<String>,
+    pub last_outbound_at: Option<String>,
+    pub last_offset: Option<String>,
+    pub last_error_code: Option<String>,
+    pub last_error: Option<String>,
+    pub last_ready_at: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub last_failure_operation: Option<String>,
+    pub last_failure_retryable: Option<bool>,
+    pub consecutive_failures: Option<usize>,
+    pub next_retry_at: Option<String>,
+    pub last_recovery_at: Option<String>,
+    pub recovery_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStatus {
+    pub state: BridgeRuntimeState,
+    pub started_at: Option<String>,
+    pub pid: Option<u32>,
+    pub admin_port: u16,
+    pub version: Option<String>,
+    #[serde(default, alias = "channels")]
+    pub connectors: Vec<BridgeConnectorStatus>,
+    pub pending_approvals: usize,
+    pub bindings: usize,
+    pub last_error_code: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BindingRecord {
+    pub binding_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
+    pub platform: BridgePlatform,
+    pub account_id: Option<String>,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub kimi_session_id: String,
+    pub work_dir: Option<String>,
+    pub onboarded_at: Option<String>,
+    pub onboarding_version: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_inbound_message_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeApprovalRecord {
+    pub approval_id: String,
+    #[serde(default)]
+    pub connector_id: String,
+    #[serde(default)]
+    pub connector_label: String,
+    pub kimi_session_id: String,
+    pub turn_id: Option<String>,
+    pub step_id: Option<String>,
+    pub request_kind: String,
+    pub prompt: String,
+    pub platform: BridgePlatform,
+    pub chat_id: String,
+    pub thread_id: Option<String>,
+    pub status: String,
+    pub request_payload_json: String,
+    pub resolution_payload_json: Option<String>,
+    pub dedupe_key: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub resolved_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillApplyScope {
+    UserGlobalKimi,
+    SessionKimi,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillProjectionMethod {
+    Symlink,
+    Junction,
+    Copy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillSourceType {
+    #[default]
+    Git,
+    LocalImport,
+    Bundled,
+    DiscoveredImport,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillUpdateStatusKind {
+    #[default]
+    UpToDate,
+    UpdateAvailable,
+    SourceMissing,
+    RefreshAvailable,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillUpdateStatusView {
+    #[serde(default)]
+    pub kind: SkillUpdateStatusKind,
+    pub detail: Option<String>,
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillManifestMetadata {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub file_patterns: Vec<String>,
+    #[serde(default)]
+    pub workspace_patterns: Vec<String>,
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub recommended_scopes: Vec<SkillApplyScope>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDiscoveryScope {
+    UserHome,
+    Workspace,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillDiscoveryContainerKind {
+    Agents,
+    Codex,
+    Claude,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDiscoveryLocation {
+    pub scope: SkillDiscoveryScope,
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+    pub skill_path: String,
+    pub workspace_id: Option<String>,
+    pub workspace_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDiscoveryRoot {
+    pub id: String,
+    pub scope: SkillDiscoveryScope,
+    pub path: String,
+    pub label: String,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillTargetContainerRoot {
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillTarget {
+    pub id: String,
+    pub scope: SkillDiscoveryScope,
+    pub label: String,
+    pub root_path: String,
+    pub read_only: bool,
+    pub is_current: bool,
+    #[serde(default)]
+    pub container_roots: Vec<WorkspaceSkillTargetContainerRoot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceManagedSkillRecord {
+    pub skill_key: String,
+    pub name: String,
+    pub description: String,
+    pub projection_name: String,
+    pub has_scripts: bool,
+    pub skill_path: String,
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub matched_installed_skill_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillContainerInventory {
+    pub container_kind: SkillDiscoveryContainerKind,
+    pub container_path: String,
+    pub read_only: bool,
+    #[serde(default)]
+    pub skills: Vec<WorkspaceManagedSkillRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillInventory {
+    pub target: WorkspaceSkillTarget,
+    pub scanned_at: String,
+    #[serde(default)]
+    pub containers: Vec<WorkspaceSkillContainerInventory>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSkillRecord {
+    pub discovery_id: String,
+    pub name: String,
+    pub description: String,
+    pub canonical_path: String,
+    pub projection_name: String,
+    pub has_scripts: bool,
+    #[serde(default)]
+    pub locations: Vec<SkillDiscoveryLocation>,
+    pub imported_skill_id: Option<String>,
+    pub last_scanned_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredSkillDetail {
+    pub record: DiscoveredSkillRecord,
+    #[serde(default)]
+    pub relative_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDiscoverySnapshot {
+    pub scanned_at: String,
+    #[serde(default)]
+    pub workspaces: Vec<WorkspaceDiscoveryRoot>,
+    #[serde(default)]
+    pub records: Vec<DiscoveredSkillRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub source_type: SkillSourceType,
+    #[serde(default)]
+    pub source_label: String,
+    #[serde(default)]
+    pub source_key: String,
+    pub source_path: Option<String>,
+    pub repo_url: Option<String>,
+    pub git_ref: Option<String>,
+    pub commit: Option<String>,
+    pub local_path: String,
+    pub projection_name: String,
+    pub trusted: bool,
+    pub installed_at: String,
+    pub updated_at: String,
+    pub has_scripts: bool,
+    #[serde(default)]
+    pub metadata: SkillManifestMetadata,
+    #[serde(default)]
+    pub update_status: SkillUpdateStatusView,
+    #[serde(default)]
+    pub discovery_locations: Vec<SkillDiscoveryLocation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDetail {
+    pub skill: InstalledSkill,
+    #[serde(default)]
+    pub relative_paths: Vec<String>,
+    pub user_global_applied: bool,
+    pub current_session_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillProjectionRecord {
+    pub skill_id: String,
+    pub scope: SkillApplyScope,
+    pub target_path: String,
+    pub projection_name: String,
+    pub applied_at: String,
+    pub method: SkillProjectionMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSkillState {
+    pub session_id: Option<String>,
+    pub session_work_dir: Option<String>,
+    #[serde(default)]
+    pub applied_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub projections: Vec<SkillProjectionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSkillProfile {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub recent_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub pinned_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub last_session_skill_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillApplyResult {
+    pub scope: SkillApplyScope,
+    #[serde(default)]
+    pub global_skills: Vec<SkillProjectionRecord>,
+    pub active_session: SessionSkillState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRecommendation {
+    pub skill_id: String,
+    pub score: i32,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub matched_signals: Vec<String>,
+    pub recommended_scope: SkillApplyScope,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeApprovalResolveInput {
+    pub approval_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution_payload_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeMaskedSecretValue {
+    pub configured: bool,
+    pub masked_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeTelegramSecretsMaskView {
+    pub bot_token: BridgeMaskedSecretValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeFeishuSecretsMaskView {
+    pub app_id: BridgeMaskedSecretValue,
+    pub app_secret: BridgeMaskedSecretValue,
+    pub verification_token: BridgeMaskedSecretValue,
+    pub encrypt_key: BridgeMaskedSecretValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeWeixinSecretsMaskView {
+    pub bot_token: BridgeMaskedSecretValue,
+    pub base_url: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSecretsMaskView {
+    #[serde(default)]
+    pub connectors: Vec<BridgeConnectorSecretsMaskView>,
+    pub telegram: BridgeTelegramSecretsMaskView,
+    pub feishu: BridgeFeishuSecretsMaskView,
+    pub weixin: BridgeWeixinSecretsMaskView,
+}
+
+pub type BridgeChannelStatus = BridgeConnectorStatus;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeConnectorSecretsMaskView {
+    pub connector_id: String,
+    pub connector_label: String,
+    pub platform: BridgePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<BridgeTelegramSecretsMaskView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feishu: Option<BridgeFeishuSecretsMaskView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weixin: Option<BridgeWeixinSecretsMaskView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

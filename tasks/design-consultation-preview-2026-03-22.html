@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kimi App Design Consultation Preview</title>
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --page-bg: #fbf8f2;
+        --page-bg-strong: #f2eee7;
+        --surface: rgba(255, 255, 255, 0.88);
+        --surface-strong: rgba(255, 255, 255, 0.96);
+        --surface-muted: #ece7de;
+        --line: rgba(31, 37, 45, 0.12);
+        --ink: #1f252d;
+        --ink-soft: #5f625d;
+        --accent: #b67a28;
+        --accent-soft: rgba(182, 122, 40, 0.14);
+        --success: #2f7d57;
+        --warning: #b67a28;
+        --error: #c84c3c;
+        --info: #2f6b9a;
+        --shadow: 0 16px 48px rgba(16, 20, 24, 0.1);
+        --radius-sm: 6px;
+        --radius-md: 10px;
+        --radius-lg: 14px;
+        --radius-xl: 20px;
+        --display: "Source Sans 3", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+        --body: "Source Sans 3", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+        --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      }
+
+      body.dark {
+        --page-bg: #13171b;
+        --page-bg-strong: #1b2026;
+        --surface: rgba(25, 31, 38, 0.88);
+        --surface-strong: rgba(29, 35, 42, 0.96);
+        --surface-muted: #232a31;
+        --line: rgba(255, 255, 255, 0.08);
+        --ink: #f5f3ef;
+        --ink-soft: #c4beb4;
+        --accent: #c89245;
+        --accent-soft: rgba(200, 146, 69, 0.16);
+        --success: #58a47c;
+        --warning: #c89245;
+        --error: #df6a59;
+        --info: #69a4d4;
+        --shadow: 0 18px 56px rgba(0, 0, 0, 0.38);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: var(--body);
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(182, 122, 40, 0.12), transparent 26%),
+          linear-gradient(180deg, var(--page-bg), var(--page-bg-strong));
+      }
+
+      .page {
+        min-height: 100vh;
+        padding: 28px;
+      }
+
+      .shell {
+        max-width: 1440px;
+        margin: 0 auto;
+        display: grid;
+        gap: 20px;
+      }
+
+      .topbar,
+      .panel,
+      .mockup {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        backdrop-filter: blur(16px);
+        box-shadow: var(--shadow);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 16px;
+        border-radius: var(--radius-xl);
+      }
+
+      .toolbar,
+      .toolbar-right,
+      .chip-row,
+      .button-row,
+      .metric-grid,
+      .preview-grid,
+      .palette-grid,
+      .mini-nav,
+      .form-grid,
+      .list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .toolbar button,
+      .toolbar-right button,
+      .button,
+      .mini-nav button {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-strong);
+        color: var(--ink);
+        padding: 9px 14px;
+        font: 600 13px/1 var(--body);
+      }
+
+      .button.primary {
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .button.ghost {
+        background: transparent;
+      }
+
+      .button.warning {
+        background: linear-gradient(180deg, var(--accent), #9d671e);
+        color: #fff;
+        border-color: transparent;
+      }
+
+      .title-lockup {
+        min-width: 0;
+        text-align: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(182, 122, 40, 0.22);
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        font-family: var(--display);
+        letter-spacing: -0.02em;
+      }
+
+      .title-lockup h1 {
+        font-size: clamp(28px, 4vw, 48px);
+        margin-top: 12px;
+      }
+
+      .lede {
+        max-width: 820px;
+        margin: 12px auto 0;
+        color: var(--ink-soft);
+        line-height: 1.65;
+        text-align: center;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .metric,
+      .palette,
+      .font-card,
+      .card,
+      .status-card,
+      .skill-item,
+      .table-card {
+        border: 1px solid var(--line);
+        background: var(--surface-strong);
+        border-radius: var(--radius-lg);
+      }
+
+      .metric {
+        padding: 16px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .metric span,
+      .meta,
+      small,
+      .field label {
+        color: var(--ink-soft);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        font-size: 28px;
+      }
+
+      .preview-grid {
+        display: grid;
+        grid-template-columns: 1.25fr 0.95fr;
+        gap: 20px;
+      }
+
+      .panel {
+        border-radius: 28px;
+        padding: 24px;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .panel-head p {
+        margin: 10px 0 0;
+        color: var(--ink-soft);
+        line-height: 1.6;
+      }
+
+      .palette-grid,
+      .font-grid,
+      .mock-grid,
+      .table {
+        display: grid;
+        gap: 14px;
+      }
+
+      .palette-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .palette {
+        overflow: hidden;
+      }
+
+      .swatch {
+        height: 92px;
+      }
+
+      .palette-copy {
+        padding: 12px 14px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .font-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .font-card {
+        padding: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .font-sample-display {
+        font-size: 32px;
+        line-height: 1.05;
+        font-weight: 700;
+      }
+
+      .font-sample-body {
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .font-sample-mono {
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .mock-grid {
+        grid-template-columns: 1.2fr 0.8fr;
+      }
+
+      .mockup {
+        border-radius: 24px;
+        overflow: hidden;
+      }
+
+      .mockup-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface-strong);
+      }
+
+      .status-card {
+        padding: 16px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .chip.success {
+        background: rgba(47, 125, 87, 0.12);
+        color: var(--success);
+      }
+
+      .chip.warning {
+        background: rgba(182, 122, 40, 0.12);
+        color: var(--warning);
+      }
+
+      .chip.info {
+        background: rgba(47, 107, 154, 0.12);
+        color: var(--info);
+      }
+
+      .mock-body {
+        padding: 18px;
+        display: grid;
+        gap: 16px;
+      }
+
+      .mini-nav {
+        padding: 12px 18px 0;
+      }
+
+      .table-card {
+        overflow: hidden;
+      }
+
+      .table-row {
+        display: grid;
+        grid-template-columns: 1.2fr 1fr 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .table-row:first-child {
+        border-top: 0;
+      }
+
+      .table-row strong {
+        font-size: 13px;
+      }
+
+      .table-row code {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: var(--surface-strong);
+        color: var(--ink);
+        padding: 12px 14px;
+        font: 500 14px/1.2 var(--body);
+      }
+
+      .list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .skill-item {
+        padding: 14px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .footer-note {
+        color: var(--ink-soft);
+        text-align: center;
+        line-height: 1.6;
+      }
+
+      .toggle {
+        position: fixed;
+        right: 20px;
+        top: 20px;
+        z-index: 10;
+      }
+
+      .toggle button {
+        appearance: none;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--surface-strong);
+        color: var(--ink);
+        padding: 10px 14px;
+        font: 600 13px/1 var(--body);
+        box-shadow: var(--shadow);
+      }
+
+      @media (max-width: 1080px) {
+        .metric-grid,
+        .preview-grid,
+        .mock-grid,
+        .palette-grid,
+        .font-grid,
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 16px;
+        }
+
+        .topbar,
+        .panel {
+          padding: 18px;
+          border-radius: 18px;
+        }
+
+        .topbar {
+          grid-template-columns: 1fr;
+          text-align: left;
+        }
+
+        .title-lockup,
+        .lede {
+          text-align: left;
+          margin-left: 0;
+          margin-right: 0;
+        }
+
+        .table-row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toggle">
+      <button type="button" id="mode-toggle">切换深色预览</button>
+    </div>
+    <div class="page">
+      <div class="shell">
+        <section class="topbar">
+          <div class="toolbar">
+            <button type="button">切换视图</button>
+            <button type="button">分栏</button>
+            <button type="button">切换主题</button>
+          </div>
+          <div class="title-lockup">
+            <span class="eyebrow">Industrial / Utilitarian</span>
+            <h1>Kimi App</h1>
+            <p class="lede">
+              一套为 Windows 桌面壳层、安装恢复、运行诊断、IM Bridge 和 Skill 管理统一出来的产品语言。重点不是“更花哨”，而是让高密度操作更稳定、更易扫读、更像同一个产品。
+            </p>
+          </div>
+          <div class="toolbar-right">
+            <button type="button">当前目录</button>
+            <button type="button">Skill</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Status Deck</span>
+              <h2>设计基线</h2>
+              <p>保留产品的高功能密度，但把视觉层级收敛成一个更稳定的桌面系统。</p>
+            </div>
+          </div>
+          <div class="metric-grid">
+            <article class="metric">
+              <span>主色</span>
+              <strong>#1F252D</strong>
+              <small>Graphite for chrome and trust</small>
+            </article>
+            <article class="metric">
+              <span>强调色</span>
+              <strong>#B67A28</strong>
+              <small>Amber for next actions and progress</small>
+            </article>
+            <article class="metric">
+              <span>基线字号</span>
+              <strong>14px</strong>
+              <small>Chinese-first dense UI</small>
+            </article>
+            <article class="metric">
+              <span>基础间距</span>
+              <strong>4px</strong>
+              <small>Compact but readable</small>
+            </article>
+          </div>
+        </section>
+
+        <div class="preview-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Typography</span>
+                <h2>字体样张</h2>
+                <p>不用再在系统栈、衬线标题和随机英文 display 之间切换。</p>
+              </div>
+            </div>
+            <div class="font-grid">
+              <article class="font-card">
+                <small>Section / Hero</small>
+                <div class="font-sample-display">控制中心</div>
+                <div class="font-sample-body">用于页面标题、阶段标题、概览卡片标题。大字有张力，但不走花哨衬线路线。</div>
+              </article>
+              <article class="font-card">
+                <small>Body / UI</small>
+                <div class="font-sample-body">为 Kimi CLI、运行诊断、Skill Center 和 IM Bridge 这种高密度页面服务。中文和英文混排都要稳定、清楚、耐读。</div>
+              </article>
+              <article class="font-card">
+                <small>Data / Logs</small>
+                <div class="font-sample-mono">PORT 55877\nPID 20660\nSESSION skill-center\nREADY 2026-03-22 10:12:09</div>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Palette</span>
+                <h2>色板与语义</h2>
+                <p>Graphite 是骨架，Amber 负责引导，语义色只在状态里发声。</p>
+              </div>
+            </div>
+            <div class="palette-grid">
+              <article class="palette">
+                <div class="swatch" style="background:#1f252d"></div>
+                <div class="palette-copy">
+                  <strong>Graphite</strong>
+                  <small>#1F252D</small>
+                </div>
+              </article>
+              <article class="palette">
+                <div class="swatch" style="background:#b67a28"></div>
+                <div class="palette-copy">
+                  <strong>Signal Amber</strong>
+                  <small>#B67A28</small>
+                </div>
+              </article>
+              <article class="palette">
+                <div class="swatch" style="background:#f2eee7"></div>
+                <div class="palette-copy">
+                  <strong>Warm Canvas</strong>
+                  <small>#F2EEE7</small>
+                </div>
+              </article>
+              <article class="palette">
+                <div class="swatch" style="background:#2f7d57"></div>
+                <div class="palette-copy">
+                  <strong>Success</strong>
+                  <small>#2F7D57</small>
+                </div>
+              </article>
+              <article class="palette">
+                <div class="swatch" style="background:#c84c3c"></div>
+                <div class="palette-copy">
+                  <strong>Error</strong>
+                  <small>#C84C3C</small>
+                </div>
+              </article>
+              <article class="palette">
+                <div class="swatch" style="background:#2f6b9a"></div>
+                <div class="palette-copy">
+                  <strong>Info</strong>
+                  <small>#2F6B9A</small>
+                </div>
+              </article>
+            </div>
+            <div class="button-row" style="margin-top:16px">
+              <button class="button primary" type="button">保存并启动</button>
+              <button class="button warning" type="button">应用设置</button>
+              <button class="button" type="button">打开日志目录</button>
+              <button class="button ghost" type="button">危险操作</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Mockup 01</span>
+              <h2>Control Center 概览</h2>
+              <p>概览页先给状态，再给任务，再给解释。装饰感退后，扫描效率前置。</p>
+            </div>
+            <div class="chip-row">
+              <span class="chip success">后端已就绪</span>
+              <span class="chip success">飞书通道正常</span>
+              <span class="chip warning">1 项待处理</span>
+            </div>
+          </div>
+          <div class="mock-grid">
+            <article class="mockup">
+              <div class="mockup-head">
+                <div>
+                  <small>控制中心</small>
+                  <h3>今日优先事项</h3>
+                </div>
+                <div class="chip-row">
+                  <span class="chip warning">默认目录待确认</span>
+                </div>
+              </div>
+              <div class="mini-nav">
+                <button type="button">概览</button>
+                <button type="button">快速设置</button>
+                <button type="button">运行诊断</button>
+                <button type="button">IM Bridge</button>
+                <button type="button">Skill Center</button>
+              </div>
+              <div class="mock-body">
+                <div class="metric-grid">
+                  <article class="status-card">
+                    <small>后端状态</small>
+                    <strong>running</strong>
+                  </article>
+                  <article class="status-card">
+                    <small>IM Bridge</small>
+                    <strong>就绪</strong>
+                  </article>
+                  <article class="status-card">
+                    <small>Session Skills</small>
+                    <strong>3</strong>
+                  </article>
+                  <article class="status-card">
+                    <small>最近日志</small>
+                    <strong>18 行</strong>
+                  </article>
+                </div>
+                <div class="table-card">
+                  <div class="table-row">
+                    <strong>完成 Quick Setup</strong>
+                    <span class="meta">还剩 1/4</span>
+                    <code>recommended</code>
+                    <span class="chip warning">现在处理</span>
+                  </div>
+                  <div class="table-row">
+                    <strong>检查运行诊断</strong>
+                    <span class="meta">稳定性回归</span>
+                    <code>runtime</code>
+                    <span class="chip info">查看详情</span>
+                  </div>
+                  <div class="table-row">
+                    <strong>整理最近日志</strong>
+                    <span class="meta">用于支持排查</span>
+                    <code>logs</code>
+                    <span class="chip">稍后</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="mockup">
+              <div class="mockup-head">
+                <div>
+                  <small>Brief</small>
+                  <h3>设计规则</h3>
+                </div>
+              </div>
+              <div class="mock-body list">
+                <article class="status-card">
+                  <strong>一个面板只保留一个主 CTA</strong>
+                  <span class="meta">避免保存、启动、刷新、打开配置同权争夺。</span>
+                </article>
+                <article class="status-card">
+                  <strong>中英文有主次</strong>
+                  <span class="meta">中文为主，英语只用于品牌名、运行时名词和技术标签。</span>
+                </article>
+                <article class="status-card">
+                  <strong>状态先于说明</strong>
+                  <span class="meta">先回答“现在是什么状态”，再回答“为什么”。</span>
+                </article>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <div class="preview-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Mockup 02</span>
+                <h2>IM Bridge 面板</h2>
+                <p>把“启用 / 状态 / 下一步”锁成一条主路径，危险动作单独收口。</p>
+              </div>
+            </div>
+            <article class="mockup">
+              <div class="mockup-head">
+                <div>
+                  <small>IM Bridge</small>
+                  <h3>当前绑定与默认目录</h3>
+                </div>
+                <div class="chip-row">
+                  <span class="chip success">Bridge 运行：就绪</span>
+                  <span class="chip success">飞书通道：就绪</span>
+                </div>
+              </div>
+              <div class="mock-body">
+                <div class="form-grid">
+                  <div class="field">
+                    <label>当前绑定</label>
+                    <select>
+                      <option>binding-f59a134c362a00f6 (feishu)</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>IM 默认工作目录</label>
+                    <input value="D:\\BaiduSyncdisk\\KimiClaw" />
+                  </div>
+                </div>
+                <div class="button-row">
+                  <button class="button primary" type="button">保存并启用 IM Bridge</button>
+                  <button class="button" type="button">刷新状态</button>
+                  <button class="button" type="button">保存 IM 目录</button>
+                </div>
+                <div class="status-card">
+                  <small>危险操作</small>
+                  <div class="button-row">
+                    <button class="button ghost" type="button">停止</button>
+                    <button class="button ghost" type="button">重启</button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">Mockup 03</span>
+                <h2>Skill Center</h2>
+                <p>安装、信任、应用、恢复，要有明确顺序感，而不是一排平权动作。</p>
+              </div>
+            </div>
+            <article class="mockup">
+              <div class="mockup-head">
+                <div>
+                  <small>Skill Center</small>
+                  <h3>当前工作区最近使用</h3>
+                </div>
+                <div class="chip-row">
+                  <span class="chip info">已信任</span>
+                  <span class="chip">全局</span>
+                </div>
+              </div>
+              <div class="mock-body list">
+                <article class="skill-item">
+                  <strong>design-review</strong>
+                  <span class="meta">视觉 QA、迭代修复、截图对比</span>
+                  <div class="button-row">
+                    <button class="button primary" type="button">应用到当前 Session</button>
+                    <button class="button" type="button">应用到用户全局</button>
+                    <button class="button ghost" type="button">取消信任</button>
+                  </div>
+                </article>
+                <article class="skill-item">
+                  <strong>qa</strong>
+                  <span class="meta">系统化测试 Web 应用并修复问题</span>
+                  <div class="chip-row">
+                    <span class="chip success">session</span>
+                    <span class="chip">最近使用</span>
+                  </div>
+                </article>
+              </div>
+            </article>
+          </section>
+        </div>
+
+        <p class="footer-note">
+          这份预览强调的是统一的产品骨架，而不是一次性把所有页面“做花”。如果后续进入实现阶段，应优先把 Control Center、IM Bridge 和 Skill Center 拉回同一套视觉规则，再处理动画和细节润色。
+        </p>
+      </div>
+    </div>
+    <script>
+      const toggle = document.getElementById("mode-toggle");
+      toggle?.addEventListener("click", () => {
+        document.body.classList.toggle("dark");
+        toggle.textContent = document.body.classList.contains("dark")
+          ? "切换浅色预览"
+          : "切换深色预览";
+      });
+    </script>
+  </body>
+</html>

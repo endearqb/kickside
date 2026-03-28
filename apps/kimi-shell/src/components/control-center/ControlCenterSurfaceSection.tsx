@@ -1,0 +1,45 @@
+import type { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+
+type ControlCenterSurfaceSectionProps = {
+  title?: ReactNode;
+  description?: ReactNode;
+  statusBadge?: ReactNode;
+  actions?: ReactNode;
+  tone?: "default" | "accent" | "danger";
+  className?: string;
+  bodyClassName?: string;
+  children: ReactNode;
+};
+
+export function ControlCenterSurfaceSection({
+  title,
+  description,
+  statusBadge,
+  actions,
+  tone = "default",
+  className,
+  bodyClassName,
+  children,
+}: ControlCenterSurfaceSectionProps) {
+  const hasHeader = title || description || statusBadge || actions;
+  return (
+    <section className={cn("cc-surface-section", `tone-${tone}`, className)}>
+      {hasHeader ? (
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            {title ? <h4>{title}</h4> : null}
+            {description ? <p>{description}</p> : null}
+          </div>
+          {statusBadge || actions ? (
+            <div className="cc-surface-section-actions">
+              {statusBadge}
+              {actions}
+            </div>
+          ) : null}
+        </header>
+      ) : null}
+      <div className={cn("cc-surface-section-body", bodyClassName)}>{children}</div>
+    </section>
+  );
+}

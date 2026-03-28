@@ -1,3 +1,10 @@
+## Design System
+Always read DESIGN.md before making any visual or UI decisions.
+All font choices, colors, spacing, and aesthetic direction are defined there.
+Do not deviate without explicit user approval.
+In QA mode, flag any code that doesn't match DESIGN.md.
+
+
 ## 工作流编排
 
 ### 1. 计划节点默认行为
@@ -40,7 +47,7 @@
 
 ## 任务管理
 
-1. **先写计划**：将计划写入 `tasks/todo.md`，包含可勾选的条目
+1. **先写计划**：将计划写入 `tasks/todo.md`，包含可勾选的条目，如果 `todo.md` 超过300行，请先把当前的 `todo.md`  重命名增加日期后缀，备份到 `tasks/history/` 后新建 `todo.md`，并保留原todo文档中最新的20行
 2. **确认计划**：开始实施前进行检查确认
 3. **追踪进度**：完成后逐项标记
 4. **说明变更**：每步提供高层级摘要

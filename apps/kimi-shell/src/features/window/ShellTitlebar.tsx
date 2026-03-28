@@ -8,6 +8,7 @@ import {
   Minus,
   Monitor,
   RefreshCcw,
+  Sparkles,
   Square,
   TerminalSquare,
   X,
@@ -209,10 +210,12 @@ type ShellTitlebarProps = {
   tauriRuntime: boolean;
   isWindowMaximized: boolean;
   canOpenWorkspace: boolean;
+  sessionSkillCount: number;
   activeSessionWorkDir?: string;
   effectiveWorkDir?: string;
   onRetry: () => void;
   onBackToStatus: () => void;
+  onOpenSkillCenter: () => void;
   onOpenFolder: (path: string) => void;
   onToggleWorkspaceView: () => void;
   onToggleWorkspaceSplit: () => void;
@@ -238,10 +241,12 @@ export function ShellTitlebar({
   tauriRuntime,
   isWindowMaximized,
   canOpenWorkspace,
+  sessionSkillCount,
   activeSessionWorkDir,
   effectiveWorkDir,
   onRetry,
   onBackToStatus,
+  onOpenSkillCenter,
   onOpenFolder,
   onToggleWorkspaceView,
   onToggleWorkspaceSplit,
@@ -254,28 +259,29 @@ export function ShellTitlebar({
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
   const workspacePathDisplay = formatWorkspacePath(activeSessionWorkDir, effectiveWorkDir);
-  const canOpenEffectivePath = workspacePathDisplay.fullPath !== "-";
+  const sessionPath = activeSessionWorkDir?.trim() || "";
+  const canOpenSessionPath = sessionPath.length > 0;
   const viewToggleLabel =
     activeWorkspaceView === "code"
-      ? "Current: Kimi Code Web. Switch to Kimi Chat"
-      : "Current: Kimi Chat. Switch to Kimi Code Web";
+      ? "当前显示 Kimi Code Web，切换到 Kimi Chat"
+      : "当前显示 Kimi Chat，切换到 Kimi Code Web";
   const splitToggleLabel =
     workspaceLayoutMode === "split"
-      ? "Return to single-pane view"
-      : "Show code and chat side by side";
+      ? "切回单栏视图"
+      : "同时显示 Kimi Code Web 与 Kimi Chat";
   const swapSplitOrderLabel =
     workspaceSplitOrder === "code_left"
-      ? "Swap panes: move Kimi Chat to the left"
-      : "Swap panes: move Kimi Code Web to the left";
+      ? "切换分栏顺序，将 Kimi Chat 移到左侧"
+      : "切换分栏顺序，将 Kimi Code Web 移到左侧";
 
-  const handleTitlebarMouseDown = (event: MouseEvent<HTMLElement>) => {
+  const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
     if (event.button !== 0) return;
     if (!isTitlebarDragTarget(event.target)) return;
     onStartWindowDrag();
   };
 
-  const handleTitlebarDoubleClick = (event: MouseEvent<HTMLElement>) => {
+  const handleDragZoneDoubleClick = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
     if (event.button !== 0) return;
     if (!isTitlebarDragTarget(event.target)) return;
@@ -283,16 +289,12 @@ export function ShellTitlebar({
   };
 
   return (
-    <header
-      className="titlebar"
-      onMouseDown={handleTitlebarMouseDown}
-      onDoubleClick={handleTitlebarDoubleClick}
-    >
-      <div className="titlebar-actions">
+    <header className="titlebar">
+      <div className="titlebar-actions" data-no-drag="true">
         {screen === "control_center" && canOpenWorkspace ? (
           <IconButton
             icon={<Monitor size={14} />}
-            label="Back to workspace"
+            label="返回工作区"
             onClick={onBackToStatus}
             className="ghost mini titlebar-nav-btn"
           />
@@ -306,8 +308,8 @@ export function ShellTitlebar({
             className="icon-btn mini titlebar-retry-btn"
             onClick={onRetry}
             disabled={actionBusy}
-            aria-label="Retry backend startup"
-            title="Retry backend startup"
+            aria-label="重试后端启动"
+            title="重试后端启动"
           />
         ) : null}
         {screen === "workspace" && workspaceLayoutMode !== "split" ? (
@@ -324,6 +326,14 @@ export function ShellTitlebar({
             className={`ghost mini titlebar-workspace-toggle ${activeWorkspaceView === "chat" ? "is-chat" : "is-code"}`}
           />
         ) : null}
+        {screen === "workspace" ? (
+          <IconButton
+            icon={<Columns2 size={14} />}
+            label={splitToggleLabel}
+            onClick={onToggleWorkspaceSplit}
+            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
+          />
+        ) : null}
         {screen === "workspace" && workspaceLayoutMode === "split" ? (
           <IconButton
             icon={<ArrowLeftRight size={14} />}
@@ -333,26 +343,23 @@ export function ShellTitlebar({
           />
         ) : null}
         {screen === "workspace" ? (
-          <IconButton
-            icon={<Columns2 size={14} />}
-            label={splitToggleLabel}
-            onClick={onToggleWorkspaceSplit}
-            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
+          <ThemeToggle
+            className="icon-btn mini"
+            theme={themeMode}
+            onToggle={onToggleTheme}
           />
         ) : null}
-        <ThemeToggle
-          className="icon-btn mini"
-          theme={themeMode}
-          onToggle={onToggleTheme}
-        />
       </div>
 
       <div className={`titlebar-identity${screen === "workspace" ? " is-workspace" : ""}`}>
         {screen === "workspace" ? (
           <div className="titlebar-workspace-line">
-            <span className="titlebar-workspace-spacer" aria-hidden />
-            <div className="titlebar-drag titlebar-workspace-main">
-              <span>Workspace</span>
+            <div
+              className="titlebar-drag titlebar-workspace-main"
+              onMouseDown={handleDragZoneMouseDown}
+              onDoubleClick={handleDragZoneDoubleClick}
+            >
+              <span>工作区</span>
               <span className="titlebar-workspace-divider" aria-hidden>
                 |
               </span>
@@ -371,44 +378,76 @@ export function ShellTitlebar({
                 </span>
               </span>
             </div>
-            <IconButton
-              icon={<FolderOpen size={14} />}
-              label="Open current workspace path"
-              onClick={() => onOpenFolder(workspacePathDisplay.fullPath)}
-              className="ghost mini titlebar-path-btn"
-              disabled={!canOpenEffectivePath}
-            />
           </div>
         ) : (
-          <div className="titlebar-drag titlebar-status-wrap">
+          <div
+            className="titlebar-drag titlebar-status-wrap"
+            onMouseDown={handleDragZoneMouseDown}
+            onDoubleClick={handleDragZoneDoubleClick}
+          >
             <KimiCliBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
-              {shellScreenLabel} | State: {statusText}
+              {shellScreenLabel} | 状态：{statusText}
             </span>
           </div>
         )}
       </div>
 
       {tauriRuntime && (
-        <div className="titlebar-window-controls">
-          <IconButton
-            icon={<Minus size={14} />}
-            label="Minimize window"
-            onClick={onMinimizeWindow}
-            className="window-control-btn"
-          />
-          <IconButton
-            icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
-            label={isWindowMaximized ? "Restore window" : "Maximize window"}
-            onClick={onToggleMaximizeWindow}
-            className="window-control-btn"
-          />
-          <IconButton
-            icon={<X size={14} />}
-            label="Close window"
-            onClick={onCloseWindow}
-            className="window-control-btn close"
-          />
+        <div className="titlebar-right" data-no-drag="true">
+          <div className="titlebar-utility-actions" data-no-drag="true">
+            {screen !== "workspace" ? (
+              <ThemeToggle
+                className="icon-btn mini"
+                theme={themeMode}
+                onToggle={onToggleTheme}
+              />
+            ) : null}
+            {screen === "workspace" ? (
+              <>
+                <IconButton
+                  icon={<FolderOpen size={14} />}
+                  label="打开当前会话目录"
+                  onClick={() => onOpenFolder(sessionPath)}
+                  className="ghost mini titlebar-path-btn"
+                  disabled={!canOpenSessionPath}
+                />
+                <button
+                  type="button"
+                  className="titlebar-skill-btn"
+                  onClick={onOpenSkillCenter}
+                  aria-label="打开技能中心"
+                  title="打开技能中心"
+                >
+                  <Sparkles size={14} />
+                  <span>技能</span>
+                  {sessionSkillCount > 0 ? (
+                    <span className="titlebar-skill-badge">{sessionSkillCount}</span>
+                  ) : null}
+                </button>
+              </>
+            ) : null}
+          </div>
+          <div className="titlebar-window-controls" data-no-drag="true">
+            <IconButton
+              icon={<Minus size={14} />}
+              label="最小化窗口"
+              onClick={onMinimizeWindow}
+              className="window-control-btn"
+            />
+            <IconButton
+              icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
+              label={isWindowMaximized ? "还原窗口" : "最大化窗口"}
+              onClick={onToggleMaximizeWindow}
+              className="window-control-btn"
+            />
+            <IconButton
+              icon={<X size={14} />}
+              label="关闭窗口"
+              onClick={onCloseWindow}
+              className="window-control-btn close"
+            />
+          </div>
         </div>
       )}
     </header>

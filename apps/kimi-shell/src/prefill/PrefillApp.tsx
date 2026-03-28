@@ -235,10 +235,10 @@ export function PrefillApp() {
   const isStartupFailed = statusState === "startup_failed";
   const statusHeadline =
     statusState === "opening_main"
-      ? "Opening main window..."
-      : statusDetail ?? "Waiting for backend startup to finish...";
+      ? "正在打开主窗口…"
+      : statusDetail ?? "正在等待后端启动完成…";
   const failureDetail =
-    statusDetail ?? "Backend startup timed out. Please retry or inspect the logs.";
+    statusDetail ?? "后端启动超时。请先重试；如果仍失败，再打开日志继续排查。";
   const effectiveWorkDir = appStatus?.effectiveWorkDir?.trim() || "-";
 
   return (
@@ -266,7 +266,7 @@ export function PrefillApp() {
           <div className="titlebar-window-controls">
             <IconButton
               icon={<X size={14} />}
-              label="Close window"
+              label="关闭窗口"
               onClick={() => {
                 void handleCloseWindow();
               }}
@@ -279,42 +279,47 @@ export function PrefillApp() {
       <section className={`prefill-stage${isStartupFailed ? " is-failed" : ""}`}>
         {!isStartupFailed ? (
           <>
-            <article className="prefill-tip-card prefill-tip-card-hero">
-              <div className="prefill-tip-meta">
-                <span className="prefill-tip-badge">随机提示</span>
-                <span className="prefill-tip-number">{selectedTip.numberLabel}</span>
+            <div className="prefill-status-panel prefill-status-panel-primary" role="status" aria-live="polite">
+              <div className="prefill-status-head">
+                <div className="prefill-failure-badge">启动中</div>
+                <p className="prefill-status-title">正在准备 Kimi App 工作区</p>
+                <p className="prefill-status-detail">{statusHeadline}</p>
               </div>
-              <h1 className="prefill-tip-title">{selectedTip.title}</h1>
-              <p className="prefill-tip-body">{selectedTip.body}</p>
-            </article>
-
-            <div className="prefill-status-panel" role="status" aria-live="polite">
               <div className="prefill-status-strip">
                 <div className="prefill-status-headline">
                   <div className="spinner" aria-hidden />
-                  <span>{statusHeadline}</span>
+                  <span>启动状态会在这里持续更新</span>
                 </div>
 
                 <div className="prefill-status-chips" aria-label="Startup details">
                   <div className="prefill-status-chip">
-                    <span className="prefill-status-chip-label">Elapsed</span>
+                    <span className="prefill-status-chip-label">已耗时</span>
                     <strong>{formatElapsed(monitorStatus?.elapsedMs)}</strong>
                   </div>
                   <div className="prefill-status-chip">
-                    <span className="prefill-status-chip-label">Backend</span>
+                    <span className="prefill-status-chip-label">后端</span>
                     <strong>{monitorStatus?.backendState ?? "starting"}</strong>
                   </div>
                   <div className="prefill-status-chip">
-                    <span className="prefill-status-chip-label">Route</span>
+                    <span className="prefill-status-chip-label">目标界面</span>
                     <strong>{monitorStatus?.targetRoute ?? "-"}</strong>
                   </div>
                 </div>
               </div>
               <p className="prefill-status-meta" title={effectiveWorkDir}>
-                Effective directory: <strong>{effectiveWorkDir}</strong>
+                当前工作目录：<strong>{effectiveWorkDir}</strong>
               </p>
               {error ? <p className="prefill-error">{error}</p> : null}
             </div>
+
+            <article className="prefill-tip-card prefill-tip-card-secondary">
+              <div className="prefill-tip-meta">
+                <span className="prefill-tip-badge">启动提示</span>
+                <span className="prefill-tip-number">{selectedTip.numberLabel}</span>
+              </div>
+              <h2 className="prefill-tip-title">{selectedTip.title}</h2>
+              <p className="prefill-tip-body">{selectedTip.body}</p>
+            </article>
           </>
         ) : (
           <>
@@ -351,13 +356,13 @@ export function PrefillApp() {
                 </Button>
               </div>
               <p className="prefill-status-meta" title={effectiveWorkDir}>
-                Effective directory: <strong>{effectiveWorkDir}</strong>
+                当前工作目录：<strong>{effectiveWorkDir}</strong>
               </p>
             </div>
 
             <article className="prefill-tip-card prefill-tip-card-secondary">
               <div className="prefill-tip-meta">
-                <span className="prefill-tip-badge">今日提示</span>
+                <span className="prefill-tip-badge">补充提示</span>
                 <span className="prefill-tip-number">{selectedTip.numberLabel}</span>
               </div>
               <h2 className="prefill-tip-title">{selectedTip.title}</h2>

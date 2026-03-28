@@ -13,7 +13,6 @@ import type {
   WorkspaceSplitOrder,
   WorkspaceViewKind,
 } from "@/app/types";
-import { IconButton } from "@/components/common/IconButton";
 import { Button } from "@/components/ui/button";
 
 type WorkspaceViewProps = {
@@ -219,19 +218,27 @@ export function WorkspaceView({
           {codePaneState === "loading" && (
             <div className="workspace-overlay">
               <div className="spinner" aria-hidden />
-              <p className="status-line">Loading Kimi Code Web...</p>
+              <p className="status-line">正在加载 Kimi Code Web…</p>
             </div>
           )}
 
           {codePaneState === "blocked" && (
             <div className="workspace-overlay">
               <div className="workspace-fallback">
-                <h3>Embedded code view is unavailable</h3>
+                <h3>Kimi Code Web 暂时无法在应用内显示</h3>
                 <p>
-                  Kimi Code Web could not finish loading inside the app. You can
-                  retry, open logs, or launch it in your browser.
+                  当前嵌入页面没有完成加载。先重试当前视图；如果问题持续，再查看日志或改用浏览器打开。
                 </p>
                 <div className="workspace-fallback-actions">
+                  <Button
+                    type="button"
+                    icon={<RefreshCcw size={14} />}
+                    className="cc-action-btn"
+                    onClick={onRetry}
+                    disabled={actionBusy}
+                  >
+                    重试加载
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -239,7 +246,16 @@ export function WorkspaceView({
                     className="cc-action-btn cc-doc-btn"
                     onClick={() => onOpenExternalUrl(codeRemoteUrl)}
                   >
-                    Open in Browser
+                    在浏览器打开
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<FolderOpen size={14} />}
+                    className="cc-action-btn"
+                    onClick={onOpenLogs}
+                  >
+                    打开日志目录
                   </Button>
                 </div>
               </div>
@@ -248,20 +264,29 @@ export function WorkspaceView({
         </div>
       ) : (
         <div className="workspace-empty">
-          <p className="hint">Workspace URL is unavailable. Restart backend to retry.</p>
-          <div className="actions">
-            <IconButton
-              icon={<RefreshCcw size={15} />}
-              label="Restart Backend"
+          <div className="workspace-empty-copy">
+            <h3>工作区尚未准备完成</h3>
+            <p>当前没有可用的工作区地址。优先重试后端启动；如果依然没有恢复，再打开日志目录继续排查。</p>
+          </div>
+          <div className="workspace-empty-actions">
+            <Button
+              type="button"
+              icon={<RefreshCcw size={14} />}
+              className="cc-action-btn"
               onClick={onRetry}
               disabled={actionBusy}
-            />
-            <IconButton
-              icon={<FolderOpen size={15} />}
-              label="Open Logs Folder"
+            >
+              重试后端启动
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<FolderOpen size={14} />}
+              className="cc-action-btn"
               onClick={onOpenLogs}
-              className="ghost"
-            />
+            >
+              打开日志目录
+            </Button>
           </div>
         </div>
       )}
@@ -283,20 +308,27 @@ export function WorkspaceView({
         {chatPaneState === "loading" && (
           <div className="workspace-overlay">
             <div className="spinner" aria-hidden />
-            <p className="status-line">Loading Kimi Chat...</p>
+            <p className="status-line">正在加载 Kimi Chat…</p>
           </div>
         )}
 
         {chatPaneState === "blocked" && (
           <div className="workspace-overlay">
             <div className="workspace-fallback">
-              <h3>Kimi Chat cannot be embedded right now</h3>
+              <h3>Kimi Chat 暂时无法在应用内显示</h3>
               <p>
-                The remote site did not finish rendering inside the app. You can
-                continue using Kimi Code Web here or open Kimi Chat in your
-                browser.
+                当前聊天页没有完成渲染。先重试当前视图；如果问题持续，可以改用浏览器打开，或先继续使用 Kimi Code Web。
               </p>
               <div className="workspace-fallback-actions">
+                <Button
+                  type="button"
+                  icon={<RefreshCcw size={14} />}
+                  className="cc-action-btn"
+                  onClick={onRetry}
+                  disabled={actionBusy}
+                >
+                  重试加载
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
@@ -304,7 +336,7 @@ export function WorkspaceView({
                   className="cc-action-btn cc-doc-btn"
                   onClick={() => onOpenExternalUrl(chatRemoteUrl)}
                 >
-                  Open in Browser
+                  在浏览器打开
                 </Button>
               </div>
             </div>

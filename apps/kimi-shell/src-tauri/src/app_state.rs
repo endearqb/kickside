@@ -8,11 +8,14 @@ use std::{
 
 use anyhow::Context;
 use fs2::FileExt;
+use rand::{distributions::Alphanumeric, Rng};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    BackendState, LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
+    BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
+    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase,
+    WeixinConnectorOnboardingState, WebviewRuntimeKind,
 };
 
 #[derive(Debug, Clone)]
@@ -116,10 +119,97 @@ impl Default for RuntimeState {
     }
 }
 
+#[derive(Debug)]
+pub struct BridgeProcessState {
+    pub state: BridgeRuntimeState,
+    pub admin_port: u16,
+    pub admin_token: String,
+    pub child: Option<Child>,
+    pub pid: Option<u32>,
+    pub binary_path: Option<PathBuf>,
+    pub started_at: Option<String>,
+    pub version: Option<String>,
+    pub last_error_code: Option<String>,
+    pub last_error: Option<String>,
+    pub channels: Vec<BridgeChannelStatus>,
+    pub bindings: usize,
+    pub pending_approvals: usize,
+}
+
+impl BridgeProcessState {
+    pub fn new(admin_token: String) -> Self {
+        Self {
+            state: BridgeRuntimeState::Stopped,
+            admin_port: 60_110,
+            admin_token,
+            child: None,
+            pid: None,
+            binary_path: None,
+            started_at: None,
+            version: None,
+            last_error_code: None,
+            last_error: None,
+            channels: Vec::new(),
+            bindings: 0,
+            pending_approvals: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FeishuOnboardingRuntimeState {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: FeishuConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub expires_at_ms: Option<u64>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub scanner_open_id: Option<String>,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub app_id_masked: Option<String>,
+    pub last_configured_at: Option<String>,
+    pub device_code: String,
+    pub poll_base_url: String,
+    pub poll_interval_secs: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct WeixinOnboardingRuntimeState {
+    pub session_id: String,
+    pub connector_id: String,
+    pub state: WeixinConnectorOnboardingState,
+    pub started_at: String,
+    pub expires_at: Option<String>,
+    pub expires_at_ms: Option<u64>,
+    pub completed_at: Option<String>,
+    pub verification_url: Option<String>,
+    pub qr_svg: Option<String>,
+    pub qrcode: String,
+    pub detail_message: Option<String>,
+    pub error_message: Option<String>,
+    pub account_id: Option<String>,
+    pub owner_user_id: Option<String>,
+    pub last_configured_at: Option<String>,
+    pub api_base_url: String,
+    pub refresh_count: u32,
+}
+
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
+    pub bridge_runtime: Mutex<BridgeProcessState>,
+    pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
+    pub weixin_onboarding: Mutex<Option<WeixinOnboardingRuntimeState>>,
+    pub bridge_host_control_port: Mutex<Option<u16>>,
     pub settings_path: PathBuf,
+    pub bridge_settings_path: PathBuf,
+    pub bridge_secrets_path: PathBuf,
+    pub bridge_db_path: PathBuf,
     pub logs_dir: PathBuf,
+    pub bridge_log_path: PathBuf,
     pub instance_id: String,
     pub pid: u32,
     pub started_at: String,
@@ -157,11 +247,20 @@ impl AppState {
 
         let (hotkey_owner, hotkey_lock_file) =
             try_acquire_hotkey_lock(config_dir.join("hotkey_owner.lock"))?;
+        let bridge_admin_token = generate_bridge_admin_token();
 
         Ok(Self {
             runtime: Mutex::new(RuntimeState::default()),
+            bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
+            feishu_onboarding: Mutex::new(None),
+            weixin_onboarding: Mutex::new(None),
+            bridge_host_control_port: Mutex::new(None),
             settings_path: config_dir.join("settings.json"),
-            logs_dir,
+            bridge_settings_path: config_dir.join("bridge_settings.json"),
+            bridge_secrets_path: config_dir.join("bridge_secrets.json"),
+            bridge_db_path: config_dir.join("bridge.db"),
+            logs_dir: logs_dir.clone(),
+            bridge_log_path: logs_dir.join("bridge.log"),
             instance_id,
             pid,
             started_at,
@@ -190,4 +289,12 @@ fn try_acquire_hotkey_lock(lock_path: PathBuf) -> anyhow::Result<(bool, Option<F
         Ok(_) => Ok((true, Some(lock_file))),
         Err(_) => Ok((false, None)),
     }
+}
+
+fn generate_bridge_admin_token() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(40)
+        .map(char::from)
+        .collect()
 }

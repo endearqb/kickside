@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -16,7 +17,7 @@ use crate::{
     bridge_host_control,
     bridge_http_client::{BindingUpdateInput, BridgeHttpClient},
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
-    log_manager,
+    log_manager, settings_store,
     types::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
         BridgeChannelStatus, BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView,
@@ -32,9 +33,18 @@ const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(120);
 const BUNDLED_BRIDGE_OPS_DIR_NAME: &str = "bridge-ops";
 const BRIDGE_SKILLS_DIR_SEGMENT: &str = ".agents";
 const BRIDGE_SKILLS_SUBDIR_SEGMENT: &str = "skills";
+const BRIDGE_START_BIND_RETRY_LIMIT: usize = 1;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[derive(Debug, Clone)]
+struct ResolvedBridgeAdminPort {
+    configured_port: u16,
+    launch_port: u16,
+    explicit_override: bool,
+    fallback_reason: Option<String>,
+}
 
 pub fn get_bridge_status(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     refresh_child_state(app)?;
@@ -138,84 +148,53 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
         runtime.admin_token.clone()
     };
 
-    let mut command = build_bridge_command(app, &binary_path, &settings, &admin_token)?;
-    {
-        let state = app.state::<AppState>();
+    let resolved_port = resolve_bridge_admin_port(app, &settings)?;
+    if let Some(reason) = resolved_port.fallback_reason.as_deref() {
         log_manager::append_line(
             app,
             format!(
-                "bridge spawn command prepared: binary={}, config={}, secrets={}, db={}, admin_port={}",
-                binary_path.display(),
-                state.bridge_settings_path.display(),
-                state.bridge_secrets_path.display(),
-                state.bridge_db_path.display(),
-                settings.admin_port
+                "bridge admin port fallback selected: configured_port={}, launch_port={}, reason={reason}",
+                resolved_port.configured_port, resolved_port.launch_port
+            ),
+        );
+    } else if !resolved_port.explicit_override {
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge admin port auto-selected at startup: launch_port={}",
+                resolved_port.launch_port
             ),
         );
     }
-    let child = command.spawn().with_context(|| {
-        format!(
-            "failed to spawn bridge sidecar: {}",
-            binary_path.to_string_lossy()
-        )
-    })?;
-    let pid = child.id();
 
-    {
-        let mut runtime = state
-            .bridge_runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
-        begin_start_transition(&mut runtime, settings.admin_port, binary_path, pid);
-        runtime.child = Some(child);
-        runtime.channels = settings_channels(&settings, BridgeRuntimeState::Starting);
-    }
+    let mut effective_settings = settings.clone();
+    effective_settings.admin_port = resolved_port.launch_port;
 
-    log_manager::append_line(
-        app,
-        format!(
-            "bridge start requested (pid={pid}, admin_port={})",
-            settings.admin_port
-        ),
-    );
+    let mut attempts = 0usize;
+    loop {
+        match start_bridge_once(app, &binary_path, &effective_settings, &admin_token) {
+            Ok(status) => return Ok(status),
+            Err(error) => {
+                let should_retry = is_bridge_admin_port_bind_failure(&error.to_string())
+                    && attempts < BRIDGE_START_BIND_RETRY_LIMIT;
+                if !should_retry {
+                    return Err(error);
+                }
 
-    let client = BridgeHttpClient::for_local_admin_port(settings.admin_port, admin_token)?;
-    if let Err(error) = wait_for_bridge_ready(app, &client) {
-        cleanup_failed_start(app, error.to_string())?;
-        return Err(error);
-    }
-    let status = match wait_for_bridge_status(app, &client) {
-        Ok(status) => status,
-        Err(error) => {
-            if let Some(status) =
-                recover_start_after_status_probe_failure(app, &settings, &client, &error)?
-            {
-                return Ok(status);
+                attempts += 1;
+                let previous_port = effective_settings.admin_port;
+                let retry_port = select_ephemeral_local_port(Some(previous_port))?;
+                log_manager::append_line(
+                    app,
+                    format!(
+                        "bridge admin port bind failed during startup; retrying with a new port (attempt={}, previous_port={}, next_port={})",
+                        attempts, previous_port, retry_port
+                    ),
+                );
+                effective_settings.admin_port = retry_port;
             }
-            cleanup_failed_start(app, error.to_string())?;
-            return Err(error);
         }
-    };
-    apply_status_snapshot(app, &status)?;
-    let rotated_count = rotate_binding_sessions_on_bridge_start(app, &settings, &client)?;
-    if rotated_count > 0 {
-        log_manager::append_line(
-            app,
-            format!(
-                "bridge session rotation completed on start (bindings_rotated={rotated_count})"
-            ),
-        );
     }
-    log_manager::append_line(
-        app,
-        format!(
-            "bridge ready (pid={}, state={:?}, bindings={})",
-            status.pid.unwrap_or(pid),
-            status.state,
-            status.bindings
-        ),
-    );
-    Ok(status)
 }
 
 pub fn stop_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
@@ -619,6 +598,161 @@ pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSec
             owner_user_id: secrets.weixin.owner_user_id,
         },
     })
+}
+
+fn start_bridge_once(
+    app: &AppHandle,
+    binary_path: &Path,
+    settings: &BridgeSettings,
+    admin_token: &str,
+) -> anyhow::Result<BridgeStatus> {
+    let state = app.state::<AppState>();
+    let mut command = build_bridge_command(app, binary_path, settings, admin_token)?;
+    log_manager::append_line(
+        app,
+        format!(
+            "bridge spawn command prepared: binary={}, config={}, secrets={}, db={}, admin_port={}",
+            binary_path.display(),
+            state.bridge_settings_path.display(),
+            state.bridge_secrets_path.display(),
+            state.bridge_db_path.display(),
+            settings.admin_port
+        ),
+    );
+    let child = command.spawn().with_context(|| {
+        format!(
+            "failed to spawn bridge sidecar: {}",
+            binary_path.to_string_lossy()
+        )
+    })?;
+    let pid = child.id();
+
+    {
+        let mut runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        begin_start_transition(
+            &mut runtime,
+            settings.admin_port,
+            binary_path.to_path_buf(),
+            pid,
+        );
+        runtime.child = Some(child);
+        runtime.channels = settings_channels(settings, BridgeRuntimeState::Starting);
+    }
+
+    log_manager::append_line(
+        app,
+        format!(
+            "bridge start requested (pid={pid}, admin_port={})",
+            settings.admin_port
+        ),
+    );
+
+    let client = BridgeHttpClient::for_local_admin_port(settings.admin_port, admin_token)?;
+    if let Err(error) = wait_for_bridge_ready(app, &client) {
+        cleanup_failed_start(app, error.to_string())?;
+        return Err(error);
+    }
+    let status = match wait_for_bridge_status(app, &client) {
+        Ok(status) => status,
+        Err(error) => {
+            if let Some(status) =
+                recover_start_after_status_probe_failure(app, settings, &client, &error)?
+            {
+                return Ok(status);
+            }
+            cleanup_failed_start(app, error.to_string())?;
+            return Err(error);
+        }
+    };
+    apply_status_snapshot(app, &status)?;
+    let rotated_count = rotate_binding_sessions_on_bridge_start(app, settings, &client)?;
+    if rotated_count > 0 {
+        log_manager::append_line(
+            app,
+            format!(
+                "bridge session rotation completed on start (bindings_rotated={rotated_count})"
+            ),
+        );
+    }
+    log_manager::append_line(
+        app,
+        format!(
+            "bridge ready (pid={}, state={:?}, bindings={})",
+            status.pid.unwrap_or(pid),
+            status.state,
+            status.bindings
+        ),
+    );
+    Ok(status)
+}
+
+fn resolve_bridge_admin_port(
+    app: &AppHandle,
+    settings: &BridgeSettings,
+) -> anyhow::Result<ResolvedBridgeAdminPort> {
+    let app_settings = settings_store::load_or_default(app)?;
+    let configured_port = if settings.admin_port == 0 {
+        DEFAULT_BRIDGE_ADMIN_PORT
+    } else {
+        settings.admin_port
+    };
+    let explicit_override = app_settings.bridge_admin_port_override.is_some()
+        || configured_port != DEFAULT_BRIDGE_ADMIN_PORT;
+
+    if !explicit_override {
+        return Ok(ResolvedBridgeAdminPort {
+            configured_port,
+            launch_port: select_ephemeral_local_port(None)?,
+            explicit_override,
+            fallback_reason: None,
+        });
+    }
+
+    match probe_local_port(configured_port) {
+        Ok(()) => Ok(ResolvedBridgeAdminPort {
+            configured_port,
+            launch_port: configured_port,
+            explicit_override,
+            fallback_reason: None,
+        }),
+        Err(error) => Ok(ResolvedBridgeAdminPort {
+            configured_port,
+            launch_port: select_ephemeral_local_port(Some(configured_port))?,
+            explicit_override,
+            fallback_reason: Some(error),
+        }),
+    }
+}
+
+fn probe_local_port(port: u16) -> Result<(), String> {
+    TcpListener::bind(("127.0.0.1", port))
+        .map(|listener| drop(listener))
+        .map_err(|error| {
+            format!(
+                "requested admin port {port} is unavailable: {}",
+                describe_bridge_bind_failure(&error.to_string())
+            )
+        })
+}
+
+fn select_ephemeral_local_port(exclude: Option<u16>) -> anyhow::Result<u16> {
+    for _ in 0..16 {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .context("failed to bind an ephemeral localhost port for bridge admin")?;
+        let port = listener
+            .local_addr()
+            .context("failed to read ephemeral bridge admin port")?
+            .port();
+        drop(listener);
+        if exclude != Some(port) {
+            return Ok(port);
+        }
+    }
+
+    anyhow::bail!("failed to choose a distinct ephemeral bridge admin port")
 }
 
 fn build_bridge_command(
@@ -1330,10 +1464,42 @@ fn enrich_bridge_failure_message(app: &AppHandle, message: &str) -> String {
         .rev()
         .find(|line| !line.trim().is_empty())
         .unwrap_or_default();
-    if relevant.is_empty() {
-        return message.to_string();
+    let mut enriched = if relevant.is_empty() {
+        message.to_string()
+    } else {
+        format!("{message}; recent bridge log: {relevant}")
+    };
+    if let Some(hint) = bridge_bind_failure_hint(&enriched) {
+        enriched.push_str("; hint: ");
+        enriched.push_str(hint);
     }
-    format!("{message}; recent bridge log: {relevant}")
+    enriched
+}
+
+fn is_bridge_admin_port_bind_failure(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    (normalized.contains("listen tcp") || normalized.contains("address already in use"))
+        && (normalized.contains("bind:")
+            || normalized.contains("access permissions")
+            || normalized.contains("forbidden by its access permissions")
+            || normalized.contains("only one usage of each socket address"))
+}
+
+fn bridge_bind_failure_hint(message: &str) -> Option<&'static str> {
+    if !is_bridge_admin_port_bind_failure(message) {
+        return None;
+    }
+    Some(
+        "bridge admin port bind failed; on Windows this is often caused by an excluded port range created by Docker Desktop, WSL2, or Hyper-V. The shell will try a fallback port automatically.",
+    )
+}
+
+fn describe_bridge_bind_failure(message: &str) -> String {
+    let trimmed = message.trim();
+    if let Some(hint) = bridge_bind_failure_hint(trimmed) {
+        return format!("{trimmed}; {hint}");
+    }
+    trimmed.to_string()
 }
 
 fn begin_start_transition(
@@ -1729,6 +1895,41 @@ mod tests {
         finish_stop_transition(&mut runtime);
         assert_eq!(runtime.state, BridgeRuntimeState::Stopped);
         assert_eq!(runtime.pid, None);
+    }
+
+    #[test]
+    fn bridge_bind_failure_detection_matches_windows_socket_permission_error() {
+        let message = "bridge startup phase=start error=listen tcp 127.0.0.1:60110: bind: An attempt was made to access a socket in a way forbidden by its access permissions.";
+        assert!(is_bridge_admin_port_bind_failure(message));
+        let described = describe_bridge_bind_failure(message);
+        assert!(described.contains("excluded port range"));
+        assert!(described.contains("Docker Desktop"));
+    }
+
+    #[test]
+    fn probe_local_port_reports_bound_listener_as_unavailable() {
+        let listener =
+            TcpListener::bind(("127.0.0.1", 0)).expect("listener should bind to an ephemeral port");
+        let port = listener
+            .local_addr()
+            .expect("listener addr should be available")
+            .port();
+
+        let error = probe_local_port(port).expect_err("probe should fail while port is in use");
+        assert!(error.contains(&port.to_string()));
+    }
+
+    #[test]
+    fn select_ephemeral_local_port_avoids_excluded_candidate() {
+        let listener =
+            TcpListener::bind(("127.0.0.1", 0)).expect("listener should bind to an ephemeral port");
+        let port = listener
+            .local_addr()
+            .expect("listener addr should be available")
+            .port();
+
+        let selected = select_ephemeral_local_port(Some(port)).expect("ephemeral port should bind");
+        assert_ne!(selected, port);
     }
 
     #[test]

@@ -6,8 +6,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, WeixinOnboardingRuntimeState},
-    bridge_manager, bridge_settings_store,
-    onboarding_http,
+    bridge_manager, bridge_settings_store, onboarding_http,
     types::{
         BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
         BridgeTelegramSecrets, BridgeWeixinSecrets, StartWeixinConnectorOnboardingInput,
@@ -58,7 +57,10 @@ pub fn start(
         verification_url: Some(qr.qrcode_img_content.clone()),
         qr_svg: Some(qr_svg),
         qrcode: qr.qrcode,
-        detail_message: Some(format!("请使用微信扫码完成 {} 的登录授权。", connector.label)),
+        detail_message: Some(format!(
+            "请使用微信扫码完成 {} 的登录授权。",
+            connector.label
+        )),
         error_message: None,
         account_id: None,
         owner_user_id: None,
@@ -147,7 +149,8 @@ pub fn get_status(
             current.qrcode = refreshed.qrcode;
             current.verification_url = Some(refreshed.qrcode_img_content.clone());
             current.qr_svg = Some(render_qr_svg(&refreshed.qrcode_img_content)?);
-            current.expires_at_ms = Some(unix_time_millis().saturating_add(DEFAULT_EXPIRE_IN_SECS * 1000));
+            current.expires_at_ms =
+                Some(unix_time_millis().saturating_add(DEFAULT_EXPIRE_IN_SECS * 1000));
             current.expires_at = current.expires_at_ms.map(rfc3339_from_unix_ms);
             current.error_message = None;
             current.detail_message = Some(format!(
@@ -169,7 +172,10 @@ pub fn get_status(
                 app,
                 current.connector_id.as_str(),
                 bot_token.as_str(),
-                status.baseurl.as_deref().unwrap_or(current.api_base_url.as_str()),
+                status
+                    .baseurl
+                    .as_deref()
+                    .unwrap_or(current.api_base_url.as_str()),
                 account_id.as_str(),
                 status.ilink_user_id.as_deref().unwrap_or(""),
             )?;
@@ -393,11 +399,11 @@ impl WeixinLoginClient {
             self.app.as_ref(),
             "weixin",
             "qr_code",
-            format!("{}/ilink/bot/get_bot_qrcode?bot_type={}", self.base_url, bot_type),
-            vec![(
-                "iLink-App-ClientVersion".to_string(),
-                "1".to_string(),
-            )],
+            format!(
+                "{}/ilink/bot/get_bot_qrcode?bot_type={}",
+                self.base_url, bot_type
+            ),
+            vec![("iLink-App-ClientVersion".to_string(), "1".to_string())],
             std::time::Duration::from_secs(20),
         )
         .context("failed to fetch weixin qr code")
@@ -408,11 +414,11 @@ impl WeixinLoginClient {
             self.app.as_ref(),
             "weixin",
             "qr_status",
-            format!("{}/ilink/bot/get_qrcode_status?qrcode={}", self.base_url, qrcode),
-            vec![(
-                "iLink-App-ClientVersion".to_string(),
-                "1".to_string(),
-            )],
+            format!(
+                "{}/ilink/bot/get_qrcode_status?qrcode={}",
+                self.base_url, qrcode
+            ),
+            vec![("iLink-App-ClientVersion".to_string(), "1".to_string())],
             std::time::Duration::from_secs(20),
         )
         .context("failed to poll weixin qr status")

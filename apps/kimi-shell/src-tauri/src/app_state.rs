@@ -13,9 +13,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::types::{
     BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
-    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase,
-    WeixinConnectorOnboardingState, WebviewRuntimeKind,
+    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
 };
 
 #[derive(Debug, Clone)]

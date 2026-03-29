@@ -12,7 +12,7 @@ use crate::{command_utils, log_manager};
 
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_RESPONSE_SNIPPET_LIMIT: usize = 240;
-const ONBOARDING_HTTP_USER_AGENT: &str = "KimiDesktopShell/0.0.32 (onboarding-http)";
+const ONBOARDING_HTTP_USER_AGENT: &str = "KimiDesktopShell/0.0.33 (onboarding-http)";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HttpRequestMethod {
@@ -116,7 +116,11 @@ where
     T: DeserializeOwned,
 {
     let form_body = url::form_urlencoded::Serializer::new(String::new())
-        .extend_pairs(form_pairs.iter().map(|(key, value)| (key.as_str(), value.as_str())))
+        .extend_pairs(
+            form_pairs
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        )
         .finish();
     let response = execute_request(
         app,
@@ -215,7 +219,10 @@ fn execute_request(
     }
 }
 
-fn send_via_reqwest(client: &Client, request: &HttpRequestSpec) -> Result<RawHttpResponse, TransportFailure> {
+fn send_via_reqwest(
+    client: &Client,
+    request: &HttpRequestSpec,
+) -> Result<RawHttpResponse, TransportFailure> {
     let mut builder = match request.method {
         HttpRequestMethod::Get => client.get(&request.url),
         HttpRequestMethod::PostForm => client
@@ -230,7 +237,9 @@ fn send_via_reqwest(client: &Client, request: &HttpRequestSpec) -> Result<RawHtt
         .send()
         .map_err(|error| classify_reqwest_transport_failure(&error))?;
     let status = response.status().as_u16();
-    let body = response.text().map_err(|error| classify_reqwest_transport_failure(&error))?;
+    let body = response
+        .text()
+        .map_err(|error| classify_reqwest_transport_failure(&error))?;
     Ok(RawHttpResponse {
         source: HttpResponseSource::Reqwest,
         status,
@@ -279,11 +288,14 @@ fn classify_reqwest_transport_failure(error: &reqwest::Error) -> TransportFailur
     let lower = message.to_ascii_lowercase();
     let kind = if error.is_timeout() || lower.contains("timed out") {
         TransportFailureKind::Timeout
-    } else if error.is_connect() && (lower.contains("dns") || lower.contains("name or service not known")) {
+    } else if error.is_connect()
+        && (lower.contains("dns") || lower.contains("name or service not known"))
+    {
         TransportFailureKind::Dns
     } else if lower.contains("dns") || lower.contains("no such host") {
         TransportFailureKind::Dns
-    } else if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake") {
+    } else if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake")
+    {
         TransportFailureKind::Tls
     } else if lower.contains("connection reset") || lower.contains("forcibly closed") {
         TransportFailureKind::ConnectionReset
@@ -411,10 +423,9 @@ catch {
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if !stdout.is_empty() {
-        let fallback: PowerShellResponse =
-            serde_json::from_str(&stdout).with_context(|| {
-                format!("failed to parse windows native onboarding payload: {stdout}")
-            })?;
+        let fallback: PowerShellResponse = serde_json::from_str(&stdout).with_context(|| {
+            format!("failed to parse windows native onboarding payload: {stdout}")
+        })?;
         if let Some(status) = fallback.status {
             return Ok(RawHttpResponse {
                 source: HttpResponseSource::WindowsNative,

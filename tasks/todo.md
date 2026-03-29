@@ -1,5 +1,20 @@
 # 控制中心双栏与控件语言统一改造
 
+## 0.0.32 Release
+- [x] 核对 `0.0.32` 版本号、现有 release notes 模板与本轮主变更
+- [x] 定位目录内已构建完成的 `0.0.32` 安装包与实际文件名
+- [x] 编写 `apps/kimi-shell/docs/release-notes-0.0.32.md`
+- [x] 创建或更新 GitHub Release `v0.0.32`，并上传本地安装包
+- [x] 验证 release 页面中的文案与附件已正确发布
+
+### Review
+- Release notes 已写入 `apps/kimi-shell/docs/release-notes-0.0.32.md`，并以该文件作为 GitHub Release 正文发布。
+- 已上传安装包：
+  - `Kimi.Desktop.Shell_0.0.32_x64-setup.exe`
+  - `Kimi.Desktop.Shell_0.0.32_x64_en-US.msi`
+- 发布地址：`https://github.com/endearqb/kimi-app/releases/tag/v0.0.32`
+- 验证结果：`gh release view v0.0.32` 确认 release 已发布，正文正确，两个附件状态均为 `uploaded`。
+
 ## Checklist
 - [x] 阅读 `DESIGN.md`、`tasks/lessons.md`，确认控制中心现状与注意事项
 - [x] 检查工作区脏文件边界，避免覆盖用户在 `tasks/` 下的历史整理
@@ -63,6 +78,37 @@
 ### Checklist
 - [x] 阅读并确认微信 / 飞书 onboarding 与工作区洞察 Skill 卡片的现状实现
 - [x] 为 Rust onboarding 外呼提取共享 HTTP helper，补齐日志、超时与 Windows 兜底
+
+## IM Bridge 端口保留导致的连接降级排查
+
+### Checklist
+- [x] 阅读 `tasks/lessons.md`，确认 bridge 失联优先追前序异常而不是后续人工恢复动作
+- [x] 检查 bridge skill 规范、auth 文件与当前 bridge 配置
+- [x] 诊断 Windows 上 `127.0.0.1:60110` 的占用/保留状态，确认 bind 失败根因
+- [x] 将 bridge admin 端口改到未被系统保留的可用端口，并执行恢复动作
+- [x] 验证 bridge admin/status 恢复可访问，确认连接降级解除
+- [x] 在本节补充 Review，记录根因、修复动作与验证结果
+
+### Review
+- 根因确认：Windows 当前 `excludedportrange` 覆盖了 `60078-60477`，而 shell/bridge 默认固定使用 `60110`，导致 bridge sidecar 在 `listen tcp 127.0.0.1:60110` 时被系统直接拒绝；本机同时运行 Docker Desktop / WSL2 / HNS，符合常见触发场景。
+- 代码修复：`apps/kimi-shell/src-tauri/src/bridge_manager.rs` 现在在启动前区分“显式 override”与“默认端口”两种模式。默认模式下不再盲用 `60110`，而是在启动时临时选择可绑定的 localhost 端口；显式 override 不可用时会记录原因并自动降级到动态端口；若 sidecar 仍因 bind 失败退出，会再自动换口重试一次。
+- 可观测性：bridge 启动失败消息新增了 bind-failure hint，会直接提示 Windows excluded port range 以及 Docker Desktop / WSL2 / Hyper-V 的常见背景，减少把 `access permissions` 误判成权限或防火墙问题。
+- 编译验证：`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 与 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 于 2026-03-29 通过；`cargo test ... bridge_manager::tests::` 真正执行测试二进制时在当前机器报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机运行时依赖问题，不是这次改动的编译错误。
+- 实机恢复：为当前已安装 shell 的运行时配置把 `C:\Users\Qian\AppData\Roaming\com.kimi.shell\bridge_settings.json` 中 `adminPort` 临时切到 `61110` 后，通过 host control 触发了 bridge restart；`bridge_ops.ps1 status` 已返回 `bridge_state=running`，`bridge_skill_auth.json` 也已刷新为 `admin_base_url=http://127.0.0.1:61110`，说明连接降级已解除。
+
+## 0.0.33 Release
+
+### Checklist
+- [x] 阅读 `tasks/lessons.md`，确认发版仍需校对版本号、安装包形态与现有脏改动边界
+- [x] 核对当前版本号来源、构建脚本与工作树改动范围
+- [ ] 将 Kimi Desktop Shell 版本从 `0.0.32` 升级到 `0.0.33`
+- [ ] 编写 `apps/kimi-shell/docs/release-notes-0.0.33.md`
+- [ ] 构建 `0.0.33` 安装包并核对产物路径/文件名
+- [ ] 提交并推送到 `main`
+- [ ] 创建或更新 GitHub Release `v0.0.33`，上传安装包并验证发布结果
+
+### Review
+- 待完成
 - [x] 修复微信 onboarding 状态兼容与成功后提示文案
 - [x] 为 Go 微信 adapter 增加瞬时网络错误有限重试与更清晰错误透传
 - [x] 调整工作区洞察“已有 Skill”卡片文案与布局，移除“查看技能中心”按钮

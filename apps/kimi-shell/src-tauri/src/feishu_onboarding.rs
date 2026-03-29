@@ -7,8 +7,7 @@ use url::Url;
 
 use crate::{
     app_state::{unix_time_millis, AppState, FeishuOnboardingRuntimeState},
-    bridge_manager, bridge_settings_store,
-    onboarding_http,
+    bridge_manager, bridge_settings_store, onboarding_http,
     types::{
         BridgeConnectorConfig, BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgePlatform,
         BridgeTelegramSecrets, BridgeWeixinSecrets, FeishuConnectorOnboardingSession,

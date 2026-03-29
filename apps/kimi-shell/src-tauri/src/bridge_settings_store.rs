@@ -124,8 +124,7 @@ pub fn save_connector_secrets(
                 existing.account_id
             },
             owner_user_id: if input.weixin.owner_user_id.is_some() {
-                trim_optional_string(input.weixin.owner_user_id.clone())
-                    .or(existing.owner_user_id)
+                trim_optional_string(input.weixin.owner_user_id.clone()).or(existing.owner_user_id)
             } else {
                 existing.owner_user_id
             },
@@ -663,7 +662,9 @@ fn normalize_bridge_secrets(mut secrets: BridgeSecrets) -> BridgeSecrets {
             continue;
         }
         let normalized = normalize_connector_secrets(connector);
-        if normalized.telegram.is_none() && normalized.feishu.is_none() && normalized.weixin.is_none()
+        if normalized.telegram.is_none()
+            && normalized.feishu.is_none()
+            && normalized.weixin.is_none()
         {
             continue;
         }
@@ -1762,18 +1763,14 @@ mod tests {
         .expect("delete connector");
 
         assert_eq!(saved.connectors.len(), 2);
-        assert!(
-            saved
-                .connectors
-                .iter()
-                .any(|connector| connector.id == "feishu-default")
-        );
-        assert!(
-            saved
-                .connectors
-                .iter()
-                .any(|connector| connector.id == "weixin-default")
-        );
+        assert!(saved
+            .connectors
+            .iter()
+            .any(|connector| connector.id == "feishu-default"));
+        assert!(saved
+            .connectors
+            .iter()
+            .any(|connector| connector.id == "weixin-default"));
 
         let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
         assert!(reloaded_secrets.connectors.contains_key("feishu-default"));

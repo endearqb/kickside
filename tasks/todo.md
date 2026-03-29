@@ -101,14 +101,23 @@
 ### Checklist
 - [x] 阅读 `tasks/lessons.md`，确认发版仍需校对版本号、安装包形态与现有脏改动边界
 - [x] 核对当前版本号来源、构建脚本与工作树改动范围
-- [ ] 将 Kimi Desktop Shell 版本从 `0.0.32` 升级到 `0.0.33`
-- [ ] 编写 `apps/kimi-shell/docs/release-notes-0.0.33.md`
-- [ ] 构建 `0.0.33` 安装包并核对产物路径/文件名
-- [ ] 提交并推送到 `main`
-- [ ] 创建或更新 GitHub Release `v0.0.33`，上传安装包并验证发布结果
+- [x] 将 Kimi Desktop Shell 版本从 `0.0.32` 升级到 `0.0.33`
+- [x] 编写 `apps/kimi-shell/docs/release-notes-0.0.33.md`
+- [x] 构建 `0.0.33` 安装包并核对产物路径/文件名
+- [x] 提交并推送到 `main`
+- [x] 创建或更新 GitHub Release `v0.0.33`，上传安装包并验证发布结果
 
 ### Review
-- 待完成
+- 版本同步：通过 `pnpm -C apps/kimi-shell version:bump:patch` 将 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 同步到 `0.0.33`，随后手动补齐了 `onboarding_http.rs` 的 UA 版本字符串，并在构建后确认 `Cargo.lock` 也已落到 `0.0.33`。
+- 发布说明：新增 `apps/kimi-shell/docs/release-notes-0.0.33.md`，并顺手把此前未入库的 `apps/kimi-shell/docs/release-notes-0.0.32.md` 一并纳入版本库；`0.0.33` 说明聚焦 bridge admin 端口动态避让、Windows reserved-port 诊断提示，以及当前工作树里的 onboarding 加固改动。
+- 构建验证：`pnpm -C apps/kimi-shell tauri build` 于 2026-03-29 通过，产出
+  - `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.33_x64-setup.exe`
+  - `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.33_x64_en-US.msi`
+- 发布资产：为保持 GitHub Releases 命名一致性，构建后额外复制出
+  - `Kimi.Desktop.Shell_0.0.33_x64-setup.exe`
+  - `Kimi.Desktop.Shell_0.0.33_x64_en-US.msi`
+  并以这两个文件名上传到 release。
+- Git / Release：已提交 `release: v0.0.33`（`86f1691`），并推送到 `origin/main`；`gh release create v0.0.33` 已成功发布，地址为 `https://github.com/endearqb/kimi-app/releases/tag/v0.0.33`，两个附件状态均为 `uploaded`。
 - [x] 修复微信 onboarding 状态兼容与成功后提示文案
 - [x] 为 Go 微信 adapter 增加瞬时网络错误有限重试与更清晰错误透传
 - [x] 调整工作区洞察“已有 Skill”卡片文案与布局，移除“查看技能中心”按钮

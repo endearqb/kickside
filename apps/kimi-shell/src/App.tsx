@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { Check, Settings } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
-import { formatBackendState } from "@/app/types";
+import {
+  formatBackendState,
+  formatKimiLoginHealthSource,
+  formatKimiLoginHealthState,
+} from "@/app/types";
 import { IconButton } from "@/components/common/IconButton";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
@@ -10,6 +14,20 @@ import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
 import "./components/control-center/control-center.css";
+
+function formatLoginCheckTimestamp(value?: number) {
+  if (!value) {
+    return "未记录";
+  }
+
+  return new Date(value).toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function App() {
   const shell = useShellController();
@@ -41,6 +59,28 @@ function App() {
       : shell.uiBackendState === "crashed"
         ? "error"
         : "unsaved";
+  const kimiLoginBannerVisible = Boolean(
+    shell.status?.authMode === "kimi_login" &&
+      shell.status.kimiLoginHealth?.needsAttention &&
+      shell.screen === "workspace" &&
+      !shell.controlCenterModalOpen,
+  );
+  const kimiLoginBannerTitle =
+    shell.status?.kimiLoginHealth.state === "error"
+      ? "Kimi 登录检测异常"
+      : "Kimi 登录需要重新验证";
+  const kimiLoginBannerSummary =
+    shell.status?.kimiLoginHealth.message?.trim() || "最近一次检测表明当前登录状态不可用。";
+  const kimiLoginBannerMeta = [
+    `状态：${formatKimiLoginHealthState(shell.status?.kimiLoginHealth.state)}`,
+    `来源：${formatKimiLoginHealthSource(shell.status?.kimiLoginHealth.source)}`,
+    `时间：${formatLoginCheckTimestamp(shell.status?.kimiLoginHealth.checkedAtMs)}`,
+    shell.status?.kimiLoginHealth.exitCode != null
+      ? `退出码：${shell.status.kimiLoginHealth.exitCode}`
+      : null,
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(" · ");
 
   useEffect(() => {
     if (!shell.controlCenterModalOpen) {
@@ -281,6 +321,35 @@ function App() {
       />
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}
+      {kimiLoginBannerVisible ? (
+        <div className="shell-login-banner" role="status" aria-live="polite">
+          <div className="shell-login-banner-copy">
+            <strong>{kimiLoginBannerTitle}</strong>
+            <p>{kimiLoginBannerSummary}</p>
+            <span>{kimiLoginBannerMeta}</span>
+          </div>
+          <div className="shell-login-banner-actions">
+            <button
+              type="button"
+              className="shell-login-banner-btn primary"
+              onClick={() => void shell.handleProbeLogin()}
+              disabled={shell.loginProbeBusy}
+            >
+              重新登录 / 检测
+            </button>
+            <button
+              type="button"
+              className="shell-login-banner-btn"
+              onClick={() => {
+                shell.setActiveControlSection("onboarding");
+                shell.openControlCenter();
+              }}
+            >
+              打开控制中心
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="shell-stage">
         <div

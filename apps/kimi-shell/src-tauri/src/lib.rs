@@ -1,4 +1,5 @@
 mod app_state;
+mod auth_state;
 mod backend_manager;
 mod bridge_host_control;
 mod bridge_http_client;
@@ -42,15 +43,15 @@ use types::{
     FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
     InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
     InstalledSkill, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-    KimiCliConfigCenterView, LoginProbeResult, LoginProbeState, MainWindowCloseBehavior,
-    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
-    SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
-    SkillDiscoverySnapshot, SkillProjectionRecord, SkillRecommendation,
-    StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
-    WorkspaceSkillInventory, WorkspaceSkillProfile, WorkspaceSkillTarget,
-    CURRENT_ONBOARDING_VERSION,
+    KimiCliConfigCenterView, KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult,
+    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
+    SkillApplyResult, SkillApplyScope, SkillDetail, SkillDiscoverySnapshot,
+    SkillProjectionRecord, SkillRecommendation, StartFeishuConnectorOnboardingInput,
+    StartWeixinConnectorOnboardingInput, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot, WorkspaceSkillInventory,
+    WorkspaceSkillProfile, WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -59,6 +60,10 @@ const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
 fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
     let settings = settings_store::load_or_default(&app).unwrap_or_default();
     let logs_dir = log_manager::ensure_logs_dir(&app).map_err(|error| error.to_string())?;
+    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    auth_state::sync_runtime_auth_snapshot(&app, &auth_snapshot)?;
+    let kimi_login_health =
+        auth_state::read_runtime_login_health(&app, settings.onboarding_step_acks.login_verified)?;
 
     let shared = app.state::<AppState>();
     let instance_id = shared.instance_id.clone();
@@ -164,6 +169,10 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         startup_monitor_reason,
         startup_monitor_target_route,
         startup_monitor_detail,
+        auth_mode: auth_snapshot.auth_mode,
+        provider_api_configured: auth_snapshot.provider_api_configured,
+        provider_api_active_provider: auth_snapshot.provider_api_active_provider,
+        kimi_login_health,
         logs_dir: logs_dir.to_string_lossy().to_string(),
         hotkey: settings.hotkey,
     })
@@ -1049,6 +1058,10 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     let app_log_path = log_manager::app_log_path(&app).map_err(|error| error.to_string())?;
     let backend_log_path =
         log_manager::backend_log_path(&app).map_err(|error| error.to_string())?;
+    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    auth_state::sync_runtime_auth_snapshot(&app, &auth_snapshot)?;
+    let kimi_login_health =
+        auth_state::read_runtime_login_health(&app, settings.onboarding_step_acks.login_verified)?;
     let shared = app.state::<AppState>();
     let instance_id = shared.instance_id.clone();
     let pid = shared.pid;
@@ -1196,6 +1209,10 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         startup_monitor_reason,
         startup_monitor_target_route,
         startup_monitor_detail,
+        auth_mode: auth_snapshot.auth_mode,
+        provider_api_configured: auth_snapshot.provider_api_configured,
+        provider_api_active_provider: auth_snapshot.provider_api_active_provider,
+        kimi_login_health,
         startup_trace,
         app_log_path: app_log_path.to_string_lossy().to_string(),
         backend_log_path: backend_log_path.to_string_lossy().to_string(),
@@ -1249,8 +1266,23 @@ fn ack_api_config_step(app: AppHandle, acknowledged: Option<bool>) -> Result<(),
 
 #[tauri::command]
 fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
-    let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
-    let kimi_path = resolve_kimi_path_for_login(&app, &settings)?;
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    auth_state::sync_runtime_auth_snapshot(&app, &auth_snapshot)?;
+    let kimi_path = match resolve_kimi_path_for_login(&app, &settings) {
+        Ok(path) => path,
+        Err(error) => {
+            auth_state::update_kimi_login_health(
+                &app,
+                auth_snapshot.auth_mode,
+                KimiLoginHealthState::Error,
+                KimiLoginHealthSource::ManualProbe,
+                error.clone(),
+                None,
+            )?;
+            return Err(error);
+        }
+    };
 
     let mut process = Command::new(&kimi_path);
     command_utils::configure_kimi_query_command(&mut process);
@@ -1261,24 +1293,38 @@ fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
         .env("PYTHONUTF8", "1")
         .output()
         .map_err(|error| {
-            format!(
+            let detail = format!(
                 "failed to run `{} login --json`: {}",
                 kimi_path.display(),
                 error
-            )
+            );
+            let _ = auth_state::update_kimi_login_health(
+                &app,
+                auth_snapshot.auth_mode,
+                KimiLoginHealthState::Error,
+                KimiLoginHealthSource::ManualProbe,
+                detail.clone(),
+                None,
+            );
+            detail
         })?;
 
     let message = summarize_command_output(&output);
-    let state = if output.status.success() {
-        LoginProbeState::LoggedIn
+    let health_state = if output.status.success() {
+        KimiLoginHealthState::Verified
     } else {
-        LoginProbeState::LoginRequired
+        KimiLoginHealthState::AuthRequired
     };
 
-    set_login_probe_runtime(&app, state, Some(message.clone()))?;
-
-    settings.onboarding_step_acks.login_verified = state == LoginProbeState::LoggedIn;
-    settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
+    auth_state::update_kimi_login_health(
+        &app,
+        auth_snapshot.auth_mode,
+        health_state,
+        KimiLoginHealthSource::ManualProbe,
+        message.clone(),
+        output.status.code(),
+    )?;
+    let state = auth_state::login_probe_state_from_health(health_state);
 
     Ok(LoginProbeResult {
         state,
@@ -1552,13 +1598,15 @@ pub fn run() {
 fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> {
     let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
     let context_status = context_menu::status(app);
+    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    auth_state::sync_runtime_auth_snapshot(app, &auth_snapshot)?;
+    let kimi_login_health =
+        auth_state::read_runtime_login_health(app, settings.onboarding_step_acks.login_verified)?;
 
     let (
         runtime_state,
         startup_open_request_applied,
         runtime_detected_kimi_path,
-        runtime_login_state,
-        runtime_login_message,
     ) = {
         let state = app.state::<AppState>();
         let runtime = state
@@ -1572,8 +1620,6 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
                 .detected_kimi_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
-            runtime.login_probe_state,
-            runtime.login_probe_message.clone(),
         )
     };
 
@@ -1583,13 +1629,15 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     let kimi_installed = located_kimi_path.is_some();
     let detected_kimi_path = runtime_detected_kimi_path.or(located_kimi_path);
 
-    let login_state = runtime_login_state.unwrap_or_else(|| {
-        if settings.onboarding_step_acks.login_verified {
-            LoginProbeState::LoggedIn
-        } else {
-            LoginProbeState::Unknown
-        }
-    });
+    let login_state = auth_state::login_probe_state_from_health(kimi_login_health.state);
+    let login_message = if kimi_login_health.message.trim().is_empty() {
+        None
+    } else {
+        Some(kimi_login_health.message.clone())
+    };
+    let auth_ready =
+        kimi_login_health.state == KimiLoginHealthState::Verified
+            || auth_snapshot.provider_api_configured;
 
     let work_dir = settings
         .work_dir
@@ -1606,7 +1654,7 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         kimi_installed,
         context_status.supported,
         context_status.enabled,
-        login_state,
+        auth_ready,
         work_dir_configured,
         api_config_ack,
     );
@@ -1623,8 +1671,12 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         context_menu_supported: context_status.supported,
         context_menu_enabled: context_status.enabled,
         context_menu_message: context_status.message,
+        auth_mode: auth_snapshot.auth_mode,
+        provider_api_configured: auth_snapshot.provider_api_configured,
+        provider_api_active_provider: auth_snapshot.provider_api_active_provider,
+        kimi_login_health,
         login_state,
-        login_message: runtime_login_message,
+        login_message,
         work_dir_configured,
         work_dir,
         api_config_ack,
@@ -1806,7 +1858,7 @@ fn recommend_onboarding_step(
     kimi_installed: bool,
     context_menu_supported: bool,
     context_menu_enabled: bool,
-    login_state: LoginProbeState,
+    auth_ready: bool,
     work_dir_configured: bool,
     api_config_ack: bool,
 ) -> OnboardingStep {
@@ -1816,7 +1868,7 @@ fn recommend_onboarding_step(
     if context_menu_supported && !context_menu_enabled {
         return OnboardingStep::ContextMenu;
     }
-    if login_state != LoginProbeState::LoggedIn {
+    if !auth_ready {
         return OnboardingStep::LoginKimi;
     }
     if !work_dir_configured {
@@ -1903,21 +1955,6 @@ fn resolve_kimi_path_for_login(app: &AppHandle, settings: &AppSettings) -> Resul
     }
 
     kimi_locator::locate(settings).map_err(|error| error.to_string())
-}
-
-fn set_login_probe_runtime(
-    app: &AppHandle,
-    state: LoginProbeState,
-    message: Option<String>,
-) -> Result<(), String> {
-    let shared = app.state::<AppState>();
-    let mut runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| "runtime state mutex is poisoned".to_string())?;
-    runtime.login_probe_state = Some(state);
-    runtime.login_probe_message = message;
-    Ok(())
 }
 
 fn summarize_command_output(output: &std::process::Output) -> String {
@@ -2224,7 +2261,7 @@ mod tests {
             false,
             true,
             false,
-            LoginProbeState::Unknown,
+            false,
             false,
             false,
         );

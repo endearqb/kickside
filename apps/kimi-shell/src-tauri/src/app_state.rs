@@ -12,9 +12,10 @@ use rand::{distributions::Alphanumeric, Rng};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
-    LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
+    AuthMode, BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
+    KimiLoginHealth, LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
+    WeixinConnectorOnboardingState,
 };
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,10 @@ pub struct RuntimeState {
     pub active_session_work_dir: Option<PathBuf>,
     pub session_source: Option<String>,
     pub startup_open_request_applied: bool,
+    pub auth_mode: AuthMode,
+    pub provider_api_configured: bool,
+    pub provider_api_active_provider: Option<String>,
+    pub kimi_login_health: Option<KimiLoginHealth>,
     pub login_probe_state: Option<LoginProbeState>,
     pub login_probe_message: Option<String>,
     pub webview_runtime_kind: WebviewRuntimeKind,
@@ -97,6 +102,10 @@ impl Default for RuntimeState {
             active_session_work_dir: None,
             session_source: None,
             startup_open_request_applied: false,
+            auth_mode: AuthMode::Unknown,
+            provider_api_configured: false,
+            provider_api_active_provider: None,
+            kimi_login_health: None,
             login_probe_state: None,
             login_probe_message: None,
             webview_runtime_kind: WebviewRuntimeKind::Evergreen,

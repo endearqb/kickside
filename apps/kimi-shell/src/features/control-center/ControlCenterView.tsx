@@ -66,7 +66,11 @@ import type {
   WorkspaceSkillRestoreResult,
   WorkspaceSkillTarget,
 } from "@/app/types";
-import { formatLoginState } from "@/app/types";
+import {
+  formatAuthMode,
+  formatKimiLoginHealthSource,
+  formatKimiLoginHealthState,
+} from "@/app/types";
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -513,6 +517,19 @@ function formatBridgeTimestamp(value?: string): string {
   return Number.isNaN(Date.parse(value))
     ? value
     : new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatLoginCheckTimestamp(value?: number): string {
+  if (!value) {
+    return "未记录";
+  }
+  return new Date(value).toLocaleString("zh-CN", {
+    hour12: false,
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function isFeishuOnboardingActive(
@@ -976,12 +993,25 @@ export function ControlCenterView({
     : runtimeContextMenuEnabled
       ? "success"
       : "warning";
-  const authStatusLabel =
-    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck ? "就绪" : "待办";
-  const authStatusTone =
-    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck
-      ? "success"
-      : "neutral";
+  const kimiLoginReady = onboarding?.kimiLoginHealth.state === "verified";
+  const providerApiReady =
+    onboarding?.providerApiConfigured ??
+    Boolean(
+      configCenterView &&
+        ((configCenterView.defaultProvider &&
+          configCenterView.providers.some(
+            (entry) =>
+              entry.key.trim() === configCenterView.defaultProvider?.trim() &&
+              (Boolean(entry.apiKey?.trim()) || Boolean(entry.authToken?.trim())),
+          )) ||
+          configCenterView.providers.some(
+            (entry) =>
+              Boolean(entry.key.trim()) &&
+              (Boolean(entry.apiKey?.trim()) || Boolean(entry.authToken?.trim())),
+          )),
+    );
+  const authStatusLabel = kimiLoginReady || providerApiReady ? "就绪" : "待办";
+  const authStatusTone = kimiLoginReady || providerApiReady ? "success" : "neutral";
   const workDirStatusLabel = effectiveWorkDir ? "就绪" : "待办";
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
 
@@ -1045,10 +1075,39 @@ export function ControlCenterView({
           : "neutral";
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
   const installReady = onboarding?.kimiInstalled ?? stepCompletion.install_kimi;
-  const authReady = Boolean(
-    onboarding?.loginState === "logged_in" || onboarding?.apiConfigAck,
-  );
+  const authReady = Boolean(kimiLoginReady || providerApiReady);
   const workDirReady = Boolean(effectiveWorkDir);
+  const authMode = onboarding?.authMode ?? status?.authMode ?? "unknown";
+  const authBannerVisible = Boolean(
+    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention,
+  );
+  const authBannerTitle =
+    onboarding?.kimiLoginHealth.state === "error"
+      ? "Kimi 登录检测异常"
+      : "Kimi 登录需要重新验证";
+  const authBannerMeta = [
+    `当前入口：${formatAuthMode(authMode)}`,
+    `来源：${formatKimiLoginHealthSource(onboarding?.kimiLoginHealth.source)}`,
+    `时间：${formatLoginCheckTimestamp(onboarding?.kimiLoginHealth.checkedAtMs)}`,
+    onboarding?.kimiLoginHealth.exitCode != null
+      ? `退出码：${onboarding.kimiLoginHealth.exitCode}`
+      : null,
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(" · ");
+  const kimiLoginStatusLabel = formatKimiLoginHealthState(onboarding?.kimiLoginHealth.state);
+  const kimiLoginStatusTone =
+    onboarding?.kimiLoginHealth.state === "verified"
+      ? "success"
+      : onboarding?.kimiLoginHealth.state === "auth_required"
+        ? "warning"
+        : onboarding?.kimiLoginHealth.state === "error"
+          ? "danger"
+          : "neutral";
+  const providerApiStatusLabel = providerApiReady
+    ? `已配置${onboarding?.providerApiActiveProvider ? ` · ${onboarding.providerApiActiveProvider}` : ""}`
+    : "未配置";
+  const providerApiStatusTone = providerApiReady ? "success" : "neutral";
   const recommendedOnboardingCard: OnboardingCardId = !installReady
     ? "install"
     : !contextMenuReady
@@ -1810,6 +1869,9 @@ export function ControlCenterView({
     diagnostics?.lastError ? `最近错误：${diagnostics.lastError}` : null,
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
     diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
+    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
+      ? `Kimi 登录：${onboarding.kimiLoginHealth.message || kimiLoginStatusLabel}`
+      : null,
     bridgeRecentErrors[0] ? `Bridge：${bridgeRecentErrors[0]}` : null,
   ]
     .filter((item): item is string => Boolean(item))
@@ -1828,6 +1890,9 @@ export function ControlCenterView({
     !installReady ? "Kimi CLI 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
     !authReady ? "尚未建立登录或 Provider API 入口。" : null,
+    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
+      ? "当前入口依赖 Kimi 登录，建议立即重新验证。"
+      : null,
     !workDirReady ? "默认工作目录未设置，跨会话上下文还不稳定。" : null,
     bridgeStatus.state === "crashed" ? "Bridge 最近出现崩溃，需要优先检查。" : null,
     configCenterDirty ? "配置中心存在未保存修改。" : null,
@@ -2200,8 +2265,34 @@ export function ControlCenterView({
                     {authCardView === "login" ? (
                       <div className="cc-auth-panel">
                         <p className="hint cc-step-summary">
-                          当前状态：{formatLoginState(onboarding?.loginState)}
+                          当前入口：<strong>{formatAuthMode(authMode)}</strong>
                         </p>
+                        <div className="cc-brief-list">
+                          <article className="cc-brief-item">
+                            <strong>Kimi 登录</strong>
+                            <span className={`cc-status-badge tone-${kimiLoginStatusTone}`}>
+                              {kimiLoginStatusLabel}
+                            </span>
+                          </article>
+                          <article className="cc-brief-item">
+                            <strong>Provider API</strong>
+                            <span className={`cc-status-badge tone-${providerApiStatusTone}`}>
+                              {providerApiStatusLabel}
+                            </span>
+                          </article>
+                        </div>
+                        <p className="hint cc-step-meta">
+                          最近来源：{formatKimiLoginHealthSource(onboarding?.kimiLoginHealth.source)}；
+                          最近时间：{formatLoginCheckTimestamp(onboarding?.kimiLoginHealth.checkedAtMs)}
+                          {onboarding?.kimiLoginHealth.exitCode != null
+                            ? `；退出码：${onboarding.kimiLoginHealth.exitCode}`
+                            : ""}
+                        </p>
+                        {onboarding?.kimiLoginHealth.message ? (
+                          <p className="hint cc-step-meta">
+                            最近摘要：{onboarding.kimiLoginHealth.message}
+                          </p>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="cc-auth-panel">
@@ -2234,6 +2325,12 @@ export function ControlCenterView({
                         <p className="hint cc-step-meta">
                           配置文件：
                           <strong>{configCenterView?.configPath || "~/.kimi/config.toml"}</strong>
+                        </p>
+                        <p className="hint cc-step-meta">
+                          当前入口：<strong>{formatAuthMode(authMode)}</strong>
+                          {onboarding?.providerApiActiveProvider
+                            ? `；活动 provider：${onboarding.providerApiActiveProvider}`
+                            : ""}
                         </p>
                         {configCenterDirty ? (
                           <p className="hint cc-step-meta">配置中心弹窗内存在未保存修改。</p>
@@ -2390,6 +2487,23 @@ export function ControlCenterView({
               <DiagnosticItem label="CLI Contract Error" value={diagnostics?.cliContractError ?? "-"} />
               <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
               <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
+              <DiagnosticItem label="Auth Mode" value={formatAuthMode(diagnostics?.authMode)} />
+              <DiagnosticItem
+                label="Kimi Login Health"
+                value={formatKimiLoginHealthState(diagnostics?.kimiLoginHealth.state)}
+              />
+              <DiagnosticItem
+                label="Last Kimi Login Check"
+                value={formatLoginCheckTimestamp(diagnostics?.kimiLoginHealth.checkedAtMs)}
+              />
+              <DiagnosticItem
+                label="Last Kimi Login Source"
+                value={formatKimiLoginHealthSource(diagnostics?.kimiLoginHealth.source)}
+              />
+              <DiagnosticItem
+                label="Last Kimi Login Exit Code"
+                value={String(diagnostics?.kimiLoginHealth.exitCode ?? "-")}
+              />
               <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
               <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
               <DiagnosticItem label="WebView Runtime" value={diagnostics?.webviewRuntimeKind ?? "-"} />
@@ -3993,12 +4107,44 @@ export function ControlCenterView({
       </header>
 
       <div className="cc-layout cc-layout-dashboard">
-
         <div
           className={`cc-main ${
             isOnboardingSection ? "cc-main-onboarding" : ""
           }`}
         >
+          {authBannerVisible ? (
+            <div className="shell-login-banner control-center-login-banner" role="status" aria-live="polite">
+              <div className="shell-login-banner-copy">
+                <strong>{authBannerTitle}</strong>
+                <p>
+                  {onboarding?.kimiLoginHealth.message?.trim() ||
+                    "当前入口依赖 Kimi 登录，最近一次检测表明需要重新处理。"}
+                </p>
+                <span>{authBannerMeta}</span>
+              </div>
+              <div className="shell-login-banner-actions">
+                <button
+                  type="button"
+                  className="shell-login-banner-btn primary"
+                  onClick={() => void onProbeLogin()}
+                  disabled={loginProbeBusy}
+                >
+                  重新登录 / 检测
+                </button>
+                <button
+                  type="button"
+                  className="shell-login-banner-btn"
+                  onClick={() => {
+                    setAuthCardView("login");
+                    setExpandedOnboardingCard("auth");
+                    setActiveControlSection("onboarding");
+                  }}
+                >
+                  前往认证步骤
+                </button>
+              </div>
+            </div>
+          ) : null}
           {activeTask && !shouldRenderInlineBridgeTask ? (
             renderActiveTask()
           ) : (

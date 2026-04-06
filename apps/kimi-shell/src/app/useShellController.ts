@@ -2755,7 +2755,7 @@ export function useShellController() {
         input: configCenterDraft,
       });
       await loadKimiCliConfigCenter();
-      await refreshOnboarding();
+      await refreshCoreState();
       setControlCenterTask(null);
     } catch (error) {
       setActionError(String(error));
@@ -3303,9 +3303,10 @@ export function useShellController() {
     try {
       const result = await invoke<LoginProbeResult>("probe_kimi_login");
       setLoginProbeResult(result);
-      await refreshOnboarding();
+      await refreshCoreState();
     } catch (error) {
       setActionError(String(error));
+      await refreshCoreState();
     } finally {
       setLoginProbeBusy(false);
     }

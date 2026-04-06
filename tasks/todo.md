@@ -1,3 +1,21 @@
+# Kimi 登录失效提醒与诊断方案（Provider API 免打扰）
+
+## Checklist
+- [x] 阅读 `DESIGN.md`、`tasks/lessons.md` 与相关登录/认证实现，确认现状边界
+- [x] 扩展 Rust 登录健康模型、认证模式判定与诊断写入
+- [x] 接入 workspace API 被动认证失败捕获，更新登录健康状态
+- [x] 同步前端类型、控制器状态与全局横幅展示规则
+- [x] 拆分控制中心/引导里的 Kimi 登录与 Provider API 状态展示
+- [x] 运行构建或检查验证，并在本节补充 Review
+
+### Review
+- 状态模型：新增 `AuthMode` 与 `KimiLoginHealth`，并把它们接入 `AppStatus`、`DiagnosticsInfo`、`OnboardingStatus` 和 Tauri runtime；旧 `login_verified` 仅作为兼容回填，不再是登录真值来源。
+- 认证判定：新增 `auth_state.rs`，按 `default_provider -> 首个有效 provider` 的顺序解析活动 provider；只有活动 provider 带 `api_key/auth_token` 时才判为 `provider_api`，否则回落到 `unknown` 或 `kimi_login`，避免误报横幅。
+- 失效捕获：手动 `probe_kimi_login` 现在会把成功、需要重新登录、命令异常都写入统一登录健康状态；`workspace_session` 在 `/api/sessions` 相关请求命中 `401/403` 或明确认证失败文案时，会被动把健康状态降级为 `auth_required`。
+- UI 展示：工作区顶部和控制中心顶部新增非阻断登录横幅，但只在 `authMode === kimi_login` 且 `needsAttention === true` 时显示；Provider API 模式下不会再出现“Kimi 未登录”的全局打扰。控制中心认证卡片拆分展示 `Kimi 登录` 与 `Provider API` 两条状态，运行诊断新增 `Auth Mode` 与最近登录检查字段。
+- 控制器同步：保存配置中心和手动重新检测后都会立即刷新 `status + onboarding`，避免依赖轮询延迟。
+- 验证结果：`pnpm -C apps/kimi-shell build` 于 2026-04-01 通过；`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 于 2026-04-01 通过。完整 `cargo test` 在当前 Windows 机器上仍会因为测试二进制运行时环境报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机运行时问题，不是本次改动的编译失败。
+
 # 控制中心双栏与控件语言统一改造
 
 ## 0.0.32 Release

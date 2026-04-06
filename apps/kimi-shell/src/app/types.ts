@@ -80,6 +80,21 @@ export type StartupMonitorTargetRoute =
   | "control_center";
 
 export type LoginProbeState = "logged_in" | "login_required" | "unknown";
+export type AuthMode = "kimi_login" | "provider_api" | "unknown";
+export type KimiLoginHealthState = "unknown" | "verified" | "auth_required" | "error";
+export type KimiLoginHealthSource =
+  | "manual_probe"
+  | "workspace_api"
+  | "backend_startup";
+
+export interface KimiLoginHealth {
+  state: KimiLoginHealthState;
+  source: KimiLoginHealthSource;
+  message: string;
+  exitCode?: number;
+  checkedAtMs?: number;
+  needsAttention: boolean;
+}
 
 export type OnboardingStep =
   | "install_kimi"
@@ -120,6 +135,10 @@ export interface AppStatus {
   startupMonitorReason?: StartupMonitorReason;
   startupMonitorTargetRoute?: StartupMonitorTargetRoute;
   startupMonitorDetail?: string;
+  authMode: AuthMode;
+  providerApiConfigured: boolean;
+  providerApiActiveProvider?: string;
+  kimiLoginHealth: KimiLoginHealth;
   logsDir: string;
   hotkey: string;
 }
@@ -723,6 +742,10 @@ export interface DiagnosticsInfo {
   startupMonitorReason?: StartupMonitorReason;
   startupMonitorTargetRoute?: StartupMonitorTargetRoute;
   startupMonitorDetail?: string;
+  authMode: AuthMode;
+  providerApiConfigured: boolean;
+  providerApiActiveProvider?: string;
+  kimiLoginHealth: KimiLoginHealth;
   startupTrace: string[];
   appLogPath: string;
   backendLogPath: string;
@@ -750,6 +773,10 @@ export interface OnboardingStatus {
   contextMenuSupported: boolean;
   contextMenuEnabled: boolean;
   contextMenuMessage?: string;
+  authMode: AuthMode;
+  providerApiConfigured: boolean;
+  providerApiActiveProvider?: string;
+  kimiLoginHealth: KimiLoginHealth;
   loginState: LoginProbeState;
   loginMessage?: string;
   workDirConfigured: boolean;
@@ -1154,6 +1181,25 @@ export function formatLoginState(state?: LoginProbeState): string {
   if (state === "logged_in") return "已登录";
   if (state === "login_required") return "需要登录";
   return "未知";
+}
+
+export function formatAuthMode(mode?: AuthMode): string {
+  if (mode === "kimi_login") return "Kimi 登录";
+  if (mode === "provider_api") return "Provider API";
+  return "未知";
+}
+
+export function formatKimiLoginHealthState(state?: KimiLoginHealthState): string {
+  if (state === "verified") return "已验证";
+  if (state === "auth_required") return "需要重新登录";
+  if (state === "error") return "检测异常";
+  return "未知";
+}
+
+export function formatKimiLoginHealthSource(source?: KimiLoginHealthSource): string {
+  if (source === "manual_probe") return "手动检测";
+  if (source === "workspace_api") return "工作区接口";
+  return "启动回填";
 }
 
 export function formatBackendState(state?: BackendState): string {

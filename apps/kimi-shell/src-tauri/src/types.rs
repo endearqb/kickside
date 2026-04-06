@@ -204,6 +204,10 @@ pub struct AppStatus {
     pub startup_monitor_reason: Option<StartupMonitorReason>,
     pub startup_monitor_target_route: Option<StartupMonitorTargetRoute>,
     pub startup_monitor_detail: Option<String>,
+    pub auth_mode: AuthMode,
+    pub provider_api_configured: bool,
+    pub provider_api_active_provider: Option<String>,
+    pub kimi_login_health: KimiLoginHealth,
     pub logs_dir: String,
     pub hotkey: String,
 }
@@ -1066,6 +1070,10 @@ pub struct DiagnosticsInfo {
     pub startup_monitor_reason: Option<StartupMonitorReason>,
     pub startup_monitor_target_route: Option<StartupMonitorTargetRoute>,
     pub startup_monitor_detail: Option<String>,
+    pub auth_mode: AuthMode,
+    pub provider_api_configured: bool,
+    pub provider_api_active_provider: Option<String>,
+    pub kimi_login_health: KimiLoginHealth,
     pub startup_trace: Vec<String>,
     pub app_log_path: String,
     pub backend_log_path: String,
@@ -1102,6 +1110,46 @@ pub enum LoginProbeState {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMode {
+    KimiLogin,
+    ProviderApi,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum KimiLoginHealthState {
+    #[default]
+    Unknown,
+    Verified,
+    AuthRequired,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum KimiLoginHealthSource {
+    ManualProbe,
+    WorkspaceApi,
+    #[default]
+    BackendStartup,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiLoginHealth {
+    pub state: KimiLoginHealthState,
+    pub source: KimiLoginHealthSource,
+    #[serde(default)]
+    pub message: String,
+    pub exit_code: Option<i32>,
+    pub checked_at_ms: Option<u64>,
+    pub needs_attention: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingStatus {
@@ -1116,6 +1164,10 @@ pub struct OnboardingStatus {
     pub context_menu_supported: bool,
     pub context_menu_enabled: bool,
     pub context_menu_message: Option<String>,
+    pub auth_mode: AuthMode,
+    pub provider_api_configured: bool,
+    pub provider_api_active_provider: Option<String>,
+    pub kimi_login_health: KimiLoginHealth,
     pub login_state: LoginProbeState,
     pub login_message: Option<String>,
     pub work_dir_configured: bool,

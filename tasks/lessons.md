@@ -41,6 +41,7 @@
 - On Windows, if the app backend can hold the CLI binary being upgraded, stop that backend inside the upgrade task before running `uv tool upgrade`; otherwise `os error 32` file-lock failures are expected.
 - For in-app CLI verification steps, use the command syntax the installed tool actually supports. In this workspace, `kimi --version` works while `kimi -v` and `kimi version` fail.
 - If an install/upgrade flow intentionally stops the backend, do not let shell screen resolution fall back to the generic loading page and close the modal stack. Keep users in Control Center until they can inspect the result or restart the backend.
+- 当用户只提供了安装器报错而没有提供升级后版本号、复检结果或真实二进制状态时，不要把“看起来像已升级”的日志推断成成功；必须先验证 `kimi --version`、安装探针或实际可执行文件状态，再判断是误报失败还是真失败。
 - For Windows sidecar lifecycle management, do not treat `taskkill` as the primary stop path once the sidecar owns queues or approvals. Always provide a cooperative loopback/admin shutdown first, and use force-kill only as a bounded fallback.
 - When a persisted approval is expected to be resumable later, store the runtime correlation identifiers at creation time. For the IM bridge, `approval_requests` must keep `turn_id` and `step_id`, not just user-facing metadata.
 - 控制中心这类“外层固定壳 + 内层滚动正文”的页面，不能只给最内层内容区加 `overflow-y: auto`；必须沿着 `grid/flex` 父链同时补齐 `min-height: 0` 和明确高度约束，否则内容会把容器撑开，表现成“卡片显示不全且没有滚动条”。

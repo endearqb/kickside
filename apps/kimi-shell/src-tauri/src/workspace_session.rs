@@ -11,8 +11,11 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
-    log_manager, skill_center,
-    types::{BackendState, OpenRequestErrorPayload, WorkspaceSessionBridgePayload},
+    auth_state, log_manager, skill_center,
+    types::{
+        BackendState, KimiLoginHealthSource, KimiLoginHealthState, OpenRequestErrorPayload,
+        WorkspaceSessionBridgePayload,
+    },
     window_manager,
 };
 
@@ -293,6 +296,7 @@ fn spawn_bootstrap_session(
             match fetch_sessions(workspace_port) {
                 Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
                 Err(error) => {
+                    maybe_capture_workspace_auth_failure(&app, &error);
                     log_manager::append_line(
                         &app,
                         format!(
@@ -320,6 +324,7 @@ fn spawn_bootstrap_session(
             let created = match response {
                 Ok(session) => session,
                 Err(error) => {
+                    maybe_capture_workspace_auth_failure(&app, &error);
                     let error_message = format!(
                         "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
                         work_dir.display()
@@ -426,8 +431,10 @@ pub fn list_workspace_sessions_for_bridge(
     let Some(workspace_port) = workspace_port else {
         return Ok(Vec::new());
     };
-    let sessions = fetch_sessions(workspace_port)
-        .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    let sessions = fetch_sessions(workspace_port).map_err(|error| {
+        maybe_capture_workspace_auth_failure(app, &error);
+        anyhow::anyhow!("failed to list workspace sessions: {error}")
+    })?;
     remember_workspace_paths(app, &sessions);
     Ok(sessions
         .into_iter()
@@ -456,8 +463,10 @@ pub fn get_workspace_session_for_bridge(
     let Some(workspace_port) = workspace_port else {
         return Ok(None);
     };
-    let sessions = fetch_sessions(workspace_port)
-        .map_err(|error| anyhow::anyhow!("failed to list workspace sessions: {error}"))?;
+    let sessions = fetch_sessions(workspace_port).map_err(|error| {
+        maybe_capture_workspace_auth_failure(app, &error);
+        anyhow::anyhow!("failed to list workspace sessions: {error}")
+    })?;
     remember_workspace_paths(app, &sessions);
     Ok(sessions
         .into_iter()
@@ -530,6 +539,48 @@ fn create_session_for_work_dir(workspace_port: u16, work_dir: &Path) -> Result<A
     response
         .json::<ApiSession>()
         .map_err(|error| format!("failed to decode create session response: {error}"))
+}
+
+fn maybe_capture_workspace_auth_failure(app: &AppHandle, error: &str) {
+    if !looks_like_workspace_auth_failure(error) {
+        return;
+    }
+
+    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    let _ = auth_state::sync_runtime_auth_snapshot(app, &auth_snapshot);
+    let _ = auth_state::update_kimi_login_health(
+        app,
+        auth_snapshot.auth_mode,
+        KimiLoginHealthState::AuthRequired,
+        KimiLoginHealthSource::WorkspaceApi,
+        error.to_string(),
+        parse_workspace_auth_status_code(error),
+    );
+}
+
+fn looks_like_workspace_auth_failure(error: &str) -> bool {
+    let normalized = error.to_lowercase();
+    normalized.contains("returned 401")
+        || normalized.contains("returned 403")
+        || normalized.contains(" status 401")
+        || normalized.contains(" status 403")
+        || normalized.contains("unauthorized")
+        || normalized.contains("forbidden")
+        || normalized.contains("auth required")
+        || normalized.contains("authentication")
+        || normalized.contains("login required")
+        || normalized.contains("not logged in")
+}
+
+fn parse_workspace_auth_status_code(error: &str) -> Option<i32> {
+    let normalized = error.to_lowercase();
+    if normalized.contains("401") || normalized.contains("unauthorized") {
+        return Some(401);
+    }
+    if normalized.contains("403") || normalized.contains("forbidden") {
+        return Some(403);
+    }
+    None
 }
 
 fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapshot>, source: &str) {

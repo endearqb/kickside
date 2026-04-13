@@ -172,4 +172,5 @@ type Gateway interface {
 	UploadFile(context.Context, string, string) (*UploadedResource, error)
 	CreateMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
 	ReplyMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	PatchMessage(context.Context, string, string) error
 }

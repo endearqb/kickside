@@ -21,6 +21,11 @@ const (
 
 	FeishuReplyRendererPost        = "post"
 	FeishuReplyRendererInteractive = "interactive"
+	FeishuReplyRendererStreaming   = "streaming"
+
+	WeixinReplyModeFinalOnly             = "final_only"
+	WeixinReplyModeStatusOnly            = "status_only"
+	WeixinReplyModeStreamingExperimental = "streaming_experimental"
 )
 
 type BridgeSettings struct {
@@ -45,6 +50,7 @@ type ConnectorConfig struct {
 	Mode                string `json:"mode"`
 	FeishuAutoApprove   bool   `json:"feishuAutoApprove,omitempty"`
 	FeishuReplyRenderer string `json:"feishuReplyRenderer,omitempty"`
+	WeixinReplyMode     string `json:"weixinReplyMode,omitempty"`
 }
 
 type ChannelConfig = ConnectorConfig
@@ -197,6 +203,7 @@ func ReconcileSettingsWithSecrets(
 			Mode:                defaultConnectorMode(platform),
 			FeishuAutoApprove:   defaultFeishuAutoApprove(),
 			FeishuReplyRenderer: defaultFeishuReplyRenderer(),
+			WeixinReplyMode:     defaultWeixinReplyMode(),
 		})
 		seenIDs[connectorID] = struct{}{}
 	}
@@ -231,7 +238,27 @@ func normalizeSettings(payload legacySettingsFile) (BridgeSettings, error) {
 	if settings.AdminPort <= 0 || settings.AdminPort > 65535 {
 		return BridgeSettings{}, fmt.Errorf("adminPort must be between 1 and 65535")
 	}
-	return populateLegacyView(settings), nil
+
+	normalized := populateLegacyView(settings)
+	hasFeishuConnector := false
+	for _, connector := range normalized.Connectors {
+		if connector.Platform == PlatformFeishu {
+			hasFeishuConnector = true
+			break
+		}
+	}
+	if !hasFeishuConnector {
+		if payload.FeishuAutoApprove != nil {
+			normalized.FeishuAutoApprove = *payload.FeishuAutoApprove
+		}
+		if payload.FeishuReplyRenderer != "" || payload.FeishuReplyCards != nil {
+			normalized.FeishuReplyRenderer = normalizeFeishuReplyRenderer(
+				payload.FeishuReplyRenderer,
+				payload.FeishuReplyCards,
+			)
+		}
+	}
+	return normalized, nil
 }
 
 func normalizeSecrets(payload legacySecretsFile) BridgeSecrets {
@@ -317,6 +344,7 @@ func normalizeConnectors(connectors []ConnectorConfig) []ConnectorConfig {
 			Mode:                normalizeConnectorMode(platform, connector.Mode),
 			FeishuAutoApprove:   connector.FeishuAutoApprove,
 			FeishuReplyRenderer: normalizeFeishuReplyRenderer(connector.FeishuReplyRenderer, nil),
+			WeixinReplyMode:     normalizeWeixinReplyMode(connector.WeixinReplyMode),
 		}
 		if platform == PlatformFeishu {
 			if connector.FeishuReplyRenderer == "" {
@@ -325,12 +353,21 @@ func normalizeConnectors(connectors []ConnectorConfig) []ConnectorConfig {
 			if !connector.FeishuAutoApprove {
 				item.FeishuAutoApprove = connector.FeishuAutoApprove
 			}
+			item.WeixinReplyMode = ""
 		} else {
 			item.FeishuReplyRenderer = ""
 			item.FeishuAutoApprove = false
+			if platform == PlatformWeixin {
+				item.WeixinReplyMode = normalizeWeixinReplyMode(connector.WeixinReplyMode)
+			} else {
+				item.WeixinReplyMode = ""
+			}
 		}
 		if platform == PlatformFeishu && connector.FeishuReplyRenderer == "" && !connector.FeishuAutoApprove {
 			item.FeishuAutoApprove = defaultFeishuAutoApprove()
+		}
+		if platform == PlatformWeixin && connector.WeixinReplyMode == "" {
+			item.WeixinReplyMode = defaultWeixinReplyMode()
 		}
 		normalized = append(normalized, item)
 	}
@@ -426,6 +463,8 @@ func normalizeFeishuReplyRenderer(renderer string, legacy *bool) string {
 		return FeishuReplyRendererPost
 	case FeishuReplyRendererInteractive:
 		return FeishuReplyRendererInteractive
+	case FeishuReplyRendererStreaming:
+		return FeishuReplyRendererStreaming
 	}
 	if legacy != nil {
 		if *legacy {
@@ -434,6 +473,19 @@ func normalizeFeishuReplyRenderer(renderer string, legacy *bool) string {
 		return FeishuReplyRendererPost
 	}
 	return FeishuReplyRendererInteractive
+}
+
+func normalizeWeixinReplyMode(mode string) string {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case WeixinReplyModeFinalOnly:
+		return WeixinReplyModeFinalOnly
+	case WeixinReplyModeStatusOnly:
+		return WeixinReplyModeStatusOnly
+	case WeixinReplyModeStreamingExperimental:
+		return WeixinReplyModeStreamingExperimental
+	default:
+		return defaultWeixinReplyMode()
+	}
 }
 
 func normalizeWorkDirPresets(presets []WorkDirPreset) []WorkDirPreset {
@@ -535,7 +587,11 @@ func defaultFeishuAutoApprove() bool {
 }
 
 func defaultFeishuReplyRenderer() string {
-	return FeishuReplyRendererInteractive
+	return FeishuReplyRendererStreaming
+}
+
+func defaultWeixinReplyMode() string {
+	return WeixinReplyModeStatusOnly
 }
 
 func platformForConnectorSecrets(connectorID string, value ConnectorSecrets) string {

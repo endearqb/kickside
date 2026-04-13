@@ -28,6 +28,8 @@ const CLI_LOG_ARG_MAX_CHARS: usize = 480;
 pub enum OpenRequest {
     OpenDir(PathBuf),
     OpenFiles(Vec<PathBuf>),
+    ImportToDefaultWorkspace(Vec<PathBuf>),
+    ImportWithWorkspacePicker(Vec<PathBuf>),
 }
 
 #[derive(Default)]
@@ -41,7 +43,21 @@ struct RecentOpenRequestCache {
     seen_at: HashMap<String, Instant>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImportRequestMode {
+    DefaultWorkspace,
+    WorkspacePicker,
+}
+
+#[derive(Default)]
+struct ImportSelectionBatch {
+    sequence: u64,
+    items: Vec<PathBuf>,
+}
+
 static OPEN_FILES_BATCH: OnceLock<Mutex<OpenFilesBatch>> = OnceLock::new();
+static IMPORT_TO_DEFAULT_BATCH: OnceLock<Mutex<ImportSelectionBatch>> = OnceLock::new();
+static IMPORT_WITH_PICKER_BATCH: OnceLock<Mutex<ImportSelectionBatch>> = OnceLock::new();
 static RECENT_OPEN_REQUESTS: OnceLock<Mutex<RecentOpenRequestCache>> = OnceLock::new();
 
 pub fn apply_startup_cli_request(app: &AppHandle) {
@@ -99,37 +115,56 @@ pub fn handle_external_cli_request(app: AppHandle, args: Vec<String>, cwd: Optio
     log_open_request_parse(&app, "forwarded", &args, cwd_path.as_deref(), &parsed);
     let args_summary = Some(format_args_for_log(&args));
     match parsed {
-        Ok(Some(OpenRequest::OpenDir(path))) => {
-            let request = OpenRequest::OpenDir(path);
+        Ok(Some(request)) => {
             if is_duplicate_open_request(&app, &request, "forwarded") {
                 window_manager::show_and_focus(&app);
                 return;
             }
-            let app_for_thread = app.clone();
-            let summary_for_thread = args_summary.clone();
-            thread::spawn(move || {
-                if let Err(error) = apply_open_request(&app_for_thread, request) {
-                    log_manager::append_line(
-                        &app_for_thread,
-                        format!("failed to apply forwarded directory request: {error}"),
-                    );
-                    emit_open_request_error(
-                        &app_for_thread,
+
+            match request {
+                OpenRequest::OpenDir(path) => {
+                    let app_for_thread = app.clone();
+                    let summary_for_thread = args_summary.clone();
+                    thread::spawn(move || {
+                        if let Err(error) =
+                            apply_open_request(&app_for_thread, OpenRequest::OpenDir(path))
+                        {
+                            log_manager::append_line(
+                                &app_for_thread,
+                                format!("failed to apply forwarded directory request: {error}"),
+                            );
+                            emit_open_request_error(
+                                &app_for_thread,
+                                "forwarded",
+                                "apply_open_request",
+                                &error,
+                                summary_for_thread,
+                            );
+                        }
+                    });
+                }
+                OpenRequest::OpenFiles(files) => {
+                    enqueue_open_files_request(app, files, "forwarded", args_summary);
+                }
+                OpenRequest::ImportToDefaultWorkspace(items) => {
+                    enqueue_import_request(
+                        app,
+                        items,
+                        ImportRequestMode::DefaultWorkspace,
                         "forwarded",
-                        "apply_open_request",
-                        &error,
-                        summary_for_thread,
+                        args_summary,
                     );
                 }
-            });
-        }
-        Ok(Some(OpenRequest::OpenFiles(files))) => {
-            let request = OpenRequest::OpenFiles(files.clone());
-            if is_duplicate_open_request(&app, &request, "forwarded") {
-                window_manager::show_and_focus(&app);
-                return;
+                OpenRequest::ImportWithWorkspacePicker(items) => {
+                    enqueue_import_request(
+                        app,
+                        items,
+                        ImportRequestMode::WorkspacePicker,
+                        "forwarded",
+                        args_summary,
+                    );
+                }
             }
-            enqueue_open_files_request(app, files, "forwarded", args_summary);
         }
         Ok(None) => {
             log_non_matching_args(&app, "forwarded", &args);
@@ -243,10 +278,143 @@ fn enqueue_open_files_request(
     });
 }
 
+fn enqueue_import_request(
+    app: AppHandle,
+    items: Vec<PathBuf>,
+    mode: ImportRequestMode,
+    source: &str,
+    args_summary: Option<String>,
+) {
+    let items = dedupe_paths(items);
+    if items.is_empty() {
+        window_manager::show_and_focus(&app);
+        return;
+    }
+
+    let batch_state = match mode {
+        ImportRequestMode::DefaultWorkspace => {
+            IMPORT_TO_DEFAULT_BATCH.get_or_init(|| Mutex::new(ImportSelectionBatch::default()))
+        }
+        ImportRequestMode::WorkspacePicker => {
+            IMPORT_WITH_PICKER_BATCH.get_or_init(|| Mutex::new(ImportSelectionBatch::default()))
+        }
+    };
+
+    let sequence = {
+        let mut batch = match batch_state.lock() {
+            Ok(lock) => lock,
+            Err(_) => {
+                log_manager::append_line(
+                    &app,
+                    "workspace-import batch lock poisoned; dropping request",
+                );
+                emit_open_request_error(
+                    &app,
+                    source,
+                    "enqueue_import_batch_lock",
+                    "workspace-import batch lock poisoned; dropping request",
+                    args_summary,
+                );
+                return;
+            }
+        };
+
+        merge_paths_into_batch(&mut batch.items, items);
+        batch.sequence = batch.sequence.saturating_add(1);
+        batch.sequence
+    };
+
+    let source = source.to_string();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(OPEN_FILES_DEBOUNCE_MS));
+
+        let maybe_items = {
+            let mut batch = match batch_state.lock() {
+                Ok(lock) => lock,
+                Err(_) => {
+                    log_manager::append_line(
+                        &app,
+                        "workspace-import batch lock poisoned during flush",
+                    );
+                    emit_open_request_error(
+                        &app,
+                        &source,
+                        "flush_import_batch_lock",
+                        "workspace-import batch lock poisoned during flush",
+                        args_summary.clone(),
+                    );
+                    return;
+                }
+            };
+
+            if batch.sequence != sequence {
+                return;
+            }
+
+            if batch.items.is_empty() {
+                return;
+            }
+
+            let items = std::mem::take(&mut batch.items);
+            batch.sequence = batch.sequence.saturating_add(1);
+            Some(items)
+        };
+
+        if let Some(items) = maybe_items {
+            let items_for_summary = items.clone();
+            let request = match mode {
+                ImportRequestMode::DefaultWorkspace => OpenRequest::ImportToDefaultWorkspace(items),
+                ImportRequestMode::WorkspacePicker => OpenRequest::ImportWithWorkspacePicker(items),
+            };
+            if let Err(error) = apply_open_request(&app, request) {
+                let summary = args_summary
+                    .clone()
+                    .or_else(|| Some(format_paths_for_log(&items_for_summary)));
+                log_manager::append_line(
+                    &app,
+                    format!("failed to process workspace-import request: {error}"),
+                );
+                emit_open_request_error(&app, &source, "apply_open_request", &error, summary);
+            }
+        }
+    });
+}
+
 fn apply_open_request(app: &AppHandle, request: OpenRequest) -> Result<(), String> {
     match request {
         OpenRequest::OpenDir(path) => apply_open_dir_request(app, path),
         OpenRequest::OpenFiles(files) => apply_open_files_request(app, files),
+        OpenRequest::ImportToDefaultWorkspace(items) => {
+            crate::workspace_import::import_items_to_default_workspace(
+                app,
+                items,
+                "import_to_default_workspace",
+            )?;
+            window_manager::show_and_focus(app);
+            Ok(())
+        }
+        OpenRequest::ImportWithWorkspacePicker(items) => {
+            crate::workspace_import::queue_workspace_picker_import_request(
+                app,
+                items,
+                "import_with_workspace_picker",
+            )?;
+            window_manager::show_and_focus(app);
+            Ok(())
+        }
+    }
+}
+
+fn merge_paths_into_batch(target: &mut Vec<PathBuf>, items: Vec<PathBuf>) {
+    let mut existing: HashSet<String> = target
+        .iter()
+        .map(|path| path.to_string_lossy().to_lowercase())
+        .collect();
+    for path in items {
+        let key = path.to_string_lossy().to_lowercase();
+        if existing.insert(key) {
+            target.push(path);
+        }
     }
 }
 
@@ -381,6 +549,20 @@ fn parse_open_request(args: &[String], cwd: Option<&Path>) -> Result<Option<Open
         return parse_open_files_flag(&args, index, cwd);
     }
 
+    if let Some(index) = args
+        .iter()
+        .position(|value| value == "--import-to-default-workspace")
+    {
+        return parse_import_selection_flag(&args, index, cwd, ImportRequestMode::DefaultWorkspace);
+    }
+
+    if let Some(index) = args
+        .iter()
+        .position(|value| value == "--import-with-workspace-picker")
+    {
+        return parse_import_selection_flag(&args, index, cwd, ImportRequestMode::WorkspacePicker);
+    }
+
     parse_implicit_candidates(&args, cwd)
 }
 
@@ -455,16 +637,69 @@ fn parse_open_files_flag(
             classification.files,
         ))));
     }
-    if classification.directories.len() == 1
+
+    Err(build_open_files_parse_error(&classification, literal_mode))
+}
+
+fn parse_import_selection_flag(
+    args: &[String],
+    index: usize,
+    cwd: Option<&Path>,
+    mode: ImportRequestMode,
+) -> Result<Option<OpenRequest>, String> {
+    let remainder = args.get(index + 1..).unwrap_or_default();
+    if remainder.is_empty() {
+        return Err(format!(
+            "`{}` requires at least one file or folder path",
+            import_mode_flag(mode)
+        ));
+    }
+
+    let literal_mode = remainder.first().is_some_and(|value| value == "--");
+    let item_tokens = if literal_mode {
+        &remainder[1..]
+    } else {
+        remainder
+    };
+    if item_tokens.is_empty() {
+        return Err(format!(
+            "`{} --` requires at least one file or folder path",
+            import_mode_flag(mode)
+        ));
+    }
+
+    let candidates = collect_candidate_paths(item_tokens, cwd, literal_mode);
+    if candidates.is_empty() {
+        return Err(format!(
+            "`{}` did not contain any usable paths after filtering options",
+            import_mode_flag(mode)
+        ));
+    }
+
+    let classification = classify_candidate_paths(candidates);
+    let items = dedupe_paths(
+        classification
+            .files
+            .iter()
+            .cloned()
+            .chain(classification.directories.iter().cloned())
+            .collect(),
+    );
+    if !items.is_empty()
         && classification.missing.is_empty()
         && classification.other_fs_entries.is_empty()
     {
-        return Ok(Some(OpenRequest::OpenDir(
-            classification.directories[0].clone(),
-        )));
+        return Ok(Some(match mode {
+            ImportRequestMode::DefaultWorkspace => OpenRequest::ImportToDefaultWorkspace(items),
+            ImportRequestMode::WorkspacePicker => OpenRequest::ImportWithWorkspacePicker(items),
+        }));
     }
 
-    Err(build_open_files_parse_error(&classification, literal_mode))
+    Err(build_import_selection_parse_error(
+        &classification,
+        literal_mode,
+        mode,
+    ))
 }
 
 fn parse_implicit_candidates(
@@ -572,6 +807,46 @@ fn build_open_files_parse_error(
         classification.missing.len(),
         classification.other_fs_entries.len()
     )
+}
+
+fn build_import_selection_parse_error(
+    classification: &CandidateClassification,
+    literal_mode: bool,
+    mode: ImportRequestMode,
+) -> String {
+    let first_invalid = classification
+        .missing
+        .first()
+        .or_else(|| classification.other_fs_entries.first());
+    let invalid_token = first_invalid
+        .map(|entry| entry.raw.as_str())
+        .unwrap_or("<none>");
+    let invalid_resolved = first_invalid
+        .map(|entry| entry.resolved.display().to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+
+    format!(
+        "workspace-import parse failed: mode={}; literal_mode={literal_mode}; first_invalid_token={invalid_token}; first_invalid_resolved={invalid_resolved}; files_detected={}; directories_detected={}; missing_detected={}; other_detected={}",
+        import_mode_name(mode),
+        classification.files.len(),
+        classification.directories.len(),
+        classification.missing.len(),
+        classification.other_fs_entries.len()
+    )
+}
+
+fn import_mode_flag(mode: ImportRequestMode) -> &'static str {
+    match mode {
+        ImportRequestMode::DefaultWorkspace => "--import-to-default-workspace",
+        ImportRequestMode::WorkspacePicker => "--import-with-workspace-picker",
+    }
+}
+
+fn import_mode_name(mode: ImportRequestMode) -> &'static str {
+    match mode {
+        ImportRequestMode::DefaultWorkspace => "default_workspace",
+        ImportRequestMode::WorkspacePicker => "workspace_picker",
+    }
 }
 
 fn strip_executable_arg<'a>(args: &'a [String], cwd: Option<&Path>) -> &'a [String] {
@@ -692,6 +967,20 @@ fn log_open_request_parse(
                 .map(|path| path.display().to_string())
                 .unwrap_or_else(|| "<none>".to_string());
             format!("open_files:{} (first={first})", files.len())
+        }
+        Ok(Some(OpenRequest::ImportToDefaultWorkspace(items))) => {
+            let first = items
+                .first()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            format!("import_default:{} (first={first})", items.len())
+        }
+        Ok(Some(OpenRequest::ImportWithWorkspacePicker(items))) => {
+            let first = items
+                .first()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string());
+            format!("import_picker:{} (first={first})", items.len())
         }
         Ok(None) => "none".to_string(),
         Err(error) => format!("error:{error}"),
@@ -837,6 +1126,22 @@ fn open_request_fingerprint(request: &OpenRequest) -> String {
                 .collect::<Vec<_>>();
             normalized.sort_unstable();
             format!("files:{}", normalized.join("|"))
+        }
+        OpenRequest::ImportToDefaultWorkspace(items) => {
+            let mut normalized = items
+                .iter()
+                .map(|path| path_fingerprint(path))
+                .collect::<Vec<_>>();
+            normalized.sort_unstable();
+            format!("import_default:{}", normalized.join("|"))
+        }
+        OpenRequest::ImportWithWorkspacePicker(items) => {
+            let mut normalized = items
+                .iter()
+                .map(|path| path_fingerprint(path))
+                .collect::<Vec<_>>();
+            normalized.sort_unstable();
+            format!("import_picker:{}", normalized.join("|"))
         }
     }
 }
@@ -1157,14 +1462,55 @@ mod tests {
     }
 
     #[test]
-    fn parse_open_files_falls_back_to_single_directory() {
-        let temp = TempDirGuard::new("fallback-dir");
+    fn parse_open_files_rejects_directory_without_explicit_open_dir_flag() {
+        let temp = TempDirGuard::new("reject-dir");
         let dir_path = temp.path().join("workspace");
         fs::create_dir_all(&dir_path).expect("failed to create directory");
 
         let args = vec!["--open-files".to_string(), "workspace".to_string()];
+        let error = parse_open_request(&args, Some(temp.path())).expect_err("should fail");
+        assert!(error.contains("reason=no_valid_files"));
+        assert!(error.contains("directories_detected=1"));
+    }
+
+    #[test]
+    fn parse_import_to_default_workspace_accepts_files_and_directories() {
+        let temp = TempDirGuard::new("import-default");
+        let file_path = temp.path().join("note.md");
+        let dir_path = temp.path().join("folder");
+        fs::write(&file_path, b"hello").expect("file");
+        fs::create_dir_all(&dir_path).expect("dir");
+
+        let args = vec![
+            "--import-to-default-workspace".to_string(),
+            "note.md".to_string(),
+            "folder".to_string(),
+        ];
         let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
-        assert_eq!(request, Some(OpenRequest::OpenDir(dir_path)));
+        assert_eq!(
+            request,
+            Some(OpenRequest::ImportToDefaultWorkspace(vec![
+                file_path, dir_path
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_import_with_workspace_picker_supports_literal_separator() {
+        let temp = TempDirGuard::new("import-picker");
+        let file_path = temp.path().join("--draft.md");
+        fs::write(&file_path, b"hello").expect("file");
+
+        let args = vec![
+            "--import-with-workspace-picker".to_string(),
+            "--".to_string(),
+            "--draft.md".to_string(),
+        ];
+        let request = parse_open_request(&args, Some(temp.path())).expect("parse should succeed");
+        assert_eq!(
+            request,
+            Some(OpenRequest::ImportWithWorkspacePicker(vec![file_path]))
+        );
     }
 
     #[test]

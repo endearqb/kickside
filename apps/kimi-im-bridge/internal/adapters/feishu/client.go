@@ -183,6 +183,27 @@ func (c *Client) CreateMessage(ctx context.Context, request SendMessageRequest) 
 	}, nil
 }
 
+func (c *Client) PatchMessage(ctx context.Context, messageID string, content string) error {
+	body := larkim.NewPatchMessageReqBodyBuilder().
+		Content(content).
+		Build()
+	req := larkim.NewPatchMessageReqBuilder().
+		MessageId(strings.TrimSpace(messageID)).
+		Body(body).
+		Build()
+	resp, err := c.api.Im.V1.Message.Patch(ctx, req)
+	if err != nil {
+		return err
+	}
+	if resp == nil || !resp.Success() {
+		if resp == nil {
+			return &APIError{Operation: "patch_message", Message: "empty response"}
+		}
+		return &APIError{Operation: "patch_message", Code: int(resp.Code), Message: resp.Msg}
+	}
+	return nil
+}
+
 func (c *Client) DownloadImage(ctx context.Context, imageKey string) (*DownloadedResource, error) {
 	req := larkim.NewGetImageReqBuilder().ImageKey(strings.TrimSpace(imageKey)).Build()
 	resp, err := c.api.Im.V1.Image.Get(ctx, req)

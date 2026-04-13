@@ -18,11 +18,22 @@ func (s *Service) sendReply(ctx context.Context, source *MessageEvent, binding d
 }
 
 func (s *Service) sendReplyBundle(ctx context.Context, source *MessageEvent, binding domain.SessionBinding, text string, artifacts []domain.RuntimeArtifact) error {
+	return s.sendReplyBundleWithRenderer(ctx, source, binding, text, artifacts, strings.TrimSpace(s.config.ReplyRenderer))
+}
+
+func (s *Service) sendReplyBundleWithRenderer(
+	ctx context.Context,
+	source *MessageEvent,
+	binding domain.SessionBinding,
+	text string,
+	artifacts []domain.RuntimeArtifact,
+	replyRenderer string,
+) error {
 	if source == nil {
 		return nil
 	}
 
-	requests, err := buildReplyRequests(*source, text, strings.TrimSpace(s.config.ReplyRenderer))
+	requests, err := buildReplyRequests(*source, text, replyRenderer)
 	if err != nil {
 		return reliability.Wrap("payload_invalid", err)
 	}
@@ -38,7 +49,9 @@ func buildReplyRequests(source MessageEvent, text string, replyRenderer string) 
 	if strings.EqualFold(strings.TrimSpace(replyRenderer), "post") {
 		return buildRichTextReplyRequests(source, text), nil
 	}
-	if strings.TrimSpace(replyRenderer) == "" || strings.EqualFold(strings.TrimSpace(replyRenderer), "interactive") {
+	if strings.TrimSpace(replyRenderer) == "" ||
+		strings.EqualFold(strings.TrimSpace(replyRenderer), "interactive") ||
+		strings.EqualFold(strings.TrimSpace(replyRenderer), "streaming") {
 		return buildReplyCardRequests(source, text)
 	}
 	return nil, fmt.Errorf("unsupported feishu reply renderer %q", replyRenderer)

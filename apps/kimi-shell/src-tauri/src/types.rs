@@ -35,8 +35,18 @@ pub enum BridgeChannelMode {
 #[serde(rename_all = "snake_case")]
 pub enum FeishuReplyRenderer {
     Post,
-    #[default]
     Interactive,
+    #[default]
+    Streaming,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WeixinReplyMode {
+    FinalOnly,
+    #[default]
+    StatusOnly,
+    StreamingExperimental,
 }
 
 fn default_feishu_auto_approve() -> bool {
@@ -292,6 +302,53 @@ pub struct WorkspaceSessionBridgePayload {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceImportTargetKind {
+    Current,
+    Default,
+    Known,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceImportTarget {
+    pub id: String,
+    pub label: String,
+    pub root_path: String,
+    pub kind: WorkspaceImportTargetKind,
+    pub is_current: bool,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceImportRequestPayload {
+    pub request_id: String,
+    pub source: String,
+    pub item_count: usize,
+    pub item_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceImportTargetInput {
+    pub root_path: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceImportResult {
+    pub request_id: String,
+    pub source: String,
+    pub target_path: String,
+    pub target_label: String,
+    pub imported_count: usize,
+    pub imported_names: Vec<String>,
+    pub current_workspace_match: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
@@ -372,6 +429,8 @@ pub struct BridgeConnectorConfig {
     pub feishu_auto_approve: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feishu_reply_renderer: Option<FeishuReplyRenderer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weixin_reply_mode: Option<WeixinReplyMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

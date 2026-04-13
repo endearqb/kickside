@@ -24,6 +24,7 @@ mod tray_manager;
 mod types;
 mod weixin_onboarding;
 mod window_manager;
+mod workspace_import;
 mod workspace_session;
 
 use std::path::PathBuf;
@@ -44,14 +45,15 @@ use types::{
     InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
     InstalledSkill, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
     KimiCliConfigCenterView, KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult,
-    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
-    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
-    SkillApplyResult, SkillApplyScope, SkillDetail, SkillDiscoverySnapshot,
-    SkillProjectionRecord, SkillRecommendation, StartFeishuConnectorOnboardingInput,
-    StartWeixinConnectorOnboardingInput, StartupMonitorReason, StartupMonitorState,
-    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
-    WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot, WorkspaceSkillInventory,
-    WorkspaceSkillProfile, WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
+    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
+    PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
+    SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
+    SkillRecommendation, StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
+    SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
+    WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
+    WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
+    WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -1241,6 +1243,30 @@ fn disable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
 }
 
 #[tauri::command]
+fn list_workspace_import_targets(app: AppHandle) -> Result<Vec<WorkspaceImportTarget>, String> {
+    workspace_import::list_workspace_import_targets(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_active_workspace_import_request() -> Option<WorkspaceImportRequestPayload> {
+    workspace_import::get_active_workspace_import_request()
+}
+
+#[tauri::command]
+fn complete_workspace_import_request(
+    app: AppHandle,
+    request_id: String,
+    input: WorkspaceImportTargetInput,
+) -> Result<WorkspaceImportResult, String> {
+    workspace_import::complete_workspace_import_request(&app, &request_id, &input)
+}
+
+#[tauri::command]
+fn cancel_workspace_import_request(app: AppHandle, request_id: String) -> Result<(), String> {
+    workspace_import::cancel_workspace_import_request(&app, &request_id)
+}
+
+#[tauri::command]
 fn get_onboarding_status(app: AppHandle) -> Result<OnboardingStatus, String> {
     build_onboarding_status(&app)
 }
@@ -1518,6 +1544,10 @@ pub fn run() {
             get_context_menu_status,
             enable_context_menu,
             disable_context_menu,
+            list_workspace_import_targets,
+            get_active_workspace_import_request,
+            complete_workspace_import_request,
+            cancel_workspace_import_request,
             get_onboarding_status,
             complete_onboarding,
             skip_onboarding,
@@ -1565,6 +1595,17 @@ pub fn run() {
                     }
                     _ => {}
                 }
+            } else if label == window_manager::WORKSPACE_IMPORT_PICKER_WINDOW_LABEL {
+                match event {
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        window_manager::handle_workspace_import_picker_close_requested(
+                            app_handle,
+                            "workspace_import_picker_close_requested",
+                        );
+                    }
+                    _ => {}
+                }
             }
         }
         RunEvent::ExitRequested { api, .. } => {
@@ -1603,11 +1644,7 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     let kimi_login_health =
         auth_state::read_runtime_login_health(app, settings.onboarding_step_acks.login_verified)?;
 
-    let (
-        runtime_state,
-        startup_open_request_applied,
-        runtime_detected_kimi_path,
-    ) = {
+    let (runtime_state, startup_open_request_applied, runtime_detected_kimi_path) = {
         let state = app.state::<AppState>();
         let runtime = state
             .runtime
@@ -1635,9 +1672,8 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     } else {
         Some(kimi_login_health.message.clone())
     };
-    let auth_ready =
-        kimi_login_health.state == KimiLoginHealthState::Verified
-            || auth_snapshot.provider_api_configured;
+    let auth_ready = kimi_login_health.state == KimiLoginHealthState::Verified
+        || auth_snapshot.provider_api_configured;
 
     let work_dir = settings
         .work_dir

@@ -14,7 +14,8 @@ use crate::{
         AppSettings, BridgeChannelMode, BridgeConnectorConfig, BridgeConnectorSecrets,
         BridgeConnectorSecretsInput, BridgeFeishuSecrets, BridgeOnboardingConfigInput,
         BridgePlatform, BridgeSecrets, BridgeSettings, BridgeSkillsMode, BridgeTelegramSecrets,
-        BridgeWeixinSecrets, FeishuReplyRenderer, WorkDirPreset, CURRENT_SETTINGS_SCHEMA_VERSION,
+        BridgeWeixinSecrets, FeishuReplyRenderer, WeixinReplyMode, WorkDirPreset,
+        CURRENT_SETTINGS_SCHEMA_VERSION,
     },
 };
 
@@ -197,6 +198,7 @@ pub fn sync_default_work_dir_from_app(
     Ok(bridge_settings)
 }
 
+#[cfg(test)]
 pub fn preview_default_work_dir_after_app_sync(
     settings: &BridgeSettings,
     previous_app_work_dir: Option<&str>,
@@ -531,7 +533,7 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
             .bridge_admin_port_override
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
         skills_mode: BridgeSkillsMode::Disabled,
-        feishu_reply_renderer: FeishuReplyRenderer::Interactive,
+        feishu_reply_renderer: FeishuReplyRenderer::Streaming,
         feishu_auto_approve: true,
         reset_binding_session_on_bridge_start: true,
         feishu_reply_cards: None,
@@ -645,9 +647,18 @@ fn normalize_connectors(
                 item.feishu_reply_renderer
                     .unwrap_or(default_feishu_reply_renderer),
             );
+            item.weixin_reply_mode = None;
+        } else if platform == BridgePlatform::Weixin {
+            item.feishu_auto_approve = None;
+            item.feishu_reply_renderer = None;
+            item.weixin_reply_mode = Some(
+                item.weixin_reply_mode
+                    .unwrap_or(WeixinReplyMode::StatusOnly),
+            );
         } else {
             item.feishu_auto_approve = None;
             item.feishu_reply_renderer = None;
+            item.weixin_reply_mode = None;
         }
         normalized.push(item);
     }
@@ -853,7 +864,9 @@ fn default_connector(platform: BridgePlatform, index: usize) -> BridgeConnectorC
         reset_binding_session_on_start: None,
         feishu_auto_approve: (platform == BridgePlatform::Feishu).then_some(true),
         feishu_reply_renderer: (platform == BridgePlatform::Feishu)
-            .then_some(FeishuReplyRenderer::Interactive),
+            .then_some(FeishuReplyRenderer::Streaming),
+        weixin_reply_mode: (platform == BridgePlatform::Weixin)
+            .then_some(WeixinReplyMode::StatusOnly),
     }
 }
 

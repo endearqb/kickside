@@ -6908,3 +6908,296 @@ input:focus {
   }
 
 }
+
+.workspace-import-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 20px 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(47, 125, 87, 0.22);
+  background: linear-gradient(180deg, rgba(251, 248, 242, 0.98), rgba(242, 238, 231, 0.94));
+  box-shadow: 0 12px 28px rgba(16, 20, 24, 0.08);
+}
+
+.workspace-import-notice-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workspace-import-notice-copy strong {
+  font-family: "Cabinet Grotesk", "Noto Sans SC", sans-serif;
+  font-size: 16px;
+  color: #1f252d;
+}
+
+.workspace-import-notice-copy p {
+  margin: 0;
+  color: #3d433f;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workspace-import-window-shell,
+.workspace-import-overlay {
+  display: grid;
+  min-height: 0;
+}
+
+.workspace-import-window-shell {
+  min-height: 100vh;
+  padding: 22px 24px 18px;
+  background:
+    radial-gradient(circle at top, rgba(182, 122, 40, 0.14), transparent 42%),
+    linear-gradient(180deg, #fbf8f2 0%, #f2eee7 100%);
+}
+
+.workspace-import-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 20, 24, 0.32);
+  backdrop-filter: blur(8px);
+}
+
+.workspace-import-content {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 16px;
+  min-height: 0;
+}
+
+.workspace-import-content-modal {
+  width: min(760px, 100%);
+  max-height: min(82vh, 620px);
+  padding: 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(31, 37, 45, 0.12);
+  background: linear-gradient(180deg, rgba(251, 248, 242, 0.98), rgba(242, 238, 231, 0.96));
+  box-shadow: 0 20px 46px rgba(16, 20, 24, 0.16);
+}
+
+.workspace-import-content-window {
+  width: 100%;
+  height: calc(100vh - 40px);
+  padding: 2px 2px 0;
+}
+
+.workspace-import-header {
+  display: grid;
+  gap: 6px;
+}
+
+.workspace-import-header-copy {
+  min-width: 0;
+}
+
+.workspace-import-header h3 {
+  margin: 4px 0 0;
+  font-family: "Cabinet Grotesk", "Noto Sans SC", sans-serif;
+  font-size: 22px;
+  color: #1f252d;
+}
+
+.workspace-import-header p {
+  margin: 0;
+  color: #3d433f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.workspace-import-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(182, 122, 40, 0.12);
+  color: #b67a28;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workspace-import-inline-error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(200, 76, 60, 0.18);
+  background: rgba(200, 76, 60, 0.08);
+  color: #8f2f24;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-import-summary,
+.workspace-import-section {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+
+.workspace-import-section-fill {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workspace-import-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #3d433f;
+  font-size: 12px;
+}
+
+.workspace-import-section-title strong {
+  font-size: 14px;
+  color: #1f252d;
+}
+
+.workspace-import-request-line {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(31, 37, 45, 0.1);
+  background: rgba(255, 255, 255, 0.54);
+  color: #3d433f;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-import-target-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 4px 6px 8px 0;
+}
+
+.workspace-import-target {
+  display: block;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 60px;
+  padding: 0;
+  border: 1px solid rgba(31, 37, 45, 0.12);
+  border-radius: 12px;
+  background: rgba(251, 248, 242, 0.92);
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  isolation: isolate;
+  transition:
+    border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.workspace-import-target:hover:not(:disabled) {
+  border-color: rgba(182, 122, 40, 0.44);
+  background: rgba(255, 252, 247, 0.98);
+  box-shadow: 0 10px 20px rgba(16, 20, 24, 0.08);
+}
+
+.workspace-import-target:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.workspace-import-target-line {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) auto minmax(0, 1.35fr);
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 60px;
+  padding: 12px 14px;
+}
+
+.workspace-import-target-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #1f252d;
+}
+
+.workspace-import-target-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(31, 37, 45, 0.08);
+  color: #3d433f;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.workspace-import-target-path {
+  display: block;
+  min-width: 0;
+  color: #3d433f;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-import-empty {
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(31, 37, 45, 0.18);
+  color: #7a746b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-import-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .workspace-import-window-shell,
+  .workspace-import-overlay {
+    padding: 16px;
+  }
+
+  .workspace-import-content-modal {
+    padding: 18px;
+  }
+
+  .workspace-import-content-modal {
+    max-height: 88vh;
+  }
+
+  .workspace-import-content-window {
+    height: calc(100vh - 32px);
+  }
+
+  .workspace-import-target-line {
+    grid-template-columns: minmax(120px, 0.9fr) auto minmax(0, 1.1fr);
+    column-gap: 10px;
+  }
+
+  .workspace-import-notice {
+    margin: 0 14px 12px;
+    flex-direction: column;
+  }
+}

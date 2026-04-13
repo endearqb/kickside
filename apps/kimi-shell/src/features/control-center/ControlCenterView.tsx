@@ -94,6 +94,24 @@ import {
 import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
+const FEISHU_REPLY_RENDERER_OPTIONS = [
+  {
+    value: "streaming",
+    label: "Streaming",
+    description: "在同一张飞书卡片里持续更新内容。",
+  },
+  {
+    value: "interactive",
+    label: "Interactive",
+    description: "生成完成后发送交互卡片。",
+  },
+  {
+    value: "post",
+    label: "Post",
+    description: "生成完成后发送普通富文本消息。",
+  },
+] as const;
+
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type OnboardingCardId =
@@ -1450,7 +1468,8 @@ export function ControlCenterView({
       defaultWorkDir: bridgeSettings.defaultWorkDir,
       resetBindingSessionOnStart: true,
       feishuAutoApprove: platform === "feishu" ? true : undefined,
-      feishuReplyRenderer: platform === "feishu" ? "interactive" : undefined,
+      feishuReplyRenderer: platform === "feishu" ? "streaming" : undefined,
+      weixinReplyMode: platform === "weixin" ? "status_only" : undefined,
     };
     onBridgeSettingsChange({
       ...bridgeSettings,
@@ -2693,7 +2712,6 @@ export function ControlCenterView({
                 <div className="bridge-workbench-rail-head">
                   <div>
                     <h4>机器人列表</h4>
-                    <p>左侧挑选机器人，右侧查看详情或继续深入配置。</p>
                   </div>
                   <ControlCenterStatusBadge tone="neutral">
                     {visibleBridgeConnectors.length} 个机器人
@@ -2755,9 +2773,11 @@ export function ControlCenterView({
                             <span>{connector.enabled ? "已启用" : "未启用"}</span>
                             <span>{connectorSecretsConfigured ? "凭据已配置" : "待配置凭据"}</span>
                           </div>
-                          <p className="bridge-workbench-list-item-error">
-                            {connectorRecentError || "当前没有记录到最近错误。"}
-                          </p>
+                          {connectorRecentError ? (
+                            <p className="bridge-workbench-list-item-error">
+                              {connectorRecentError}
+                            </p>
+                          ) : null}
                         </button>
                       );
                     })}
@@ -2824,7 +2844,7 @@ export function ControlCenterView({
                           description={
                             selectedBridgeConnectorPendingToggle
                               ? "正在应用配置..."
-                              : "切换后立即写入设置"
+                              : undefined
                           }
                           checked={selectedBridgeConnectorEnabledValue}
                           onChange={(checked) => {
@@ -2861,20 +2881,17 @@ export function ControlCenterView({
                         />
                       </div>
 
-                      <p className="bridge-workbench-card-error">
-                        {selectedBridgeConnectorRecentError || "当前没有记录到该机器人的最近错误。"}
-                      </p>
+                      {selectedBridgeConnectorRecentError ? (
+                        <p className="bridge-workbench-card-error">
+                          {selectedBridgeConnectorRecentError}
+                        </p>
+                      ) : null}
 
                       <div className="bridge-port-card bridge-robot-workdir-card">
                         <span>工作区目录</span>
                         <strong>
                           {selectedBridgeConnectorEffectiveWorkDir || "跟随应用默认目录"}
                         </strong>
-                        <small>
-                          {selectedBridgeConnectorUsesCustomWorkDir
-                            ? "当前机器人使用独立工作区目录。"
-                            : "当前机器人继承应用默认工作目录。"}
-                        </small>
                         <div className="bridge-inline-path-actions">
                           <Button
                             type="button"
@@ -2951,7 +2968,6 @@ export function ControlCenterView({
                     <div className="bridge-danger-group">
                       <div className="bridge-panel-group-label is-danger">
                         <span>危险操作</span>
-                        <small>删除后会立即保存配置，并在运行中自动重启 IM Bridge。</small>
                       </div>
                       <div className="cc-actions">
                         <Button
@@ -2975,8 +2991,8 @@ export function ControlCenterView({
                   title={visibleBridgeConnectors.length > 0 ? "选择一个机器人" : "先创建一个机器人"}
                   description={
                     visibleBridgeConnectors.length > 0
-                      ? "从左侧列表选择机器人，查看状态、凭据和运行面板。"
-                      : "机器人创建后会出现在左侧列表。你可以在这里查看状态、切换工作区目录，并继续打开连接与凭据或高级运行面板。"
+                      ? "从左侧列表选择机器人。"
+                      : "创建后会出现在左侧列表。"
                   }
                   icon={<Sparkles size={18} />}
                 />
@@ -3236,7 +3252,6 @@ export function ControlCenterView({
               ? `${selectedBridgeConnector.label} 连接与凭据`
               : "连接与凭据"
           }
-          description="先确认状态，再统一维护机器人名称、连接凭据和平台开通信息。"
           className="cc-bridge-task-surface cc-bridge-connector-modal"
           bodyClassName="cc-bridge-connector-body"
           onBack={closeBridgeConnectorSecretsTask}
@@ -3312,13 +3327,19 @@ export function ControlCenterView({
                     <strong>{formatBridgeTimestamp(selectedBridgeConnectorStatus?.lastReadyAt)}</strong>
                   </article>
                 </div>
-                <p className="hint">
-                  {findBridgeConnectorRecentError(
-                    selectedBridgeConnector,
-                    selectedBridgeConnectorStatus,
-                    bridgeRecentErrors,
-                  ) || "当前没有记录到该机器人的最近错误。"}
-                </p>
+                {findBridgeConnectorRecentError(
+                  selectedBridgeConnector,
+                  selectedBridgeConnectorStatus,
+                  bridgeRecentErrors,
+                ) ? (
+                  <p className="hint">
+                    {findBridgeConnectorRecentError(
+                      selectedBridgeConnector,
+                      selectedBridgeConnectorStatus,
+                      bridgeRecentErrors,
+                    )}
+                  </p>
+                ) : null}
               </div>
 
               <div className="bridge-panel-subsection">
@@ -3353,9 +3374,43 @@ export function ControlCenterView({
                           : "飞书机器人名称"
                     }
                   />
-                  <small>保存后将同步到机器人卡片、运行面板和审批/绑定标题。</small>
                 </label>
               </div>
+
+              {selectedBridgeConnector.platform === "feishu" ? (
+                <div className="bridge-panel-subsection">
+                  <div className="bridge-panel-subheader">
+                    <h5>回复呈现</h5>
+                    <span className="cc-status-badge tone-warning">默认 Streaming</span>
+                  </div>
+                  <label className="bridge-port-card">
+                    <span>飞书 renderer</span>
+                    <select
+                      className="ui-input cc-config-select"
+                      value={
+                        selectedBridgeConnector.feishuReplyRenderer ??
+                        bridgeSettings.feishuReplyRenderer ??
+                        "streaming"
+                      }
+                      onChange={(event) =>
+                        updateBridgeConnector(selectedBridgeConnector.id, {
+                          feishuReplyRenderer: event.currentTarget.value as
+                            | "post"
+                            | "interactive"
+                            | "streaming",
+                        })
+                      }
+                      aria-label="飞书回复呈现方式"
+                    >
+                      {FEISHU_REPLY_RENDERER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
 
               <div className="bridge-panel-subsection">
                 <div className="bridge-panel-subheader">
@@ -3642,17 +3697,6 @@ export function ControlCenterView({
                     </span>
                   </div>
                   <div className="bridge-onboarding-card">
-                    <div className="bridge-onboarding-copy">
-                      <strong>
-                        {selectedFeishuSecretsConfigured
-                          ? "当前机器人已具备飞书凭据"
-                          : "用飞书官方流程创建并绑定机器人"}
-                      </strong>
-                      <p>
-                        应用会发起飞书官方托管创建页，扫码完成后自动保存 `appId/appSecret`
-                        并重启 IM Bridge。手动凭据输入仍保留在上方。
-                      </p>
-                    </div>
                     <div className="bridge-onboarding-actions">
                       <Button
                         type="button"
@@ -3755,13 +3799,6 @@ export function ControlCenterView({
                         {selectedFeishuOnboarding.errorMessage}
                       </p>
                     ) : null}
-                    {selectedFeishuOnboarding?.state === "succeeded" ? (
-                      <div className="bridge-onboarding-success-list">
-                        <span>1. 去飞书里找到这个机器人或刚创建的应用。</span>
-                        <span>2. 给机器人发送第一条私聊消息，或在群里 @ 它。</span>
-                        <span>3. 当前 bridge 会继续按现有 binding / session 机制自动工作。</span>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -3787,17 +3824,6 @@ export function ControlCenterView({
                     </span>
                   </div>
                   <div className="bridge-onboarding-card">
-                    <div className="bridge-onboarding-copy">
-                      <strong>
-                        {selectedWeixinSecretsConfigured
-                          ? "当前机器人已具备微信 owner 凭据"
-                          : "扫码绑定一个微信机器人"}
-                      </strong>
-                      <p>
-                        应用会拉起 iLink 兼容扫码流程，登录成功后自动保存 `botToken/baseUrl/accountId/ownerUserId`
-                        并重启 IM Bridge。V1 只支持 owner 私聊文本消息，不支持群聊和媒体。
-                      </p>
-                    </div>
                     <div className="bridge-onboarding-actions">
                       <Button
                         type="button"
@@ -3903,13 +3929,6 @@ export function ControlCenterView({
                         {selectedWeixinOnboarding.errorMessage}
                       </p>
                     ) : null}
-                    {selectedWeixinOnboarding?.state === "succeeded" ? (
-                      <div className="bridge-onboarding-success-list">
-                        <span>1. 用扫码成功的 owner 微信给机器人发送第一条私聊文本。</span>
-                        <span>2. bridge 会按当前 binding / session 机制建立会话并保存上下文。</span>
-                        <span>3. 其他用户、群聊和媒体消息在 V1 中会被明确忽略。</span>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -3921,7 +3940,6 @@ export function ControlCenterView({
               <div className="bridge-danger-group">
                 <div className="cc-danger-group-label">
                   <strong>危险操作</strong>
-                  <span>删除后会立即保存配置，并在运行中自动重启 IM Bridge。</span>
                 </div>
                 <div className="cc-actions">
                   <Button
@@ -3952,7 +3970,6 @@ export function ControlCenterView({
               ? `${selectedBridgeConnector.label} 高级运行面板`
               : "高级运行面板"
           }
-          description="这个任务面只显示当前机器人相关的状态、绑定、审批、会话、日志和凭据掩码。"
           className="cc-bridge-task-surface cc-bridge-runtime-modal"
           bodyClassName="cc-bridge-runtime-body"
           onBack={onCloseTask}

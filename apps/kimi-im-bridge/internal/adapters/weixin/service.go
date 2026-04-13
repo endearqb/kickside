@@ -20,6 +20,7 @@ import (
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/adapterkit"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
+	bridgeconfig "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 )
 
@@ -57,6 +58,7 @@ type Config struct {
 	AccountID      string
 	OwnerUserID    string
 	DefaultWorkDir string
+	ReplyMode      string
 }
 
 type Options struct {
@@ -311,6 +313,19 @@ func (s *Service) processMessage(ctx context.Context, message WeixinMessage) err
 		RawRef:      fmt.Sprintf("weixin:%s", normalizeMessageID(message.MessageID)),
 	}
 
+	typingSession, typingErr := s.startTypingSession(ctx, *binding)
+	if typingErr != nil {
+		s.logf(
+			"channel event=warn platform=%s operation=send_typing connector=%s err=%q",
+			platformID,
+			s.connectorID(),
+			typingErr.Error(),
+		)
+	}
+	if typingSession != nil {
+		defer typingSession.stop()
+	}
+
 	result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 		DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
 	}, func(event bridgecore.TurnEvent) error {
@@ -433,6 +448,16 @@ func (c *Client) SendMessage(ctx context.Context, input SendMessageRequest) erro
 	return c.postJSON(ctx, "ilink/bot/sendmessage", input, &map[string]any{})
 }
 
+func (c *Client) GetConfig(ctx context.Context, input GetConfigRequest) (GetConfigResponse, error) {
+	var response GetConfigResponse
+	err := c.postJSON(ctx, "ilink/bot/getconfig", input, &response)
+	return response, err
+}
+
+func (c *Client) SendTyping(ctx context.Context, input SendTypingRequest) error {
+	return c.postJSON(ctx, "ilink/bot/sendtyping", input, &map[string]any{})
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, payload any, out any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -522,6 +547,25 @@ type SendMessageRequest struct {
 	BaseInfo BaseInfo              `json:"base_info"`
 }
 
+type GetConfigRequest struct {
+	IlinkUserID  string   `json:"ilink_user_id"`
+	ContextToken string   `json:"context_token,omitempty"`
+	BaseInfo     BaseInfo `json:"base_info"`
+}
+
+type GetConfigResponse struct {
+	Ret          int    `json:"ret"`
+	ErrMsg       string `json:"errmsg"`
+	TypingTicket string `json:"typing_ticket"`
+}
+
+type SendTypingRequest struct {
+	IlinkUserID  string   `json:"ilink_user_id"`
+	TypingTicket string   `json:"typing_ticket"`
+	Status       int      `json:"status,omitempty"`
+	BaseInfo     BaseInfo `json:"base_info"`
+}
+
 type OutboundWeixinMessage struct {
 	FromUserID   string        `json:"from_user_id,omitempty"`
 	ToUserID     string        `json:"to_user_id"`
@@ -572,6 +616,19 @@ func randomWechatUIN() string {
 
 func defaultBaseInfo() BaseInfo {
 	return BaseInfo{ChannelVersion: defaultChannelVersion}
+}
+
+func normalizeWeixinReplyMode(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case bridgeconfig.WeixinReplyModeFinalOnly:
+		return bridgeconfig.WeixinReplyModeFinalOnly
+	case bridgeconfig.WeixinReplyModeStreamingExperimental:
+		return bridgeconfig.WeixinReplyModeStreamingExperimental
+	case bridgeconfig.WeixinReplyModeStatusOnly:
+		return bridgeconfig.WeixinReplyModeStatusOnly
+	default:
+		return bridgeconfig.WeixinReplyModeStatusOnly
+	}
 }
 
 func nowRFC3339() string {

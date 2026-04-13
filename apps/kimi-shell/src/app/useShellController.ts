@@ -95,6 +95,9 @@ import type {
   SkillRecommendation,
   SkillDiscoveryContainerKind,
   WorkspaceDiscoveryRoot,
+  WorkspaceImportRequestPayload,
+  WorkspaceImportResult,
+  WorkspaceImportTarget,
   WorkspaceSkillInventory,
   WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
@@ -131,6 +134,12 @@ import {
   uninstallSkill,
   updateSkill,
 } from "@/services/skillCenterService";
+import {
+  cancelWorkspaceImportRequest,
+  completeWorkspaceImportRequest,
+  getActiveWorkspaceImportRequest,
+  listWorkspaceImportTargets,
+} from "@/services/workspaceImportService";
 
 const POLL_MS = 1000;
 const SHELL_ROUTE_EVENT = "shell-route";
@@ -139,6 +148,8 @@ const SHUTDOWN_PROGRESS_EVENT = "shutdown-progress";
 const OPEN_REQUEST_ERROR_EVENT = "open-request-error";
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT = "workspace-session-bridge";
+const WORKSPACE_IMPORT_REQUEST_EVENT = "workspace-import-request";
+const WORKSPACE_IMPORT_RESULT_EVENT = "workspace-import-result";
 const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT = "main-window-close-decision-request";
 const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
@@ -179,7 +190,8 @@ function createDefaultBridgeConnector(
     defaultWorkDir: undefined,
     resetBindingSessionOnStart: true,
     feishuAutoApprove: platform === "feishu" ? true : undefined,
-    feishuReplyRenderer: platform === "feishu" ? "interactive" : undefined,
+    feishuReplyRenderer: platform === "feishu" ? "streaming" : undefined,
+    weixinReplyMode: platform === "weixin" ? "status_only" : undefined,
   };
 }
 
@@ -268,7 +280,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     enabled: false,
     autoStart: false,
     adminPort: 60110,
-    feishuReplyRenderer: "interactive",
+    feishuReplyRenderer: "streaming",
     feishuAutoApprove: true,
     resetBindingSessionOnBridgeStart: true,
     defaultWorkDir: "",
@@ -446,6 +458,14 @@ export function useShellController() {
   const [contextMenuBusy, setContextMenuBusy] = useState(false);
   const [loginProbeBusy, setLoginProbeBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [workspaceImportBusy, setWorkspaceImportBusy] = useState(false);
+  const [workspaceImportTargets, setWorkspaceImportTargets] = useState<
+    WorkspaceImportTarget[]
+  >([]);
+  const [workspaceImportRequest, setWorkspaceImportRequest] =
+    useState<WorkspaceImportRequestPayload | null>(null);
+  const [workspaceImportResult, setWorkspaceImportResult] =
+    useState<WorkspaceImportResult | null>(null);
   const [contextMenuStatus, setContextMenuStatus] =
     useState<ContextMenuStatus | null>(null);
   const [loginProbeResult, setLoginProbeResult] =
@@ -618,6 +638,7 @@ export function useShellController() {
   const workspaceRemoteUrlRef = useRef<string | null>(null);
   const chatRemoteUrlRef = useRef<string | null>(null);
   const hashRoute = parseHashRoute(routeHash);
+  const isWorkspaceImportPickerRoute = hashRoute === "workspace-import-picker";
   const useBootHintWorkspace =
     hashRoute === "loading" &&
     !status &&
@@ -1181,6 +1202,28 @@ export function useShellController() {
     }
   }
 
+  async function refreshWorkspaceImportTargets() {
+    try {
+      const targets = await listWorkspaceImportTargets();
+      setWorkspaceImportTargets(targets);
+      return targets;
+    } catch (error) {
+      setActionError(String(error));
+      return [];
+    }
+  }
+
+  async function refreshActiveWorkspaceImportRequest() {
+    try {
+      const request = await getActiveWorkspaceImportRequest();
+      setWorkspaceImportRequest(request);
+      return request;
+    } catch (error) {
+      setActionError(String(error));
+      return null;
+    }
+  }
+
   async function refreshBridgeSettings() {
     try {
       const data = await invoke<BridgeSettings>("get_bridge_settings");
@@ -1673,6 +1716,8 @@ export function useShellController() {
     let unlistenPrefill: (() => void) | undefined;
     let unlistenShutdownProgress: (() => void) | undefined;
     let unlistenOpenRequestError: (() => void) | undefined;
+    let unlistenWorkspaceImportRequest: (() => void) | undefined;
+    let unlistenWorkspaceImportResult: (() => void) | undefined;
     let unlistenSessionBootstrap: (() => void) | undefined;
     let unlistenSessionBridge: (() => void) | undefined;
     let unlistenMainCloseDecisionRequest: (() => void) | undefined;
@@ -1685,6 +1730,8 @@ export function useShellController() {
           prefillOff,
           shutdownOff,
           openRequestErrorOff,
+          workspaceImportRequestOff,
+          workspaceImportResultOff,
           bootstrapOff,
           sessionBridgeOff,
           mainCloseDecisionRequestOff,
@@ -1723,6 +1770,28 @@ export function useShellController() {
               setActionError(
                 `Open request failed [${source}/${stage}]: ${message}${argsPart}`,
               );
+            },
+          ),
+          currentWebviewWindow.listen<WorkspaceImportRequestPayload>(
+            WORKSPACE_IMPORT_REQUEST_EVENT,
+            (event) => {
+              setActionError(null);
+              setWorkspaceImportResult(null);
+              setWorkspaceImportBusy(false);
+              void refreshWorkspaceImportTargets();
+              setWorkspaceImportRequest(event.payload);
+            },
+          ),
+          currentWebviewWindow.listen<WorkspaceImportResult>(
+            WORKSPACE_IMPORT_RESULT_EVENT,
+            (event) => {
+              setActionError(null);
+              setWorkspaceImportBusy(false);
+              setWorkspaceImportRequest((current) =>
+                current?.requestId === event.payload.requestId ? null : current,
+              );
+              setWorkspaceImportResult(event.payload);
+              void refreshWorkspaceImportTargets();
             },
           ),
           currentWebviewWindow.listen<WorkspaceSessionBridgePayload>(
@@ -1794,6 +1863,8 @@ export function useShellController() {
           prefillOff();
           shutdownOff();
           openRequestErrorOff();
+          workspaceImportRequestOff();
+          workspaceImportResultOff();
           bootstrapOff();
           sessionBridgeOff();
           mainCloseDecisionRequestOff();
@@ -1804,6 +1875,8 @@ export function useShellController() {
         unlistenPrefill = prefillOff;
         unlistenShutdownProgress = shutdownOff;
         unlistenOpenRequestError = openRequestErrorOff;
+        unlistenWorkspaceImportRequest = workspaceImportRequestOff;
+        unlistenWorkspaceImportResult = workspaceImportResultOff;
         unlistenSessionBootstrap = bootstrapOff;
         unlistenSessionBridge = sessionBridgeOff;
         unlistenMainCloseDecisionRequest = mainCloseDecisionRequestOff;
@@ -1830,6 +1903,12 @@ export function useShellController() {
       if (unlistenOpenRequestError) {
         unlistenOpenRequestError();
       }
+      if (unlistenWorkspaceImportRequest) {
+        unlistenWorkspaceImportRequest();
+      }
+      if (unlistenWorkspaceImportResult) {
+        unlistenWorkspaceImportResult();
+      }
       if (unlistenSessionBootstrap) {
         unlistenSessionBootstrap();
       }
@@ -1844,6 +1923,10 @@ export function useShellController() {
 
   useEffect(() => {
     if (!tauriRuntime || !listenersReady || frontendReadyHandshakeSent) {
+      return;
+    }
+    if (isWorkspaceImportPickerRoute) {
+      setShellBootPending(false);
       return;
     }
 
@@ -1885,7 +1968,7 @@ export function useShellController() {
         clearFrontendReadyReportTimer();
         setShellBootPending(false);
       });
-  }, [enqueuePrefillPayload, listenersReady, tauriRuntime]);
+  }, [enqueuePrefillPayload, isWorkspaceImportPickerRoute, listenersReady, tauriRuntime]);
 
   useEffect(() => {
     const handleWorkspaceBridgeMessage = (event: MessageEvent) => {
@@ -2570,6 +2653,15 @@ export function useShellController() {
   }, [tauriRuntime]);
 
   useEffect(() => {
+    if (!tauriRuntime || !listenersReady || !isWorkspaceImportPickerRoute) {
+      return;
+    }
+
+    void refreshWorkspaceImportTargets();
+    void refreshActiveWorkspaceImportRequest();
+  }, [isWorkspaceImportPickerRoute, listenersReady, tauriRuntime]);
+
+  useEffect(() => {
     if (screen !== "control_center") return;
 
     const hashRoute = parseHashRoute(routeHash);
@@ -2843,6 +2935,101 @@ export function useShellController() {
       setActionError(String(error));
       return null;
     }
+  }
+
+  async function handleBrowseWorkspaceImportTarget() {
+    try {
+      const selected = await open({
+        title: "选择目标工作区目录",
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        return selected;
+      }
+      return null;
+    } catch (error) {
+      setActionError(String(error));
+      return null;
+    }
+  }
+
+  async function handleSelectWorkspaceImportTarget(target: WorkspaceImportTarget) {
+    if (!workspaceImportRequest?.requestId?.trim()) {
+      return null;
+    }
+
+    setWorkspaceImportBusy(true);
+    setActionError(null);
+    try {
+      const result = await completeWorkspaceImportRequest(workspaceImportRequest.requestId, {
+        rootPath: target.rootPath,
+        label: target.label,
+      });
+      setWorkspaceImportRequest(null);
+      setWorkspaceImportResult(result);
+      await refreshStatus();
+      return result;
+    } catch (error) {
+      setActionError(String(error));
+      return null;
+    } finally {
+      setWorkspaceImportBusy(false);
+    }
+  }
+
+  async function handleImportToBrowsedWorkspace() {
+    if (!workspaceImportRequest?.requestId?.trim()) {
+      return null;
+    }
+
+    const selected = await handleBrowseWorkspaceImportTarget();
+    if (!selected?.trim()) {
+      return null;
+    }
+
+    setWorkspaceImportBusy(true);
+    setActionError(null);
+    try {
+      const result = await completeWorkspaceImportRequest(workspaceImportRequest.requestId, {
+        rootPath: selected.trim(),
+        label: "手动选择的工作区",
+      });
+      setWorkspaceImportRequest(null);
+      setWorkspaceImportResult(result);
+      await refreshStatus();
+      return result;
+    } catch (error) {
+      setActionError(String(error));
+      return null;
+    } finally {
+      setWorkspaceImportBusy(false);
+    }
+  }
+
+  async function handleCancelWorkspaceImportPicker() {
+    if (!workspaceImportRequest?.requestId?.trim()) {
+      setWorkspaceImportRequest(null);
+      if (isWorkspaceImportPickerRoute) {
+        await handleCloseWindow();
+      }
+      return;
+    }
+
+    setWorkspaceImportBusy(true);
+    setActionError(null);
+    try {
+      await cancelWorkspaceImportRequest(workspaceImportRequest.requestId);
+      setWorkspaceImportRequest(null);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setWorkspaceImportBusy(false);
+    }
+  }
+
+  function handleDismissWorkspaceImportResult() {
+    setWorkspaceImportResult(null);
   }
 
   async function handleSaveWorkDirAndRestart() {
@@ -4166,7 +4353,11 @@ export function useShellController() {
     diagnosticsBusy,
     contextMenuBusy,
     loginProbeBusy,
+    workspaceImportBusy,
     actionError,
+    workspaceImportTargets,
+    workspaceImportRequest,
+    workspaceImportResult,
     shutdownProgress,
     shutdownElapsedMs,
     contextMenuStatus,
@@ -4282,6 +4473,8 @@ export function useShellController() {
     refreshBridgeApprovals,
     refreshBridgeLogTail,
     refreshBridgeSecretsMask,
+    refreshActiveWorkspaceImportRequest,
+    refreshWorkspaceImportTargets,
     refreshSkillCenterState,
     refreshSkillDiscoveryState,
     refreshWorkspaceSkillManagementState,
@@ -4309,6 +4502,10 @@ export function useShellController() {
     handlePickWorkDir,
     handlePickBridgeDefaultWorkDir,
     handlePickBridgeConnectorDefaultWorkDir,
+    handleSelectWorkspaceImportTarget,
+    handleImportToBrowsedWorkspace,
+    handleCancelWorkspaceImportPicker,
+    handleDismissWorkspaceImportResult,
     handleSaveWorkDirAndRestart,
     handleClearWorkDir,
     handleBridgeSettingsChange,

@@ -1781,6 +1781,7 @@ mod tests {
                     reset_binding_session_on_start: Some(true),
                     feishu_auto_approve: None,
                     feishu_reply_renderer: None,
+                    weixin_reply_mode: None,
                 },
                 BridgeConnectorConfig {
                     id: "feishu-default".to_string(),
@@ -1792,6 +1793,7 @@ mod tests {
                     reset_binding_session_on_start: Some(false),
                     feishu_auto_approve: Some(true),
                     feishu_reply_renderer: Some(crate::types::FeishuReplyRenderer::Interactive),
+                    weixin_reply_mode: None,
                 },
             ],
         };
@@ -1956,6 +1958,7 @@ mod tests {
                     reset_binding_session_on_start: Some(true),
                     feishu_auto_approve: None,
                     feishu_reply_renderer: None,
+                    weixin_reply_mode: None,
                 },
                 BridgeConnectorConfig {
                     id: "feishu-default".to_string(),
@@ -1967,6 +1970,7 @@ mod tests {
                     reset_binding_session_on_start: Some(true),
                     feishu_auto_approve: Some(true),
                     feishu_reply_renderer: Some(crate::types::FeishuReplyRenderer::Interactive),
+                    weixin_reply_mode: None,
                 },
             ],
         };

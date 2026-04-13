@@ -167,3 +167,87 @@ func TestClientGetUpdatesRetriesUnexpectedEOF(t *testing.T) {
 		t.Fatalf("unexpected response after retry: %#v", resp)
 	}
 }
+
+func TestClientGetConfigUsesIlinkEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody GetConfigRequest
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(data, &gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(GetConfigResponse{
+			Ret:          0,
+			TypingTicket: "ticket-1",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-config")
+	resp, err := client.GetConfig(context.Background(), GetConfigRequest{
+		IlinkUserID:  "user-1",
+		ContextToken: "ctx-1",
+		BaseInfo:     defaultBaseInfo(),
+	})
+	if err != nil {
+		t.Fatalf("get config: %v", err)
+	}
+	if gotPath != "/ilink/bot/getconfig" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if gotBody.IlinkUserID != "user-1" || gotBody.ContextToken != "ctx-1" {
+		t.Fatalf("unexpected request body: %#v", gotBody)
+	}
+	if resp.TypingTicket != "ticket-1" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestClientSendTypingUsesIlinkEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody SendTypingRequest
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if err := json.Unmarshal(data, &gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-typing")
+	err := client.SendTyping(context.Background(), SendTypingRequest{
+		IlinkUserID:  "user-typing",
+		TypingTicket: "ticket-typing",
+		Status:       1,
+		BaseInfo:     defaultBaseInfo(),
+	})
+	if err != nil {
+		t.Fatalf("send typing: %v", err)
+	}
+	if gotPath != "/ilink/bot/sendtyping" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if gotBody.IlinkUserID != "user-typing" || gotBody.TypingTicket != "ticket-typing" || gotBody.Status != 1 {
+		t.Fatalf("unexpected request body: %#v", gotBody)
+	}
+}

@@ -5,7 +5,7 @@
       "identifier": "default",
       "description": "Capability for the main window",
       "local": true,
-      "windows": ["main", "prefill"],
+      "windows": ["main", "prefill", "workspace-import-picker"],
       "permissions": [
         "core:default",
         "dialog:allow-open"
@@ -16,7 +16,7 @@
       "description": "Windows-only permissions required by the custom titlebar controls.",
       "local": true,
       "platforms": ["windows"],
-      "windows": ["main"],
+      "windows": ["main", "prefill", "workspace-import-picker"],
       "permissions": [
         "core:window:allow-start-dragging",
         "core:window:allow-minimize",

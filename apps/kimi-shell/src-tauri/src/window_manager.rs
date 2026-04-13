@@ -27,17 +27,20 @@ use crate::{
         MainWindowCloseDecisionRequestPayload, OpenRequestErrorPayload, PrefillChatPayload,
         PrefillStatusPayload, PrefillStatusState, ShellRoutePayload, StartupFailureKind,
         StartupMonitorTargetRoute, StartupPhase, SubmitPrefillAck, WebviewRuntimeKind,
-        WorkspaceSessionBridgePayload,
+        WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceSessionBridgePayload,
     },
 };
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const PREFILL_WINDOW_LABEL: &str = "prefill";
+pub const WORKSPACE_IMPORT_PICKER_WINDOW_LABEL: &str = "workspace-import-picker";
 
 const SHELL_ROUTE_EVENT: &str = "shell-route";
 const PREFILL_CHAT_EVENT: &str = "prefill-chat";
 const PREFILL_STATUS_EVENT: &str = "prefill-status";
 const OPEN_REQUEST_ERROR_EVENT: &str = "open-request-error";
+const WORKSPACE_IMPORT_REQUEST_EVENT: &str = "workspace-import-request";
+const WORKSPACE_IMPORT_RESULT_EVENT: &str = "workspace-import-result";
 pub const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT: &str = "main-window-close-decision-request";
 const STARTUP_TRACE_LIMIT: usize = 48;
 const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(2);
@@ -55,6 +58,10 @@ const SHELL_WIDTH: f64 = 1200.0;
 const SHELL_HEIGHT: f64 = 820.0;
 const SHELL_MIN_WIDTH: f64 = 900.0;
 const SHELL_MIN_HEIGHT: f64 = 640.0;
+const WORKSPACE_IMPORT_PICKER_WIDTH: f64 = 720.0;
+const WORKSPACE_IMPORT_PICKER_HEIGHT: f64 = 560.0;
+const WORKSPACE_IMPORT_PICKER_MIN_WIDTH: f64 = 680.0;
+const WORKSPACE_IMPORT_PICKER_MIN_HEIGHT: f64 = 520.0;
 
 fn chat_external_link_bridge_script() -> String {
     format!(
@@ -498,6 +505,8 @@ enum QueuedMainEvent {
         payload: WorkspaceSessionBridgePayload,
     },
     OpenRequestError(OpenRequestErrorPayload),
+    WorkspaceImportRequest(WorkspaceImportRequestPayload),
+    WorkspaceImportResult(WorkspaceImportResult),
 }
 
 #[derive(Debug, Clone)]
@@ -1074,6 +1083,177 @@ pub fn publish_open_request_error(
             source,
             "emit_failed",
         );
+    }
+}
+
+pub fn publish_workspace_import_request(
+    app: &AppHandle,
+    payload: &WorkspaceImportRequestPayload,
+    source: &str,
+) {
+    match show_workspace_import_picker_window(app, source) {
+        Ok(_) => {
+            if emit_workspace_import_request_event_to(
+                app,
+                WORKSPACE_IMPORT_PICKER_WINDOW_LABEL,
+                payload,
+                source,
+            ) {
+                return;
+            }
+
+            log_manager::append_line(
+                app,
+                format!(
+                    "workspace import picker event emit failed, falling back to main window modal (source={source}, request_id={})",
+                    payload.request_id
+                ),
+            );
+        }
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "failed to show workspace import picker window; falling back to main window modal (source={source}, request_id={}, error={error})",
+                    payload.request_id
+                ),
+            );
+        }
+    }
+
+    let should_queue = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            log_manager::append_line(
+                app,
+                format!(
+                    "navigation state mutex poisoned while publishing workspace import request (source={source})"
+                ),
+            );
+            return;
+        };
+
+        if state.frontend_ready && app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
+            false
+        } else {
+            state
+                .pending_main_events
+                .push(QueuedMainEvent::WorkspaceImportRequest(payload.clone()));
+            true
+        }
+    };
+
+    if should_queue {
+        log_manager::append_line(
+            app,
+            format!(
+                "queued workspace import request for main window (source={source}, request_id={})",
+                payload.request_id
+            ),
+        );
+        return;
+    }
+
+    if !emit_workspace_import_request_event(app, payload, source) {
+        requeue_main_event(
+            app,
+            QueuedMainEvent::WorkspaceImportRequest(payload.clone()),
+            source,
+            "emit_failed",
+        );
+    }
+}
+
+pub fn publish_workspace_import_result(
+    app: &AppHandle,
+    payload: &WorkspaceImportResult,
+    source: &str,
+) {
+    let should_queue = {
+        let lock = shared_navigation_state().lock();
+        let Ok(mut state) = lock else {
+            log_manager::append_line(
+                app,
+                format!(
+                    "navigation state mutex poisoned while publishing workspace import result (source={source})"
+                ),
+            );
+            return;
+        };
+
+        if state.frontend_ready && app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
+            false
+        } else {
+            state
+                .pending_main_events
+                .push(QueuedMainEvent::WorkspaceImportResult(payload.clone()));
+            true
+        }
+    };
+
+    if should_queue {
+        log_manager::append_line(
+            app,
+            format!(
+                "queued workspace import result for main window (source={source}, request_id={})",
+                payload.request_id
+            ),
+        );
+        return;
+    }
+
+    if !emit_workspace_import_result_event(app, payload, source) {
+        requeue_main_event(
+            app,
+            QueuedMainEvent::WorkspaceImportResult(payload.clone()),
+            source,
+            "emit_failed",
+        );
+    }
+}
+
+pub fn show_workspace_import_picker_window(app: &AppHandle, source: &str) -> Result<(), String> {
+    let window = if let Some(existing) =
+        app.get_webview_window(WORKSPACE_IMPORT_PICKER_WINDOW_LABEL)
+    {
+        existing
+    } else {
+        let config = window_config(app, WORKSPACE_IMPORT_PICKER_WINDOW_LABEL)?;
+        WebviewWindowBuilder::from_config(app, &config)
+            .map_err(|error| {
+                format!("failed to construct workspace import picker builder: {error}")
+            })?
+            .build()
+            .map_err(|error| format!("failed to build workspace import picker window: {error}"))?
+    };
+
+    apply_workspace_import_picker_geometry(app, &window, source);
+    let _ = window.show();
+    let _ = window.set_focus();
+    Ok(())
+}
+
+pub fn hide_workspace_import_picker_window(app: &AppHandle, source: &str) {
+    if let Some(window) = app.get_webview_window(WORKSPACE_IMPORT_PICKER_WINDOW_LABEL) {
+        let _ = window.hide();
+        let _ = window.set_always_on_top(false);
+        log_manager::append_line(
+            app,
+            format!("workspace import picker window hidden (source={source})"),
+        );
+    }
+}
+
+pub fn handle_workspace_import_picker_close_requested(app: &AppHandle, source: &str) {
+    if let Err(error) = crate::workspace_import::cancel_active_workspace_import_request(app, source)
+    {
+        log_manager::append_line(
+            app,
+            format!(
+                "failed to cancel active workspace import request on picker close; hiding window instead (source={source}, error={error})"
+            ),
+        );
+        hide_workspace_import_picker_window(app, source);
     }
 }
 
@@ -1959,6 +2139,12 @@ fn flush_pending_main_events(app: &AppHandle, events: Vec<QueuedMainEvent>, sour
             QueuedMainEvent::OpenRequestError(payload) => {
                 emit_open_request_error_event(app, payload, source)
             }
+            QueuedMainEvent::WorkspaceImportRequest(payload) => {
+                emit_workspace_import_request_event(app, payload, source)
+            }
+            QueuedMainEvent::WorkspaceImportResult(payload) => {
+                emit_workspace_import_result_event(app, payload, source)
+            }
         };
 
         if !dispatched {
@@ -2012,6 +2198,45 @@ fn apply_main_window_geometry(app: &AppHandle, window: &tauri::WebviewWindow, so
     let _ = window.set_decorations(false);
     #[cfg(target_os = "windows")]
     let _ = window.set_shadow(true);
+}
+
+fn apply_workspace_import_picker_geometry(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+    source: &str,
+) {
+    if let Err(error) = window.set_min_size(Some(Size::Logical(LogicalSize::new(
+        WORKSPACE_IMPORT_PICKER_MIN_WIDTH,
+        WORKSPACE_IMPORT_PICKER_MIN_HEIGHT,
+    )))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set workspace import picker min size (source={source}): {error}"),
+        );
+    }
+    if let Err(error) = window.set_max_size(Some(Size::Logical(LogicalSize::new(
+        WORKSPACE_IMPORT_PICKER_WIDTH,
+        WORKSPACE_IMPORT_PICKER_HEIGHT,
+    )))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set workspace import picker max size (source={source}): {error}"),
+        );
+    }
+    if let Err(error) = window.set_size(Size::Logical(LogicalSize::new(
+        WORKSPACE_IMPORT_PICKER_WIDTH,
+        WORKSPACE_IMPORT_PICKER_HEIGHT,
+    ))) {
+        log_manager::append_line(
+            app,
+            format!("failed to set workspace import picker size (source={source}): {error}"),
+        );
+    }
+    let _ = window.set_decorations(false);
+    #[cfg(target_os = "windows")]
+    let _ = window.set_shadow(true);
+    let _ = window.center();
+    let _ = window.set_always_on_top(true);
 }
 
 fn window_config(
@@ -2269,6 +2494,55 @@ fn emit_open_request_error_event(
                 format!(
                     "failed to emit open-request error event (source={source}, stage={}): {error}",
                     payload.stage
+                ),
+            );
+            false
+        }
+    }
+}
+
+fn emit_workspace_import_request_event(
+    app: &AppHandle,
+    payload: &WorkspaceImportRequestPayload,
+    source: &str,
+) -> bool {
+    emit_workspace_import_request_event_to(app, MAIN_WINDOW_LABEL, payload, source)
+}
+
+fn emit_workspace_import_request_event_to(
+    app: &AppHandle,
+    window_label: &str,
+    payload: &WorkspaceImportRequestPayload,
+    source: &str,
+) -> bool {
+    match app.emit_to(window_label, WORKSPACE_IMPORT_REQUEST_EVENT, payload) {
+        Ok(_) => true,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "failed to emit workspace import request event (source={source}, window={window_label}, request_id={}): {error}",
+                    payload.request_id,
+                ),
+            );
+            false
+        }
+    }
+}
+
+fn emit_workspace_import_result_event(
+    app: &AppHandle,
+    payload: &WorkspaceImportResult,
+    source: &str,
+) -> bool {
+    match app.emit_to(MAIN_WINDOW_LABEL, WORKSPACE_IMPORT_RESULT_EVENT, payload) {
+        Ok(_) => true,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "failed to emit workspace import result event (source={source}, request_id={}): {error}",
+                    payload.request_id
                 ),
             );
             false

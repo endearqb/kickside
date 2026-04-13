@@ -12,10 +12,10 @@ use rand::{distributions::Alphanumeric, Rng};
 use tauri::{AppHandle, Manager};
 
 use crate::types::{
-    AuthMode, BackendState, BridgeChannelStatus, BridgeRuntimeState, FeishuConnectorOnboardingState,
-    KimiLoginHealth, LoginProbeState, MainCreateMode, StartupFailureKind, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind,
-    WeixinConnectorOnboardingState,
+    AuthMode, BackendState, BridgeChannelStatus, BridgeRuntimeState,
+    FeishuConnectorOnboardingState, KimiLoginHealth, LoginProbeState, MainCreateMode,
+    StartupFailureKind, StartupMonitorReason, StartupMonitorState, StartupMonitorTargetRoute,
+    StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
 };
 
 #[derive(Debug, Clone)]

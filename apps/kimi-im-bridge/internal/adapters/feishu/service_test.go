@@ -27,6 +27,7 @@ type fakeGateway struct {
 	runFunc       func(context.Context, EventHandler) error
 	replyFunc     func(context.Context, SendMessageRequest) (*SendMessageResult, error)
 	createFunc    func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	patchFunc     func(context.Context, string, string) error
 	uploadImage   func(context.Context, string) (*UploadedResource, error)
 	uploadFile    func(context.Context, string, string) (*UploadedResource, error)
 	downloadImage func(context.Context, string) (*DownloadedResource, error)
@@ -34,6 +35,10 @@ type fakeGateway struct {
 
 	replyCalls  []SendMessageRequest
 	createCalls []SendMessageRequest
+	patchCalls  []struct {
+		MessageID string
+		Content   string
+	}
 }
 
 func (f *fakeGateway) ProbeCredentials(context.Context) error {
@@ -74,6 +79,20 @@ func (f *fakeGateway) CreateMessage(ctx context.Context, request SendMessageRequ
 	return &SendMessageResult{
 		MessageID: fmt.Sprintf("create-%d", callIndex),
 	}, nil
+}
+
+func (f *fakeGateway) PatchMessage(ctx context.Context, messageID string, content string) error {
+	f.mu.Lock()
+	f.patchCalls = append(f.patchCalls, struct {
+		MessageID string
+		Content   string
+	}{MessageID: messageID, Content: content})
+	fn := f.patchFunc
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, messageID, content)
+	}
+	return nil
 }
 
 func (f *fakeGateway) DownloadImage(ctx context.Context, imageKey string) (*DownloadedResource, error) {
@@ -1064,6 +1083,93 @@ func TestServiceCachesInboundImageUntilNextPrompt(t *testing.T) {
 	}
 	if pendingAfter != 0 {
 		t.Fatalf("expected cached attachment to be cleared after prompt acceptance, got %d", pendingAfter)
+	}
+}
+
+func TestServiceProcessMessageStreamsRuntimeReplyWhenStreamingRenderer(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, runtimeExec := newTestService(t, Config{
+		AppID:          "cli_a",
+		AppSecret:      "secret",
+		ReplyRenderer:  "streaming",
+		DefaultWorkDir: "D:/workspace",
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{
+			events: []runtime.PromptEvent{
+				{Type: runtime.EventTypeContentDelta, Text: "hello"},
+				{Type: runtime.EventTypeContentDelta, Text: " world"},
+			},
+		},
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-stream-1",
+		MessageID:   "msg-stream-1",
+		ChatID:      "chat-stream-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"hello"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("streaming processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected one streaming anchor reply, got %d", len(gateway.replyCalls))
+	}
+	if len(gateway.patchCalls) == 0 {
+		t.Fatalf("expected at least one patch call")
+	}
+	lastPatch := gateway.patchCalls[len(gateway.patchCalls)-1]
+	if !strings.Contains(lastPatch.Content, "hello world") {
+		t.Fatalf("expected final patched card to contain complete text, got %q", lastPatch.Content)
+	}
+	if !strings.Contains(lastPatch.Content, "已完成") {
+		t.Fatalf("expected final patched card to mark completion, got %q", lastPatch.Content)
+	}
+}
+
+func TestServiceProcessMessageStreamingFallsBackToFinalReplyWhenPatchFails(t *testing.T) {
+	t.Parallel()
+
+	service, _, gateway, runtimeExec := newTestService(t, Config{
+		AppID:         "cli_a",
+		AppSecret:     "secret",
+		ReplyRenderer: "streaming",
+	})
+	runtimeExec.responses = []fakeRuntimeResponse{
+		{
+			events: []runtime.PromptEvent{
+				{Type: runtime.EventTypeContentDelta, Text: "hello"},
+				{Type: runtime.EventTypeContentDelta, Text: " world"},
+			},
+		},
+	}
+	gateway.patchFunc = func(context.Context, string, string) error {
+		return fmt.Errorf("patch failed")
+	}
+
+	advance, err := service.processMessageEvent(context.Background(), &MessageEvent{
+		EventID:     "evt-stream-fallback-1",
+		MessageID:   "msg-stream-fallback-1",
+		ChatID:      "chat-stream-fallback-1",
+		ChatType:    "p2p",
+		MessageType: "text",
+		Content:     `{"text":"hello"}`,
+	})
+	if err != nil || !advance {
+		t.Fatalf("streaming fallback processMessageEvent returned advance=%v err=%v", advance, err)
+	}
+	if len(gateway.patchCalls) == 0 {
+		t.Fatalf("expected at least one failed patch attempt")
+	}
+	if len(gateway.replyCalls) < 2 {
+		t.Fatalf("expected fallback to send a final reply after streaming anchor, got %d reply calls", len(gateway.replyCalls))
+	}
+	lastReply := gateway.replyCalls[len(gateway.replyCalls)-1]
+	if !strings.Contains(lastReply.Content, "hello world") {
+		t.Fatalf("expected fallback reply to contain final text, got %q", lastReply.Content)
 	}
 }
 

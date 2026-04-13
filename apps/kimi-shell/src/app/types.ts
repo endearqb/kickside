@@ -14,7 +14,12 @@ export type MainWindowCloseDecision = "exit" | "minimize_to_tray";
 
 export type BridgeChannelMode = "polling" | "websocket";
 
-export type FeishuReplyRenderer = "post" | "interactive";
+export type FeishuReplyRenderer = "post" | "interactive" | "streaming";
+
+export type WeixinReplyMode =
+  | "final_only"
+  | "status_only"
+  | "streaming_experimental";
 
 export type BridgeRuntimeState =
   | "stopped"
@@ -153,6 +158,7 @@ export interface BridgeConnectorConfig {
   resetBindingSessionOnStart?: boolean;
   feishuAutoApprove?: boolean;
   feishuReplyRenderer?: FeishuReplyRenderer;
+  weixinReplyMode?: WeixinReplyMode;
 }
 
 export type BridgeChannelConfig = BridgeConnectorConfig;
@@ -703,6 +709,39 @@ export interface WorkspaceSessionBridgePayload {
   routeTemplate?: string;
   applied?: boolean;
   reason?: string;
+}
+
+export type WorkspaceImportTargetKind = "current" | "default" | "known";
+
+export interface WorkspaceImportTarget {
+  id: string;
+  label: string;
+  rootPath: string;
+  kind: WorkspaceImportTargetKind;
+  isCurrent: boolean;
+  isDefault: boolean;
+}
+
+export interface WorkspaceImportRequestPayload {
+  requestId: string;
+  source: string;
+  itemCount: number;
+  itemPaths: string[];
+}
+
+export interface WorkspaceImportTargetInput {
+  rootPath: string;
+  label?: string;
+}
+
+export interface WorkspaceImportResult {
+  requestId: string;
+  source: string;
+  targetPath: string;
+  targetLabel: string;
+  importedCount: number;
+  importedNames: string[];
+  currentWorkspaceMatch: boolean;
 }
 
 export interface DiagnosticsInfo {

@@ -203,7 +203,8 @@ fn provider_has_credential(entry: &ProviderEntry) -> bool {
 }
 
 fn normalize_optional_string(value: &Option<String>) -> Option<String> {
-    value.as_ref()
+    value
+        .as_ref()
         .map(|item| item.trim().to_string())
         .filter(|item| !item.is_empty())
 }
@@ -227,7 +228,10 @@ mod tests {
 
         assert_eq!(snapshot.auth_mode, AuthMode::ProviderApi);
         assert!(snapshot.provider_api_configured);
-        assert_eq!(snapshot.provider_api_active_provider.as_deref(), Some("moonshot"));
+        assert_eq!(
+            snapshot.provider_api_active_provider.as_deref(),
+            Some("moonshot")
+        );
     }
 
     #[test]
@@ -250,6 +254,9 @@ mod tests {
 
         assert_eq!(snapshot.auth_mode, AuthMode::Unknown);
         assert!(!snapshot.provider_api_configured);
-        assert_eq!(snapshot.provider_api_active_provider.as_deref(), Some("moonshot"));
+        assert_eq!(
+            snapshot.provider_api_active_provider.as_deref(),
+            Some("moonshot")
+        );
     }
 }

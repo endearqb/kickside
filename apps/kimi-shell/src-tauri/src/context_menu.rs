@@ -3,10 +3,20 @@ use tauri::AppHandle;
 use crate::types::ContextMenuStatus;
 
 const VERB_KEY_NAME: &str = "KimiWebShell";
+const MOVE_TO_WORKSPACE_VERB_KEY_NAME: &str = "MoveToWorkspace";
+const IMPORT_DEFAULT_VERB_KEY_NAME: &str = "ImportToDefaultWorkspace";
+const IMPORT_PICKER_VERB_KEY_NAME: &str = "ImportWithWorkspacePicker";
+
 const DIR_BACKGROUND_MUIVERB: &str = "Open Kimi Web Shell here";
 const DIR_MUIVERB: &str = "Open in Kimi Web Shell";
 const FILE_MUIVERB: &str = "Open in Kimi Web Shell (Copy to Workspace)";
 const ALL_FILESYSTEM_OBJECTS_MUIVERB: &str = "Open in Kimi Web Shell";
+
+const MOVE_TO_WORKSPACE_MUIVERB: &str = "移动到工作区";
+const IMPORT_DEFAULT_MUIVERB: &str = "导入到默认工作区";
+const IMPORT_PICKER_MUIVERB: &str = "选择其他工作区";
+const MULTI_SELECT_MODEL_PLAYER: &str = "Player";
+const EMPTY_SUBCOMMANDS_VALUE: &str = "";
 
 #[cfg(target_os = "windows")]
 const DIR_BACKGROUND_KEY: &str = "Software\\Classes\\Directory\\Background\\shell\\KimiWebShell";
@@ -28,13 +38,109 @@ const ALL_FILESYSTEM_OBJECTS_KEY: &str =
 const ALL_FILESYSTEM_OBJECTS_COMMAND_KEY: &str =
     "Software\\Classes\\AllFilesystemObjects\\shell\\KimiWebShell\\command";
 
+#[cfg(target_os = "windows")]
+const DIR_MOVE_TO_WORKSPACE_KEY: &str = "Software\\Classes\\Directory\\shell\\MoveToWorkspace";
+#[cfg(target_os = "windows")]
+const DIR_MOVE_TO_WORKSPACE_SHELL_KEY: &str =
+    "Software\\Classes\\Directory\\shell\\MoveToWorkspace\\shell";
+#[cfg(target_os = "windows")]
+const DIR_IMPORT_DEFAULT_KEY: &str =
+    "Software\\Classes\\Directory\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace";
+#[cfg(target_os = "windows")]
+const DIR_IMPORT_DEFAULT_COMMAND_KEY: &str =
+    "Software\\Classes\\Directory\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace\\command";
+#[cfg(target_os = "windows")]
+const DIR_IMPORT_PICKER_KEY: &str =
+    "Software\\Classes\\Directory\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker";
+#[cfg(target_os = "windows")]
+const DIR_IMPORT_PICKER_COMMAND_KEY: &str =
+    "Software\\Classes\\Directory\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker\\command";
+
+#[cfg(target_os = "windows")]
+const FILE_MOVE_TO_WORKSPACE_KEY: &str = "Software\\Classes\\*\\shell\\MoveToWorkspace";
+#[cfg(target_os = "windows")]
+const FILE_MOVE_TO_WORKSPACE_SHELL_KEY: &str =
+    "Software\\Classes\\*\\shell\\MoveToWorkspace\\shell";
+#[cfg(target_os = "windows")]
+const FILE_IMPORT_DEFAULT_KEY: &str =
+    "Software\\Classes\\*\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace";
+#[cfg(target_os = "windows")]
+const FILE_IMPORT_DEFAULT_COMMAND_KEY: &str =
+    "Software\\Classes\\*\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace\\command";
+#[cfg(target_os = "windows")]
+const FILE_IMPORT_PICKER_KEY: &str =
+    "Software\\Classes\\*\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker";
+#[cfg(target_os = "windows")]
+const FILE_IMPORT_PICKER_COMMAND_KEY: &str =
+    "Software\\Classes\\*\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker\\command";
+
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace";
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_SHELL_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell";
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace";
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_COMMAND_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace\\command";
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker";
+#[cfg(target_os = "windows")]
+const ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_COMMAND_KEY: &str =
+    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker\\command";
+
 #[derive(Debug, Clone)]
 struct ExpectedContextMenuCommands {
     icon_value: String,
     open_dir_background_command: String,
     open_dir_command: String,
     open_files_command: String,
+    import_default_command: String,
+    import_picker_command: String,
 }
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy)]
+struct CascadingMenuKeySet {
+    parent_key: &'static str,
+    shell_key: &'static str,
+    import_default_key: &'static str,
+    import_default_command_key: &'static str,
+    import_picker_key: &'static str,
+    import_picker_command_key: &'static str,
+}
+
+#[cfg(target_os = "windows")]
+const CASCADING_MENU_KEYSETS: [CascadingMenuKeySet; 3] = [
+    CascadingMenuKeySet {
+        parent_key: DIR_MOVE_TO_WORKSPACE_KEY,
+        shell_key: DIR_MOVE_TO_WORKSPACE_SHELL_KEY,
+        import_default_key: DIR_IMPORT_DEFAULT_KEY,
+        import_default_command_key: DIR_IMPORT_DEFAULT_COMMAND_KEY,
+        import_picker_key: DIR_IMPORT_PICKER_KEY,
+        import_picker_command_key: DIR_IMPORT_PICKER_COMMAND_KEY,
+    },
+    CascadingMenuKeySet {
+        parent_key: FILE_MOVE_TO_WORKSPACE_KEY,
+        shell_key: FILE_MOVE_TO_WORKSPACE_SHELL_KEY,
+        import_default_key: FILE_IMPORT_DEFAULT_KEY,
+        import_default_command_key: FILE_IMPORT_DEFAULT_COMMAND_KEY,
+        import_picker_key: FILE_IMPORT_PICKER_KEY,
+        import_picker_command_key: FILE_IMPORT_PICKER_COMMAND_KEY,
+    },
+    CascadingMenuKeySet {
+        parent_key: ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
+        shell_key: ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_SHELL_KEY,
+        import_default_key: ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY,
+        import_default_command_key: ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_COMMAND_KEY,
+        import_picker_key: ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY,
+        import_picker_command_key: ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_COMMAND_KEY,
+    },
+];
 
 fn quote_executable_path(executable: &str) -> String {
     format!("\"{}\"", executable.replace('"', "\\\""))
@@ -46,10 +152,9 @@ fn build_expected_commands(executable: &str) -> ExpectedContextMenuCommands {
         icon_value: quoted_exe.clone(),
         open_dir_background_command: format!("{quoted_exe} --open-dir \"%V\""),
         open_dir_command: format!("{quoted_exe} --open-dir \"%1\""),
-        // NOTE: We intentionally keep file command without literal `--` here.
-        // Explorer on some systems fails to trigger the file verb reliably when
-        // extra separator arguments are present in command templates.
         open_files_command: format!("{quoted_exe} --open-files \"%1\""),
+        import_default_command: format!("{quoted_exe} --import-to-default-workspace \"%1\""),
+        import_picker_command: format!("{quoted_exe} --import-with-workspace-picker \"%1\""),
     }
 }
 
@@ -100,91 +205,48 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             .map_err(|error| format!("failed to resolve executable path: {error}"))?;
         let executable = executable.to_string_lossy();
         let expected = build_expected_commands(executable.as_ref());
-
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-        fn write_file_verb(
-            hkcu: &RegKey,
-            key_path: &str,
-            command_key_path: &str,
-            menu_label: &str,
-            expected: &ExpectedContextMenuCommands,
-        ) -> Result<(), String> {
-            let (file_key, _) = hkcu
-                .create_subkey(key_path)
-                .map_err(|error| format!("failed to create `{key_path}`: {error}"))?;
-            file_key
-                .set_value("MUIVerb", &menu_label)
-                .map_err(|error| {
-                    format!("failed to write MUIVerb for files `{key_path}`: {error}")
-                })?;
-            file_key
-                .set_value("Icon", &expected.icon_value)
-                .map_err(|error| format!("failed to write Icon for files `{key_path}`: {error}"))?;
-            file_key
-                .set_value("MultiSelectModel", &"Player")
-                .map_err(|error| {
-                    format!("failed to write MultiSelectModel for files `{key_path}`: {error}")
-                })?;
-
-            let (file_command_key, _) = hkcu
-                .create_subkey(command_key_path)
-                .map_err(|error| format!("failed to create `{command_key_path}`: {error}"))?;
-            file_command_key
-                .set_value("", &expected.open_files_command)
-                .map_err(|error| {
-                    format!("failed to write command for files `{command_key_path}`: {error}")
-                })?;
-
-            Ok(())
-        }
-
-        let (dir_background_key, _) = hkcu
-            .create_subkey(DIR_BACKGROUND_KEY)
-            .map_err(|error| format!("failed to create `{DIR_BACKGROUND_KEY}`: {error}"))?;
-        dir_background_key
-            .set_value("MUIVerb", &DIR_BACKGROUND_MUIVERB)
-            .map_err(|error| {
-                format!("failed to write MUIVerb for directory background: {error}")
-            })?;
-        dir_background_key
-            .set_value("Icon", &expected.icon_value)
-            .map_err(|error| format!("failed to write Icon for directory background: {error}"))?;
-
-        let (dir_background_command_key, _) = hkcu
-            .create_subkey(DIR_BACKGROUND_COMMAND_KEY)
-            .map_err(|error| format!("failed to create `{DIR_BACKGROUND_COMMAND_KEY}`: {error}"))?;
-        dir_background_command_key
-            .set_value("", &expected.open_dir_background_command)
-            .map_err(|error| {
-                format!("failed to write command for directory background: {error}")
-            })?;
-
-        let (dir_key, _) = hkcu
-            .create_subkey(DIR_KEY)
-            .map_err(|error| format!("failed to create `{DIR_KEY}`: {error}"))?;
-        dir_key
-            .set_value("MUIVerb", &DIR_MUIVERB)
-            .map_err(|error| format!("failed to write MUIVerb for directory: {error}"))?;
-        dir_key
-            .set_value("Icon", &expected.icon_value)
-            .map_err(|error| format!("failed to write Icon for directory: {error}"))?;
-
-        let (dir_command_key, _) = hkcu
-            .create_subkey(DIR_COMMAND_KEY)
-            .map_err(|error| format!("failed to create `{DIR_COMMAND_KEY}`: {error}"))?;
-        dir_command_key
-            .set_value("", &expected.open_dir_command)
-            .map_err(|error| format!("failed to write command for directory: {error}"))?;
-
-        write_file_verb(&hkcu, FILE_KEY, FILE_COMMAND_KEY, FILE_MUIVERB, &expected)?;
-        write_file_verb(
+        write_simple_verb(
+            &hkcu,
+            DIR_BACKGROUND_KEY,
+            DIR_BACKGROUND_COMMAND_KEY,
+            DIR_BACKGROUND_MUIVERB,
+            &expected.icon_value,
+            None,
+            &expected.open_dir_background_command,
+        )?;
+        write_simple_verb(
+            &hkcu,
+            DIR_KEY,
+            DIR_COMMAND_KEY,
+            DIR_MUIVERB,
+            &expected.icon_value,
+            None,
+            &expected.open_dir_command,
+        )?;
+        write_simple_verb(
+            &hkcu,
+            FILE_KEY,
+            FILE_COMMAND_KEY,
+            FILE_MUIVERB,
+            &expected.icon_value,
+            Some(MULTI_SELECT_MODEL_PLAYER),
+            &expected.open_files_command,
+        )?;
+        write_simple_verb(
             &hkcu,
             ALL_FILESYSTEM_OBJECTS_KEY,
             ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
             ALL_FILESYSTEM_OBJECTS_MUIVERB,
-            &expected,
+            &expected.icon_value,
+            Some(MULTI_SELECT_MODEL_PLAYER),
+            &expected.open_files_command,
         )?;
+
+        for keyset in CASCADING_MENU_KEYSETS {
+            write_cascading_menu(&hkcu, keyset, &expected)?;
+        }
 
         return Ok(());
     }
@@ -210,10 +272,17 @@ pub fn disable(_app: &AppHandle) -> Result<(), String> {
         }
 
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        delete_key_if_exists(&hkcu, DIR_BACKGROUND_KEY)?;
-        delete_key_if_exists(&hkcu, DIR_KEY)?;
-        delete_key_if_exists(&hkcu, FILE_KEY)?;
-        delete_key_if_exists(&hkcu, ALL_FILESYSTEM_OBJECTS_KEY)?;
+        for subkey in [
+            DIR_BACKGROUND_KEY,
+            DIR_KEY,
+            FILE_KEY,
+            ALL_FILESYSTEM_OBJECTS_KEY,
+            DIR_MOVE_TO_WORKSPACE_KEY,
+            FILE_MOVE_TO_WORKSPACE_KEY,
+            ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
+        ] {
+            delete_key_if_exists(&hkcu, subkey)?;
+        }
         return Ok(());
     }
 
@@ -233,7 +302,8 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
     let executable = executable.to_string_lossy();
     let expected = build_expected_commands(executable.as_ref());
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let required_keys = [
+
+    let legacy_required_keys = [
         DIR_BACKGROUND_KEY,
         DIR_BACKGROUND_COMMAND_KEY,
         DIR_KEY,
@@ -243,24 +313,17 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
         ALL_FILESYSTEM_OBJECTS_KEY,
         ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
     ];
+    validate_required_keys(&hkcu, &legacy_required_keys, "旧入口")?;
 
-    let missing_keys: Vec<&str> = required_keys
-        .iter()
-        .copied()
-        .filter(|key| hkcu.open_subkey(*key).is_err())
-        .collect();
-    if !missing_keys.is_empty() {
-        let missing = missing_keys.join(", ");
-        return Ok(ContextMenuStatus {
-            supported: true,
-            enabled: false,
-            message: Some(format!(
-                "右键菜单需修复：缺少注册表键 {missing}。可点击“启用”重新写入。"
-            )),
-        });
-    }
+    let legacy_verb_checks = [
+        (DIR_BACKGROUND_KEY, DIR_BACKGROUND_MUIVERB),
+        (DIR_KEY, DIR_MUIVERB),
+        (FILE_KEY, FILE_MUIVERB),
+        (ALL_FILESYSTEM_OBJECTS_KEY, ALL_FILESYSTEM_OBJECTS_MUIVERB),
+    ];
+    validate_mui_verbs(&hkcu, &legacy_verb_checks, "旧入口")?;
 
-    let checks = [
+    let legacy_command_checks = [
         (
             DIR_BACKGROUND_COMMAND_KEY,
             expected.open_dir_background_command.as_str(),
@@ -272,52 +335,68 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
             expected.open_files_command.as_str(),
         ),
     ];
+    validate_commands(&hkcu, &legacy_command_checks, "旧入口")?;
+    validate_multi_select_model(&hkcu, FILE_KEY, "旧入口文件菜单")?;
+    validate_multi_select_model(&hkcu, ALL_FILESYSTEM_OBJECTS_KEY, "旧入口文件系统对象菜单")?;
 
-    let verb_checks = [
-        (DIR_BACKGROUND_KEY, DIR_BACKGROUND_MUIVERB),
-        (DIR_KEY, DIR_MUIVERB),
-        (FILE_KEY, FILE_MUIVERB),
-        (ALL_FILESYSTEM_OBJECTS_KEY, ALL_FILESYSTEM_OBJECTS_MUIVERB),
-    ];
-
-    for (menu_key, expected_verb) in verb_checks {
-        let key = hkcu
-            .open_subkey(menu_key)
-            .map_err(|error| format!("failed to open `{menu_key}`: {error}"))?;
-        let actual_verb: String = key
-            .get_value("MUIVerb")
-            .map_err(|error| format!("failed to read MUIVerb of `{menu_key}`: {error}"))?;
-        if !command_matches_expected(&actual_verb, expected_verb) {
-            let actual = truncate_for_status_message(&actual_verb, 80);
-            let expected = truncate_for_status_message(expected_verb, 80);
-            return Ok(ContextMenuStatus {
-                supported: true,
-                enabled: false,
-                message: Some(format!(
-                    "Context menu needs repair: MUIVerb mismatch at `{menu_key}` (current={actual}; expected={expected})."
-                )),
-            });
-        }
-    }
-
-    for (command_key, expected_value) in checks {
-        let key = hkcu
-            .open_subkey(command_key)
-            .map_err(|error| format!("failed to open `{command_key}`: {error}"))?;
-        let actual_value: String = key
-            .get_value("")
-            .map_err(|error| format!("failed to read default value of `{command_key}`: {error}"))?;
-        if !command_matches_expected(&actual_value, &expected_value) {
-            let actual = truncate_for_status_message(&actual_value, 120);
-            let expected = truncate_for_status_message(expected_value, 120);
-            return Ok(ContextMenuStatus {
-                supported: true,
-                enabled: false,
-                message: Some(format!(
-                    "右键菜单需修复：命令值漂移 `{command_key}`（当前={actual}; 预期={expected}）。可点击“启用”重新写入。"
-                )),
-            });
-        }
+    for keyset in CASCADING_MENU_KEYSETS {
+        validate_required_keys(
+            &hkcu,
+            &[
+                keyset.parent_key,
+                keyset.shell_key,
+                keyset.import_default_key,
+                keyset.import_default_command_key,
+                keyset.import_picker_key,
+                keyset.import_picker_command_key,
+            ],
+            "移动到工作区子菜单",
+        )?;
+        validate_mui_verbs(
+            &hkcu,
+            &[
+                (keyset.parent_key, MOVE_TO_WORKSPACE_MUIVERB),
+                (keyset.import_default_key, IMPORT_DEFAULT_MUIVERB),
+                (keyset.import_picker_key, IMPORT_PICKER_MUIVERB),
+            ],
+            "移动到工作区子菜单",
+        )?;
+        validate_icon_value(
+            &hkcu,
+            keyset.parent_key,
+            &expected.icon_value,
+            "移动到工作区父菜单",
+        )?;
+        validate_icon_value(
+            &hkcu,
+            keyset.import_default_key,
+            &expected.icon_value,
+            "移动到工作区默认子项",
+        )?;
+        validate_icon_value(
+            &hkcu,
+            keyset.import_picker_key,
+            &expected.icon_value,
+            "移动到工作区选择器子项",
+        )?;
+        validate_commands(
+            &hkcu,
+            &[
+                (
+                    keyset.import_default_command_key,
+                    expected.import_default_command.as_str(),
+                ),
+                (
+                    keyset.import_picker_command_key,
+                    expected.import_picker_command.as_str(),
+                ),
+            ],
+            "移动到工作区子菜单",
+        )?;
+        validate_multi_select_model(&hkcu, keyset.parent_key, "移动到工作区父菜单")?;
+        validate_subcommands_value(&hkcu, keyset.parent_key, "移动到工作区父菜单")?;
+        validate_multi_select_model(&hkcu, keyset.import_default_key, "移动到工作区默认子项")?;
+        validate_multi_select_model(&hkcu, keyset.import_picker_key, "移动到工作区选择器子项")?;
     }
 
     Ok(ContextMenuStatus {
@@ -327,9 +406,252 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
     })
 }
 
+#[cfg(target_os = "windows")]
+fn write_simple_verb(
+    hkcu: &winreg::RegKey,
+    key_path: &str,
+    command_key_path: &str,
+    menu_label: &str,
+    icon_value: &str,
+    multi_select_model: Option<&str>,
+    command_value: &str,
+) -> Result<(), String> {
+    let (menu_key, _) = hkcu
+        .create_subkey(key_path)
+        .map_err(|error| format!("failed to create `{key_path}`: {error}"))?;
+    menu_key
+        .set_value("MUIVerb", &menu_label)
+        .map_err(|error| format!("failed to write MUIVerb for `{key_path}`: {error}"))?;
+    menu_key
+        .set_value("Icon", &icon_value)
+        .map_err(|error| format!("failed to write Icon for `{key_path}`: {error}"))?;
+    if let Some(value) = multi_select_model {
+        menu_key
+            .set_value("MultiSelectModel", &value)
+            .map_err(|error| {
+                format!("failed to write MultiSelectModel for `{key_path}`: {error}")
+            })?;
+    }
+
+    let (command_key, _) = hkcu
+        .create_subkey(command_key_path)
+        .map_err(|error| format!("failed to create `{command_key_path}`: {error}"))?;
+    command_key
+        .set_value("", &command_value)
+        .map_err(|error| format!("failed to write command for `{command_key_path}`: {error}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn write_cascading_menu(
+    hkcu: &winreg::RegKey,
+    keyset: CascadingMenuKeySet,
+    expected: &ExpectedContextMenuCommands,
+) -> Result<(), String> {
+    let (parent_key, _) = hkcu
+        .create_subkey(keyset.parent_key)
+        .map_err(|error| format!("failed to create `{}`: {error}", keyset.parent_key))?;
+    parent_key
+        .set_value("MUIVerb", &MOVE_TO_WORKSPACE_MUIVERB)
+        .map_err(|error| {
+            format!(
+                "failed to write MUIVerb for `{}`: {error}",
+                keyset.parent_key
+            )
+        })?;
+    parent_key
+        .set_value("Icon", &expected.icon_value)
+        .map_err(|error| format!("failed to write Icon for `{}`: {error}", keyset.parent_key))?;
+    parent_key
+        .set_value("MultiSelectModel", &MULTI_SELECT_MODEL_PLAYER)
+        .map_err(|error| {
+            format!(
+                "failed to write MultiSelectModel for `{}`: {error}",
+                keyset.parent_key
+            )
+        })?;
+    parent_key
+        .set_value("SubCommands", &EMPTY_SUBCOMMANDS_VALUE)
+        .map_err(|error| {
+            format!(
+                "failed to write SubCommands for `{}`: {error}",
+                keyset.parent_key
+            )
+        })?;
+
+    hkcu.create_subkey(keyset.shell_key)
+        .map_err(|error| format!("failed to create `{}`: {error}", keyset.shell_key))?;
+
+    write_simple_verb(
+        hkcu,
+        keyset.import_default_key,
+        keyset.import_default_command_key,
+        IMPORT_DEFAULT_MUIVERB,
+        &expected.icon_value,
+        Some(MULTI_SELECT_MODEL_PLAYER),
+        &expected.import_default_command,
+    )?;
+    write_simple_verb(
+        hkcu,
+        keyset.import_picker_key,
+        keyset.import_picker_command_key,
+        IMPORT_PICKER_MUIVERB,
+        &expected.icon_value,
+        Some(MULTI_SELECT_MODEL_PLAYER),
+        &expected.import_picker_command,
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn validate_required_keys(hkcu: &winreg::RegKey, keys: &[&str], area: &str) -> Result<(), String> {
+    let missing_keys: Vec<&str> = keys
+        .iter()
+        .copied()
+        .filter(|key| hkcu.open_subkey(*key).is_err())
+        .collect();
+    if missing_keys.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        "{area}需修复：缺少注册表键 {}。可点击“启用”重新写入。",
+        missing_keys.join(", ")
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn validate_mui_verbs(
+    hkcu: &winreg::RegKey,
+    checks: &[(&str, &str)],
+    area: &str,
+) -> Result<(), String> {
+    for (menu_key, expected_verb) in checks {
+        let key = hkcu
+            .open_subkey(menu_key)
+            .map_err(|error| format!("failed to open `{menu_key}`: {error}"))?;
+        let actual_verb: String = key
+            .get_value("MUIVerb")
+            .map_err(|error| format!("failed to read MUIVerb of `{menu_key}`: {error}"))?;
+        if !command_matches_expected(&actual_verb, expected_verb) {
+            let actual = truncate_for_status_message(&actual_verb, 80);
+            let expected = truncate_for_status_message(expected_verb, 80);
+            return Err(format!(
+                "{area}需修复：MUIVerb 漂移 `{menu_key}`（当前={actual}; 预期={expected}）。可点击“启用”重新写入。"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn validate_icon_value(
+    hkcu: &winreg::RegKey,
+    key_path: &str,
+    expected_value: &str,
+    area: &str,
+) -> Result<(), String> {
+    let key = hkcu
+        .open_subkey(key_path)
+        .map_err(|error| format!("failed to open `{key_path}`: {error}"))?;
+    let actual_value: String = key
+        .get_value("Icon")
+        .map_err(|error| format!("failed to read Icon of `{key_path}`: {error}"))?;
+    if command_matches_expected(&actual_value, expected_value) {
+        return Ok(());
+    }
+
+    let actual = truncate_for_status_message(&actual_value, 120);
+    let expected = truncate_for_status_message(expected_value, 120);
+    Err(format!(
+        "{area}需修复：Icon 漂移 `{key_path}`（当前={actual}; 预期={expected}）。可点击“启用”重新写入。"
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn validate_commands(
+    hkcu: &winreg::RegKey,
+    checks: &[(&str, &str)],
+    area: &str,
+) -> Result<(), String> {
+    for (command_key, expected_value) in checks {
+        let key = hkcu
+            .open_subkey(command_key)
+            .map_err(|error| format!("failed to open `{command_key}`: {error}"))?;
+        let actual_value: String = key
+            .get_value("")
+            .map_err(|error| format!("failed to read default value of `{command_key}`: {error}"))?;
+        if !command_matches_expected(&actual_value, expected_value) {
+            let actual = truncate_for_status_message(&actual_value, 120);
+            let expected = truncate_for_status_message(expected_value, 120);
+            return Err(format!(
+                "{area}需修复：命令值漂移 `{command_key}`（当前={actual}; 预期={expected}）。可点击“启用”重新写入。"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn validate_multi_select_model(
+    hkcu: &winreg::RegKey,
+    key_path: &str,
+    area: &str,
+) -> Result<(), String> {
+    let key = hkcu
+        .open_subkey(key_path)
+        .map_err(|error| format!("failed to open `{key_path}`: {error}"))?;
+    let actual_value: String = key
+        .get_value("MultiSelectModel")
+        .map_err(|error| format!("failed to read MultiSelectModel of `{key_path}`: {error}"))?;
+    if command_matches_expected(&actual_value, MULTI_SELECT_MODEL_PLAYER) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "{area}需修复：MultiSelectModel 漂移 `{key_path}`（当前={actual_value}; 预期={MULTI_SELECT_MODEL_PLAYER}）。可点击“启用”重新写入。"
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn validate_subcommands_value(
+    hkcu: &winreg::RegKey,
+    key_path: &str,
+    area: &str,
+) -> Result<(), String> {
+    let key = hkcu
+        .open_subkey(key_path)
+        .map_err(|error| format!("failed to open `{key_path}`: {error}"))?;
+    let actual_value: String = key
+        .get_value("SubCommands")
+        .map_err(|error| format!("failed to read SubCommands of `{key_path}`: {error}"))?;
+    if command_matches_expected(&actual_value, EMPTY_SUBCOMMANDS_VALUE) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "{area}需修复：SubCommands 漂移 `{key_path}`（当前={actual_value}; 预期为空字符串）。可点击“启用”重新写入。"
+    ))
+}
+
 #[allow(dead_code)]
 pub fn verb_key_name() -> &'static str {
     VERB_KEY_NAME
+}
+
+#[allow(dead_code)]
+pub fn move_to_workspace_verb_key_name() -> &'static str {
+    MOVE_TO_WORKSPACE_VERB_KEY_NAME
+}
+
+#[allow(dead_code)]
+pub fn import_default_verb_key_name() -> &'static str {
+    IMPORT_DEFAULT_VERB_KEY_NAME
+}
+
+#[allow(dead_code)]
+pub fn import_picker_verb_key_name() -> &'static str {
+    IMPORT_PICKER_VERB_KEY_NAME
 }
 
 #[cfg(test)]
@@ -346,6 +668,10 @@ mod tests {
         assert_eq!(
             commands.open_dir_background_command,
             "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --open-dir \"%V\""
+        );
+        assert_eq!(
+            commands.import_default_command,
+            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --import-to-default-workspace \"%1\""
         );
     }
 

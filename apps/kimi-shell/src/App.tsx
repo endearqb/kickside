@@ -9,6 +9,11 @@ import {
 import { IconButton } from "@/components/common/IconButton";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
+import {
+  WorkspaceImportModal,
+  WorkspaceImportStandaloneWindow,
+  WorkspaceImportResultNotice,
+} from "@/features/workspace-import/WorkspaceImportModal";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
@@ -33,6 +38,8 @@ function App() {
   const shell = useShellController();
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
+  const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
+  const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
   const bridgeState = shell.bridgeStatus.state;
   const bridgeStateLabel =
     bridgeState === "running"
@@ -111,6 +118,45 @@ function App() {
       setRememberMainCloseDecision(false);
     }
   }, [shell.mainWindowCloseDecisionRequest]);
+
+  useEffect(() => {
+    if (!isWorkspaceImportPickerRoute) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      if (shell.workspaceImportRequest?.requestId?.trim()) {
+        void shell.handleCancelWorkspaceImportPicker();
+        return;
+      }
+      void shell.handleCloseWindow();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    isWorkspaceImportPickerRoute,
+    shell.handleCancelWorkspaceImportPicker,
+    shell.handleCloseWindow,
+    shell.workspaceImportRequest,
+  ]);
+
+  if (isWorkspaceImportPickerRoute) {
+    return (
+      <WorkspaceImportStandaloneWindow
+        request={shell.workspaceImportRequest}
+        targets={shell.workspaceImportTargets}
+        busy={shell.workspaceImportBusy}
+        errorMessage={shell.actionError}
+        onSelectTarget={shell.handleSelectWorkspaceImportTarget}
+        onBrowse={shell.handleImportToBrowsedWorkspace}
+        onCancel={shell.handleCancelWorkspaceImportPicker}
+      />
+    );
+  }
 
   const controlCenterProps = {
     status: shell.status,
@@ -321,6 +367,10 @@ function App() {
       />
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}
+      <WorkspaceImportResultNotice
+        result={shell.workspaceImportResult}
+        onDismiss={shell.handleDismissWorkspaceImportResult}
+      />
       {kimiLoginBannerVisible ? (
         <div className="shell-login-banner" role="status" aria-live="polite">
           <div className="shell-login-banner-copy">
@@ -419,6 +469,15 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <WorkspaceImportModal
+        request={shell.workspaceImportRequest}
+        targets={shell.workspaceImportTargets}
+        busy={shell.workspaceImportBusy}
+        onSelectTarget={shell.handleSelectWorkspaceImportTarget}
+        onBrowse={shell.handleImportToBrowsedWorkspace}
+        onCancel={shell.handleCancelWorkspaceImportPicker}
+      />
 
       {shell.mainWindowCloseDecisionRequest ? (
         <div className="main-close-decision-overlay" role="presentation">

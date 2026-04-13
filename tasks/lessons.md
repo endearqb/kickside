@@ -20,6 +20,10 @@
 - 遇到 WebView2 启动白屏且存在多阶段导航时，优先用 `main(hidden)+prefill/splash(visible)` 架构把主窗口文档加载次数压到 1，再用事件路由替代 `window.navigate`；这比继续堆叠恢复重试更稳。
 - Windows 右键菜单状态不能只看注册表“键是否存在”，还要校验命令值是否与当前版本一致；否则旧版残留命令会让 UI 误报“已启用”并把问题推迟到运行时（如文件右键链路 404）。
 - Windows 文件右键注册要做“多键覆盖 + 最保守命令模板”：仅写 `*\\shell` 在部分安装环境可能不触发，需同时覆盖 `AllFilesystemObjects\\shell`；命令参数优先用更兼容的 `--open-files "%1"`，literal `--` 作为解析兼容而非注册表强依赖。
+- Windows 级联右键菜单不能只创建 `...\\shell` 子树；父菜单键还必须显式写 `SubCommands=""`，并在健康检查里验证该值存在且为空字符串，否则 Explorer 可能把父项当普通动作执行，点击文件直接弹“该文件没有与之关联的应用”。
+- 当用户明确反馈“应用内选择器太大/溢出主界面”并倾向独立弹出窗口时，不要继续在主窗口遮罩层上微调大卡片；应优先改成独立小窗口，并把高频选择列表收紧成单行可滚动视图。
+- 新增 Tauri 独立窗口时，不能只加 `tauri.conf.json` 和前端 route；必须同步把窗口 label 纳入 capability ACL，并对齐运行时 `set_decorations(...)`，否则会同时出现原生标题栏回归、`invoke` 失效和 `window|close not allowed by ACL`。
+- 当用户说“外部壳也不要”并明确补充“包括整个窗口 titlebar”时，要按整层视觉结构理解，而不是只删内容区卡片；同时要把窗口内所有重复关闭入口一起收口到底部主动作，避免视觉和语义都残留半套旧方案。
 - When using a keepalive `iframe` workspace, do not gate bridge dispatch by visible screen. Gate by backend running + iframe ready + origin so session navigation/prefill can continue while control center is in front.
 - On Windows, do not verify a freshly installed Python 3.13 runtime by assuming `python` is now on PATH or by checking only `%LocalAppData%\\Programs\\Python\\Python313\\python.exe`. `uv python install 3.13` can succeed without either condition, so install-time verification must also accept `py -3.13`, explicit Python 3.13 paths, or `uv run --python 3.13 python --version`.
 - Do not eager-run full install dependency probes on normal shell startup. For Kimi-only startup, gate `git`/`uv`/`node`/`python` probing behind the control-center install step or explicit install actions.
@@ -50,6 +54,7 @@
 - 对需要本地脚本访问 bridge/admin 凭证的 CLI skill，不能只依赖父进程环境变量继承；要提供显式参数或上下文传参，并保留环境变量作为兼容兜底，否则真实 agent/tool 链路里很容易出现“脚本能运行但拿不到 auth”的假失败。
 - 首次启动用的 `ensure_*` / `bootstrap_*` 初始化函数，不能通过会再次调用初始化函数本身的 `save_*` 包装器来落默认文件；缺文件场景会递归进入自身，在打包版里常表现为启动即栈溢出。
 - 控制中心这类信息密度高的标题栏，不要为了补充说明去加 hover reveal 文案；如果不是长期必须驻留的信息，就直接删掉。概览统计卡里的中文指标也不要硬塞成一句话，优先拆成小栅格保证扫读效率。
+- IM Bridge 这类“左侧选对象、右侧看详情/任务面”的高密度工作台，不要堆“如何阅读界面”或“操作后会怎样”的固定说明文案；默认只保留标题、状态、数据、操作，以及真正避免空白的数据空态。
 - 如果用户明确把概览卡口径收敛到单一指标，就不要继续保留聚合卡或四宫格“信息增强”；概览层优先展示一个最重要的数量信号，其余细节留给下钻页面。
 - Skill Center / 控制中心这类高密度工具栏里，枚举筛选不要堆成一排按钮；超过 4 个选项时，优先改成搜索框后的带标签下拉（如“范围”“状态”），既保留能力又能明显降噪。
 - 当 Skill Center 的“工作区洞察”从只读发现页演变成真实目录管理页时，不要继续复用 discovery-only 的状态和动作；应尽快拆成“技能管理中的发现上下文切换”与“工作区目录 inventory 管理”两套明确模型。

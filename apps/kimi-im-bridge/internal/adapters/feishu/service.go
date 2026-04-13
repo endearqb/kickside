@@ -268,6 +268,10 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	if s.orchestrator != nil {
 		contextualizedPrompt := s.applyBridgeSkillPromptContext(inbound.Text, *binding)
 		inbound.Text = contextualizedPrompt
+		var streamer *feishuReplyStreamer
+		if s.streamingRepliesEnabled() {
+			streamer = s.newReplyStreamer(event, *binding, nil)
+		}
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
 			AutoApprove:    s.config.AutoApprove,
@@ -276,15 +280,33 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 			if turnEvent.Kind == bridgecore.EventApprovalRequested {
 				return s.sendApprovalMessageBridge(ctx, event, turnEvent)
 			}
+			if streamer != nil {
+				streamer.handleBridgeEvent(ctx, turnEvent)
+			}
 			return nil
 		})
 		if err != nil {
+			if streamer != nil {
+				if handledErr := streamer.handleFailure(ctx, err); handledErr == nil {
+					if len(pendingAttachmentIDs) > 0 {
+						_ = s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs)
+					}
+					return true, nil
+				}
+			}
 			return false, err
 		}
 		if len(pendingAttachmentIDs) > 0 {
 			if err := s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs); err != nil {
 				return false, reliability.Wrap("unknown", err)
 			}
+		}
+		if streamer != nil {
+			streamer.artifacts = append(streamer.artifacts, result.Artifacts...)
+			if err := streamer.finish(ctx, result.ReplyText); err != nil {
+				return false, err
+			}
+			return true, nil
 		}
 		if strings.TrimSpace(result.ReplyText) == "" {
 			if err := s.sendArtifacts(ctx, event, result.Artifacts); err != nil {
@@ -308,12 +330,25 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		prompt.WorkDir = strings.TrimSpace(s.config.DefaultWorkDir)
 	}
 
-	var content strings.Builder
+	var (
+		content  strings.Builder
+		streamer *feishuReplyStreamer
+	)
+	if s.streamingRepliesEnabled() {
+		streamer = s.newReplyStreamer(event, *binding, nil)
+	}
 	response, err := s.runtime.ExecuteBindingPrompt(ctx, *binding, prompt, func(promptEvent runtime.PromptEvent) error {
 		switch promptEvent.Type {
 		case runtime.EventTypeContentDelta:
 			if promptEvent.Text != "" {
 				content.WriteString(promptEvent.Text)
+			}
+			if streamer != nil {
+				streamer.handleRuntimeEvent(ctx, promptEvent)
+			}
+		case runtime.EventTypeStatusUpdate:
+			if streamer != nil {
+				streamer.handleRuntimeEvent(ctx, promptEvent)
 			}
 		case runtime.EventTypeApprovalRequested:
 			return s.sendApprovalMessage(ctx, event, *binding, promptEvent)
@@ -321,6 +356,14 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return nil
 	})
 	if err != nil {
+		if streamer != nil {
+			if handledErr := streamer.handleFailure(ctx, err); handledErr == nil {
+				if len(pendingAttachmentIDs) > 0 {
+					_ = s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs)
+				}
+				return true, nil
+			}
+		}
 		return false, err
 	}
 	if len(pendingAttachmentIDs) > 0 {
@@ -329,6 +372,15 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		}
 	}
 	if response.Result.Error != "" {
+		err := reliability.Wrap(
+			"delivery_failed",
+			fmt.Errorf("feishu runtime turn failed: %s", response.Result.Error),
+		)
+		if streamer != nil {
+			if handledErr := streamer.handleFailure(ctx, err); handledErr == nil {
+				return true, nil
+			}
+		}
 		return false, reliability.Wrap(
 			"delivery_failed",
 			fmt.Errorf("feishu runtime turn failed: %s", response.Result.Error),
@@ -336,6 +388,12 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 	}
 
 	finalText := strings.TrimSpace(content.String())
+	if streamer != nil {
+		if err := streamer.finish(ctx, finalText); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	if finalText == "" {
 		return true, nil
 	}

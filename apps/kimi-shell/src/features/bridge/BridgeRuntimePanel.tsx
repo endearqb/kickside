@@ -208,7 +208,6 @@ export function BridgeRuntimePanel({
     <div className="bridge-panel">
       <ControlCenterSurfaceSection
         title="运行状态"
-        description="只显示当前机器人相关的连接状态、最近失败和运行时间。"
         actions={
           <div className="cc-actions">
             <Button
@@ -249,14 +248,11 @@ export function BridgeRuntimePanel({
               </div>
             ))}
           </div>
-        ) : (
-          <p className="hint">当前没有记录到该机器人的近期错误。</p>
-        )}
+        ) : null}
       </ControlCenterSurfaceSection>
 
       <ControlCenterSurfaceSection
         title="绑定与会话"
-        description="这里可以查看当前机器人对应的绑定、已映射会话以及恢复动作。"
         actions={
           <div className="cc-actions">
             <Button

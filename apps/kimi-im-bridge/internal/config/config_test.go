@@ -23,8 +23,8 @@ func TestLoadOrCreateSettingsWritesDefaults(t *testing.T) {
 	if settings.AdminPort != DefaultAdminPort {
 		t.Fatalf("expected admin port %d, got %d", DefaultAdminPort, settings.AdminPort)
 	}
-	if settings.FeishuReplyRenderer != FeishuReplyRendererInteractive {
-		t.Fatalf("expected feishuReplyRenderer to default interactive, got %q", settings.FeishuReplyRenderer)
+	if settings.FeishuReplyRenderer != FeishuReplyRendererStreaming {
+		t.Fatalf("expected feishuReplyRenderer to default streaming, got %q", settings.FeishuReplyRenderer)
 	}
 	if !settings.FeishuAutoApprove {
 		t.Fatalf("expected feishuAutoApprove to default true")
@@ -100,6 +100,29 @@ func TestLoadOrCreateSettingsPreservesFeishuReplyRenderer(t *testing.T) {
 
 	if settings.FeishuReplyRenderer != FeishuReplyRendererPost {
 		t.Fatalf("expected feishuReplyRenderer to be preserved, got %q", settings.FeishuReplyRenderer)
+	}
+}
+
+func TestLoadOrCreateSettingsDefaultsWeixinReplyMode(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge_settings.json")
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"connectors":[{"id":"weixin-default","platform":"weixin","enabled":true,"mode":"polling","label":"Weixin"}]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("failed to seed settings file: %v", err)
+	}
+
+	settings, err := LoadOrCreateSettings(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
+	}
+
+	if len(settings.Connectors) != 1 {
+		t.Fatalf("expected one connector, got %d", len(settings.Connectors))
+	}
+	if settings.Connectors[0].WeixinReplyMode != WeixinReplyModeStatusOnly {
+		t.Fatalf("expected weixinReplyMode to default status_only, got %q", settings.Connectors[0].WeixinReplyMode)
 	}
 }
 

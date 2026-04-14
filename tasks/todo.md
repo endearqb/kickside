@@ -274,3 +274,35 @@
 - 根因：`preview_default_work_dir_after_app_sync` 仅被同文件测试使用，生产代码从未调用，所以正常 `cargo check` 会把它报告成 `dead_code`。
 - 修复：将该函数改成 `#[cfg(test)]` 下才编译，保留测试覆盖但不再进入正常构建产物，比单纯加 `#[allow(dead_code)]` 更干净。
 - 验证结果：`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 于 2026-04-13 通过，原 warning 已消失。
+
+## 控制中心 Quick Settings / IM Bridge 三处交互修复
+
+### Checklist
+- [x] 调整 Quick Settings 第 01 步 install 详情区结构与间距，只修正控制中心 onboarding 场景
+- [x] 修复升级 Kimi 期间 onboarding 当前步骤被重置，保持停留在 install 步骤
+- [x] 修复顶部主导航切换时未清理 bridge task，确保能直接切换到其他 tab
+- [x] 运行 `pnpm build`（`apps/kimi-shell`）并回填 Review
+
+### Review
+- 布局修复：在 onboarding 第 01 步详情区为安装内容加了专用纵向 stack，只影响控制中心里的 install 场景；顶部次操作、安装总览与状态补充说明之间现在由局部 `gap` 管理，不再挤在一起。
+- 升级步骤保持：onboarding 的默认落点现在会在 `upgrade_kimi` 会话未回到 `idle` 前优先保持在 `install`；同时 controller 不再在进入独立控制中心屏幕时重置整套导航状态，避免升级生命周期里的瞬时状态切换把用户带回推荐步骤。
+- 顶部 tab 切换：主导航切换前会先尝试关闭当前 task；如果 task 因未保存配置或 busy 状态不能关闭，则沿用原有阻止逻辑，否则清掉任务态后直接进入目标 section，bridge 的“连接与凭据 / 高级运行面板”不再拦截顶部 tab。
+- 验证结果：`pnpm build` 在 `apps/kimi-shell` 于 2026-04-14 通过。首次构建前本地缺少 `node_modules`，已执行 `pnpm install --frozen-lockfile` 补齐依赖后重跑成功。
+- 未完成项：本轮未在真实桌面界面里手工点击验证 3 条交互路径，仍需启动应用做一轮 UI 回归确认。
+
+## v0.0.38 发版执行
+
+### Checklist
+- [x] 复查 `tasks/lessons.md`、当前工作区 diff 和现有发版约定
+- [x] 确认版本号已同步到 shell `package.json`、`Cargo.toml`、`Cargo.lock`、`tauri.conf.json`
+- [x] 撰写 `apps/kimi-shell/docs/release-notes-0.0.38.md`
+- [x] 运行本次发版所需验证命令并记录结果
+- [x] 提交当前工作区改动并推送 `main`
+- [x] 创建并推送 `v0.0.38` tag / GitHub release
+
+### Review
+- 目标：基于当前已完成的控制中心交互修复、Weixin auto-approve 行为修正和 `0.0.38` 版本号更新，补齐 release notes 后完成一次完整发版。
+- 风险：仓库当前包含用户本地新增的 `AGENTS.md` 约束和未做真实桌面手工回归的 UI 交互修复，因此自动化验证之外仍保留安装版/桌面点击验证缺口。
+- Release note：已新增 `apps/kimi-shell/docs/release-notes-0.0.38.md`，内容覆盖控制中心 onboarding/导航修复、Weixin `AutoApprove=true` 协议修正，以及本次安装包名称与验证命令。
+- 自动化验证：`go test ./...`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell tauri build` 于 2026-04-14 通过，`0.0.38` 的 NSIS/MSI 安装包已生成。
+- Rust 测试说明：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 于 2026-04-14 通过；完整 `cargo test` 真正执行测试二进制时在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，与 `tasks/todo.md` 既有多次记录一致，属于本机运行时环境问题，不是本次改动的编译失败。

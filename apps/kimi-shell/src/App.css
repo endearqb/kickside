@@ -5373,6 +5373,21 @@ input:focus {
   scrollbar-gutter: stable;
 }
 
+.cc-onboarding-detail-shell .cc-onboarding-install-stack {
+  display: grid;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.cc-onboarding-detail-shell .cc-onboarding-install-stack .cc-step-secondary-actions {
+  margin: 0;
+}
+
+.cc-onboarding-install-meta {
+  display: grid;
+  gap: 8px;
+}
+
 .cc-runtime-summary-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 20px;

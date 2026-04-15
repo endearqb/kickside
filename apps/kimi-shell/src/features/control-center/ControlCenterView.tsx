@@ -284,7 +284,7 @@ type ControlCenterViewProps = {
     task: ControlCenterTaskId,
     payload?: ControlCenterTaskPayload | null,
   ) => Promise<void>;
-  onCloseTask: () => void;
+  onCloseTask: () => boolean;
   onSelectDiscoveredSkill: (discoveryId: string) => Promise<void>;
   onScanDiscoveredSkills: () => Promise<void>;
   onImportDiscoveredSkill: (discoveryId: string) => Promise<void>;
@@ -1133,6 +1133,10 @@ export function ControlCenterView({
       : !authReady
         ? "auth"
         : "work_dir";
+  const defaultOnboardingCard: OnboardingCardId =
+    installSessionSnapshot.taskId === "upgrade_kimi" && installSessionSnapshot.status !== "idle"
+      ? "install"
+      : recommendedOnboardingCard;
 
   function toggleOnboardingCard(cardId: OnboardingCardId) {
     setExpandedOnboardingCard(cardId);
@@ -1144,9 +1148,9 @@ export function ControlCenterView({
       return;
     }
     if (!expandedOnboardingCard) {
-      setExpandedOnboardingCard(recommendedOnboardingCard);
+      setExpandedOnboardingCard(defaultOnboardingCard);
     }
-  }, [activeControlSection, expandedOnboardingCard, recommendedOnboardingCard]);
+  }, [activeControlSection, defaultOnboardingCard, expandedOnboardingCard]);
 
   useEffect(() => {
     if (activeControlSection === "runtime_center") {
@@ -1404,6 +1408,12 @@ export function ControlCenterView({
   }
 
   async function handleSelectControlSection(section: ControlSectionId) {
+    if (activeTask && section !== activeControlSection) {
+      const closed = onCloseTask();
+      if (!closed) {
+        return;
+      }
+    }
     if (section === "overview") {
       setActiveControlSection("overview");
       return;
@@ -1421,6 +1431,13 @@ export function ControlCenterView({
       return;
     }
     await handleSelectRuntimePanel("core");
+  }
+
+  async function handleStartInstallFlowTask(taskId: InstallTaskId) {
+    if (taskId === "upgrade_kimi") {
+      setExpandedOnboardingCard("install");
+    }
+    await onStartInstallTask(taskId);
   }
 
   function updateBridgeConnector(
@@ -2228,7 +2245,7 @@ export function ControlCenterView({
             <div className="cc-card-body cc-step-body cc-step-body-single cc-step-detail-scroll">
               <div className="cc-step-main">
                 {activeOnboardingStep.id === "install" ? (
-                  <>
+                  <div className="cc-onboarding-install-stack">
                     <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
                     <InstallFlowTaskContent
                       catalog={installFlowCatalog}
@@ -2244,17 +2261,23 @@ export function ControlCenterView({
                       onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
                       onSourceChange={onInstallSourceChange}
                       onSaveInstallSettings={onSaveInstallSettings}
-                      onStartTask={onStartInstallTask}
+                      onStartTask={handleStartInstallFlowTask}
                       onRestartBackend={onRetry}
                       onPickKimiPath={onPickKimiPath}
                       onSavePathAndRetry={onSavePathAndRetry}
                       restartBusy={actionBusy}
                     />
-                    {recentInstallSummary ? (
-                      <p className="hint cc-step-meta">{recentInstallSummary}</p>
+                    {recentInstallSummary || installMessage ? (
+                      <div className="cc-onboarding-install-meta">
+                        {recentInstallSummary ? (
+                          <p className="hint cc-step-meta">{recentInstallSummary}</p>
+                        ) : null}
+                        {installMessage ? (
+                          <p className="hint cc-step-meta">{installMessage}</p>
+                        ) : null}
+                      </div>
                     ) : null}
-                    {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
-                  </>
+                  </div>
                 ) : null}
 
                 {activeOnboardingStep.id === "context_menu" ? renderContextMenuStepContent() : null}
@@ -4215,4 +4238,3 @@ export function ControlCenterView({
     </section>
   );
 }
-

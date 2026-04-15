@@ -1,3 +1,5 @@
+rg 在这个环境里起不来，用 PowerShell 直接抓取对应片段
+
 ## Design System
 Always read DESIGN.md before making any visual or UI decisions.
 All font choices, colors, spacing, and aesthetic direction are defined there.

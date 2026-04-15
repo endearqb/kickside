@@ -2612,7 +2612,9 @@ export function useShellController() {
     }
     setControlCenterModalOpen(false);
     setInstallCommandsOpen(false);
-    resetControlCenterNavigation();
+    if (screen !== "control_center") {
+      resetControlCenterNavigation();
+    }
   }, [keepControlCenterForUpgrade, screen]);
 
   useEffect(() => {
@@ -3857,7 +3859,7 @@ export function useShellController() {
   }
 
   function handleCloseControlTask() {
-    closeActiveControlTask();
+    return closeActiveControlTask();
   }
 
   async function handleSetSkillTrust(skillId: string, trusted: boolean) {

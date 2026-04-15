@@ -328,6 +328,10 @@ func (s *Service) processMessage(ctx context.Context, message WeixinMessage) err
 
 	result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
 		DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
+		// Weixin currently has no in-chat approval UI or callback path, so keep
+		// tool/permission requests on the auto-approve path until the protocol
+		// can carry approval interactions explicitly.
+		AutoApprove: true,
 	}, func(event bridgecore.TurnEvent) error {
 		return nil
 	})

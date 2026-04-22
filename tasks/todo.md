@@ -36,3 +36,34 @@
 - Release note：已新增 `apps/kimi-shell/docs/release-notes-0.0.38.md`，内容覆盖控制中心 onboarding/导航修复、Weixin `AutoApprove=true` 协议修正，以及本次安装包名称与验证命令。
 - 自动化验证：`go test ./...`、`pnpm -C apps/kimi-shell build`、`pnpm -C apps/kimi-shell tauri build` 于 2026-04-14 通过，`0.0.38` 的 NSIS/MSI 安装包已生成。
 - Rust 测试说明：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 于 2026-04-14 通过；完整 `cargo test` 真正执行测试二进制时在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，与 `tasks/todo.md` 既有多次记录一致，属于本机运行时环境问题，不是本次改动的编译失败。
+
+## 修复打包版 skills 资源路径
+
+### Checklist
+- [x] 复查 `tauri.conf.json`、`skill_center.rs` 与生成的 NSIS `installer.nsi`，确认 `_up_` 来源
+- [x] 将 `bundle.resources` 改为 source->target 映射，固定 `skills` 和 `binaries` 的资源落点
+- [x] 运行一次 Windows NSIS debug 打包验证资源目标路径
+- [x] 在本节补充 Review，记录验证结果与仍未覆盖的缺口
+
+### Review
+- 根因确认：`apps/kimi-shell/src-tauri/tauri.conf.json` 原先把 `skills` 写成 `../../../skills`，NSIS 生成脚本会把每一级 `..` 安全改写为 `_up_`，因此安装包目标路径变成 `_up_/_up_/_up_/skills`。
+- 实现方式：`bundle.resources` 改为对象映射，使用 `binaries/ -> binaries/` 与 `../../../skills/ -> skills/`，只修正安装包资源布局，不改 Rust/TS 运行时读取逻辑。
+- 自动化验证：`pnpm --dir apps/kimi-shell exec tauri build --bundles nsis --debug` 已执行通过；生成的 `apps/kimi-shell/src-tauri/target/debug/nsis/x64/installer.nsi` 中，skills 资源目标已变为 `skills\\...`，未再出现 `_up_\\_up_\\_up_\\skills`。
+- 行为结论：安装后资源目录应收敛为 `C:\Users\endea\AppData\Local\Kimi Desktop Shell\skills`，`skill_center.rs` 现有 `resource_dir()/skills` 查找逻辑可直接复用，无需额外代码改动。
+- 未覆盖项：本轮未在真实已安装包上手工点开应用验证 Skill Center 展示，但由于运行时仍读取 `resource_dir()/skills` 且 NSIS 目标路径已修正，风险主要剩余在安装后人工回归层。
+
+## 修复旧安装包默认 skill 扫描兼容
+
+### Checklist
+- [x] 核对技能中心 bundled 扫描入口与当前安装版实际资源目录
+- [x] 确认旧安装版默认 5 个 skill 位于 `_up_/_up_/_up_/skills`
+- [x] 为 `skill_center` 增加 legacy `_up_` 资源目录兼容
+- [x] 补一条单测锁定 bundled 扫描候选路径
+- [x] 运行针对性 Rust 单测验证兼容逻辑
+
+### Review
+- 根因确认：当前安装目录 `C:\Users\endea\AppData\Local\Kimi Desktop Shell` 仍是旧安装包布局，默认 5 个 skill 实际位于 `_up_\\_up_\\_up_\\skills`；而 `skill_center::resolve_bundled_skills_dir()` 只查 `resource_dir()/skills`，因此在“全新用户数据目录 + 旧安装包”场景下不会注册 bundled skills。
+- 现状核对：`C:\Users\endea\AppData\Roaming\com.kimi.shell\skill-center\registry.json` 里已有 5 个 bundled skill，说明当前机器上 UI 是否显示取决于历史 registry；问题主要影响新安装或清空状态后的初始化。
+- 实现方式：参照 `bridge_manager` 的思路，把 bundled skills 资源候选扩展为根级 `skills` 与 legacy `_up_/_up_/_up_/skills` 两种路径，新打包布局和旧安装包都能被识别。
+- 自动化验证：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bundled_skills_resource_candidates_include_root_and_legacy_up_path --no-run` 已通过，确认新增单测可正常编译；直接执行测试二进制在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，与仓库既有记录一致，属于本机运行时环境问题。
+- 行为结论：新安装包继续使用干净的 `skills` 目录；旧安装包即使不重装，也能在下一次启动时正确扫到默认 5 个 skill 并完成注册。

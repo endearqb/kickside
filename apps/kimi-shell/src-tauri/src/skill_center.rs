@@ -25,6 +25,7 @@ use crate::{
 };
 
 const BUNDLED_SKILLS_DIR_NAME: &str = "skills";
+const LEGACY_BUNDLED_SKILLS_DIR_SEGMENTS: [&str; 4] = ["_up_", "_up_", "_up_", "skills"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingSkillAction {
@@ -1325,11 +1326,12 @@ fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
 fn resolve_bundled_skills_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     let mut checked = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
-        let candidate = resource_dir.join(BUNDLED_SKILLS_DIR_NAME);
-        if candidate.is_dir() {
-            return Ok(candidate);
+        for candidate in bundled_skills_resource_candidates(&resource_dir) {
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+            checked.push(candidate);
         }
-        checked.push(candidate);
     }
 
     let development_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1350,6 +1352,20 @@ fn resolve_bundled_skills_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
     Err(anyhow::anyhow!(
         "bundled skills directory not found; checked {checked_paths}"
     ))
+}
+
+fn bundled_skills_resource_candidates(resource_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(2);
+    candidates.push(resource_dir.join(BUNDLED_SKILLS_DIR_NAME));
+
+    let legacy_dir = LEGACY_BUNDLED_SKILLS_DIR_SEGMENTS
+        .iter()
+        .fold(resource_dir.to_path_buf(), |path, segment| path.join(segment));
+    if legacy_dir != candidates[0] {
+        candidates.push(legacy_dir);
+    }
+
+    candidates
 }
 
 fn resync_bundled_copy_projections(app: &AppHandle, skill: &InstalledSkill) -> anyhow::Result<()> {
@@ -2233,5 +2249,22 @@ mod tests {
             skill_center_store::path_to_display_string(&valid)
         );
         assert_eq!(skipped, vec!["broken-skill".to_string()]);
+    }
+
+    #[test]
+    fn bundled_skills_resource_candidates_include_root_and_legacy_up_path() {
+        let resource_dir = Path::new("C:\\Users\\endea\\AppData\\Local\\Kimi Desktop Shell");
+        let candidates = bundled_skills_resource_candidates(resource_dir);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0], resource_dir.join("skills"));
+        assert_eq!(
+            candidates[1],
+            resource_dir
+                .join("_up_")
+                .join("_up_")
+                .join("_up_")
+                .join("skills")
+        );
     }
 }

@@ -3,6 +3,8 @@ import { Copy, RefreshCw } from "lucide-react";
 import type {
   BackendState,
   InstallFlowCatalog,
+  InstallMirrorHealthCategory,
+  InstallMirrorHealthReport,
   InstallSettingsView,
   InstallProbeStatus,
   InstallSessionSnapshot,
@@ -22,10 +24,13 @@ type InstallFlowTaskContentProps = {
   installSource: InstallSource;
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
+  installMirrorHealthReport: InstallMirrorHealthReport | null;
+  installMirrorHealthBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
   kimiPathInput: string;
   detectedKimiPath: string;
   onRefreshPowerShellPreflight: () => Promise<unknown>;
+  onRefreshMirrorHealth: (input?: InstallSettingsView) => Promise<unknown>;
   onSourceChange: (source: InstallSource) => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
   onStartTask: (taskId: InstallTaskId) => Promise<void>;
@@ -41,6 +46,18 @@ type TaskAvailability = {
 };
 
 type PreflightBadgeTone = "neutral" | "success" | "warning" | "danger";
+
+type MirrorHealthSummary = {
+  total: number;
+  healthy: number;
+};
+
+const MIRROR_CATEGORY_ORDER: InstallMirrorHealthCategory[] = [
+  "git_release_page",
+  "uv_release_page",
+  "python_installer",
+  "pypi_index",
+];
 
 export function formatInstallSessionStatus(status: InstallSessionSnapshot["status"]): string {
   switch (status) {
@@ -115,6 +132,38 @@ function formatBackendStateLabel(state: BackendState | null): string {
 
 function formatInstallSourceLabel(source: InstallSource): string {
   return source === "mirror" ? "镜像源" : "官方源";
+}
+
+function formatMirrorPresetLabel(preset: InstallSettingsView["mirrorPreset"]) {
+  switch (preset) {
+    case "mixed":
+      return "综合回退";
+    case "tuna":
+      return "清华优先";
+    case "ustc":
+      return "中科大优先";
+    case "aliyun":
+      return "综合回退";
+    case "custom":
+      return "自定义";
+    default:
+      return "综合回退";
+  }
+}
+
+function formatMirrorCategoryLabel(category: InstallMirrorHealthCategory) {
+  switch (category) {
+    case "git_release_page":
+      return "Git";
+    case "uv_release_page":
+      return "uv";
+    case "python_installer":
+      return "Python";
+    case "pypi_index":
+      return "PyPI";
+    default:
+      return category;
+  }
 }
 
 function getPreflightKindMeta(kind?: PowerShellPreflightSummary["kind"]): {
@@ -213,6 +262,10 @@ function getTaskAvailability(
       return probe.kimiReady
         ? { disabled: false }
         : { disabled: true, reason: "需先安装 Kimi CLI" };
+    case "uninstall_kimi":
+      return probe.kimiReady
+        ? { disabled: false }
+        : { disabled: true, reason: "当前未安装 Kimi CLI" };
     case "install_git":
       return probe.gitReady ? { disabled: true, reason: "已安装" } : { disabled: false };
     case "install_nodejs":
@@ -253,6 +306,33 @@ function buildLogsText(session: InstallSessionSnapshot) {
   return lines.join("\n");
 }
 
+function summarizeMirrorHealth(report: InstallMirrorHealthReport | null): MirrorHealthSummary {
+  const entries = report?.entries ?? [];
+  return {
+    total: entries.length,
+    healthy: entries.filter((entry) => entry.healthy).length,
+  };
+}
+
+function formatSourceSummary(
+  source: InstallSource,
+  healthSummary: MirrorHealthSummary,
+  healthBusy: boolean,
+) {
+  const prefix = source === "mirror" ? "镜像安装" : "官方优先";
+  if (healthBusy && healthSummary.total === 0) {
+    return `${prefix}；镜像检测中`;
+  }
+  if (!healthSummary.total) {
+    return `${prefix}；尚未检测镜像`;
+  }
+  return `${prefix}；镜像健康 ${healthSummary.healthy}/${healthSummary.total}`;
+}
+
+function formatHealthDetail(detail: string) {
+  return detail.trim() || "未返回更多信息";
+}
+
 export function InstallFlowTaskContent({
   catalog,
   session,
@@ -261,10 +341,13 @@ export function InstallFlowTaskContent({
   installSource,
   installSettings,
   installSettingsBusy,
+  installMirrorHealthReport,
+  installMirrorHealthBusy,
   powershellPreflight,
   kimiPathInput,
   detectedKimiPath,
   onRefreshPowerShellPreflight,
+  onRefreshMirrorHealth,
   onSourceChange,
   onSaveInstallSettings,
   onStartTask,
@@ -276,6 +359,7 @@ export function InstallFlowTaskContent({
   const consoleRef = useRef<HTMLPreElement | null>(null);
   const [mirrorDraft, setMirrorDraft] = useState<InstallSettingsView>(installSettings);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [uninstallConfirmOpen, setUninstallConfirmOpen] = useState(false);
   const activeTask = useMemo(
     () => catalog?.tasks.find((task) => task.id === session.taskId),
     [catalog, session.taskId],
@@ -289,6 +373,7 @@ export function InstallFlowTaskContent({
   const primaryTask = catalog?.tasks.find((task) => task.id === primaryTaskId);
   const quickInstallAvailability = getTaskAvailability("quick_install_core", probe, isBusy);
   const upgradeAvailability = getTaskAvailability("upgrade_kimi", probe, isBusy);
+  const uninstallAvailability = getTaskAvailability("uninstall_kimi", probe, isBusy);
   const activeTaskForCommands = activeTask ?? primaryTask;
   const currentStepCommand =
     taskSteps(activeTaskForCommands, installSource).find((step) => step.id === session.currentStepId)
@@ -309,7 +394,7 @@ export function InstallFlowTaskContent({
   const failureSummary =
     session.status === "failed" ? session.failureSummary?.trim() || session.message?.trim() : "";
   const blockingMessages = [
-    !probe ? "等待环境检测完成后再执行安装或升级。" : "",
+    !probe ? "等待环境检测完成后再执行操作。" : "",
     activePreflight && !activePreflight.smokeTestOk
       ? "PowerShell 预检未通过，建议先处理执行策略。"
       : "",
@@ -319,6 +404,14 @@ export function InstallFlowTaskContent({
     session.fallbackReason?.trim() || "",
     failureSummary,
   ].filter(Boolean);
+  const mirrorHealthSummary = summarizeMirrorHealth(installMirrorHealthReport);
+  const groupedMirrorHealth = useMemo(() => {
+    const reportEntries = installMirrorHealthReport?.entries ?? [];
+    return MIRROR_CATEGORY_ORDER.map((category) => ({
+      category,
+      entries: reportEntries.filter((entry) => entry.category === category),
+    }));
+  }, [installMirrorHealthReport]);
 
   useEffect(() => {
     setMirrorDraft(installSettings);
@@ -336,6 +429,20 @@ export function InstallFlowTaskContent({
       node.scrollTop = node.scrollHeight;
     }
   }, [session.logs.length, session.message, failureSummary, logsText]);
+
+  useEffect(() => {
+    const payload =
+      mirrorDraft.mirrorPreset === "custom"
+        ? installSettings
+        : { ...mirrorDraft, preferredSource: installSource };
+    void onRefreshMirrorHealth(payload).catch(() => {});
+  }, [installSource, installSettings, mirrorDraft.mirrorPreset]);
+
+  useEffect(() => {
+    if (session.taskId === "uninstall_kimi" && session.status !== "idle") {
+      setUninstallConfirmOpen(false);
+    }
+  }, [session.taskId, session.status]);
 
   const renderMirrorTextarea = (
     label: string,
@@ -360,12 +467,8 @@ export function InstallFlowTaskContent({
         <div className="cc-install-overview-head">
           <div className="cc-install-overview-copy">
             <ControlCenterStatusBadge tone={sessionTone}>{sessionStatusLabel}</ControlCenterStatusBadge>
-            <h4>安装 / 升级 Kimi CLI</h4>
-            <p>
-              {session.message?.trim() ||
-                primaryTask?.description ||
-                "先看状态，再决定是立即安装还是升级。"}
-            </p>
+            <h4>安装 / 管理 Kimi CLI</h4>
+            <p>{session.message?.trim() || "先看状态，再执行安装、升级或卸载。"}</p>
           </div>
         </div>
 
@@ -378,12 +481,12 @@ export function InstallFlowTaskContent({
           <article className="cc-install-overview-card">
             <span>后端状态</span>
             <strong>{formatBackendStateLabel(backendState)}</strong>
-            <small>{showRestartAction ? "升级后需恢复后端" : "用于判断是否需要恢复运行环境"}</small>
+            <small>{showRestartAction ? "升级完成后需手动恢复后端" : "用于判断是否需要恢复运行环境"}</small>
           </article>
           <article className="cc-install-overview-card">
             <span>当前来源</span>
             <strong>{formatInstallSourceLabel(installSource)}</strong>
-            <small>{installSource === "mirror" ? "适合国内网络环境" : "优先使用官方地址"}</small>
+            <small>{formatSourceSummary(installSource, mirrorHealthSummary, installMirrorHealthBusy)}</small>
           </article>
           <article className="cc-install-overview-card">
             <span>Kimi CLI</span>
@@ -405,46 +508,52 @@ export function InstallFlowTaskContent({
         <div className="cc-install-console-head">
           <div>
             <h4>主操作区</h4>
-            <p>默认只保留一键安装、升级和详细安装入口，其余内容下沉到下方展开区。</p>
+            <p>保留安装、升级、卸载和详细选项入口。</p>
           </div>
-          <div className="cc-install-flow-actions">
-            <Button
-              type="button"
-              className="cc-action-btn"
-              onClick={() => void onStartTask("quick_install_core")}
-              disabled={quickInstallAvailability.disabled}
-              title={quickInstallAvailability.reason}
-            >
-              一键安装 Kimi CLI
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn"
-              onClick={() => void onStartTask("upgrade_kimi")}
-              disabled={upgradeAvailability.disabled}
-              title={upgradeAvailability.reason}
-            >
-              升级 Kimi
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="cc-action-btn"
-              onClick={() => setAdvancedOpen((current) => !current)}
-              aria-expanded={advancedOpen}
-            >
-              {advancedOpen ? "收起详细安装选项" : "打开详细安装选项"}
-            </Button>
+          <div className="cc-install-primary-action-groups">
+            <div className="cc-install-flow-actions">
+              <Button
+                type="button"
+                className="cc-action-btn"
+                onClick={() => void onStartTask("quick_install_core")}
+                disabled={quickInstallAvailability.disabled}
+                title={quickInstallAvailability.reason}
+              >
+                一键安装 Kimi CLI
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="cc-action-btn"
+                onClick={() => void onStartTask("upgrade_kimi")}
+                disabled={upgradeAvailability.disabled}
+                title={upgradeAvailability.reason}
+              >
+                升级 Kimi
+              </Button>
+            </div>
+            <div className="cc-install-flow-actions cc-install-danger-actions">
+              <Button
+                type="button"
+                variant="destructive"
+                className="cc-action-btn"
+                onClick={() => setUninstallConfirmOpen(true)}
+                disabled={uninstallAvailability.disabled}
+                title={uninstallAvailability.reason}
+              >
+                卸载 Kimi CLI
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="cc-action-btn"
+                onClick={() => setAdvancedOpen((current) => !current)}
+                aria-expanded={advancedOpen}
+              >
+                {advancedOpen ? "收起详细选项" : "打开详细选项"}
+              </Button>
+            </div>
           </div>
-        </div>
-        <div className="cc-install-primary-hints">
-          <p className="hint cc-install-task-hint">
-            一键安装：{quickInstallAvailability.reason ?? "补齐 uv / Python 3.13 / Kimi CLI 核心依赖。"}
-          </p>
-          <p className="hint cc-install-task-hint">
-            升级 Kimi：{upgradeAvailability.reason ?? "仅升级已安装的 Kimi CLI，不额外引入安装引导。"}
-          </p>
         </div>
 
         {advancedOpen ? (
@@ -453,7 +562,7 @@ export function InstallFlowTaskContent({
               <div className="cc-install-console-head">
                 <div>
                   <h4>安装来源</h4>
-                  <p>默认保持当前来源；只有需要切换官方源 / 镜像源时再展开这里。</p>
+                  <p>切换官方源或镜像源。</p>
                 </div>
               </div>
               <div className="cc-install-flow-source" role="group" aria-label="安装来源">
@@ -476,10 +585,160 @@ export function InstallFlowTaskContent({
               </div>
             </div>
 
+            <div className="cc-install-mirror-config-card">
+              <div className="cc-install-console-head">
+                <div>
+                  <h4>镜像策略</h4>
+                  <p>当前预设：{formatMirrorPresetLabel(mirrorDraft.mirrorPreset)}</p>
+                </div>
+                <div className="cc-install-flow-actions">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<RefreshCw size={14} />}
+                    className="cc-action-btn"
+                    onClick={() =>
+                      void onRefreshMirrorHealth({
+                        ...mirrorDraft,
+                        preferredSource: installSource,
+                      }).catch(() => {})
+                    }
+                    disabled={installMirrorHealthBusy || isBusy}
+                  >
+                    重新检测
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cc-action-btn"
+                    onClick={() => void onSaveInstallSettings(mirrorDraft)}
+                    disabled={installSettingsBusy || isBusy}
+                  >
+                    保存镜像设置
+                  </Button>
+                </div>
+              </div>
+              <label className="cc-install-mirror-field">
+                <span>镜像预设</span>
+                <select
+                  className="cc-install-mirror-select"
+                  value={mirrorDraft.mirrorPreset === "aliyun" ? "mixed" : mirrorDraft.mirrorPreset}
+                  onChange={(event) =>
+                    setMirrorDraft((current) => ({
+                      ...current,
+                      mirrorPreset: event.target.value as InstallSettingsView["mirrorPreset"],
+                      preferredSource: "mirror",
+                    }))
+                  }
+                  disabled={installSettingsBusy || isBusy}
+                >
+                  <option value="mixed">综合回退</option>
+                  <option value="tuna">清华优先</option>
+                  <option value="ustc">中科大优先</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+
+              <div className="cc-install-mirror-health-grid">
+                {groupedMirrorHealth.map(({ category, entries }) => {
+                  const healthy = entries.filter((entry) => entry.healthy).length;
+                  const total = entries.length;
+                  const tone =
+                    total > 0 && healthy === total ? "success" : healthy > 0 ? "warning" : "danger";
+                  return (
+                    <article key={category} className="cc-install-mirror-health-card">
+                      <div className="cc-install-mirror-health-card-head">
+                        <span>{formatMirrorCategoryLabel(category)}</span>
+                        <strong className={`is-${tone}`}>
+                          {healthy}/{total || 0}
+                        </strong>
+                      </div>
+                      <div className="cc-install-mirror-health-list">
+                        {entries.length ? (
+                          entries.map((entry) => (
+                            <div
+                              key={`${entry.category}-${entry.url}`}
+                              className="cc-install-mirror-health-item"
+                            >
+                              <div className="cc-install-mirror-health-item-head">
+                                <span className={entry.healthy ? "is-success" : "is-danger"}>
+                                  {entry.healthy ? "可用" : "不可用"}
+                                </span>
+                                <code>{entry.statusCode ?? "-"}</code>
+                              </div>
+                              <small>{entry.url}</small>
+                              <small>{formatHealthDetail(entry.detail)}</small>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="cc-install-mirror-health-item">
+                            <small>{installMirrorHealthBusy ? "正在检测…" : "当前分类没有地址。"}</small>
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+
+              {mirrorDraft.mirrorPreset === "custom" ? (
+                <div className="cc-install-mirror-grid">
+                  {renderMirrorTextarea(
+                    "Git 发布页",
+                    mirrorDraft.customMirrorConfig.gitReleasePages,
+                    (next) =>
+                      setMirrorDraft((current) => ({
+                        ...current,
+                        customMirrorConfig: {
+                          ...current.customMirrorConfig,
+                          gitReleasePages: textToLines(next),
+                        },
+                      })),
+                  )}
+                  {renderMirrorTextarea(
+                    "uv 发布页",
+                    mirrorDraft.customMirrorConfig.uvReleasePages,
+                    (next) =>
+                      setMirrorDraft((current) => ({
+                        ...current,
+                        customMirrorConfig: {
+                          ...current.customMirrorConfig,
+                          uvReleasePages: textToLines(next),
+                        },
+                      })),
+                  )}
+                  {renderMirrorTextarea(
+                    "Python 安装器",
+                    mirrorDraft.customMirrorConfig.pythonInstallerUrls,
+                    (next) =>
+                      setMirrorDraft((current) => ({
+                        ...current,
+                        customMirrorConfig: {
+                          ...current.customMirrorConfig,
+                          pythonInstallerUrls: textToLines(next),
+                        },
+                      })),
+                  )}
+                  {renderMirrorTextarea(
+                    "PyPI Index",
+                    mirrorDraft.customMirrorConfig.pypiIndexUrls,
+                    (next) =>
+                      setMirrorDraft((current) => ({
+                        ...current,
+                        customMirrorConfig: {
+                          ...current.customMirrorConfig,
+                          pypiIndexUrls: textToLines(next),
+                        },
+                      })),
+                  )}
+                </div>
+              ) : null}
+            </div>
+
             <div className="cc-install-console-head">
               <div>
                 <h4>PowerShell 预检</h4>
-                <p>只在需要排障时展开，避免重复解释。</p>
+                <p>只在需要排障时查看。</p>
               </div>
               <div className="cc-install-flow-actions">
                 <Button
@@ -522,105 +781,11 @@ export function InstallFlowTaskContent({
               ) : null}
             </div>
 
-            {installSource === "mirror" ? (
-              <div className="cc-install-mirror-config-card">
-                <div className="cc-install-console-head">
-                  <div>
-                    <h4>镜像策略</h4>
-                    <p>预设优先，只有自定义时才展开完整配置。</p>
-                  </div>
-                  <div className="cc-install-flow-actions">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="cc-action-btn"
-                      onClick={() => void onSaveInstallSettings(mirrorDraft)}
-                      disabled={installSettingsBusy || isBusy}
-                    >
-                      保存镜像设置
-                    </Button>
-                  </div>
-                </div>
-                <label className="cc-install-mirror-field">
-                  <span>镜像预设</span>
-                  <select
-                    className="cc-install-mirror-select"
-                    value={mirrorDraft.mirrorPreset}
-                    onChange={(event) =>
-                      setMirrorDraft((current) => ({
-                        ...current,
-                        mirrorPreset: event.target.value as InstallSettingsView["mirrorPreset"],
-                        preferredSource: "mirror",
-                      }))
-                    }
-                    disabled={installSettingsBusy || isBusy}
-                  >
-                    <option value="mixed">清华后阿里</option>
-                    <option value="tuna">仅清华</option>
-                    <option value="aliyun">仅阿里</option>
-                    <option value="custom">自定义</option>
-                  </select>
-                </label>
-                {mirrorDraft.mirrorPreset === "custom" ? (
-                  <div className="cc-install-mirror-grid">
-                    {renderMirrorTextarea(
-                      "Git 发布页",
-                      mirrorDraft.customMirrorConfig.gitReleasePages,
-                      (next) =>
-                        setMirrorDraft((current) => ({
-                          ...current,
-                          customMirrorConfig: {
-                            ...current.customMirrorConfig,
-                            gitReleasePages: textToLines(next),
-                          },
-                        })),
-                    )}
-                    {renderMirrorTextarea(
-                      "uv 发布页",
-                      mirrorDraft.customMirrorConfig.uvReleasePages,
-                      (next) =>
-                        setMirrorDraft((current) => ({
-                          ...current,
-                          customMirrorConfig: {
-                            ...current.customMirrorConfig,
-                            uvReleasePages: textToLines(next),
-                          },
-                        })),
-                    )}
-                    {renderMirrorTextarea(
-                      "Python 安装器",
-                      mirrorDraft.customMirrorConfig.pythonInstallerUrls,
-                      (next) =>
-                        setMirrorDraft((current) => ({
-                          ...current,
-                          customMirrorConfig: {
-                            ...current.customMirrorConfig,
-                            pythonInstallerUrls: textToLines(next),
-                          },
-                        })),
-                    )}
-                    {renderMirrorTextarea(
-                      "PyPI Index",
-                      mirrorDraft.customMirrorConfig.pypiIndexUrls,
-                      (next) =>
-                        setMirrorDraft((current) => ({
-                          ...current,
-                          customMirrorConfig: {
-                            ...current.customMirrorConfig,
-                            pypiIndexUrls: textToLines(next),
-                          },
-                        })),
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
             <div className="cc-install-mirror-config-card">
               <div className="cc-install-console-head">
                 <div>
                   <h4>手动路径</h4>
-                  <p>当自动探测不到 Kimi 时，用这里补充本地路径。</p>
+                  <p>自动探测不到 Kimi 时再补充。</p>
                 </div>
                 <div className="cc-install-flow-actions">
                   <Button
@@ -749,9 +914,41 @@ export function InstallFlowTaskContent({
           {logsText || session.message || "还没有采集到输出日志。"}
         </pre>
       </section>
+
+      {uninstallConfirmOpen ? (
+        <div className="main-close-decision-overlay" role="presentation">
+          <div
+            className="main-close-decision-card"
+            role="dialog"
+            aria-modal="true"
+            aria-label="卸载 Kimi CLI"
+          >
+            <h3>卸载 Kimi CLI</h3>
+            <p>仅卸载 Kimi CLI，保留 uv 和 Python 3.13。卸载前会先停止后端，完成后后端保持停止。</p>
+            <div className="main-close-decision-actions">
+              <button
+                type="button"
+                className="ui-btn ui-btn-default ui-btn-size-default"
+                onClick={() => setUninstallConfirmOpen(false)}
+                disabled={isBusy}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                onClick={() => {
+                  void onStartTask("uninstall_kimi");
+                }}
+                disabled={uninstallAvailability.disabled}
+                title={uninstallAvailability.reason}
+              >
+                确认卸载
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
-
-
-

@@ -997,6 +997,7 @@ export type InstallTaskId =
   | "install_python313"
   | "install_kimi"
   | "upgrade_kimi"
+  | "uninstall_kimi"
   | "install_git"
   | "install_nodejs";
 
@@ -1004,7 +1005,7 @@ export type InstallTaskGroup = "core" | "optional" | "upgrade";
 
 export type InstallSource = "official" | "mirror";
 
-export type InstallMirrorPreset = "mixed" | "tuna" | "aliyun" | "custom";
+export type InstallMirrorPreset = "mixed" | "tuna" | "ustc" | "aliyun" | "custom";
 
 export interface InstallCustomMirrorConfig {
   gitReleasePages: string[];
@@ -1017,6 +1018,25 @@ export interface InstallSettingsView {
   preferredSource: InstallSource;
   mirrorPreset: InstallMirrorPreset;
   customMirrorConfig: InstallCustomMirrorConfig;
+}
+
+export type InstallMirrorHealthCategory =
+  | "git_release_page"
+  | "uv_release_page"
+  | "python_installer"
+  | "pypi_index";
+
+export interface InstallMirrorHealthEntry {
+  category: InstallMirrorHealthCategory;
+  url: string;
+  healthy: boolean;
+  statusCode?: number;
+  detail: string;
+  checkedAt: string;
+}
+
+export interface InstallMirrorHealthReport {
+  entries: InstallMirrorHealthEntry[];
 }
 
 export type PowerShellDiagnosticKind =

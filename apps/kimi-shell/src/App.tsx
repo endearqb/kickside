@@ -224,6 +224,8 @@ function App() {
     installSource: shell.installSource,
     installSettings: shell.installSettings,
     installSettingsBusy: shell.installSettingsBusy,
+    installMirrorHealthReport: shell.installMirrorHealthReport,
+    installMirrorHealthBusy: shell.installMirrorHealthBusy,
     powershellPreflight: shell.powershellPreflight,
     installFlowCatalog: shell.installFlowCatalog,
     installSessionSnapshot: shell.installSessionSnapshot,
@@ -258,6 +260,7 @@ function App() {
     onRefreshWorkspaceSkillManagementState: () =>
       shell.refreshWorkspaceSkillManagementState(shell.selectedWorkspaceSkillTargetId),
     onRefreshInstallProbe: shell.refreshInstallProbe,
+    onRefreshInstallMirrorHealth: shell.refreshInstallMirrorHealth,
     onRefreshOnboarding: shell.refreshOnboarding,
     onRetry: shell.handleRuntimeOnlyRetry,
     onOpenLogs: shell.handleOpenLogs,

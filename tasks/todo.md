@@ -67,3 +67,22 @@
 - 实现方式：参照 `bridge_manager` 的思路，把 bundled skills 资源候选扩展为根级 `skills` 与 legacy `_up_/_up_/_up_/skills` 两种路径，新打包布局和旧安装包都能被识别。
 - 自动化验证：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml bundled_skills_resource_candidates_include_root_and_legacy_up_path --no-run` 已通过，确认新增单测可正常编译；直接执行测试二进制在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，与仓库既有记录一致，属于本机运行时环境问题。
 - 行为结论：新安装包继续使用干净的 `skills` 目录；旧安装包即使不重装，也能在下一次启动时正确扫到默认 5 个 skill 并完成注册。
+
+## 精简 Kimi 安装页 + 卸载入口 + 镜像健康校验
+
+### Checklist
+- [x] 扩展安装任务与设置类型，新增 `uninstall_kimi`、`ustc` 预设与镜像健康返回结构
+- [x] 修正默认镜像链与 `aliyun -> mixed` 迁移逻辑，补齐镜像健康检查接口与单测
+- [x] 更新安装弹层 UI：精简文案、增加卸载确认与镜像健康展示
+- [x] 接通前端控制器数据流与安装状态刷新，确保卸载后停留控制中心
+- [x] 运行 `pnpm build` 与 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager`
+- [x] 在本节补充 Review，记录镜像修正、验证结果与剩余风险
+
+### Review
+- 类型与任务流：`InstallTaskId` 新增 `uninstall_kimi`，`InstallMirrorPreset` 新增 `ustc`，并补了 `InstallMirrorHealthReport` / `InstallMirrorHealthEntry`。Tauri 新增 `uninstall_kimi_cli` 与 `get_install_mirror_health_report`，安装会话、日志流、成功消息和后端停止判定都已接通。
+- 镜像策略：默认混合链已替换为可用地址，`tuna` 预设改为 Git/Python/PyPI 走清华、uv 直接回退 USTC；`ustc` 预设四类资源全部走中科大；旧 `aliyun` 预设在设置加载和保存时都会迁移到 `mixed`。
+- 安装页 UI：主操作区收敛成安装、升级、卸载和详细选项入口；卸载按钮使用危险样式并带确认弹层；“当前来源”卡补了镜像健康摘要；镜像策略卡新增 4 类紧凑健康状态卡和“重新检测”入口；原先冗长说明已删减为简短提示。
+- 前端数据流：控制中心和 shell controller 增加镜像健康状态、刷新动作和自动同步；切换安装来源、刷新设置、保存镜像配置后都会刷新镜像健康；卸载成功后不会展示“重启后端”按钮。
+- 自动化验证：`pnpm -C apps/kimi-shell build` 已于 2026-04-22 通过；`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 已通过，说明 Rust 代码与测试二进制可成功编译。
+- Rust 测试说明：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager` 在当前 Windows 机器编译通过后，执行测试二进制阶段仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`；这是本机既有运行时环境问题，不是本次改动引入的编译错误。
+- 未覆盖项：本轮没有启动桌面应用做真实 UI 点击回归，因此卸载按钮、镜像健康卡与控制中心状态切换的最终交互仍保留一轮手工验收缺口。

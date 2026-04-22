@@ -3,7 +3,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::AppState,
-    types::{AppSettings, CURRENT_SETTINGS_SCHEMA_VERSION},
+    types::{AppSettings, InstallMirrorPreset, CURRENT_SETTINGS_SCHEMA_VERSION},
 };
 
 pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
@@ -29,6 +29,11 @@ pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
 
     if settings.schema_version < CURRENT_SETTINGS_SCHEMA_VERSION {
         settings.schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
+        changed = true;
+    }
+
+    if settings.mirror_preset == InstallMirrorPreset::Aliyun {
+        settings.mirror_preset = InstallMirrorPreset::Mixed;
         changed = true;
     }
 

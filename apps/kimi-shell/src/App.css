@@ -1993,6 +1993,99 @@
   line-height: 1.4;
 }
 
+.cc-install-primary-action-groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px 16px;
+}
+
+.cc-install-danger-actions {
+  padding-left: 16px;
+  border-left: 1px solid color-mix(in srgb, var(--error) 22%, var(--chrome-border));
+}
+
+.cc-install-mirror-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.cc-install-mirror-health-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 88%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--surface-muted));
+}
+
+.cc-install-mirror-health-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cc-install-mirror-health-card-head span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cc-install-mirror-health-card-head strong {
+  font-size: 13px;
+}
+
+.cc-install-mirror-health-card-head .is-success {
+  color: var(--saved);
+}
+
+.cc-install-mirror-health-card-head .is-warning {
+  color: var(--warning);
+}
+
+.cc-install-mirror-health-card-head .is-danger {
+  color: var(--error);
+}
+
+.cc-install-mirror-health-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-install-mirror-health-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+.cc-install-mirror-health-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.cc-install-mirror-health-item-head .is-success {
+  color: var(--saved);
+}
+
+.cc-install-mirror-health-item-head .is-danger {
+  color: var(--error);
+}
+
+.cc-install-mirror-health-item code,
+.cc-install-mirror-health-item small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .cc-install-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -6672,6 +6765,16 @@ input:focus {
   .bridge-workbench-card-head,
   .cc-install-path-grid {
     grid-template-columns: 1fr;
+  }
+
+  .cc-install-primary-action-groups {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .cc-install-danger-actions {
+    padding-left: 0;
+    border-left: 0;
   }
 
   .bridge-workbench-card-summary {

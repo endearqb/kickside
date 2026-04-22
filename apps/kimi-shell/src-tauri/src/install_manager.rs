@@ -16,10 +16,12 @@ use crate::{
     backend_manager, command_utils, log_manager, settings_store,
     types::{
         AppSettings, InstallCustomMirrorConfig, InstallFlowCatalog, InstallLogChunk,
-        InstallLogStream, InstallMirrorPreset, InstallProbeStatus, InstallSessionEvent,
-        InstallSessionSnapshot, InstallSessionStage, InstallSessionStatus, InstallSettingsView,
-        InstallSource, InstallTaskDefinition, InstallTaskGroup, InstallTaskId, InstallTaskStep,
-        PowerShellDiagnosticKind, PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
+        InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
+        InstallMirrorHealthReport, InstallMirrorPreset, InstallProbeStatus,
+        InstallSessionEvent, InstallSessionSnapshot, InstallSessionStage,
+        InstallSessionStatus, InstallSettingsView, InstallSource, InstallTaskDefinition,
+        InstallTaskGroup, InstallTaskId, InstallTaskStep, PowerShellDiagnosticKind,
+        PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
     },
 };
 
@@ -32,20 +34,37 @@ const EXECUTION_POLICY_SUGGESTION: &str =
     "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned";
 const DEFAULT_GIT_MIRROR_RELEASE_PAGES: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/",
-    "https://mirrors.aliyun.com/github-release/git-for-windows/git/LatestRelease/",
+    "https://mirrors.ustc.edu.cn/github-release/git-for-windows/git/LatestRelease/",
+    "https://mirror.nju.edu.cn/github-release/git-for-windows/git/LatestRelease/",
 ];
-const DEFAULT_UV_MIRROR_RELEASE_PAGES: &[&str] = &[
-    "https://mirrors.tuna.tsinghua.edu.cn/github-release/astral-sh/uv/LatestRelease/",
-    "https://mirrors.aliyun.com/github-release/astral-sh/uv/LatestRelease/",
-];
+const DEFAULT_UV_MIRROR_RELEASE_PAGES: &[&str] =
+    &["https://mirrors.ustc.edu.cn/github-release/astral-sh/uv/LatestRelease/"];
 const DEFAULT_PYTHON_MIRROR_INSTALLERS: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/python/3.13.12/python-3.13.12-amd64.exe",
     "https://mirrors.aliyun.com/python-release/windows/python-3.13.12-amd64.exe",
+    "https://mirrors.ustc.edu.cn/python/3.13.12/python-3.13.12-amd64.exe",
+    "https://mirrors.huaweicloud.com/python/3.13.12/python-3.13.12-amd64.exe",
 ];
 const DEFAULT_PYPI_INDEXES: &[&str] = &[
     "https://pypi.tuna.tsinghua.edu.cn/simple/",
     "https://mirrors.aliyun.com/pypi/simple/",
+    "https://mirrors.ustc.edu.cn/pypi/simple/",
+    "https://mirror.nju.edu.cn/pypi/web/simple/",
 ];
+const TUNA_GIT_MIRROR_RELEASE_PAGES: &[&str] =
+    &["https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/"];
+const TUNA_UV_MIRROR_RELEASE_PAGES: &[&str] =
+    &["https://mirrors.ustc.edu.cn/github-release/astral-sh/uv/LatestRelease/"];
+const TUNA_PYTHON_MIRROR_INSTALLERS: &[&str] =
+    &["https://mirrors.tuna.tsinghua.edu.cn/python/3.13.12/python-3.13.12-amd64.exe"];
+const TUNA_PYPI_INDEXES: &[&str] = &["https://pypi.tuna.tsinghua.edu.cn/simple/"];
+const USTC_GIT_MIRROR_RELEASE_PAGES: &[&str] =
+    &["https://mirrors.ustc.edu.cn/github-release/git-for-windows/git/LatestRelease/"];
+const USTC_UV_MIRROR_RELEASE_PAGES: &[&str] =
+    &["https://mirrors.ustc.edu.cn/github-release/astral-sh/uv/LatestRelease/"];
+const USTC_PYTHON_MIRROR_INSTALLERS: &[&str] =
+    &["https://mirrors.ustc.edu.cn/python/3.13.12/python-3.13.12-amd64.exe"];
+const USTC_PYPI_INDEXES: &[&str] = &["https://mirrors.ustc.edu.cn/pypi/simple/"];
 
 #[derive(Debug, Clone)]
 struct ResolvedMirrorConfig {
@@ -324,10 +343,17 @@ pub fn save_install_settings(
 ) -> Result<InstallSettingsView, String> {
     let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
     settings.preferred_install_source = input.preferred_source;
-    settings.mirror_preset = input.mirror_preset;
+    settings.mirror_preset = normalize_install_mirror_preset(input.mirror_preset);
     settings.custom_mirror_config = validate_custom_mirror_config(&input.custom_mirror_config)?;
     settings_store::save(app, &settings).map_err(|error| error.to_string())?;
     Ok(build_install_settings_view(&settings))
+}
+
+pub fn get_install_mirror_health_report(
+    input: InstallSettingsView,
+) -> Result<InstallMirrorHealthReport, String> {
+    let config = resolved_mirror_config_from_view(&input)?;
+    Ok(check_install_mirror_health(&config))
 }
 
 pub fn build_install_flow_catalog(app: &AppHandle) -> InstallFlowCatalog {
@@ -409,6 +435,18 @@ fn build_install_flow_catalog_with_mirror_config(
                 None,
             ),
             task(
+                InstallTaskId::UninstallKimi,
+                "Uninstall Kimi CLI",
+                "Remove only the installed Kimi CLI and keep uv plus Python 3.13.",
+                InstallTaskGroup::Core,
+                false,
+                false,
+                false,
+                vec![step_uninstall_kimi()],
+                vec![step_uninstall_kimi()],
+                None,
+            ),
+            task(
                 InstallTaskId::InstallGit,
                 "Install Git for Windows",
                 "Optional enhancement for broader development workflows.",
@@ -464,8 +502,15 @@ pub fn get_install_probe_status(app: &AppHandle) -> InstallProbeStatus {
 fn build_install_settings_view(settings: &AppSettings) -> InstallSettingsView {
     InstallSettingsView {
         preferred_source: settings.preferred_install_source,
-        mirror_preset: settings.mirror_preset,
+        mirror_preset: normalize_install_mirror_preset(settings.mirror_preset),
         custom_mirror_config: settings.custom_mirror_config.clone(),
+    }
+}
+
+fn normalize_install_mirror_preset(preset: InstallMirrorPreset) -> InstallMirrorPreset {
+    match preset {
+        InstallMirrorPreset::Aliyun => InstallMirrorPreset::Mixed,
+        _ => preset,
     }
 }
 
@@ -514,8 +559,22 @@ fn resolved_mirror_config(app: &AppHandle) -> ResolvedMirrorConfig {
     resolved_mirror_config_from_settings(&settings)
 }
 
+fn resolved_mirror_config_from_view(input: &InstallSettingsView) -> Result<ResolvedMirrorConfig, String> {
+    let custom_mirror_config = if input.mirror_preset == InstallMirrorPreset::Custom {
+        validate_custom_mirror_config(&input.custom_mirror_config)?
+    } else {
+        input.custom_mirror_config.clone()
+    };
+    Ok(resolved_mirror_config_from_settings(&AppSettings {
+        preferred_install_source: input.preferred_source,
+        mirror_preset: normalize_install_mirror_preset(input.mirror_preset),
+        custom_mirror_config,
+        ..AppSettings::default()
+    }))
+}
+
 fn resolved_mirror_config_from_settings(settings: &AppSettings) -> ResolvedMirrorConfig {
-    match settings.mirror_preset {
+    match normalize_install_mirror_preset(settings.mirror_preset) {
         InstallMirrorPreset::Mixed => ResolvedMirrorConfig {
             git_release_pages: DEFAULT_GIT_MIRROR_RELEASE_PAGES
                 .iter()
@@ -535,17 +594,45 @@ fn resolved_mirror_config_from_settings(settings: &AppSettings) -> ResolvedMirro
                 .collect(),
         },
         InstallMirrorPreset::Tuna => ResolvedMirrorConfig {
-            git_release_pages: vec![DEFAULT_GIT_MIRROR_RELEASE_PAGES[0].to_string()],
-            uv_release_pages: vec![DEFAULT_UV_MIRROR_RELEASE_PAGES[0].to_string()],
-            python_installer_urls: vec![DEFAULT_PYTHON_MIRROR_INSTALLERS[0].to_string()],
-            pypi_index_urls: vec![DEFAULT_PYPI_INDEXES[0].to_string()],
+            git_release_pages: TUNA_GIT_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            uv_release_pages: TUNA_UV_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            python_installer_urls: TUNA_PYTHON_MIRROR_INSTALLERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            pypi_index_urls: TUNA_PYPI_INDEXES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
         },
-        InstallMirrorPreset::Aliyun => ResolvedMirrorConfig {
-            git_release_pages: vec![DEFAULT_GIT_MIRROR_RELEASE_PAGES[1].to_string()],
-            uv_release_pages: vec![DEFAULT_UV_MIRROR_RELEASE_PAGES[1].to_string()],
-            python_installer_urls: vec![DEFAULT_PYTHON_MIRROR_INSTALLERS[1].to_string()],
-            pypi_index_urls: vec![DEFAULT_PYPI_INDEXES[1].to_string()],
+        InstallMirrorPreset::Ustc => ResolvedMirrorConfig {
+            git_release_pages: USTC_GIT_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            uv_release_pages: USTC_UV_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            python_installer_urls: USTC_PYTHON_MIRROR_INSTALLERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+            pypi_index_urls: USTC_PYPI_INDEXES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
         },
+        InstallMirrorPreset::Aliyun => resolved_mirror_config_from_settings(&AppSettings {
+            mirror_preset: InstallMirrorPreset::Mixed,
+            ..settings.clone()
+        }),
         InstallMirrorPreset::Custom => {
             if let Ok(custom) = validate_custom_mirror_config(&settings.custom_mirror_config) {
                 ResolvedMirrorConfig {
@@ -561,6 +648,199 @@ fn resolved_mirror_config_from_settings(settings: &AppSettings) -> ResolvedMirro
                 })
             }
         }
+    }
+}
+
+fn check_install_mirror_health(config: &ResolvedMirrorConfig) -> InstallMirrorHealthReport {
+    let client = match reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .timeout(Duration::from_secs(12))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            let checked_at = now_rfc3339();
+            let detail = format!("client build failed: {error}");
+            return InstallMirrorHealthReport {
+                entries: [
+                    (
+                        InstallMirrorHealthCategory::GitReleasePage,
+                        &config.git_release_pages,
+                    ),
+                    (
+                        InstallMirrorHealthCategory::UvReleasePage,
+                        &config.uv_release_pages,
+                    ),
+                    (
+                        InstallMirrorHealthCategory::PythonInstaller,
+                        &config.python_installer_urls,
+                    ),
+                    (InstallMirrorHealthCategory::PypiIndex, &config.pypi_index_urls),
+                ]
+                .into_iter()
+                .flat_map(|(category, urls)| {
+                    let detail = detail.clone();
+                    let checked_at = checked_at.clone();
+                    urls.iter().map(move |url| InstallMirrorHealthEntry {
+                        category,
+                        url: url.clone(),
+                        healthy: false,
+                        status_code: None,
+                        detail: detail.clone(),
+                        checked_at: checked_at.clone(),
+                    })
+                })
+                .collect(),
+            };
+        }
+    };
+
+    let mut entries = Vec::new();
+    for url in &config.git_release_pages {
+        entries.push(check_release_page_health(
+            &client,
+            InstallMirrorHealthCategory::GitReleasePage,
+            url,
+        ));
+    }
+    for url in &config.uv_release_pages {
+        entries.push(check_release_page_health(
+            &client,
+            InstallMirrorHealthCategory::UvReleasePage,
+            url,
+        ));
+    }
+    for url in &config.python_installer_urls {
+        entries.push(check_python_installer_health(&client, url));
+    }
+    for url in &config.pypi_index_urls {
+        entries.push(check_pypi_index_health(&client, url));
+    }
+
+    InstallMirrorHealthReport { entries }
+}
+
+fn check_release_page_health(
+    client: &reqwest::blocking::Client,
+    category: InstallMirrorHealthCategory,
+    url: &str,
+) -> InstallMirrorHealthEntry {
+    let checked_at = now_rfc3339();
+    let response = client.get(url).send();
+    match response {
+        Ok(response) => {
+            let status_code = Some(response.status().as_u16());
+            let body = response.text().unwrap_or_default();
+            let healthy = match category {
+                InstallMirrorHealthCategory::GitReleasePage => {
+                    body.contains("Git-") && body.contains("-64-bit.exe")
+                }
+                InstallMirrorHealthCategory::UvReleasePage => {
+                    body.contains("uv-x86_64-pc-windows-msvc.zip")
+                }
+                _ => false,
+            };
+            InstallMirrorHealthEntry {
+                category,
+                url: url.to_string(),
+                healthy,
+                status_code,
+                detail: if healthy {
+                    "release page contains expected asset".to_string()
+                } else {
+                    "release page missing expected asset link".to_string()
+                },
+                checked_at,
+            }
+        }
+        Err(error) => InstallMirrorHealthEntry {
+            category,
+            url: url.to_string(),
+            healthy: false,
+            status_code: error.status().map(|status| status.as_u16()),
+            detail: error.to_string(),
+            checked_at,
+        },
+    }
+}
+
+fn check_python_installer_health(
+    client: &reqwest::blocking::Client,
+    url: &str,
+) -> InstallMirrorHealthEntry {
+    let checked_at = now_rfc3339();
+    match client.head(url).send() {
+        Ok(response) => {
+            let status_code = Some(response.status().as_u16());
+            if response.status().is_success() || response.status().is_redirection() {
+                return InstallMirrorHealthEntry {
+                    category: InstallMirrorHealthCategory::PythonInstaller,
+                    url: url.to_string(),
+                    healthy: true,
+                    status_code,
+                    detail: "HEAD succeeded".to_string(),
+                    checked_at,
+                };
+            }
+        }
+        Err(_) => {}
+    }
+
+    match client.get(url).send() {
+        Ok(response) => InstallMirrorHealthEntry {
+            category: InstallMirrorHealthCategory::PythonInstaller,
+            url: url.to_string(),
+            healthy: response.status().is_success() || response.status().is_redirection(),
+            status_code: Some(response.status().as_u16()),
+            detail: if response.status().is_success() || response.status().is_redirection() {
+                "GET fallback succeeded".to_string()
+            } else {
+                format!("GET returned {}", response.status().as_u16())
+            },
+            checked_at,
+        },
+        Err(error) => InstallMirrorHealthEntry {
+            category: InstallMirrorHealthCategory::PythonInstaller,
+            url: url.to_string(),
+            healthy: false,
+            status_code: error.status().map(|status| status.as_u16()),
+            detail: error.to_string(),
+            checked_at,
+        },
+    }
+}
+
+fn check_pypi_index_health(
+    client: &reqwest::blocking::Client,
+    url: &str,
+) -> InstallMirrorHealthEntry {
+    let checked_at = now_rfc3339();
+    match client.get(url).send() {
+        Ok(response) => {
+            let status_code = Some(response.status().as_u16());
+            let body = response.text().unwrap_or_default();
+            let healthy = body.to_ascii_lowercase().contains("<html");
+            InstallMirrorHealthEntry {
+                category: InstallMirrorHealthCategory::PypiIndex,
+                url: url.to_string(),
+                healthy,
+                status_code,
+                detail: if healthy {
+                    "HTML index returned".to_string()
+                } else {
+                    "response does not look like an HTML index".to_string()
+                },
+                checked_at,
+            }
+        }
+        Err(error) => InstallMirrorHealthEntry {
+            category: InstallMirrorHealthCategory::PypiIndex,
+            url: url.to_string(),
+            healthy: false,
+            status_code: error.status().map(|status| status.as_u16()),
+            detail: error.to_string(),
+            checked_at,
+        },
     }
 }
 
@@ -738,19 +1018,26 @@ fn prepare_managed_task(
         return Ok(());
     }
 
+    let action_label = if task.id == InstallTaskId::UninstallKimi {
+        "uninstalling"
+    } else {
+        "upgrading"
+    };
+
     let _ = manager.update_snapshot(|state| {
         state.snapshot.status = InstallSessionStatus::Running;
         state.snapshot.stage = InstallSessionStage::Prepare;
         state.snapshot.current_step_id = None;
         state.snapshot.current_step_title = Some("Stop app backend".to_string());
-        state.snapshot.message =
-            Some("Stopping app backend before upgrading Kimi CLI.".to_string());
+        state.snapshot.message = Some(format!(
+            "Stopping app backend before {action_label} Kimi CLI."
+        ));
     });
     push_system_log(
         manager,
         task.id,
         source,
-        "Stopping app backend before upgrading Kimi CLI.".to_string(),
+        format!("Stopping app backend before {action_label} Kimi CLI."),
     );
 
     backend_manager::stop_backend(app)
@@ -761,23 +1048,36 @@ fn prepare_managed_task(
         state.snapshot.stage = InstallSessionStage::Prepare;
         state.snapshot.current_step_id = None;
         state.snapshot.current_step_title = None;
-        state.snapshot.message =
-            Some("App backend stopped. Starting Kimi CLI upgrade.".to_string());
+        state.snapshot.message = Some(if task.id == InstallTaskId::UninstallKimi {
+            "App backend stopped. Starting Kimi CLI uninstall.".to_string()
+        } else {
+            "App backend stopped. Starting Kimi CLI upgrade.".to_string()
+        });
     });
     push_system_log(
         manager,
         task.id,
         source,
-        "App backend stopped. Starting Kimi CLI upgrade.".to_string(),
+        if task.id == InstallTaskId::UninstallKimi {
+            "App backend stopped. Starting Kimi CLI uninstall.".to_string()
+        } else {
+            "App backend stopped. Starting Kimi CLI upgrade.".to_string()
+        },
     );
     Ok(())
 }
 
 fn managed_task_requires_backend_stop(task_id: InstallTaskId) -> bool {
-    matches!(task_id, InstallTaskId::UpgradeKimi)
+    matches!(task_id, InstallTaskId::UpgradeKimi | InstallTaskId::UninstallKimi)
 }
 
 fn managed_task_success_message(task: &InstallTaskDefinition) -> String {
+    if task.id == InstallTaskId::UninstallKimi {
+        return format!(
+            "Install task completed: {}. Kimi CLI is removed and the app backend remains stopped.",
+            task.title
+        );
+    }
     if managed_task_requires_backend_stop(task.id) {
         return format!(
             "Install task completed: {}. The app backend remains stopped; click restart backend to relaunch.",
@@ -1137,6 +1437,15 @@ fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
     )
 }
 
+fn step_uninstall_kimi() -> InstallTaskStep {
+    step(
+        "uninstall_kimi",
+        "Uninstall Kimi CLI",
+        "Remove only the installed Kimi CLI tool and keep uv plus Python 3.13.",
+        &kimi_uninstall_command(),
+    )
+}
+
 fn kimi_install_command(indexes_expr: Option<&str>) -> String {
     match indexes_expr {
         None => {
@@ -1203,6 +1512,17 @@ throw 'Kimi mirror upgrade failed.'
             .replace("__INDEXES__", indexes_expr)
         }
     }
+}
+
+fn kimi_uninstall_command() -> String {
+    r#"
+Ensure-KimiShellPath
+if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before uninstalling Kimi CLI.' }
+uv tool uninstall kimi-cli
+if ($LASTEXITCODE -ne 0) { throw "uv tool uninstall kimi-cli failed with exit code $LASTEXITCODE." }
+if (Get-Command kimi -ErrorAction SilentlyContinue) { throw 'kimi command is still present after uninstall.' }
+"#
+    .to_string()
 }
 
 fn step_git_official() -> InstallTaskStep {
@@ -2127,9 +2447,12 @@ mod tests {
     }
 
     #[test]
-    fn only_upgrade_task_requires_backend_stop() {
+    fn upgrade_and_uninstall_require_backend_stop() {
         assert!(managed_task_requires_backend_stop(
             InstallTaskId::UpgradeKimi
+        ));
+        assert!(managed_task_requires_backend_stop(
+            InstallTaskId::UninstallKimi
         ));
         assert!(!managed_task_requires_backend_stop(
             InstallTaskId::InstallKimi
@@ -2170,6 +2493,26 @@ mod tests {
 
         assert!(managed_task_success_message(&upgrade).contains("click restart backend"));
         assert!(!managed_task_success_message(&install).contains("click restart backend"));
+    }
+
+    #[test]
+    fn uninstall_success_message_keeps_backend_stopped_without_restart_prompt() {
+        let uninstall = InstallTaskDefinition {
+            id: InstallTaskId::UninstallKimi,
+            title: "Uninstall Kimi CLI".to_string(),
+            description: String::new(),
+            group: InstallTaskGroup::Core,
+            recommended: false,
+            runs_in_app: true,
+            requires_elevation: false,
+            optional: false,
+            fallback_reason: None,
+            official_steps: vec![],
+            mirror_steps: vec![],
+        };
+        let message = managed_task_success_message(&uninstall);
+        assert!(message.contains("backend remains stopped"));
+        assert!(!message.contains("click restart backend"));
     }
 
     #[test]
@@ -2288,6 +2631,119 @@ mod tests {
         assert!(uv_task.mirror_steps[0]
             .command
             .contains("https://mirror.example/uv/"));
+    }
+
+    #[test]
+    fn aliyun_preset_normalizes_to_mixed() {
+        assert_eq!(
+            normalize_install_mirror_preset(InstallMirrorPreset::Aliyun),
+            InstallMirrorPreset::Mixed
+        );
+    }
+
+    #[test]
+    fn ustc_preset_uses_only_ustc_urls() {
+        let config = resolved_mirror_config_from_settings(&AppSettings {
+            mirror_preset: InstallMirrorPreset::Ustc,
+            ..AppSettings::default()
+        });
+        assert_eq!(
+            config.git_release_pages,
+            USTC_GIT_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.uv_release_pages,
+            USTC_UV_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.python_installer_urls,
+            USTC_PYTHON_MIRROR_INSTALLERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.pypi_index_urls,
+            USTC_PYPI_INDEXES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn mixed_preset_uses_curated_default_order() {
+        let config = resolved_mirror_config_from_settings(&AppSettings::default());
+        assert_eq!(
+            config.git_release_pages,
+            DEFAULT_GIT_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.uv_release_pages,
+            DEFAULT_UV_MIRROR_RELEASE_PAGES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.python_installer_urls,
+            DEFAULT_PYTHON_MIRROR_INSTALLERS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            config.pypi_index_urls,
+            DEFAULT_PYPI_INDEXES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn release_page_health_requires_expected_asset_link() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("server should start");
+        let address = format!("http://{}", server.server_addr());
+        let thread = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let request = server.recv().expect("request should arrive");
+                let body = "<html><body>no asset here</body></html>";
+                let response = tiny_http::Response::from_string(body).with_status_code(200);
+                request.respond(response).expect("response should send");
+            }
+        });
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("client should build");
+
+        let git_entry = check_release_page_health(
+            &client,
+            InstallMirrorHealthCategory::GitReleasePage,
+            &address,
+        );
+        let uv_entry = check_release_page_health(
+            &client,
+            InstallMirrorHealthCategory::UvReleasePage,
+            &address,
+        );
+        thread.join().expect("server thread should complete");
+
+        assert!(!git_entry.healthy);
+        assert_eq!(git_entry.status_code, Some(200));
+        assert!(!uv_entry.healthy);
+        assert_eq!(uv_entry.status_code, Some(200));
     }
 
     #[test]

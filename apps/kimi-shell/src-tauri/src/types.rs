@@ -1442,6 +1442,7 @@ pub enum InstallTaskId {
     InstallPython313,
     InstallKimi,
     UpgradeKimi,
+    UninstallKimi,
     InstallGit,
     InstallNodejs,
 }
@@ -1472,6 +1473,7 @@ impl Default for InstallSource {
 pub enum InstallMirrorPreset {
     Mixed,
     Tuna,
+    Ustc,
     Aliyun,
     Custom,
 }
@@ -1497,6 +1499,33 @@ pub struct InstallSettingsView {
     pub preferred_source: InstallSource,
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMirrorHealthCategory {
+    GitReleasePage,
+    UvReleasePage,
+    PythonInstaller,
+    PypiIndex,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallMirrorHealthEntry {
+    pub category: InstallMirrorHealthCategory,
+    pub url: String,
+    pub healthy: bool,
+    pub status_code: Option<u16>,
+    pub detail: String,
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallMirrorHealthReport {
+    #[serde(default)]
+    pub entries: Vec<InstallMirrorHealthEntry>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -40,6 +40,7 @@ import type {
   ControlSectionId,
   DiagnosticsInfo,
   InstallFlowCatalog,
+  InstallMirrorHealthReport,
   InstallSettingsView,
   InstallProbeStatus,
   InstallSessionSnapshot,
@@ -151,7 +152,13 @@ type ControlCenterViewProps = {
   loginProbeBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
-  installAction: "dependencies" | "kimi" | "upgrade_kimi" | "nodejs" | null;
+  installAction:
+    | "dependencies"
+    | "kimi"
+    | "upgrade_kimi"
+    | "uninstall_kimi"
+    | "nodejs"
+    | null;
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
@@ -202,6 +209,8 @@ type ControlCenterViewProps = {
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
+  installMirrorHealthReport: InstallMirrorHealthReport | null;
+  installMirrorHealthBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
   installFlowCatalog: InstallFlowCatalog | null;
   installSessionSnapshot: InstallSessionSnapshot;
@@ -243,6 +252,7 @@ type ControlCenterViewProps = {
   ) => Promise<WeixinConnectorOnboardingSession>;
   onRefreshSkillCenterState: () => Promise<unknown>;
   onRefreshInstallProbe: () => Promise<InstallProbeStatus>;
+  onRefreshInstallMirrorHealth: (input?: InstallSettingsView) => Promise<InstallMirrorHealthReport>;
   onRefreshOnboarding: () => Promise<void>;
   onClose: () => void;
   onRetry: () => Promise<void>;
@@ -706,6 +716,8 @@ export function ControlCenterView({
   installSource,
   installSettings,
   installSettingsBusy,
+  installMirrorHealthReport,
+  installMirrorHealthBusy,
   powershellPreflight,
   installFlowCatalog,
   installSessionSnapshot,
@@ -735,6 +747,7 @@ export function ControlCenterView({
   onCancelWeixinConnectorOnboarding,
   onRefreshSkillCenterState,
   onRefreshInstallProbe,
+  onRefreshInstallMirrorHealth,
   onRefreshOnboarding,
   onClose,
   onRetry,
@@ -2255,10 +2268,13 @@ export function ControlCenterView({
                       installSource={installSource}
                       installSettings={installSettings}
                       installSettingsBusy={installSettingsBusy}
+                      installMirrorHealthReport={installMirrorHealthReport}
+                      installMirrorHealthBusy={installMirrorHealthBusy}
                       powershellPreflight={powershellPreflight}
                       kimiPathInput={kimiPathInput}
                       detectedKimiPath={installPathDisplay}
                       onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+                      onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
                       onSourceChange={onInstallSourceChange}
                       onSaveInstallSettings={onSaveInstallSettings}
                       onStartTask={handleStartInstallFlowTask}

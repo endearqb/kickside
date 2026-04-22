@@ -41,19 +41,20 @@ use types::{
     BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
     BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource,
     BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo, DiscoveredSkillDetail,
-    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog, InstallProbeStatus,
-    InstallSessionEvent, InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
-    InstalledSkill, KimiCliApiConfigInput, KimiCliApiConfigView, KimiCliConfigCenterInput,
-    KimiCliConfigCenterView, KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult,
-    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
+    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
+    InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
+    InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCliApiConfigInput,
+    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+    KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult, MainWindowCloseBehavior,
+    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
     PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
     SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
     SkillRecommendation, StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
     StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
-    SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
-    WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
-    WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
-    WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
+    SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession,
+    WorkspaceDiscoveryRoot, WorkspaceImportRequestPayload, WorkspaceImportResult,
+    WorkspaceImportTarget, WorkspaceImportTargetInput, WorkspaceSkillInventory,
+    WorkspaceSkillProfile, WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -1018,6 +1019,15 @@ fn upgrade_kimi_cli(
 }
 
 #[tauri::command]
+fn uninstall_kimi_cli(
+    app: AppHandle,
+    state: State<install_manager::InstallManager>,
+    source: InstallSource,
+) -> Result<String, String> {
+    install_manager::start_compat_task(&app, &state, InstallTaskId::UninstallKimi, source)
+}
+
+#[tauri::command]
 fn install_nodejs(
     app: AppHandle,
     state: State<install_manager::InstallManager>,
@@ -1046,6 +1056,13 @@ fn save_install_settings(
     input: InstallSettingsView,
 ) -> Result<InstallSettingsView, String> {
     install_manager::save_install_settings(&app, input)
+}
+
+#[tauri::command]
+fn get_install_mirror_health_report(
+    input: InstallSettingsView,
+) -> Result<InstallMirrorHealthReport, String> {
+    install_manager::get_install_mirror_health_report(input)
 }
 
 #[tauri::command]
@@ -1536,10 +1553,12 @@ pub fn run() {
             install_kimi_dependencies,
             install_kimi_cli,
             upgrade_kimi_cli,
+            uninstall_kimi_cli,
             install_nodejs,
             get_install_probe_status,
             get_install_settings,
             save_install_settings,
+            get_install_mirror_health_report,
             get_powershell_preflight,
             get_context_menu_status,
             enable_context_menu,

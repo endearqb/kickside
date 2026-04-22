@@ -59,6 +59,7 @@ import type {
   InstallCommandCatalog,
   InstallCustomMirrorConfig,
   InstallLogChunk,
+  InstallMirrorHealthReport,
   FrontendReadyAck,
   InstallProbeStatus,
   InstallSessionEvent,
@@ -162,7 +163,12 @@ const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
-type InstallAction = "dependencies" | "kimi" | "upgrade_kimi" | "nodejs";
+type InstallAction =
+  | "dependencies"
+  | "kimi"
+  | "upgrade_kimi"
+  | "uninstall_kimi"
+  | "nodejs";
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type BootHint = Pick<
   FrontendReadyAck,
@@ -569,6 +575,9 @@ export function useShellController() {
     useState<InstallFlowCatalog | null>(null);
   const [installSessionSnapshot, setInstallSessionSnapshot] =
     useState<InstallSessionSnapshot>(() => createEmptyInstallSessionSnapshot());
+  const [installMirrorHealthReport, setInstallMirrorHealthReport] =
+    useState<InstallMirrorHealthReport | null>(null);
+  const [installMirrorHealthBusy, setInstallMirrorHealthBusy] = useState(false);
   const [installCommandsOpen, setInstallCommandsOpen] = useState(false);
   const [installCommandsBusy, setInstallCommandsBusy] = useState(false);
   const [installCommandCatalog, setInstallCommandCatalog] =
@@ -2166,6 +2175,7 @@ export function useShellController() {
     const data = await invoke<InstallSettingsView>("get_install_settings");
     setInstallSettings(data);
     setInstallSource(data.preferredSource);
+    void refreshInstallMirrorHealth(data);
     return data;
   }
 
@@ -2175,9 +2185,27 @@ export function useShellController() {
       const data = await invoke<InstallSettingsView>("save_install_settings", { input });
       setInstallSettings(data);
       setInstallSource(data.preferredSource);
+      void refreshInstallMirrorHealth(data);
       return data;
     } finally {
       setInstallSettingsBusy(false);
+    }
+  }
+
+  async function refreshInstallMirrorHealth(input?: InstallSettingsView) {
+    const payload = input ?? installSettings;
+    setInstallMirrorHealthBusy(true);
+    try {
+      const data = await invoke<InstallMirrorHealthReport>("get_install_mirror_health_report", {
+        input: payload,
+      });
+      setInstallMirrorHealthReport(data);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setInstallMirrorHealthBusy(false);
     }
   }
 
@@ -2317,6 +2345,7 @@ export function useShellController() {
     }
     void refreshOnboarding();
     void refreshInstallSettings();
+    void refreshInstallMirrorHealth();
     void refreshPowerShellPreflight();
     void refreshBridgeSettings();
     void refreshBridgeStatus();
@@ -4460,6 +4489,8 @@ export function useShellController() {
     installMessage,
     installFlowCatalog,
     installSessionSnapshot,
+    installMirrorHealthReport,
+    installMirrorHealthBusy,
     installCommandsOpen,
     installCommandsBusy: false,
     installCommandCatalog,
@@ -4482,6 +4513,7 @@ export function useShellController() {
     refreshWorkspaceSkillManagementState,
     refreshInstallProbe,
     refreshInstallSettings,
+    refreshInstallMirrorHealth,
     refreshPowerShellPreflight,
     refreshOnboarding: async () => {
       await refreshOnboarding();

@@ -11,9 +11,10 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
-    auth_state, log_manager, skill_center,
+    auth_state, log_manager, settings_store, skill_center,
     types::{
-        BackendState, KimiLoginHealthSource, KimiLoginHealthState, OpenRequestErrorPayload,
+        AuthMode, BackendState, KimiLoginHealthSource, KimiLoginHealthState,
+        OpenRequestErrorPayload, ProviderApiHealthSource, ProviderApiHealthState,
         WorkspaceSessionBridgePayload,
     },
     window_manager,
@@ -546,15 +547,34 @@ fn maybe_capture_workspace_auth_failure(app: &AppHandle, error: &str) {
         return;
     }
 
-    let auth_snapshot = auth_state::resolve_auth_mode_snapshot();
+    let settings = settings_store::load_or_default(app).unwrap_or_default();
+    let auth_snapshot = match auth_state::resolve_auth_mode_snapshot(
+        app,
+        settings.onboarding_step_acks.login_verified,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(_) => return,
+    };
     let _ = auth_state::sync_runtime_auth_snapshot(app, &auth_snapshot);
+    let exit_code = parse_workspace_auth_status_code(error);
+
+    if auth_snapshot.auth_mode == AuthMode::ProviderApi {
+        let _ = auth_state::update_provider_api_health(
+            app,
+            ProviderApiHealthState::AuthRequired,
+            ProviderApiHealthSource::WorkspaceApi,
+            error.to_string(),
+            exit_code,
+        );
+        return;
+    }
+
     let _ = auth_state::update_kimi_login_health(
         app,
-        auth_snapshot.auth_mode,
         KimiLoginHealthState::AuthRequired,
         KimiLoginHealthSource::WorkspaceApi,
         error.to_string(),
-        parse_workspace_auth_status_code(error),
+        exit_code,
     );
 }
 

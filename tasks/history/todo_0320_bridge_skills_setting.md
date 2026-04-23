@@ -56,7 +56,7 @@
 
 ## Retrospective
 
-- 第二版把 Feishu `bridge-ops` 从适配层原生拦截改成了真正的 CLI skill：消息重新进入正常 agent prompt，只有在 bridge 启动时显式传入 `--skills-dir` 时，Kimi CLI session 才会加载 `D:\MyProject\kimi-app\skills\bridge-ops`。
+- 第二版把 Feishu `bridge-ops` 从适配层原生拦截改成了真正的 CLI skill：消息重新进入正常 agent prompt，只有在 bridge 启动时显式传入 `--skills-dir` 时，Kimi CLI session 才会加载 `skills/bridge-ops`。
 - 由于 bridge admin token 只存在宿主内存里，纯 CLI skill 不能直接“猜到” localhost 权限；这次通过 sidecar 生成桥接 auth file，并在拉起 Kimi CLI session 前注入 `KIMI_BRIDGE_AUTH_FILE`，把权限交给脚本而不是写死在 workdir 或日志里。
 - 当前仓库内已完成 `go test ./...`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --nocapture`，并验证脚本在未注入 `KIMI_BRIDGE_AUTH_FILE` 时会安全失败；真正的 live bridge 手工 smoke 仍需在你显式启用 `KIMI_BRIDGE_SKILLS_DIR` 后再做一次。
 
@@ -84,7 +84,7 @@
 
 - [x] Run focused Go tests for Feishu bridge ops parsing, confirmation, and execution behavior.
 - [x] Run focused Rust tests or cargo test coverage for the new host-control plumbing.
-- [x] Verify the new skill file is present at `D:\MyProject\kimi-app\skills\bridge-ops\SKILL.md`.
+- [x] Verify the new skill file is present at `skills/bridge-ops/SKILL.md`.
 
 ## Retrospective
 

@@ -621,12 +621,20 @@ pub fn open_kimi_config_dir() -> Result<(), String> {
     open_with_system_file_manager(&config_dir).map_err(|error| error.to_string())
 }
 
+const KIMI_CODING_PLAN_PROVIDER_ID: &str = "kimi-for-coding";
+const KIMI_CODING_PLAN_MODEL_ID: &str = "kimi-for-coding";
+const KIMI_CODING_PLAN_BASE_URL: &str = "https://api.kimi.com/coding/v1";
+const KIMI_CODING_PLAN_SEARCH_URL: &str = "https://api.kimi.com/coding/v1/search";
+const KIMI_CODING_PLAN_FETCH_URL: &str = "https://api.kimi.com/coding/v1/fetch";
+const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE: i64 = 262144;
+const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY: &str = "moonshot_search";
+const KIMI_CODING_PLAN_FETCH_SERVICE_KEY: &str = "moonshot_fetch";
+
 pub fn load_kimi_cli_api_config() -> Result<KimiCliApiConfigView, String> {
     let config_path = resolve_kimi_config_path()?;
-    let mut provider_id = None;
-    let mut model = None;
-    let mut base_url = None;
     let mut has_api_key = false;
+    let mut template_configured = false;
+    let mut is_default = false;
 
     if config_path.exists() {
         let raw = fs::read_to_string(&config_path).map_err(|error| {
@@ -637,40 +645,26 @@ pub fn load_kimi_cli_api_config() -> Result<KimiCliApiConfigView, String> {
         })?;
         let doc = parse_kimi_config_document(&raw, &config_path)?;
         let root = doc.as_table();
-
-        provider_id = table_string(root, "provider");
-        model = table_string(root, "model");
-        if let Some(provider) = provider_id.as_deref() {
-            if let Some(provider_table) = provider_table(root, provider) {
-                base_url = table_string(provider_table, "base_url");
-                has_api_key = table_string(provider_table, "api_key").is_some();
-            }
-        }
+        has_api_key = resolve_existing_kimi_api_key(root).is_some();
+        template_configured = kimi_api_template_configured(root);
+        is_default = kimi_api_default_selected(root);
     }
 
     Ok(KimiCliApiConfigView {
         config_path: config_path.to_string_lossy().to_string(),
-        provider_id,
-        model,
-        base_url,
+        provider_id: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+        model: KIMI_CODING_PLAN_MODEL_ID.to_string(),
+        base_url: KIMI_CODING_PLAN_BASE_URL.to_string(),
         has_api_key,
+        template_configured,
+        is_default,
     })
 }
 
-pub fn save_kimi_cli_api_config(input: KimiCliApiConfigInput) -> Result<(), String> {
-    let provider_id = input.provider_id.trim();
-    if provider_id.is_empty() {
-        return Err("provider cannot be empty".to_string());
-    }
-    let model = input.model.trim();
-    if model.is_empty() {
-        return Err("model cannot be empty".to_string());
-    }
-    let base_url = input.base_url.trim();
-    if base_url.is_empty() {
-        return Err("base url cannot be empty".to_string());
-    }
-
+pub fn save_kimi_cli_api_config(
+    app: &AppHandle,
+    input: KimiCliApiConfigInput,
+) -> Result<(), String> {
     let config_dir = resolve_kimi_config_dir()?;
     fs::create_dir_all(&config_dir).map_err(|error| {
         format!(
@@ -679,49 +673,21 @@ pub fn save_kimi_cli_api_config(input: KimiCliApiConfigInput) -> Result<(), Stri
         )
     })?;
     let config_path = config_dir.join("config.toml");
-    let mut doc = read_or_init_kimi_config(&config_path)?;
+    save_kimi_api_template_to_path(&config_path, input.api_key)?;
 
-    doc["provider"] = value(provider_id);
-    doc["model"] = value(model);
+    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    settings.onboarding_step_acks.api_config_ack = true;
+    settings_store::save(app, &settings).map_err(|error| error.to_string())?;
+    Ok(())
+}
 
-    if !doc["providers"].is_table() {
-        doc["providers"] = Item::Table(Table::new());
-    }
-    let providers = doc["providers"]
-        .as_table_mut()
-        .ok_or_else(|| "providers must be a table".to_string())?;
+pub fn set_kimi_cli_api_as_default(app: &AppHandle) -> Result<(), String> {
+    let config_path = resolve_kimi_config_path()?;
+    set_kimi_api_default_at_path(&config_path)?;
 
-    let provider_item = providers
-        .entry(provider_id)
-        .or_insert(Item::Table(Table::new()));
-    if !provider_item.is_table() {
-        *provider_item = Item::Table(Table::new());
-    }
-    let provider_table = provider_item
-        .as_table_mut()
-        .ok_or_else(|| "provider config must be a table".to_string())?;
-
-    provider_table["name"] = value(provider_id);
-    provider_table["base_url"] = value(base_url);
-
-    let requested_api_key = input.api_key.unwrap_or_default();
-    let api_key = requested_api_key.trim();
-    if api_key.is_empty() {
-        if !provider_table.contains_key("api_key")
-            || table_string(provider_table, "api_key").is_none()
-        {
-            return Err("api key cannot be empty when no existing key is present".to_string());
-        }
-    } else {
-        provider_table["api_key"] = value(api_key);
-    }
-
-    fs::write(&config_path, doc.to_string()).map_err(|error| {
-        format!(
-            "failed to write config file {}: {error}",
-            config_path.display()
-        )
-    })?;
+    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    settings.onboarding_step_acks.api_config_ack = true;
+    settings_store::save(app, &settings).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -799,6 +765,185 @@ pub fn save_kimi_cli_config_center(
     settings.onboarding_step_acks.api_config_ack = true;
     settings_store::save(app, &settings).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn save_kimi_api_template_to_path(
+    config_path: &Path,
+    requested_api_key: Option<String>,
+) -> Result<(), String> {
+    let mut doc = read_or_init_kimi_config(config_path)?;
+    let api_key = {
+        let root = doc.as_table();
+        resolve_requested_kimi_api_key(root, requested_api_key)?
+    };
+    apply_kimi_api_template(&mut doc, &api_key)?;
+    fs::write(config_path, doc.to_string()).map_err(|error| {
+        format!(
+            "failed to write config file {}: {error}",
+            config_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn set_kimi_api_default_at_path(config_path: &Path) -> Result<(), String> {
+    let mut doc = read_or_init_kimi_config(config_path)?;
+    if !kimi_api_template_configured(doc.as_table()) {
+        return Err("请先保存 Kimi Coding Plan 配置，再设为默认。".to_string());
+    }
+
+    doc["provider"] = value(KIMI_CODING_PLAN_PROVIDER_ID);
+    doc["model"] = value(KIMI_CODING_PLAN_MODEL_ID);
+    doc["default_model"] = value(KIMI_CODING_PLAN_MODEL_ID);
+
+    fs::write(config_path, doc.to_string()).map_err(|error| {
+        format!(
+            "failed to write config file {}: {error}",
+            config_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn resolve_requested_kimi_api_key(
+    root: &Table,
+    requested_api_key: Option<String>,
+) -> Result<String, String> {
+    if let Some(api_key) = requested_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(api_key.to_string());
+    }
+
+    resolve_existing_kimi_api_key(root).ok_or_else(|| {
+        "请先填写 API 密钥，或在已有 Kimi Coding Plan 配置基础上继续保存。".to_string()
+    })
+}
+
+fn resolve_existing_kimi_api_key(root: &Table) -> Option<String> {
+    provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID)
+        .and_then(|table| table_string(table, "api_key"))
+        .or_else(|| {
+            service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY)
+                .and_then(|table| table_string(table, "api_key"))
+        })
+        .or_else(|| {
+            service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY)
+                .and_then(|table| table_string(table, "api_key"))
+        })
+}
+
+fn kimi_api_template_configured(root: &Table) -> bool {
+    let provider_ready = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).is_some_and(|table| {
+        table_string(table, "type").as_deref() == Some("kimi")
+            && table_string(table, "base_url").as_deref() == Some(KIMI_CODING_PLAN_BASE_URL)
+            && table_string(table, "api_key").is_some()
+    });
+    let model_ready = root
+        .get("models")
+        .and_then(Item::as_table)
+        .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
+        .and_then(Item::as_table)
+        .is_some_and(|table| {
+            table_string(table, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
+                && table_string(table, "model").as_deref() == Some(KIMI_CODING_PLAN_MODEL_ID)
+                && table_i64(table, "max_context_size") == Some(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE)
+        });
+    let search_ready =
+        service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY).is_some_and(|table| {
+            service_base_url(table).as_deref() == Some(KIMI_CODING_PLAN_SEARCH_URL)
+                && table_string(table, "api_key").is_some()
+        });
+    let fetch_ready =
+        service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY).is_some_and(|table| {
+            service_base_url(table).as_deref() == Some(KIMI_CODING_PLAN_FETCH_URL)
+                && table_string(table, "api_key").is_some()
+        });
+
+    provider_ready && model_ready && search_ready && fetch_ready
+}
+
+fn kimi_api_default_selected(root: &Table) -> bool {
+    table_string(root, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
+        && table_string(root, "model").as_deref() == Some(KIMI_CODING_PLAN_MODEL_ID)
+        && table_string(root, "default_model").as_deref() == Some(KIMI_CODING_PLAN_MODEL_ID)
+}
+
+fn apply_kimi_api_template(doc: &mut DocumentMut, api_key: &str) -> Result<(), String> {
+    let providers = ensure_root_table_mut(doc, "providers")?;
+    providers.insert(
+        KIMI_CODING_PLAN_PROVIDER_ID,
+        Item::Table(build_kimi_provider_table(api_key)),
+    );
+
+    let models = ensure_root_table_mut(doc, "models")?;
+    models.insert(
+        KIMI_CODING_PLAN_MODEL_ID,
+        Item::Table(build_kimi_model_table()),
+    );
+
+    let services = ensure_root_table_mut(doc, "services")?;
+    services.insert(
+        KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
+        Item::Table(build_kimi_service_table(
+            KIMI_CODING_PLAN_SEARCH_URL,
+            api_key,
+        )),
+    );
+    services.insert(
+        KIMI_CODING_PLAN_FETCH_SERVICE_KEY,
+        Item::Table(build_kimi_service_table(
+            KIMI_CODING_PLAN_FETCH_URL,
+            api_key,
+        )),
+    );
+
+    Ok(())
+}
+
+fn build_kimi_provider_table(api_key: &str) -> Table {
+    let mut table = Table::new();
+    table["type"] = value("kimi");
+    table["base_url"] = value(KIMI_CODING_PLAN_BASE_URL);
+    table["api_key"] = value(api_key);
+    table
+}
+
+fn build_kimi_model_table() -> Table {
+    let mut table = Table::new();
+    table["provider"] = value(KIMI_CODING_PLAN_PROVIDER_ID);
+    table["model"] = value(KIMI_CODING_PLAN_MODEL_ID);
+    table["max_context_size"] = value(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE);
+    table
+}
+
+fn build_kimi_service_table(base_url: &str, api_key: &str) -> Table {
+    let mut table = Table::new();
+    table["base_url"] = value(base_url);
+    table["api_key"] = value(api_key);
+    table
+}
+
+fn ensure_root_table_mut<'a>(doc: &'a mut DocumentMut, key: &str) -> Result<&'a mut Table, String> {
+    if !doc[key].is_table() {
+        doc[key] = Item::Table(Table::new());
+    }
+    doc[key]
+        .as_table_mut()
+        .ok_or_else(|| format!("{key} must be a table"))
+}
+
+fn service_table<'a>(root: &'a Table, key: &str) -> Option<&'a Table> {
+    root.get("services")
+        .and_then(Item::as_table)
+        .and_then(|services| services.get(key))
+        .and_then(Item::as_table)
+}
+
+fn service_base_url(table: &Table) -> Option<String> {
+    table_string(table, "base_url").or_else(|| table_string(table, "endpoint"))
 }
 
 #[allow(dead_code)]
@@ -1886,7 +2031,7 @@ fn parse_service_entries(root: &Table) -> Vec<ServiceEntry> {
             key: key.to_string(),
             provider: table_string(table, "provider"),
             model: table_string(table, "model"),
-            endpoint: table_string(table, "endpoint"),
+            endpoint: table_string(table, "endpoint").or_else(|| table_string(table, "base_url")),
             api_key: table_string(table, "api_key"),
             timeout_ms: table_i64(table, "timeout_ms"),
             max_retries: table_i64(table, "max_retries"),
@@ -1896,6 +2041,7 @@ fn parse_service_entries(root: &Table) -> Vec<ServiceEntry> {
                     "provider",
                     "model",
                     "endpoint",
+                    "base_url",
                     "api_key",
                     "timeout_ms",
                     "max_retries",
@@ -4430,10 +4576,26 @@ fn open_with_system_browser(url: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn temp_config_path(test_name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("kimi-app-{test_name}-{suffix}"));
+        fs::create_dir_all(&dir).expect("temp test dir should be created");
+        dir.join("config.toml")
+    }
+
+    fn read_test_config(path: &Path) -> DocumentMut {
+        let raw = fs::read_to_string(path).expect("test config should exist");
+        parse_kimi_config_document(&raw, path).expect("test config should parse")
     }
 
     #[test]
@@ -4619,6 +4781,191 @@ api_key = "legacy-key"
             .and_then(Item::as_table)
             .and_then(|table| table.get("filesystem"))
             .is_some());
+    }
+
+    #[test]
+    fn save_kimi_api_template_from_empty_config_writes_fixed_sections() {
+        let config_path = temp_config_path("save-kimi-api-template-empty");
+        save_kimi_api_template_to_path(&config_path, Some("sk-test-123".to_string()))
+            .expect("save kimi api template");
+
+        let doc = read_test_config(&config_path);
+        let root = doc.as_table();
+        let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID)
+            .expect("kimi provider section should exist");
+        assert_eq!(table_string(provider, "type").as_deref(), Some("kimi"));
+        assert_eq!(
+            table_string(provider, "base_url").as_deref(),
+            Some(KIMI_CODING_PLAN_BASE_URL)
+        );
+        assert_eq!(
+            table_string(provider, "api_key").as_deref(),
+            Some("sk-test-123")
+        );
+
+        let model = root
+            .get("models")
+            .and_then(Item::as_table)
+            .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
+            .and_then(Item::as_table)
+            .expect("kimi model section should exist");
+        assert_eq!(
+            table_string(model, "provider").as_deref(),
+            Some(KIMI_CODING_PLAN_PROVIDER_ID)
+        );
+        assert_eq!(
+            table_string(model, "model").as_deref(),
+            Some(KIMI_CODING_PLAN_MODEL_ID)
+        );
+        assert_eq!(
+            table_i64(model, "max_context_size"),
+            Some(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE)
+        );
+
+        let search_service = service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY)
+            .expect("search service should exist");
+        assert_eq!(
+            service_base_url(search_service).as_deref(),
+            Some(KIMI_CODING_PLAN_SEARCH_URL)
+        );
+        assert_eq!(
+            table_string(search_service, "api_key").as_deref(),
+            Some("sk-test-123")
+        );
+
+        let fetch_service = service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY)
+            .expect("fetch service should exist");
+        assert_eq!(
+            service_base_url(fetch_service).as_deref(),
+            Some(KIMI_CODING_PLAN_FETCH_URL)
+        );
+        assert_eq!(
+            table_string(fetch_service, "api_key").as_deref(),
+            Some("sk-test-123")
+        );
+
+        assert!(kimi_api_template_configured(root));
+        let _ = fs::remove_dir_all(
+            config_path
+                .parent()
+                .expect("config path should have temp parent directory"),
+        );
+    }
+
+    #[test]
+    fn save_kimi_api_template_preserves_unrelated_config_sections() {
+        let config_path = temp_config_path("save-kimi-api-template-preserve");
+        fs::write(
+            &config_path,
+            r#"
+provider = "openai"
+model = "gpt-4.1"
+default_model = "gpt-4.1"
+
+[providers.openai]
+type = "openai"
+api_key = "sk-openai"
+
+[models.gpt-4.1]
+provider = "openai"
+model = "gpt-4.1"
+
+[services.docs]
+endpoint = "https://docs.example.com"
+api_key = "docs-key"
+"#,
+        )
+        .expect("seed config should be written");
+
+        save_kimi_api_template_to_path(&config_path, Some("sk-kimi-456".to_string()))
+            .expect("save kimi api template");
+
+        let doc = read_test_config(&config_path);
+        let root = doc.as_table();
+        assert_eq!(table_string(root, "provider").as_deref(), Some("openai"));
+        assert_eq!(table_string(root, "model").as_deref(), Some("gpt-4.1"));
+        assert_eq!(
+            table_string(root, "default_model").as_deref(),
+            Some("gpt-4.1")
+        );
+        assert!(provider_table(root, "openai").is_some());
+        assert!(service_table(root, "docs").is_some());
+        assert!(provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).is_some());
+        assert!(service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY).is_some());
+        assert!(service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY).is_some());
+        let _ = fs::remove_dir_all(
+            config_path
+                .parent()
+                .expect("config path should have temp parent directory"),
+        );
+    }
+
+    #[test]
+    fn set_kimi_api_default_only_updates_top_level_defaults() {
+        let config_path = temp_config_path("set-kimi-api-default");
+        fs::write(
+            &config_path,
+            r#"
+provider = "openai"
+model = "gpt-4.1"
+default_model = "gpt-4.1"
+
+[providers.openai]
+type = "openai"
+api_key = "sk-openai"
+"#,
+        )
+        .expect("seed config should be written");
+        save_kimi_api_template_to_path(&config_path, Some("sk-kimi-789".to_string()))
+            .expect("save kimi api template");
+
+        set_kimi_api_default_at_path(&config_path).expect("set kimi api default");
+
+        let doc = read_test_config(&config_path);
+        let root = doc.as_table();
+        assert_eq!(
+            table_string(root, "provider").as_deref(),
+            Some(KIMI_CODING_PLAN_PROVIDER_ID)
+        );
+        assert_eq!(
+            table_string(root, "model").as_deref(),
+            Some(KIMI_CODING_PLAN_MODEL_ID)
+        );
+        assert_eq!(
+            table_string(root, "default_model").as_deref(),
+            Some(KIMI_CODING_PLAN_MODEL_ID)
+        );
+        assert!(provider_table(root, "openai").is_some());
+        assert!(provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).is_some());
+        assert!(kimi_api_default_selected(root));
+        let _ = fs::remove_dir_all(
+            config_path
+                .parent()
+                .expect("config path should have temp parent directory"),
+        );
+    }
+
+    #[test]
+    fn set_kimi_api_default_requires_saved_template() {
+        let config_path = temp_config_path("set-kimi-api-default-missing-template");
+        fs::write(
+            &config_path,
+            r#"
+[providers.openai]
+type = "openai"
+api_key = "sk-openai"
+"#,
+        )
+        .expect("seed config should be written");
+
+        let error = set_kimi_api_default_at_path(&config_path)
+            .expect_err("setting default without template should fail");
+        assert!(error.contains("请先保存 Kimi Coding Plan 配置"));
+        let _ = fs::remove_dir_all(
+            config_path
+                .parent()
+                .expect("config path should have temp parent directory"),
+        );
     }
 
     #[test]

@@ -5240,6 +5240,23 @@ input:focus {
   background: color-mix(in srgb, var(--surface) 84%, rgba(255, 255, 255, 0.3));
 }
 
+.cc-brief-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cc-brief-item > strong {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cc-brief-item > .cc-status-badge {
+  margin-left: auto;
+}
+
 .cc-brief-tip-card {
   display: grid;
   gap: 10px;

@@ -68,6 +68,8 @@ import type {
   InstallSource,
   InstallTaskId,
   InstalledSkill,
+  KimiCliApiConfigInput,
+  KimiCliApiConfigView,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
   MainWindowCloseBehavior,
@@ -158,6 +160,14 @@ const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
+const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-for-coding";
+const KIMI_CODING_PLAN_MODEL_ID = "kimi-for-coding";
+const KIMI_CODING_PLAN_BASE_URL = "https://api.kimi.com/coding/v1";
+const KIMI_CODING_PLAN_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
+const KIMI_CODING_PLAN_FETCH_URL = "https://api.kimi.com/coding/v1/fetch";
+const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE = 262144;
+const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY = "moonshot_search";
+const KIMI_CODING_PLAN_FETCH_SERVICE_KEY = "moonshot_fetch";
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 let frontendReadyHandshakeSent = false;
@@ -258,6 +268,54 @@ function cloneConfigCenterInput(
   input: KimiCliConfigCenterInput,
 ): KimiCliConfigCenterInput {
   return JSON.parse(JSON.stringify(input)) as KimiCliConfigCenterInput;
+}
+
+function deriveKimiCliApiConfigView(
+  view: KimiCliConfigCenterView | null,
+): KimiCliApiConfigView | null {
+  if (!view) {
+    return null;
+  }
+
+  const provider = view.providers.find(
+    (entry) => entry.key.trim() === KIMI_CODING_PLAN_PROVIDER_ID,
+  );
+  const model = view.models.find(
+    (entry) => entry.key.trim() === KIMI_CODING_PLAN_MODEL_ID,
+  );
+  const searchService = view.services.find(
+    (entry) => entry.key.trim() === KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
+  );
+  const fetchService = view.services.find(
+    (entry) => entry.key.trim() === KIMI_CODING_PLAN_FETCH_SERVICE_KEY,
+  );
+  const hasApiKey = Boolean(
+    provider?.apiKey?.trim() || searchService?.apiKey?.trim() || fetchService?.apiKey?.trim(),
+  );
+  const templateConfigured =
+    provider?.providerType?.trim() === "kimi" &&
+    provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
+    hasApiKey &&
+    model?.provider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
+    model.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
+    model.maxContextSize === KIMI_CODING_PLAN_MAX_CONTEXT_SIZE &&
+    searchService?.endpoint?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
+    Boolean(searchService.apiKey?.trim()) &&
+    fetchService?.endpoint?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
+    Boolean(fetchService.apiKey?.trim());
+
+  return {
+    configPath: view.configPath,
+    providerId: KIMI_CODING_PLAN_PROVIDER_ID,
+    model: KIMI_CODING_PLAN_MODEL_ID,
+    baseUrl: KIMI_CODING_PLAN_BASE_URL,
+    hasApiKey,
+    templateConfigured,
+    isDefault:
+      view.defaultProvider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
+      view.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
+      view.defaultModel?.trim() === KIMI_CODING_PLAN_MODEL_ID,
+  };
 }
 
 function parseHashRoute(hash: string): string {
@@ -486,6 +544,7 @@ export function useShellController() {
   const [configCenterSnapshot, setConfigCenterSnapshot] =
     useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
+  const [kimiApiKeyInput, setKimiApiKeyInput] = useState("");
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
     () => createDefaultInstallSettingsView(),
@@ -2869,6 +2928,44 @@ export function useShellController() {
     setConfigCenterDraft(cloneConfigCenterInput(configCenterSnapshot));
   }
 
+  async function handleSaveKimiCliApiConfig() {
+    setActionBusy(true);
+    setConfigCenterBusy(true);
+    setActionError(null);
+    try {
+      await invoke("save_kimi_cli_api_config", {
+        input: {
+          apiKey: kimiApiKeyInput.trim() || undefined,
+        } satisfies KimiCliApiConfigInput,
+      });
+      await loadKimiCliConfigCenter();
+      await refreshCoreState();
+      setKimiApiKeyInput("");
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+      setConfigCenterBusy(false);
+    }
+  }
+
+  async function handleSetKimiCliApiAsDefault() {
+    setActionBusy(true);
+    setConfigCenterBusy(true);
+    setActionError(null);
+    try {
+      await invoke("set_kimi_cli_api_as_default");
+      await loadKimiCliConfigCenter();
+      await refreshCoreState();
+      setKimiApiKeyInput("");
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+      setConfigCenterBusy(false);
+    }
+  }
+
   async function handleSaveKimiCliConfigCenter() {
     setActionBusy(true);
     setConfigCenterBusy(true);
@@ -3520,6 +3617,21 @@ export function useShellController() {
     setActionError(null);
     try {
       const result = await invoke<LoginProbeResult>("probe_kimi_login");
+      setLoginProbeResult(result);
+      await refreshCoreState();
+    } catch (error) {
+      setActionError(String(error));
+      await refreshCoreState();
+    } finally {
+      setLoginProbeBusy(false);
+    }
+  }
+
+  async function handleLogoutKimiLogin() {
+    setLoginProbeBusy(true);
+    setActionError(null);
+    try {
+      const result = await invoke<LoginProbeResult>("logout_kimi_login");
       setLoginProbeResult(result);
       await refreshCoreState();
     } catch (error) {
@@ -4294,6 +4406,10 @@ export function useShellController() {
       JSON.stringify(configCenterDraft) !== JSON.stringify(configCenterSnapshot),
     [configCenterDraft, configCenterSnapshot],
   );
+  const kimiApiConfigView = useMemo(
+    () => deriveKimiCliApiConfigView(configCenterView),
+    [configCenterView],
+  );
 
   const bridgeRecentErrors = useMemo(() => {
     const items: string[] = [];
@@ -4472,6 +4588,9 @@ export function useShellController() {
     remoteUrl,
     workspaceIframeRef,
     stepCompletion,
+    kimiApiConfigView,
+    kimiApiKeyInput,
+    setKimiApiKeyInput,
     configCenterView,
     configCenterDraft,
     configCenterBusy,
@@ -4528,6 +4647,8 @@ export function useShellController() {
     handleOpenKimiConfigDir,
     handleOpenControlTask,
     handleCloseControlTask,
+    handleSaveKimiCliApiConfig,
+    handleSetKimiCliApiAsDefault,
     handleConfigCenterDraftChange,
     handleResetConfigCenterDraft,
     handleSaveKimiCliConfigCenter,
@@ -4576,6 +4697,7 @@ export function useShellController() {
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleProbeLogin,
+    handleLogoutKimiLogin,
     handleSelectSkill,
     handleOpenSkillFromInsights,
     handleSelectDiscoveredSkill,

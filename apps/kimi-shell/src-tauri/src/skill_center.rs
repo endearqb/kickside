@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io;
@@ -26,6 +27,7 @@ use crate::{
 
 const BUNDLED_SKILLS_DIR_NAME: &str = "skills";
 const LEGACY_BUNDLED_SKILLS_DIR_SEGMENTS: [&str; 4] = ["_up_", "_up_", "_up_", "skills"];
+const DEV_WORKSPACE_FALLBACK_ENV: &str = "KIMI_DEV_ALLOW_WORKSPACE_FALLBACK";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingSkillAction {
@@ -1279,18 +1281,8 @@ fn refresh_installed_skill_from_source(
 
 fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
     let bundled_dir = resolve_bundled_skills_dir(app)?;
-    for entry in fs::read_dir(&bundled_dir).with_context(|| {
-        format!(
-            "failed to read bundled skills dir: {}",
-            bundled_dir.display()
-        )
-    })? {
-        let entry = entry.with_context(|| {
-            format!(
-                "failed to read bundled skill entry under {}",
-                bundled_dir.display()
-            )
-        })?;
+    for entry in fs::read_dir(&bundled_dir).context("failed to read bundled skills directory")? {
+        let entry = entry.context("failed to read bundled skill entry")?;
         let path = entry.path();
         if !path.is_dir() || !path.join("SKILL.md").is_file() {
             continue;
@@ -1313,10 +1305,7 @@ fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
         {
             log_manager::append_line(
                 app,
-                format!(
-                    "bundled skill sync failed (path={}): {error:#}",
-                    path.display()
-                ),
+                format!("bundled skill sync failed (entry={dir_name}): {error:#}"),
             );
         }
     }
@@ -1324,34 +1313,16 @@ fn sync_bundled_skills(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 fn resolve_bundled_skills_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    let mut checked = Vec::new();
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        for candidate in bundled_skills_resource_candidates(&resource_dir) {
-            if candidate.is_dir() {
-                return Ok(candidate);
-            }
-            checked.push(candidate);
-        }
-    }
-
     let development_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("..")
         .join(BUNDLED_SKILLS_DIR_NAME);
-    if development_dir.is_dir() {
-        return Ok(development_dir);
-    }
-    checked.push(development_dir);
-
-    let checked_paths = checked
-        .iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<String>>()
-        .join(", ");
-    Err(anyhow::anyhow!(
-        "bundled skills directory not found; checked {checked_paths}"
-    ))
+    resolve_bundled_skills_dir_from_sources(
+        app.path().resource_dir().ok(),
+        development_dir,
+        dev_workspace_fallback_enabled(),
+    )
 }
 
 fn bundled_skills_resource_candidates(resource_dir: &Path) -> Vec<PathBuf> {
@@ -1360,7 +1331,9 @@ fn bundled_skills_resource_candidates(resource_dir: &Path) -> Vec<PathBuf> {
 
     let legacy_dir = LEGACY_BUNDLED_SKILLS_DIR_SEGMENTS
         .iter()
-        .fold(resource_dir.to_path_buf(), |path, segment| path.join(segment));
+        .fold(resource_dir.to_path_buf(), |path, segment| {
+            path.join(segment)
+        });
     if legacy_dir != candidates[0] {
         candidates.push(legacy_dir);
     }
@@ -1397,6 +1370,46 @@ fn resync_bundled_copy_projections(app: &AppHandle, skill: &InstalledSkill) -> a
         }
     }
     Ok(())
+}
+
+fn resolve_bundled_skills_dir_from_sources(
+    resource_dir: Option<PathBuf>,
+    development_dir: PathBuf,
+    allow_workspace_fallback: bool,
+) -> anyhow::Result<PathBuf> {
+    let mut checked = Vec::new();
+    if let Some(resource_dir) = resource_dir {
+        for (index, candidate) in bundled_skills_resource_candidates(&resource_dir)
+            .into_iter()
+            .enumerate()
+        {
+            let source = if index == 0 {
+                "resource_bundle:root"
+            } else {
+                "resource_bundle:legacy_up_path"
+            };
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+            checked.push(format!("{source}:missing"));
+        }
+    } else {
+        checked.push("resource_bundle:unavailable".to_string());
+    }
+
+    if allow_workspace_fallback {
+        if development_dir.is_dir() {
+            return Ok(development_dir);
+        }
+        checked.push("workspace_fallback:missing".to_string());
+    } else {
+        checked.push("workspace_fallback:disabled".to_string());
+    }
+
+    Err(anyhow::anyhow!(
+        "bundled skills directory not found; checked_sources={}",
+        checked.join(", ")
+    ))
 }
 
 fn rematerialize_projection(
@@ -1949,11 +1962,23 @@ fn resolve_bundled_skill_source(app: &AppHandle, relative_path: &str) -> anyhow:
         .fold(bundled_dir, |path, part| path.join(part));
     if !source_dir.join("SKILL.md").is_file() {
         return Err(anyhow::anyhow!(
-            "bundled skill source is missing: {}",
-            source_dir.display()
+            "bundled skill source is missing for relative path: {}",
+            normalized
         ));
     }
     Ok(source_dir)
+}
+
+fn dev_workspace_fallback_enabled() -> bool {
+    env_flag_enabled(env::var(DEV_WORKSPACE_FALLBACK_ENV).ok().as_deref())
+}
+
+fn env_flag_enabled(value: Option<&str>) -> bool {
+    value
+        .map(str::trim)
+        .map(|value| value.to_ascii_lowercase())
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 fn default_recommended_scope(skill: &InstalledSkill) -> SkillApplyScope {
@@ -2266,5 +2291,33 @@ mod tests {
                 .join("_up_")
                 .join("skills")
         );
+    }
+
+    #[test]
+    fn resolve_bundled_skills_dir_disables_workspace_fallback_by_default() {
+        let err = resolve_bundled_skills_dir_from_sources(
+            None,
+            PathBuf::from("D:\\MyProject\\kimi-app\\skills"),
+            false,
+        )
+        .expect_err("workspace fallback should be disabled by default");
+
+        let message = err.to_string();
+        assert!(message.contains("workspace_fallback:disabled"));
+        assert!(!message.contains("D:\\MyProject\\kimi-app"));
+    }
+
+    #[test]
+    fn resolve_bundled_skills_dir_allows_workspace_fallback_when_explicitly_enabled() {
+        let temp = TempDir::new("bundled-skills-workspace-fallback");
+        let development_dir = temp.path.join("skills");
+        let bundled_skill = development_dir.join("bridge-ops");
+        fs::create_dir_all(&bundled_skill).expect("bundled skill dir");
+        fs::write(bundled_skill.join("SKILL.md"), "# Bundled Skill\nbody").expect("skill file");
+
+        let resolved = resolve_bundled_skills_dir_from_sources(None, development_dir.clone(), true)
+            .expect("workspace fallback should resolve when explicitly enabled");
+
+        assert_eq!(resolved, development_dir);
     }
 }

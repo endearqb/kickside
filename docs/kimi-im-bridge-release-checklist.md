@@ -11,7 +11,9 @@
 1. `go test ./...` in `apps/kimi-im-bridge`
 2. `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`
 3. `pnpm -C apps/kimi-shell build`
-4. `pnpm -C apps/kimi-shell tauri build`
+4. `pnpm -C apps/kimi-shell clean:public-build-artifacts`
+5. `pnpm -C apps/kimi-shell tauri:build:webview:evergreen`
+6. `pnpm -C apps/kimi-shell verify:tracked-markdown:no-abs-paths`
 
 ## 预期构建产物
 
@@ -34,7 +36,9 @@
 - `go test ./...` passed
 - `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` passed
 - `pnpm -C apps/kimi-shell build` passed
-- `pnpm -C apps/kimi-shell tauri build` passed
+- `pnpm -C apps/kimi-shell clean:public-build-artifacts` passed
+- `pnpm -C apps/kimi-shell tauri:build:webview:evergreen` passed
+- `pnpm -C apps/kimi-shell verify:tracked-markdown:no-abs-paths` passed
 
 以上任一失败都属于发布阻塞项。
 

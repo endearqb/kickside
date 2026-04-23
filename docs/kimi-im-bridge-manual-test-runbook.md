@@ -3,7 +3,7 @@
 ## 执行快照（2026-03-13）
 
 - 范围：`Kimi IM Bridge` Phase 2-6 统一手工闸门
-- 工作站：`D:\MyProject\kimi-app`
+- 工作站：`<workspace-root>`
 - 记录时间：2026 年 3 月 13 日
 - 已收集的环境证据：
   - `%APPDATA%\com.kimi.shell\bridge_settings.json` shows bridge disabled and both channels disabled.

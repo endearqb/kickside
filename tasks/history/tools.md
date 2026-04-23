@@ -92,7 +92,7 @@
 /bridge sessions
 /bridge use session_abc123
 /bridge cwd
-/bridge cwd set D:\MyProject\kimi-app
+/bridge cwd set <workspace-root>
 /bridge cwd add D:\workspace\repo
 /bridge cwd clear
 /bridge approvals

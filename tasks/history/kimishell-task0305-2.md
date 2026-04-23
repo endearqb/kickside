@@ -7,18 +7,18 @@
 主要在切到配置中心时会立刻触发这些调用：
 
 1. 前端进入 `control_center` 时并发刷新  
-[useShellController.ts](d:/MyProject/kimi-app/apps/kimi-shell/src/app/useShellController.ts:934) 会同时调用 `refreshOnboarding`、`refreshContextMenuStatus`、`refreshInstallProbe`。
+[useShellController.ts](../../apps/kimi-shell/src/app/useShellController.ts#L934) 会同时调用 `refreshOnboarding`、`refreshContextMenuStatus`、`refreshInstallProbe`。
 
 2. `refreshInstallProbe` 会跑外部命令探测  
-[get_install_probe_status](d:/MyProject/kimi-app/apps/kimi-shell/src-tauri/src/backend_manager.rs:662) 里会依次执行 `git --version`、`uv --version`、Python 3.13 检测、`kimi -v`。这些进程启动本身就可能带来顿挫。
+[get_install_probe_status](../../apps/kimi-shell/src-tauri/src/backend_manager.rs#L662) 里会依次执行 `git --version`、`uv --version`、Python 3.13 检测、`kimi -v`。这些进程启动本身就可能带来顿挫。
 
 3. `refreshOnboarding` 里也有同步检查  
-[get_onboarding_status](d:/MyProject/kimi-app/apps/kimi-shell/src-tauri/src/lib.rs:688) 会做 `context_menu::status` + `kimi_locator::locate`（PATH 搜索），而 `context_menu::status` 会读多项注册表键  
-[context_menu.rs](d:/MyProject/kimi-app/apps/kimi-shell/src-tauri/src/context_menu.rs:226)。
+[get_onboarding_status](../../apps/kimi-shell/src-tauri/src/lib.rs#L688) 会做 `context_menu::status` + `kimi_locator::locate`（PATH 搜索），而 `context_menu::status` 会读多项注册表键
+[context_menu.rs](../../apps/kimi-shell/src-tauri/src/context_menu.rs#L226)。
 
 4. 还有一次重复的右键状态读取  
 `refreshContextMenuStatus` 又单独调用一次 `get_context_menu_status`  
-[lib.rs](d:/MyProject/kimi-app/apps/kimi-shell/src-tauri/src/lib.rs:420)，所以注册表检查会重复一遍。
+[lib.rs](../../apps/kimi-shell/src-tauri/src/lib.rs#L420)，所以注册表检查会重复一遍。
 
 如果你切到的是 runtime 面板，还会额外触发诊断：`kimi --version` + 读日志尾部，会更明显。  
 如果你要，我可以下一步直接把这几项改成“首屏先渲染、后台增量刷新 + 短期缓存 + 去重调用”。

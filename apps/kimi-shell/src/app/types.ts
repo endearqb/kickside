@@ -91,10 +91,21 @@ export type KimiLoginHealthSource =
   | "manual_probe"
   | "workspace_api"
   | "backend_startup";
+export type ProviderApiHealthState = "unknown" | "auth_required" | "error";
+export type ProviderApiHealthSource = "workspace_api" | "backend_startup";
 
 export interface KimiLoginHealth {
   state: KimiLoginHealthState;
   source: KimiLoginHealthSource;
+  message: string;
+  exitCode?: number;
+  checkedAtMs?: number;
+  needsAttention: boolean;
+}
+
+export interface ProviderApiHealth {
+  state: ProviderApiHealthState;
+  source: ProviderApiHealthSource;
   message: string;
   exitCode?: number;
   checkedAtMs?: number;
@@ -144,6 +155,7 @@ export interface AppStatus {
   providerApiConfigured: boolean;
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
+  providerApiHealth: ProviderApiHealth;
   logsDir: string;
   hotkey: string;
 }
@@ -785,6 +797,7 @@ export interface DiagnosticsInfo {
   providerApiConfigured: boolean;
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
+  providerApiHealth: ProviderApiHealth;
   startupTrace: string[];
   appLogPath: string;
   backendLogPath: string;
@@ -816,6 +829,7 @@ export interface OnboardingStatus {
   providerApiConfigured: boolean;
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
+  providerApiHealth: ProviderApiHealth;
   loginState: LoginProbeState;
   loginMessage?: string;
   workDirConfigured: boolean;
@@ -832,16 +846,15 @@ export interface LoginProbeResult {
 
 export interface KimiCliApiConfigView {
   configPath: string;
-  providerId?: string;
-  model?: string;
-  baseUrl?: string;
-  hasApiKey: boolean;
-}
-
-export interface KimiCliApiConfigInput {
   providerId: string;
   model: string;
   baseUrl: string;
+  hasApiKey: boolean;
+  templateConfigured: boolean;
+  isDefault: boolean;
+}
+
+export interface KimiCliApiConfigInput {
   apiKey?: string;
 }
 
@@ -1257,6 +1270,17 @@ export function formatKimiLoginHealthState(state?: KimiLoginHealthState): string
 
 export function formatKimiLoginHealthSource(source?: KimiLoginHealthSource): string {
   if (source === "manual_probe") return "手动检测";
+  if (source === "workspace_api") return "工作区接口";
+  return "启动回填";
+}
+
+export function formatProviderApiHealthState(state?: ProviderApiHealthState): string {
+  if (state === "auth_required") return "认证失败";
+  if (state === "error") return "运行异常";
+  return "待检查";
+}
+
+export function formatProviderApiHealthSource(source?: ProviderApiHealthSource): string {
   if (source === "workspace_api") return "工作区接口";
   return "启动回填";
 }

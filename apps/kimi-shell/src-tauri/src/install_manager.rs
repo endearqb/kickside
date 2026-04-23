@@ -17,11 +17,10 @@ use crate::{
     types::{
         AppSettings, InstallCustomMirrorConfig, InstallFlowCatalog, InstallLogChunk,
         InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
-        InstallMirrorHealthReport, InstallMirrorPreset, InstallProbeStatus,
-        InstallSessionEvent, InstallSessionSnapshot, InstallSessionStage,
-        InstallSessionStatus, InstallSettingsView, InstallSource, InstallTaskDefinition,
-        InstallTaskGroup, InstallTaskId, InstallTaskStep, PowerShellDiagnosticKind,
-        PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
+        InstallMirrorHealthReport, InstallMirrorPreset, InstallProbeStatus, InstallSessionEvent,
+        InstallSessionSnapshot, InstallSessionStage, InstallSessionStatus, InstallSettingsView,
+        InstallSource, InstallTaskDefinition, InstallTaskGroup, InstallTaskId, InstallTaskStep,
+        PowerShellDiagnosticKind, PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
     },
 };
 
@@ -559,7 +558,9 @@ fn resolved_mirror_config(app: &AppHandle) -> ResolvedMirrorConfig {
     resolved_mirror_config_from_settings(&settings)
 }
 
-fn resolved_mirror_config_from_view(input: &InstallSettingsView) -> Result<ResolvedMirrorConfig, String> {
+fn resolved_mirror_config_from_view(
+    input: &InstallSettingsView,
+) -> Result<ResolvedMirrorConfig, String> {
     let custom_mirror_config = if input.mirror_preset == InstallMirrorPreset::Custom {
         validate_custom_mirror_config(&input.custom_mirror_config)?
     } else {
@@ -675,7 +676,10 @@ fn check_install_mirror_health(config: &ResolvedMirrorConfig) -> InstallMirrorHe
                         InstallMirrorHealthCategory::PythonInstaller,
                         &config.python_installer_urls,
                     ),
-                    (InstallMirrorHealthCategory::PypiIndex, &config.pypi_index_urls),
+                    (
+                        InstallMirrorHealthCategory::PypiIndex,
+                        &config.pypi_index_urls,
+                    ),
                 ]
                 .into_iter()
                 .flat_map(|(category, urls)| {
@@ -1068,7 +1072,10 @@ fn prepare_managed_task(
 }
 
 fn managed_task_requires_backend_stop(task_id: InstallTaskId) -> bool {
-    matches!(task_id, InstallTaskId::UpgradeKimi | InstallTaskId::UninstallKimi)
+    matches!(
+        task_id,
+        InstallTaskId::UpgradeKimi | InstallTaskId::UninstallKimi
+    )
 }
 
 fn managed_task_success_message(task: &InstallTaskDefinition) -> String {

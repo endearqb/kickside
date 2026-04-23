@@ -15,7 +15,7 @@ New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 
 Push-Location $bridgeRoot
 try {
-  & $goCommand.Source build -o $outputPath ./cmd/kimi-im-bridge
+  & $goCommand.Source build -trimpath -o $outputPath ./cmd/kimi-im-bridge
 }
 finally {
   Pop-Location

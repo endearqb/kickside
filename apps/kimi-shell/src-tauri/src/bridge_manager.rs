@@ -34,6 +34,7 @@ const BUNDLED_BRIDGE_OPS_DIR_NAME: &str = "bridge-ops";
 const BRIDGE_SKILLS_DIR_SEGMENT: &str = ".agents";
 const BRIDGE_SKILLS_SUBDIR_SEGMENT: &str = "skills";
 const BRIDGE_START_BIND_RETRY_LIMIT: usize = 1;
+const DEV_WORKSPACE_FALLBACK_ENV: &str = "KIMI_DEV_ALLOW_WORKSPACE_FALLBACK";
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -44,6 +45,12 @@ struct ResolvedBridgeAdminPort {
     launch_port: u16,
     explicit_override: bool,
     fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedSourcePath {
+    path: PathBuf,
+    source: &'static str,
 }
 
 pub fn get_bridge_status(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
@@ -116,7 +123,8 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     }
 
     let settings = bridge_settings_store::load_or_default(app)?;
-    let binary_path = resolve_bridge_binary_path(app)?;
+    let resolved_binary = resolve_bridge_binary_path(app)?;
+    let binary_path = resolved_binary.path.clone();
     if let Ok(metadata) = fs::metadata(&binary_path) {
         let modified_secs = metadata
             .modified()
@@ -127,8 +135,8 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
         log_manager::append_line(
             app,
             format!(
-                "bridge binary resolved: path={}, size_bytes={}, modified_epoch_utc={}",
-                binary_path.display(),
+                "bridge binary resolved: source={}, size_bytes={}, modified_epoch_utc={}",
+                resolved_binary.source,
                 metadata.len(),
                 modified_secs
             ),
@@ -136,7 +144,7 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     } else {
         log_manager::append_line(
             app,
-            format!("bridge binary resolved: path={}", binary_path.display()),
+            format!("bridge binary resolved: source={}", resolved_binary.source),
         );
     }
     let state = app.state::<AppState>();
@@ -172,7 +180,13 @@ pub fn start_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
 
     let mut attempts = 0usize;
     loop {
-        match start_bridge_once(app, &binary_path, &effective_settings, &admin_token) {
+        match start_bridge_once(
+            app,
+            &binary_path,
+            resolved_binary.source,
+            &effective_settings,
+            &admin_token,
+        ) {
             Ok(status) => return Ok(status),
             Err(error) => {
                 let should_retry = is_bridge_admin_port_bind_failure(&error.to_string())
@@ -603,6 +617,7 @@ pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSec
 fn start_bridge_once(
     app: &AppHandle,
     binary_path: &Path,
+    binary_source: &str,
     settings: &BridgeSettings,
     admin_token: &str,
 ) -> anyhow::Result<BridgeStatus> {
@@ -611,20 +626,17 @@ fn start_bridge_once(
     log_manager::append_line(
         app,
         format!(
-            "bridge spawn command prepared: binary={}, config={}, secrets={}, db={}, admin_port={}",
-            binary_path.display(),
+            "bridge spawn command prepared: binary_source={}, config={}, secrets={}, db={}, admin_port={}",
+            binary_source,
             state.bridge_settings_path.display(),
             state.bridge_secrets_path.display(),
             state.bridge_db_path.display(),
             settings.admin_port
         ),
     );
-    let child = command.spawn().with_context(|| {
-        format!(
-            "failed to spawn bridge sidecar: {}",
-            binary_path.to_string_lossy()
-        )
-    })?;
+    let child = command
+        .spawn()
+        .with_context(|| format!("failed to spawn bridge sidecar from {binary_source}"))?;
     let pid = child.id();
 
     {
@@ -831,53 +843,71 @@ fn open_bridge_stdio_logs(app: &AppHandle) -> anyhow::Result<(Stdio, Stdio)> {
     Ok((Stdio::from(stdout), Stdio::from(file)))
 }
 
-fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
+fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<ResolvedSourcePath> {
     let env_override = std::env::var_os("KIMI_IM_BRIDGE_BIN").map(PathBuf::from);
     let dev_path = development_binary_path();
     let resource_dir = app.path().resource_dir().ok();
-    resolve_bridge_binary_from_sources(env_override, dev_path, resource_dir)
+    resolve_bridge_binary_from_sources(
+        env_override,
+        dev_path,
+        resource_dir,
+        dev_workspace_fallback_enabled(),
+    )
 }
 
 fn resolve_bridge_binary_from_sources(
     env_override: Option<PathBuf>,
     development_path: PathBuf,
     resource_dir: Option<PathBuf>,
-) -> anyhow::Result<PathBuf> {
+    allow_workspace_fallback: bool,
+) -> anyhow::Result<ResolvedSourcePath> {
     if let Some(path) = env_override {
         if path.exists() {
-            return Ok(path);
+            return Ok(ResolvedSourcePath {
+                path,
+                source: "env_override",
+            });
         }
         return Err(anyhow::anyhow!(
-            "KIMI_IM_BRIDGE_BIN does not exist: {}",
-            path.display()
+            "bridge binary not found: env override KIMI_IM_BRIDGE_BIN points to a missing file"
         ));
     }
 
     let mut checked = Vec::new();
     if let Some(resource_dir) = resource_dir {
         let resource_candidates = vec![
-            resource_dir.join("binaries").join(binary_name()),
-            resource_dir.join(binary_name()),
+            (
+                "resource_bundle:binaries",
+                resource_dir.join("binaries").join(binary_name()),
+            ),
+            ("resource_bundle:root", resource_dir.join(binary_name())),
         ];
-        for candidate in resource_candidates {
+        for (source, candidate) in resource_candidates {
             if candidate.exists() {
-                return Ok(candidate);
+                return Ok(ResolvedSourcePath {
+                    path: candidate,
+                    source,
+                });
             }
-            checked.push(candidate);
+            checked.push(format!("{source}:missing"));
         }
+    } else {
+        checked.push("resource_bundle:unavailable".to_string());
     }
-    if development_path.exists() {
-        return Ok(development_path);
+    if allow_workspace_fallback {
+        if development_path.exists() {
+            return Ok(ResolvedSourcePath {
+                path: development_path,
+                source: "workspace_fallback",
+            });
+        }
+        checked.push("workspace_fallback:missing".to_string());
+    } else {
+        checked.push("workspace_fallback:disabled".to_string());
     }
-    checked.push(development_path);
-
-    let checked_paths = checked
-        .iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<String>>()
-        .join(", ");
     Err(anyhow::anyhow!(
-        "bridge binary not found; checked {checked_paths}"
+        "bridge binary not found; checked_sources={}",
+        checked.join(", ")
     ))
 }
 
@@ -1215,17 +1245,12 @@ fn ensure_bundled_bridge_ops_installed_from_source(
             return Ok(skills_dir.to_path_buf());
         }
         return Err(anyhow::anyhow!(
-            "bundled bridge-ops target exists but is not a directory: {}",
-            target_dir.display()
+            "bundled bridge-ops target exists but is not a directory"
         ));
     }
 
-    fs::create_dir_all(&skills_dir).with_context(|| {
-        format!(
-            "failed to create bundled bridge skill parent directory: {}",
-            skills_dir.display()
-        )
-    })?;
+    fs::create_dir_all(&skills_dir)
+        .context("failed to create bundled bridge skill parent directory")?;
     copy_directory_recursive(&source_dir, &target_dir)?;
     Ok(skills_dir.to_path_buf())
 }
@@ -1238,40 +1263,60 @@ fn resolve_bridge_skills_dir(
 }
 
 fn resolve_bundled_bridge_ops_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    let mut checked = Vec::new();
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let resource_candidates = vec![
-            resource_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME),
-            resource_dir
-                .join("skills")
-                .join(BUNDLED_BRIDGE_OPS_DIR_NAME),
-        ];
-        for candidate in resource_candidates {
-            if candidate.is_dir() {
-                return Ok(candidate);
-            }
-            checked.push(candidate);
-        }
-    }
-
     let development_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("..")
         .join("skills")
         .join(BUNDLED_BRIDGE_OPS_DIR_NAME);
-    if development_dir.is_dir() {
-        return Ok(development_dir);
-    }
-    checked.push(development_dir);
+    resolve_bundled_bridge_ops_dir_from_sources(
+        app.path().resource_dir().ok(),
+        development_dir,
+        dev_workspace_fallback_enabled(),
+    )
+}
 
-    let checked_paths = checked
-        .iter()
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<String>>()
-        .join(", ");
+fn resolve_bundled_bridge_ops_dir_from_sources(
+    resource_dir: Option<PathBuf>,
+    development_dir: PathBuf,
+    allow_workspace_fallback: bool,
+) -> anyhow::Result<PathBuf> {
+    let mut checked = Vec::new();
+    if let Some(resource_dir) = resource_dir {
+        let resource_candidates = vec![
+            (
+                "resource_bundle:root",
+                resource_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME),
+            ),
+            (
+                "resource_bundle:skills_subdir",
+                resource_dir
+                    .join("skills")
+                    .join(BUNDLED_BRIDGE_OPS_DIR_NAME),
+            ),
+        ];
+        for (source, candidate) in resource_candidates {
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+            checked.push(format!("{source}:missing"));
+        }
+    } else {
+        checked.push("resource_bundle:unavailable".to_string());
+    }
+
+    if allow_workspace_fallback {
+        if development_dir.is_dir() {
+            return Ok(development_dir);
+        }
+        checked.push("workspace_fallback:missing".to_string());
+    } else {
+        checked.push("workspace_fallback:disabled".to_string());
+    }
+
     Err(anyhow::anyhow!(
-        "bundled bridge-ops skill not found; checked {checked_paths}"
+        "bundled bridge-ops skill not found; checked_sources={}",
+        checked.join(", ")
     ))
 }
 
@@ -1315,50 +1360,40 @@ fn resolve_connector_default_work_dir(
 fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> anyhow::Result<()> {
     if !source_dir.is_dir() {
         return Err(anyhow::anyhow!(
-            "bundled bridge-ops source is not a directory: {}",
-            source_dir.display()
+            "bundled bridge-ops source is not a directory"
         ));
     }
-    fs::create_dir_all(target_dir).with_context(|| {
-        format!(
-            "failed to create bundled bridge-ops target directory: {}",
-            target_dir.display()
-        )
-    })?;
+    fs::create_dir_all(target_dir)
+        .context("failed to create bundled bridge-ops target directory")?;
 
-    for entry in fs::read_dir(source_dir).with_context(|| {
-        format!(
-            "failed to read bundled bridge-ops source directory: {}",
-            source_dir.display()
-        )
-    })? {
-        let entry = entry.with_context(|| {
-            format!(
-                "failed to read entry under bundled bridge-ops source directory: {}",
-                source_dir.display()
-            )
-        })?;
+    for entry in
+        fs::read_dir(source_dir).context("failed to read bundled bridge-ops source directory")?
+    {
+        let entry = entry.context("failed to read bundled bridge-ops entry")?;
         let source_path = entry.path();
         let target_path = target_dir.join(entry.file_name());
-        let metadata = entry.metadata().with_context(|| {
-            format!(
-                "failed to read metadata for bundled bridge-ops entry: {}",
-                source_path.display()
-            )
-        })?;
+        let metadata = entry
+            .metadata()
+            .context("failed to read bundled bridge-ops entry metadata")?;
         if metadata.is_dir() {
             copy_directory_recursive(&source_path, &target_path)?;
             continue;
         }
-        fs::copy(&source_path, &target_path).with_context(|| {
-            format!(
-                "failed to copy bundled bridge-ops file from {} to {}",
-                source_path.display(),
-                target_path.display()
-            )
-        })?;
+        fs::copy(&source_path, &target_path).context("failed to copy bundled bridge-ops file")?;
     }
     Ok(())
+}
+
+fn dev_workspace_fallback_enabled() -> bool {
+    env_flag_enabled(env::var(DEV_WORKSPACE_FALLBACK_ENV).ok().as_deref())
+}
+
+fn env_flag_enabled(value: Option<&str>) -> bool {
+    value
+        .map(str::trim)
+        .map(|value| value.to_ascii_lowercase())
+        .map(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 fn default_channel_state(enabled: bool, runtime_state: BridgeRuntimeState) -> BridgeChannelState {
@@ -1732,10 +1767,17 @@ mod tests {
             Some(env_path.clone()),
             dev_path,
             Some(resource_dir),
+            false,
         )
         .expect("binary should resolve");
 
-        assert_eq!(resolved, env_path);
+        assert_eq!(
+            resolved,
+            ResolvedSourcePath {
+                path: env_path,
+                source: "env_override",
+            }
+        );
     }
 
     #[test]
@@ -1751,10 +1793,95 @@ mod tests {
         fs::write(&resource_binary, b"resource").expect("resource binary");
 
         let resolved =
-            resolve_bridge_binary_from_sources(None, dev_path, Some(resource_dir.clone()))
+            resolve_bridge_binary_from_sources(None, dev_path, Some(resource_dir.clone()), false)
                 .expect("binary should resolve");
 
-        assert_eq!(resolved, resource_binary);
+        assert_eq!(
+            resolved,
+            ResolvedSourcePath {
+                path: resource_binary,
+                source: "resource_bundle:binaries",
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_binary_disables_workspace_fallback_by_default() {
+        let err = resolve_bridge_binary_from_sources(
+            None,
+            PathBuf::from("D:\\MyProject\\kimi-app\\apps\\kimi-im-bridge\\bin\\kimi-im-bridge.exe"),
+            None,
+            false,
+        )
+        .expect_err("workspace fallback should be disabled by default");
+
+        let message = err.to_string();
+        assert!(message.contains("workspace_fallback:disabled"));
+        assert!(!message.contains("D:\\MyProject\\kimi-app"));
+    }
+
+    #[test]
+    fn resolve_binary_allows_workspace_fallback_when_explicitly_enabled() {
+        let temp = TempDirGuard::new("binary-workspace-fallback");
+        let dev_path = temp.path.join("dev").join(binary_name());
+        fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
+        fs::write(&dev_path, b"dev").expect("dev binary");
+
+        let resolved = resolve_bridge_binary_from_sources(None, dev_path.clone(), None, true)
+            .expect("workspace fallback should resolve when explicitly enabled");
+
+        assert_eq!(
+            resolved,
+            ResolvedSourcePath {
+                path: dev_path,
+                source: "workspace_fallback",
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_binary_missing_env_override_error_is_sanitized() {
+        let err = resolve_bridge_binary_from_sources(
+            Some(PathBuf::from(
+                "D:\\MyProject\\kimi-app\\apps\\kimi-im-bridge\\bin\\kimi-im-bridge.exe",
+            )),
+            PathBuf::from("ignored"),
+            None,
+            false,
+        )
+        .expect_err("missing env override should fail");
+
+        let message = err.to_string();
+        assert!(message.contains("KIMI_IM_BRIDGE_BIN"));
+        assert!(!message.contains("D:\\MyProject\\kimi-app"));
+    }
+
+    #[test]
+    fn resolve_bundled_bridge_ops_dir_disables_workspace_fallback_by_default() {
+        let err = resolve_bundled_bridge_ops_dir_from_sources(
+            None,
+            PathBuf::from("D:\\MyProject\\kimi-app\\skills\\bridge-ops"),
+            false,
+        )
+        .expect_err("workspace fallback should be disabled by default");
+
+        let message = err.to_string();
+        assert!(message.contains("workspace_fallback:disabled"));
+        assert!(!message.contains("D:\\MyProject\\kimi-app"));
+    }
+
+    #[test]
+    fn resolve_bundled_bridge_ops_dir_allows_workspace_fallback_when_explicitly_enabled() {
+        let temp = TempDirGuard::new("bridge-ops-workspace-fallback");
+        let development_dir = temp.path.join("skills").join(BUNDLED_BRIDGE_OPS_DIR_NAME);
+        fs::create_dir_all(&development_dir).expect("development bridge-ops dir");
+        fs::write(development_dir.join("SKILL.md"), b"# bridge ops").expect("skill file");
+
+        let resolved =
+            resolve_bundled_bridge_ops_dir_from_sources(None, development_dir.clone(), true)
+                .expect("workspace fallback should resolve when explicitly enabled");
+
+        assert_eq!(resolved, development_dir);
     }
 
     #[test]

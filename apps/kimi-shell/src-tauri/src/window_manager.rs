@@ -43,9 +43,9 @@ const WORKSPACE_IMPORT_REQUEST_EVENT: &str = "workspace-import-request";
 const WORKSPACE_IMPORT_RESULT_EVENT: &str = "workspace-import-result";
 pub const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT: &str = "main-window-close-decision-request";
 const STARTUP_TRACE_LIMIT: usize = 48;
-const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(2);
-const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(3);
-const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(5);
+const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(4);
+const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(8);
+const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-chat-external-link-bridge";
 const CHAT_FRAME_ORIGIN: &str = "https://www.kimi.com";
 const DOWNLOAD_SAVE_DIALOG_TITLE: &str = "Save download";
@@ -2707,6 +2707,13 @@ mod tests {
             _ => panic!("expected queued outcome"),
         }
         assert_eq!(state.queued_route, Some(LocalRoute::ControlCenter));
+    }
+
+    #[test]
+    fn startup_watchdog_timeouts_are_relaxed_for_slow_boots() {
+        assert_eq!(MAIN_TASK_ENTER_TIMEOUT, Duration::from_secs(4));
+        assert_eq!(MAIN_WINDOW_READY_TIMEOUT, Duration::from_secs(8));
+        assert_eq!(FRONTEND_READY_TIMEOUT, Duration::from_secs(15));
     }
 
     #[test]

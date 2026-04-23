@@ -218,6 +218,7 @@ pub struct AppStatus {
     pub provider_api_configured: bool,
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
+    pub provider_api_health: ProviderApiHealth,
     pub logs_dir: String,
     pub hotkey: String,
 }
@@ -1133,6 +1134,7 @@ pub struct DiagnosticsInfo {
     pub provider_api_configured: bool,
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
+    pub provider_api_health: ProviderApiHealth,
     pub startup_trace: Vec<String>,
     pub app_log_path: String,
     pub backend_log_path: String,
@@ -1209,6 +1211,35 @@ pub struct KimiLoginHealth {
     pub needs_attention: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderApiHealthState {
+    #[default]
+    Unknown,
+    AuthRequired,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderApiHealthSource {
+    WorkspaceApi,
+    #[default]
+    BackendStartup,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderApiHealth {
+    pub state: ProviderApiHealthState,
+    pub source: ProviderApiHealthSource,
+    #[serde(default)]
+    pub message: String,
+    pub exit_code: Option<i32>,
+    pub checked_at_ms: Option<u64>,
+    pub needs_attention: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingStatus {
@@ -1227,6 +1258,7 @@ pub struct OnboardingStatus {
     pub provider_api_configured: bool,
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
+    pub provider_api_health: ProviderApiHealth,
     pub login_state: LoginProbeState,
     pub login_message: Option<String>,
     pub work_dir_configured: bool,
@@ -1247,18 +1279,17 @@ pub struct LoginProbeResult {
 #[serde(rename_all = "camelCase")]
 pub struct KimiCliApiConfigView {
     pub config_path: String,
-    pub provider_id: Option<String>,
-    pub model: Option<String>,
-    pub base_url: Option<String>,
+    pub provider_id: String,
+    pub model: String,
+    pub base_url: String,
     pub has_api_key: bool,
+    pub template_configured: bool,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KimiCliApiConfigInput {
-    pub provider_id: String,
-    pub model: String,
-    pub base_url: String,
     pub api_key: Option<String>,
 }
 

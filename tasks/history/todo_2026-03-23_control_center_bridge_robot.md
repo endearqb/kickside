@@ -230,7 +230,7 @@
 - [x] v1 只支持 Kimi CLI，不扩展 Claude/Codex 投影。
 - [x] “应用到用户全局”固定指向 `~/.config/agents/skills`，不再复用 IM 默认目录。
 - [x] “仅应用到当前 Session”固定指向 `active_session_work_dir/.agents/skills`，并按 session 生命周期清理受管投影。
-- [x] 手动导入支持本地目录和 ZIP；安装包内置 [skills](/D:/MyProject/kimi-app/skills) 目录下的合法 Skill 首次导入默认已信任。
+- [x] 手动导入支持本地目录和 ZIP；安装包内置 [skills](../../skills) 目录下的合法 Skill 首次导入默认已信任。
 
 ### Implementation
 

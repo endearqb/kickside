@@ -86,3 +86,75 @@
 - 自动化验证：`pnpm -C apps/kimi-shell build` 已于 2026-04-22 通过；`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 已通过，说明 Rust 代码与测试二进制可成功编译。
 - Rust 测试说明：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml install_manager` 在当前 Windows 机器编译通过后，执行测试二进制阶段仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`；这是本机既有运行时环境问题，不是本次改动引入的编译错误。
 - 未覆盖项：本轮没有启动桌面应用做真实 UI 点击回归，因此卸载按钮、镜像健康卡与控制中心状态切换的最终交互仍保留一轮手工验收缺口。
+
+## 修复启动计时卡住并延长启动超时
+
+### Checklist
+- [x] 复查 prefill 启动计时、startup monitor 和 watchdog 现状，锁定冻结根因与现有超时阈值
+- [x] 更新 `PrefillApp` 计时逻辑，避免切页阶段冻结，并在路由调用失败时给出明确恢复行为
+- [x] 放宽 Rust 侧总启动超时与 watchdog 阈值，保持现有检查策略不变
+- [x] 补充或更新启动监控相关单测，覆盖 60 秒总超时与既有路由优先级
+- [x] 运行前端类型检查与 Rust 编译级验证，确认不引入新错误
+- [x] 在本节补充 Review，记录本次启动行为修正与验证结果
+
+### Review
+- 根因确认：prefill 页在收到 `route_workspace` / `route_control_center` 后会先把 `statusState` 切到 `opening_main`，但同时立即 `setPolling(false)`，导致“已耗时”停在最后一次轮询值；应用其实可以继续打开，只是 prefill 自己不再刷新。
+- 前端修正：`PrefillApp` 现在会在 `opening_main` 阶段切到本地连续计时，并把当前 `startupPhase`、失败类型一起展示出来；如果 `complete_startup_monitor_route` 调用失败，会撤销切页锁存、恢复等待态并显示错误，而不是卡在静止的“正在打开主窗口…”。
+- Rust 阈值：总启动超时从 `30_000 ms` 放宽到 `60_000 ms`；watchdog 阈值调整为主线程进入 `4s`、主窗口创建 `8s`、前端 ready `15s`，避免慢启动时被过早误判。
+- 检查策略：`MissingKimi`、`BackendCrashed`、`OnboardingRequired`、`BackendReady` 这 4 类 startup monitor 路由判断，以及 `MainThreadTaskStalled`、`MainWebviewBuildHung`、`FrontendReadyTimeout` 这 3 类 watchdog 均保持不变，没有新增用户可关闭的设置。
+- 自动化验证：`pnpm -C apps/kimi-shell exec tsc --noEmit` 通过；`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 通过，说明本次 TS/Rust 改动可成功编译。
+- Rust 测试说明：实际执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml startup_monitor_fails_after_timeout -- --exact` 时，测试二进制仍在当前 Windows 机器报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机既有运行时环境问题，不是本次启动逻辑改动引入的编译错误。
+- 未覆盖项：本轮没有启动桌面应用做真实 prefill 到工作区 / 控制中心的点击回归，所以“切页完成前连续计时”的最终桌面观感仍保留一轮手工验收缺口。
+
+## 登录优先 + Provider API 语义修正
+
+### Checklist
+- [x] 梳理现有认证判定、运行时状态与控制中心卡片实现，锁定最小修改面
+- [x] 调整 Rust 认证状态模型：登录优先、未验证时回退 Provider API，并新增独立 Provider API 健康状态
+- [x] 新增 `logout_kimi_login` Tauri 命令并接通前端 handler / 按钮
+- [x] 修正控制中心认证卡片布局与文案，区分 Kimi 登录和 Provider API 的失败归因
+- [x] 运行前端构建与 Rust 编译级验证，确认改动可通过静态检查
+- [x] 在本节补充 Review，记录行为变化、验证结果与剩余风险
+
+### Review
+- 认证优先级：后端 `auth_state` 现在按“`Kimi 登录` 已验证优先，否则回退到已配置的 `Provider API`，provider 存在但无凭据则记为 `Unknown`”统一计算 `authMode`；登录检测、退出登录、onboarding 状态和工作区运行时都走同一套判定。
+- 状态拆分：新增独立 `provider_api_health`，导出到 `AppStatus`、`DiagnosticsInfo` 和 `OnboardingStatus`；工作区请求 401/403 时，如果当前入口是 `Provider API`，只更新 Provider API 健康状态，不再污染 `kimi_login_health`。
+- 退出登录：新增 Tauri 命令 `logout_kimi_login`，调用 `kimi logout --json`；前端 controller 已接通同一套 busy / 刷新逻辑，控制中心认证步骤在 `Kimi 登录` 视图下新增“退出登录”按钮。
+- 控制中心 UI：`cc-brief-item` 改为左右分栏布局，认证卡内 badge 现在默认右对齐；认证步骤里分别展示 `Kimi 登录` 和 `Provider API` 的状态、来源、时间和摘要，`Provider API` 失败会显示为单独告警，不再伪装成“登录失效”。
+- 自动化验证：`pnpm -C apps/kimi-shell exec tsc --noEmit`、`pnpm -C apps/kimi-shell build`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 均通过，说明 TS、前端构建与 Rust 编译级检查均正常。
+- Rust 测试说明：实际执行 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml auth_mode_prefers_verified_kimi_login_over_provider_api -- --exact` 时，测试二进制仍在当前 Windows 机器报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`；这是本机既有运行时环境问题，不是本次认证逻辑改动引入的编译错误。
+- 未覆盖项：本轮没有启动桌面应用做真实点击回归，因此“退出登录后自动回退到 Provider API”以及认证卡在实际窗口宽度下的最终观感仍保留一轮手工验收缺口。
+
+## 绝对路径泄露整改
+
+### Checklist
+- [x] 复查 bridge / bundled skills 的开发态路径回退与报错文案，收敛为默认不走工作区回退、仅显式开发开关启用
+- [x] 调整 Go sidecar 与 Tauri 打包脚本，为公开产物注入 `-trimpath` / `--remap-path-prefix` 并补充清理说明
+- [x] 新增公开产物与已跟踪文档的绝对路径扫描脚本，覆盖工作区根路径泄露校验
+- [x] 补充 Rust 单测，覆盖默认禁用工作区回退、显式启用工作区回退与错误文案脱敏
+- [x] 清理已跟踪 `docs/` / `tasks/` 中的工作区绝对路径引用，改为占位符或相对路径
+- [x] 运行针对性测试、脚本扫描与编译级检查，并在本节补充 Review
+
+### Review
+- 运行时收敛：`bridge_manager.rs` 与 `skill_center.rs` 现在默认只接受环境变量覆盖或打包资源目录；工作区相对路径回退仅在显式设置 `KIMI_DEV_ALLOW_WORKSPACE_FALLBACK=1` 时启用。桥接 sidecar、bundled `bridge-ops` 和 bundled skills 的缺失报错均已改为 `checked_sources=...` 这类来源标签，不再回显工作区绝对路径。
+- 构建链路：`apps/kimi-shell/scripts/build_bridge_sidecar.ps1` 已切到 `go build -trimpath`；`apps/kimi-shell/scripts/build_webview_variant.ps1` 会在公开构建时注入 `RUSTFLAGS=--remap-path-prefix=<workspace-root>`、设置 `KIMI_PUBLIC_RELEASE=1`，并在归档前后各跑一次公开产物扫描。新增 `clean_public_build_artifacts.ps1`、`verify_public_artifacts_no_abs_paths.ps1` 与 `verify_tracked_markdown_no_abs_paths.ps1`，同时把入口接入 `package.json` 与 release checklist。
+- 跟踪内容清理：已清掉 `docs/`、`tasks/` 中确认存在的 `D:\MyProject\kimi-app` 绝对路径引用，改成 `<workspace-root>`、相对路径或技能目录占位。`verify:tracked-markdown:no-abs-paths` 在当前仓库通过，说明已跟踪 Markdown 不再暴露当前工作区根路径。
+- 自动化验证：`pnpm -C apps/kimi-shell verify:tracked-markdown:no-abs-paths`、`pnpm -C apps/kimi-shell clean:public-build-artifacts`、`pnpm -C apps/kimi-shell build:bridge-sidecar`、`pnpm -C apps/kimi-shell verify:public-artifacts:no-abs-paths`、`pnpm -C apps/kimi-shell tauri:build:webview:evergreen`、`pnpm -C apps/kimi-shell exec tsc --noEmit` 已于 2026-04-23 通过。`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 之前已通过，说明新增 Rust 代码与测试可编译。
+- Rust 测试说明：直接执行 `cargo test` 的测试二进制在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`；这与仓库里既有多次记录一致，属于本机运行时环境问题，不是本次“绝对路径泄露整改”引入的编译错误。
+
+## 简化 Kimi API 配置入口
+
+### Checklist
+- [x] 复查当前认证页、配置中心与旧 `save_kimi_cli_api_config` 链路，锁定最小改动面
+- [x] 在认证页新增只含 `API 密钥` 的 Kimi 简化配置卡片，并固定展示只读接口地址说明
+- [x] 在前端 controller 中接入“保存模板 / 设为默认”两条独立动作与刷新逻辑
+- [x] 在 Tauri 后端实现 Kimi 规范模板写入与“设为默认”命令，统一三处 `api_key`
+- [x] 补充 Rust 单测，覆盖模板写入、固定 URL、无关配置保留与默认切换约束
+- [x] 运行针对性 TS / Rust 验证，并在本节补充 Review
+
+### Review
+- 认证页 `Provider API` 现在不再把用户直接丢进配置中心；主路径改成 Kimi 单卡片，只保留 `API 密钥` 输入，接口地址固定只读展示为 `Kimi Coding Plan` 和 `https://api.kimi.com/coding/v1`。顶部主操作改成 `保存`，次操作改成 `设为默认`，`打开配置中心弹窗 / 打开配置目录` 被降级到卡片内的辅助动作。
+- 前端 controller 新增了简化 Kimi API 状态与动作：保存时调用独立的模板写入命令，设默认时调用独立的默认切换命令；两条链路都会刷新 `configCenterView` 与核心 onboarding/auth 状态，并在保存或设默认后清空明文输入，不回显已有 key。配置中心草稿如果有未保存修改，简化入口会先阻止覆盖。
+- Tauri 后端把旧 `save_kimi_cli_api_config` 升级为规范模板写入：只重写 `providers.kimi-for-coding`、`models.kimi-for-coding`、`services.moonshot_search`、`services.moonshot_fetch` 四段，固定写入 `https://api.kimi.com/coding/v1`、`/search`、`/fetch`，并把同一个 `api_key` 同步到三处。新增 `set_kimi_cli_api_as_default` 只改顶层 `provider / model / default_model`，未保存模板时会直接报错。
+- 配置中心兼容性也补上了：`services.*.base_url` 现在会被当成 service endpoint 读入高级配置视图，因此简化入口写出的 Moonshot Search / Fetch 段在配置中心里仍然可见，不会出现“保存了但高级视图空白”的割裂状态。
+- 验证结果：`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 和 `pnpm --dir apps/kimi-shell exec tsc --noEmit` 于 2026-04-23 通过，说明 Rust 与前端类型层面已接通。`cargo test save_kimi_api_template ...` 与 `cargo test set_kimi_api_default ...` 在当前 Windows 环境执行测试二进制时仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机既有运行时问题；新增测试代码已随 `cargo check` 一起通过编译，但本轮没法在这台机器上完成实际运行。

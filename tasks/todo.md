@@ -138,7 +138,7 @@
 ### Review
 - 运行时收敛：`bridge_manager.rs` 与 `skill_center.rs` 现在默认只接受环境变量覆盖或打包资源目录；工作区相对路径回退仅在显式设置 `KIMI_DEV_ALLOW_WORKSPACE_FALLBACK=1` 时启用。桥接 sidecar、bundled `bridge-ops` 和 bundled skills 的缺失报错均已改为 `checked_sources=...` 这类来源标签，不再回显工作区绝对路径。
 - 构建链路：`apps/kimi-shell/scripts/build_bridge_sidecar.ps1` 已切到 `go build -trimpath`；`apps/kimi-shell/scripts/build_webview_variant.ps1` 会在公开构建时注入 `RUSTFLAGS=--remap-path-prefix=<workspace-root>`、设置 `KIMI_PUBLIC_RELEASE=1`，并在归档前后各跑一次公开产物扫描。新增 `clean_public_build_artifacts.ps1`、`verify_public_artifacts_no_abs_paths.ps1` 与 `verify_tracked_markdown_no_abs_paths.ps1`，同时把入口接入 `package.json` 与 release checklist。
-- 跟踪内容清理：已清掉 `docs/`、`tasks/` 中确认存在的 `D:\MyProject\kimi-app` 绝对路径引用，改成 `<workspace-root>`、相对路径或技能目录占位。`verify:tracked-markdown:no-abs-paths` 在当前仓库通过，说明已跟踪 Markdown 不再暴露当前工作区根路径。
+- 跟踪内容清理：已清掉 `docs/`、`tasks/` 中确认存在的当前工作区绝对路径引用，改成 `<workspace-root>`、相对路径或技能目录占位。`verify:tracked-markdown:no-abs-paths` 在当前仓库通过，说明已跟踪 Markdown 不再暴露当前工作区根路径。
 - 自动化验证：`pnpm -C apps/kimi-shell verify:tracked-markdown:no-abs-paths`、`pnpm -C apps/kimi-shell clean:public-build-artifacts`、`pnpm -C apps/kimi-shell build:bridge-sidecar`、`pnpm -C apps/kimi-shell verify:public-artifacts:no-abs-paths`、`pnpm -C apps/kimi-shell tauri:build:webview:evergreen`、`pnpm -C apps/kimi-shell exec tsc --noEmit` 已于 2026-04-23 通过。`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 之前已通过，说明新增 Rust 代码与测试可编译。
 - Rust 测试说明：直接执行 `cargo test` 的测试二进制在当前 Windows 机器仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`；这与仓库里既有多次记录一致，属于本机运行时环境问题，不是本次“绝对路径泄露整改”引入的编译错误。
 
@@ -158,3 +158,151 @@
 - Tauri 后端把旧 `save_kimi_cli_api_config` 升级为规范模板写入：只重写 `providers.kimi-for-coding`、`models.kimi-for-coding`、`services.moonshot_search`、`services.moonshot_fetch` 四段，固定写入 `https://api.kimi.com/coding/v1`、`/search`、`/fetch`，并把同一个 `api_key` 同步到三处。新增 `set_kimi_cli_api_as_default` 只改顶层 `provider / model / default_model`，未保存模板时会直接报错。
 - 配置中心兼容性也补上了：`services.*.base_url` 现在会被当成 service endpoint 读入高级配置视图，因此简化入口写出的 Moonshot Search / Fetch 段在配置中心里仍然可见，不会出现“保存了但高级视图空白”的割裂状态。
 - 验证结果：`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 和 `pnpm --dir apps/kimi-shell exec tsc --noEmit` 于 2026-04-23 通过，说明 Rust 与前端类型层面已接通。`cargo test save_kimi_api_template ...` 与 `cargo test set_kimi_api_default ...` 在当前 Windows 环境执行测试二进制时仍报 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，属于本机既有运行时问题；新增测试代码已随 `cargo check` 一起通过编译，但本轮没法在这台机器上完成实际运行。
+
+## 镜像健康检查移出启动路径
+
+### Checklist
+- [x] 移除启动期、设置读取期和保存设置后的自动镜像健康检查
+- [x] 移除安装弹窗里根据来源/预设变化自动检测镜像的 effect
+- [x] 将镜像健康检查改为仅由“镜像源”按钮和“重新检测”按钮触发
+- [x] 运行类型检查并补充 Review
+
+### Review
+- 启动路径收敛：`refreshInstallSettings()`、`saveCurrentInstallSettings()` 和 controller 初始化 effect 不再隐式调用 `refreshInstallMirrorHealth()`，应用启动不会自动发起镜像健康检查。
+- 用户触发入口：安装详细选项里的“镜像源”按钮现在会先切换来源，再用当前 `mirrorDraft` 主动调用一次镜像健康检查；“官方源”按钮只切换来源；“重新检测”按钮保留手动刷新能力。
+- 自动 effect 清理：安装弹窗中原本跟随 `installSource / installSettings / mirrorDraft.mirrorPreset` 自动检测镜像的 effect 已移除，避免打开详细选项或切换预设时后台自动跑 PyPI 检查。
+- 验证结果：`pnpm --dir apps/kimi-shell exec tsc --noEmit` 于 2026-04-24 通过；本轮未启动桌面应用做真实点击验收。
+
+## 快速设置探测显式化与登录/API 默认切换
+
+### Checklist
+- [x] 移除快速设置进入时自动环境探测，保留手动重新检测入口
+- [x] 调整安装/升级入口，避免点击时先同步执行环境探测
+- [x] 增加“设为默认登录”后端命令、认证判定与前端入口
+- [x] 将 API Key 输入框移动到 Provider API 卡片内部
+- [x] 运行前端类型检查与 Rust 编译级验证，并补充 Review
+
+### Review
+- 快速设置探测：控制中心进入 onboarding 时不再自动执行 `onRefreshInstallProbe()`；“重新检测”现在是唯一显式环境检测入口，并会显示“正在检测安装环境...”和完成/错误状态。
+- 安装入口：旧安装 helper 不再点击前同步跑环境探测，只使用已有缓存判断“无需重复安装”；主安装/升级任务仍直接进入 install session，任务完成后的复检保留在安装流程内。
+- 登录/API 默认：新增 `set_kimi_login_as_default`，会清除顶层 Kimi Coding Plan 的 `provider / model / default_model` 选择，但保留 Kimi API 模板和 API Key；认证判定现在会在 Kimi API 明确设为默认且凭据可用时切到 Provider API，否则已验证登录优先。
+- UI 调整：登录卡片新增“设为默认登录”，API 卡片按钮文案改为“设为默认 API”；API Key 输入框已移动到 API Key 卡片内部。
+- 验证结果：`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 和 `git diff --check` 通过。新增 Rust 单测可编译，但实际运行仍遇到本机既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 测试二进制启动问题，非断言失败。
+
+## 允许删除唯一 IM Bridge 机器人
+
+### Checklist
+- [x] 调整 Bridge 配置归一化，避免删除唯一飞书/微信机器人后被自动补回
+- [x] 补充 Rust 单测覆盖首次默认配置、读取空平台配置、删除唯一飞书/微信机器人
+- [x] 收敛删除机器人失败横幅文案，避免直接暴露后端路径详情
+- [x] 运行前端类型检查与 Rust 编译级验证，并补充 Review
+
+### Review
+- 后端 `normalize_bridge_settings()` 不再在普通读取、保存或删除后强制补回默认飞书/微信机器人；默认三机器人仍由缺失 `bridge_settings.json` 时的 `default_bridge_settings()` 负责创建。
+- `delete_connector_files()` 现在允许删除最后一个飞书或微信 connector，并同步移除对应 connector secrets；已补充单测覆盖唯一飞书、唯一微信、首次默认配置和已存在空 connector 配置不补回。
+- 前端删除机器人失败横幅和机器人详情错误提示已改为短文案“删除机器人失败，请稍后重试或查看日志。”；删除成功但运行状态刷新失败时也不再把底层路径详情透出到横幅。
+- 验证结果：`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`git diff --check -- apps/kimi-shell/src-tauri/src/bridge_settings_store.rs apps/kimi-shell/src/app/useShellController.ts apps/kimi-shell/src/features/control-center/ControlCenterView.tsx tasks/todo.md` 均通过。
+- Rust 测试说明：`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml delete_connector_allows` 已完成测试编译，但测试二进制启动仍报当前 Windows 环境既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，没有进入断言阶段。
+
+## Kimi Web 本地增强版产品化
+
+### Checklist
+- [x] 落地开发计划文档、第三方合规说明、上游来源与修改记录
+- [x] 新增 `kimi-cli/web` 同步脚本、patch/overlay 目录和增强版静态入口骨架
+- [x] 扩展 Shell 设置、AppStatus/Diagnostics 类型与 Tauri 命令，支持 `official` / `enhanced_local` 模式、健康状态和回退原因
+- [x] 接入前端 controller 与 workspace 加载逻辑，支持增强版加载失败自动回退官方 Web
+- [x] 在控制中心新增“Web 体验”设置区，展示模式、来源、健康状态、免责声明与回退操作
+- [x] 补齐 i18n 检查脚本、合规检查脚本和 package scripts
+- [x] 运行 TypeScript、Rust、脚本级验证，并补充 Review
+
+### Review
+- 产品入口：新增 `official` / `enhanced_local` Web 体验模式，默认仍为官方 Web；本地增强版通过 `public/enhanced-kimi-web/` 静态入口承载现有 workspace proxy，不改变官方认证、stream、模型、计费或权限语义。
+- 回退机制：新增 `workspaceWebMode`、`enhancedWebAutoFallback`、`enhancedWebLastKnownGoodCommit`、`enhancedWebLastFallbackReason` 等设置字段，并通过 Tauri 命令支持读取、保存、标记 ready 和手动/自动回退官方 Web。
+- 控制中心：运行诊断页新增“Web 体验”卡片，可切换官方 Web / 本地增强版、开关自动回退、查看增强版健康状态、上游 commit、最近可用版本、回退记录和品牌免责声明。
+- 合规与同步：新增 `apps/kimi-shell/docs/kimi-web-enhanced-plan.md`、`docs/third-party-notices.md`、`third_party/kimi-cli-web/{LICENSE,SOURCE.md,CHANGES.md}`、`patches/kimi-web/` 与 `scripts/sync_kimi_cli_web.ps1`；当前记录上游 commit 为 `1e45df06da698151d2dc29a700722c37432e86ce`。
+- 验证结果：`pnpm --dir apps/kimi-shell check:enhanced-web:i18n`、`pnpm --dir apps/kimi-shell check:enhanced-web:compliance`、`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`git diff --check` 均通过。
+- 未覆盖项：本轮未启动桌面应用做真实 UI 点击验收，因此“切换本地增强版后 iframe 内部承载 Kimi Web、自动回退提示与控制中心视觉观感”仍需要一轮手工回归。
+- 追加修复：截图反馈显示增强版入口 HTML 加载但外部 CSS/JS 未执行，导致 iframe 未设置 `src` 并卡在“正在加载”。已将增强版入口改为单文件内联 CSS + 普通脚本自举，避免 Tauri iframe 内相对静态资源或 module script 差异导致卡住；复跑 i18n、合规、TS、build、Rust check 与 `git diff --check` 均通过。
+
+## Kimi Web 本地增强版从 Wrapper 改为注入增强
+
+### Checklist
+- [x] 确认当前本地增强版只是外层 wrapper，主体仍是官方 Web iframe
+- [x] 回滚前端 `remoteUrl` wrapper 构造，让工作区继续直接加载 workspace proxy
+- [x] 扩展 workspace proxy HTML 注入链路，按 `workspaceWebMode` 区分官方模式和增强模式
+- [x] 新增同源增强注入脚本，覆盖高频英文空状态、搜索、会话、归档、新建按钮等中文化
+- [x] 新增轻量增强 CSS，仅作用于本地增强模式标记，避免大范围覆盖官方样式
+- [x] 更新健康文案与经验记录，明确 wrapper 不是主体增强
+- [x] 运行 TypeScript、Rust、build、合规/i18n 与 diff 检查，并补充 Review
+
+### Review
+- 根因确认：上一版“本地增强版”通过 `/enhanced-kimi-web/index.html?workspaceUrl=...` 外层 wrapper 再嵌套官方 Web，主体 DOM 仍完全由官方页面控制，所以用户看到的主界面不会出现真实 i18n 或体验优化。
+- 加载链路修正：前端 `remoteUrl` 已回到直接使用 workspace proxy URL；`enhanced_local` 不再构造 wrapper URL，因此工作区不会再出现额外“本地增强版”顶栏。
+- 注入实现：workspace proxy 在 HTML 响应阶段读取 `workspaceWebMode`；官方模式只注入现有 theme/session/prefill bridge，增强模式额外注入同源增强脚本和轻量 CSS。
+- 首批增强：增强脚本通过 `MutationObserver` 翻译高频英文文案，包括 `Create a session to begin`、`Click the + button...`、`Create new session`、`Search sessions...`、`SESSIONS`、`Archived` 等，并给空状态、主按钮和侧栏打局部标记做轻量视觉优化。
+- 健康状态：增强版健康文案已改为“本地增强注入已启用”，避免继续暗示当前阶段已经是完整源码 fork。
+- 经验沉淀：已在 `tasks/lessons.md` 记录“本地增强版不能只做外层 wrapper，真实增强必须运行在官方 Web DOM 同源上下文或本地源码构建内”。
+- 验证结果：`pnpm --dir apps/kimi-shell check:enhanced-web:i18n`、`pnpm --dir apps/kimi-shell check:enhanced-web:compliance`、`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`git diff --check` 均通过。
+- 未覆盖项：本轮仍未启动桌面应用做真实点击回归；需要手工确认切到本地增强版后主体界面直接显示中文空状态，且新建会话、搜索、归档、theme/session/prefill/WebSocket stream 均正常。
+
+## backend_manager.rs 瘦身重构
+
+### Checklist
+- [x] 记录重构前 Rust 基线验证结果
+- [x] 新建 `backend_manager/` 子模块目录，保留 `backend_manager.rs` 作为 façade
+- [x] 拆出 `system_open.rs`、`config.rs`、`install_compat.rs`
+- [x] 拆出 `lifecycle.rs`、`workspace_proxy.rs`、`workspace_injection.rs`
+- [x] 保持现有公开 API、Tauri command 名称和行为不变
+- [x] 运行格式、编译、测试与 diff 检查，并补充 Review
+
+### Review
+- `backend_manager.rs` 已从 5275 行收敛到 53 行，仅保留模块声明、公开 re-export 和少量共享常量。
+- 后端职责已拆到 `backend_manager/` 子模块：系统打开、Kimi config、兼容安装入口、生命周期、workspace proxy、workspace 注入各自独立；原有对外 API 和 Tauri command 调用点保持不变。
+- 现有单测已迁移到对应子模块，覆盖范围保持在 config、proxy、injection、lifecycle 各自文件内。
+- 验证结果：重构前 `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过；重构后 `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`git diff --check` 均通过。
+- 测试说明：重构前后 `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml backend_manager` 均能完成测试编译，但测试二进制启动仍报当前 Windows 环境既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)`，没有进入断言阶段。
+
+## 修复本地增强版切换后卡在加载中
+
+### Checklist
+- [x] 确认切换 `official` / `enhanced_local` 时 iframe URL 不变导致不会重新请求 HTML
+- [x] 为工作区 iframe 增加加载身份 key，模式切换或回退时强制重新挂载
+- [x] 调整 workspace pane loading 状态依赖，避免只设置 `loading` 却没有新 `onLoad`
+- [x] 更新经验记录，避免后续同源注入模式忽略 iframe 重新加载
+- [x] 运行 TypeScript、Rust、build、fmt 与 diff 检查，并补充 Review
+
+### Review
+- 根因确认：当前增强版和官方版都使用同一个 workspace proxy URL；切换模式只保存设置并把面板状态改为 `loading`，不会改变 `iframe.src`，因此不会触发新的 HTML 请求和 `onLoad`。
+- 重新加载机制：工作区 iframe 新增由 `remoteUrl + workspaceWebMode + reloadToken` 组成的加载身份，并作为 React `key` 传入 `WorkspaceView`；模式切换或回退会推进 token，强制 iframe 重新挂载。
+- 状态修正：`startWorkspacePane()` 改为比较加载身份而非仅比较 URL，模式切换后会进入真正的新加载周期，成功后由 iframe `onLoad` 切回 `ready`，不再长期停留在遮罩层。
+- 回退同步：手动/自动回退官方 Web 后同样触发 iframe 重新挂载，避免继续显示旧的增强 DOM 或等不到新的加载事件。
+- 经验沉淀：已在 `tasks/lessons.md` 记录同 URL proxy 注入模式必须显式重载 iframe。
+- 验证结果：`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`git diff --check` 均通过；`git diff --check` 仅输出当前工作区已有 CRLF 提示。
+
+## 0.0.40 / 0.0.41 发布说明与 GitHub 发布
+
+### Checklist
+- [x] 梳理 `v0.0.39` 之后的工作区变更，按 0.0.40 / 0.0.41 划分发布主题
+- [x] 新增 `apps/kimi-shell/docs/release-notes-0.0.40.md`
+- [x] 新增 `apps/kimi-shell/docs/release-notes-0.0.41.md`
+- [x] 新增今天的 `update/updatenote_20260424*.md`
+- [x] 验证文档、版本号、安装包资产和基础检查
+- [ ] 提交到 `main` 并推送 GitHub
+- [ ] 创建/推送 `v0.0.40`、`v0.0.41` GitHub Releases，并上传对应 NSIS/MSI 资产
+- [ ] 记录发布结果与验证回顾
+
+### Plan Confirmation
+- 当前 `tasks/todo.md` 232 行，未超过 300 行，不需要归档。
+- 当前源码版本为 `0.0.41`，本地已有 `0.0.40` 与 `0.0.41` 安装包资产。
+- `0.0.40` 聚焦 Kimi Web 本地增强版产品化；`0.0.41` 聚焦增强版切换修复、`backend_manager` 瘦身重构与桥接设置修正。
+
+### Validation So Far
+- `pnpm --dir apps/kimi-shell check:enhanced-web:i18n` 通过。
+- `pnpm --dir apps/kimi-shell check:enhanced-web:compliance` 通过。
+- `pnpm --dir apps/kimi-shell exec tsc --noEmit` 通过。
+- `pnpm --dir apps/kimi-shell build` 通过。
+- `cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+- `cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check` 通过。
+- `pnpm --dir apps/kimi-shell verify:tracked-markdown:no-abs-paths` 通过。
+- `git diff --check` 通过，仅输出当前工作区 CRLF 提示。
+- 已确认本地存在 `0.0.40` / `0.0.41` 的 NSIS 与 MSI 安装包资产。

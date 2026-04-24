@@ -1,0 +1,5 @@
+{
+  "app.title": "Kimi Web 本地增强版",
+  "loading.workspace": "正在接入 Kimi Web...",
+  "error.missingWorkspaceUrl": "缺少 Kimi Web 工作区地址。"
+}

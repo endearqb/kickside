@@ -431,14 +431,6 @@ export function InstallFlowTaskContent({
   }, [session.logs.length, session.message, failureSummary, logsText]);
 
   useEffect(() => {
-    const payload =
-      mirrorDraft.mirrorPreset === "custom"
-        ? installSettings
-        : { ...mirrorDraft, preferredSource: installSource };
-    void onRefreshMirrorHealth(payload).catch(() => {});
-  }, [installSource, installSettings, mirrorDraft.mirrorPreset]);
-
-  useEffect(() => {
     if (session.taskId === "uninstall_kimi" && session.status !== "idle") {
       setUninstallConfirmOpen(false);
     }
@@ -577,7 +569,13 @@ export function InstallFlowTaskContent({
                 <button
                   type="button"
                   className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
-                  onClick={() => onSourceChange("mirror")}
+                  onClick={() => {
+                    onSourceChange("mirror");
+                    void onRefreshMirrorHealth({
+                      ...mirrorDraft,
+                      preferredSource: "mirror",
+                    }).catch(() => {});
+                  }}
                   disabled={isBusy}
                 >
                   镜像源

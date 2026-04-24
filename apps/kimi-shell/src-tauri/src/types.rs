@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +95,34 @@ pub enum WebviewRuntimeKind {
 pub enum MainCreateMode {
     Auto,
     Manual,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceWebMode {
+    #[default]
+    Official,
+    EnhancedLocal,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EnhancedWebHealthState {
+    #[default]
+    NotConfigured,
+    Ready,
+    MissingAssets,
+    FallbackActive,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EnhancedWebHealth {
+    pub state: EnhancedWebHealthState,
+    pub message: String,
+    pub source_commit: Option<String>,
+    pub checked_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -219,6 +247,10 @@ pub struct AppStatus {
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
     pub provider_api_health: ProviderApiHealth,
+    pub workspace_web_mode: WorkspaceWebMode,
+    pub enhanced_web_source_commit: Option<String>,
+    pub enhanced_web_health: EnhancedWebHealth,
+    pub enhanced_web_last_fallback_reason: Option<String>,
     pub logs_dir: String,
     pub hotkey: String,
 }
@@ -357,6 +389,11 @@ pub struct AppSettings {
     pub kimi_path: Option<String>,
     pub work_dir: Option<String>,
     pub hotkey: String,
+    pub workspace_web_mode: WorkspaceWebMode,
+    pub enhanced_web_auto_fallback: bool,
+    pub enhanced_web_pinned_commit: Option<String>,
+    pub enhanced_web_last_known_good_commit: Option<String>,
+    pub enhanced_web_last_fallback_reason: Option<String>,
     pub main_window_close_behavior: MainWindowCloseBehavior,
     pub start_minimized_to_tray: bool,
     pub auto_restart_on_crash: bool,
@@ -380,6 +417,11 @@ impl Default for AppSettings {
             kimi_path: None,
             work_dir: None,
             hotkey: "CmdOrCtrl+Shift+K".to_string(),
+            workspace_web_mode: WorkspaceWebMode::Official,
+            enhanced_web_auto_fallback: true,
+            enhanced_web_pinned_commit: None,
+            enhanced_web_last_known_good_commit: None,
+            enhanced_web_last_fallback_reason: None,
             main_window_close_behavior: MainWindowCloseBehavior::Ask,
             start_minimized_to_tray: false,
             auto_restart_on_crash: false,
@@ -393,6 +435,26 @@ impl Default for AppSettings {
             custom_mirror_config: InstallCustomMirrorConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWebSettingsView {
+    pub mode: WorkspaceWebMode,
+    pub auto_fallback: bool,
+    pub pinned_commit: Option<String>,
+    pub last_known_good_commit: Option<String>,
+    pub last_fallback_reason: Option<String>,
+    pub source_commit: Option<String>,
+    pub health: EnhancedWebHealth,
+    pub disclaimer: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceWebSettingsInput {
+    pub mode: WorkspaceWebMode,
+    pub auto_fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1135,6 +1197,10 @@ pub struct DiagnosticsInfo {
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
     pub provider_api_health: ProviderApiHealth,
+    pub workspace_web_mode: WorkspaceWebMode,
+    pub enhanced_web_source_commit: Option<String>,
+    pub enhanced_web_health: EnhancedWebHealth,
+    pub enhanced_web_last_fallback_reason: Option<String>,
     pub startup_trace: Vec<String>,
     pub app_log_path: String,
     pub backend_log_path: String,

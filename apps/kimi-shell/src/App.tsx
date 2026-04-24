@@ -227,6 +227,8 @@ function App() {
     installSource: shell.installSource,
     installSettings: shell.installSettings,
     installSettingsBusy: shell.installSettingsBusy,
+    workspaceWebSettings: shell.workspaceWebSettings,
+    workspaceWebSettingsBusy: shell.workspaceWebSettingsBusy,
     installMirrorHealthReport: shell.installMirrorHealthReport,
     installMirrorHealthBusy: shell.installMirrorHealthBusy,
     powershellPreflight: shell.powershellPreflight,
@@ -271,6 +273,7 @@ function App() {
     onOpenKimiConfigDir: shell.handleOpenKimiConfigDir,
     onSaveKimiCliApiConfig: shell.handleSaveKimiCliApiConfig,
     onSetKimiCliApiAsDefault: shell.handleSetKimiCliApiAsDefault,
+    onSetKimiLoginAsDefault: shell.handleSetKimiLoginAsDefault,
     onPickKimiPath: shell.handlePickKimiPath,
     onSavePathAndRetry: shell.handleSavePathAndRetry,
     onEnableContextMenu: shell.handleEnableContextMenu,
@@ -326,6 +329,9 @@ function App() {
     onSaveMainWindowCloseBehavior: shell.handleSaveMainWindowCloseBehavior,
     onInstallSourceChange: shell.handleInstallSourceChange,
     onSaveInstallSettings: shell.handleSaveInstallSettings,
+    onWorkspaceWebModeChange: shell.handleWorkspaceWebModeChange,
+    onWorkspaceWebAutoFallbackChange: shell.handleWorkspaceWebAutoFallbackChange,
+    onFallbackWorkspaceWebToOfficial: shell.handleFallbackWorkspaceWebToOfficial,
     onRefreshPowerShellPreflight: shell.refreshPowerShellPreflight,
     onInstallDependencies: shell.handleInstallDependencies,
     onInstallKimi: shell.handleInstallKimi,
@@ -421,6 +427,7 @@ function App() {
             workspaceSplitRatio={shell.workspaceSplitRatio}
             isSplitDragging={shell.isWorkspaceSplitDragging}
             codeRemoteUrl={shell.remoteUrl}
+            codeFrameKey={shell.workspaceFrameKey}
             chatRemoteUrl={shell.chatRemoteUrl}
             workspaceIframeRef={shell.workspaceIframeRef}
             chatIframeRef={shell.chatIframeRef}

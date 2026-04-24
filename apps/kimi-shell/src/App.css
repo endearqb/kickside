@@ -5257,6 +5257,11 @@ input:focus {
   margin-left: auto;
 }
 
+.cc-brief-inline-input {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
 .cc-brief-tip-card {
   display: grid;
   gap: 10px;

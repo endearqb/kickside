@@ -1,0 +1,5 @@
+{
+  "app.title": "Kimi Web Local Enhanced",
+  "loading.workspace": "Connecting to Kimi Web...",
+  "error.missingWorkspaceUrl": "Workspace URL is missing."
+}

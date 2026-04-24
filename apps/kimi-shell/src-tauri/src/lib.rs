@@ -8,6 +8,7 @@ mod bridge_settings_store;
 mod cli_contract;
 mod command_utils;
 mod context_menu;
+mod enhanced_web;
 mod feishu_onboarding;
 mod install_manager;
 mod kimi_locator;
@@ -54,7 +55,8 @@ use types::{
     WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
     WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
     WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
-    WorkspaceSkillTarget, CURRENT_ONBOARDING_VERSION,
+    WorkspaceSkillTarget, WorkspaceWebSettingsInput, WorkspaceWebSettingsView,
+    CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -69,6 +71,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
     let kimi_login_health =
         auth_state::read_runtime_login_health(&app, settings.onboarding_step_acks.login_verified)?;
     let provider_api_health = auth_state::read_runtime_provider_api_health(&app)?;
+    let enhanced_web_health = enhanced_web::health(&settings);
 
     let shared = app.state::<AppState>();
     let instance_id = shared.instance_id.clone();
@@ -179,6 +182,10 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         provider_api_active_provider: auth_snapshot.provider_api_active_provider,
         kimi_login_health,
         provider_api_health,
+        workspace_web_mode: settings.workspace_web_mode,
+        enhanced_web_source_commit: Some(enhanced_web::SOURCE_COMMIT.to_string()),
+        enhanced_web_health,
+        enhanced_web_last_fallback_reason: settings.enhanced_web_last_fallback_reason,
         logs_dir: logs_dir.to_string_lossy().to_string(),
         hotkey: settings.hotkey,
     })
@@ -346,6 +353,32 @@ fn save_main_window_close_behavior(
     settings.main_window_close_behavior = behavior;
     settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
     Ok(settings.main_window_close_behavior)
+}
+
+#[tauri::command]
+fn get_workspace_web_settings(app: AppHandle) -> Result<WorkspaceWebSettingsView, String> {
+    enhanced_web::settings_view(&app)
+}
+
+#[tauri::command]
+fn save_workspace_web_settings(
+    app: AppHandle,
+    input: WorkspaceWebSettingsInput,
+) -> Result<WorkspaceWebSettingsView, String> {
+    enhanced_web::save_settings(&app, input)
+}
+
+#[tauri::command]
+fn fallback_workspace_web_to_official(
+    app: AppHandle,
+    reason: String,
+) -> Result<WorkspaceWebSettingsView, String> {
+    enhanced_web::fallback_to_official(&app, &reason)
+}
+
+#[tauri::command]
+fn mark_enhanced_web_ready(app: AppHandle) -> Result<WorkspaceWebSettingsView, String> {
+    enhanced_web::mark_enhanced_ready(&app)
 }
 
 #[tauri::command]
@@ -961,6 +994,12 @@ fn set_kimi_cli_api_as_default(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_kimi_login_as_default(app: AppHandle) -> Result<(), String> {
+    backend_manager::set_kimi_login_as_default(&app)?;
+    sync_provider_api_snapshot_after_config_change(&app)
+}
+
+#[tauri::command]
 fn load_kimi_cli_config_center() -> Result<KimiCliConfigCenterView, String> {
     backend_manager::load_kimi_cli_config_center()
 }
@@ -1103,6 +1142,7 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
     let kimi_login_health =
         auth_state::read_runtime_login_health(&app, settings.onboarding_step_acks.login_verified)?;
     let provider_api_health = auth_state::read_runtime_provider_api_health(&app)?;
+    let enhanced_web_health = enhanced_web::health(&settings);
     let shared = app.state::<AppState>();
     let instance_id = shared.instance_id.clone();
     let pid = shared.pid;
@@ -1255,6 +1295,10 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         provider_api_active_provider: auth_snapshot.provider_api_active_provider,
         kimi_login_health,
         provider_api_health,
+        workspace_web_mode: settings.workspace_web_mode,
+        enhanced_web_source_commit: Some(enhanced_web::SOURCE_COMMIT.to_string()),
+        enhanced_web_health,
+        enhanced_web_last_fallback_reason: settings.enhanced_web_last_fallback_reason,
         startup_trace,
         app_log_path: app_log_path.to_string_lossy().to_string(),
         backend_log_path: backend_log_path.to_string_lossy().to_string(),
@@ -1574,6 +1618,10 @@ pub fn run() {
             quit_app_gracefully,
             get_main_window_close_behavior,
             save_main_window_close_behavior,
+            get_workspace_web_settings,
+            save_workspace_web_settings,
+            fallback_workspace_web_to_official,
+            mark_enhanced_web_ready,
             submit_main_window_close_decision,
             save_kimi_path,
             save_work_dir,
@@ -1634,6 +1682,7 @@ pub fn run() {
             load_kimi_cli_api_config,
             save_kimi_cli_api_config,
             set_kimi_cli_api_as_default,
+            set_kimi_login_as_default,
             load_kimi_cli_config_center,
             save_kimi_cli_config_center,
             register_install_session_channel,

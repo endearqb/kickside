@@ -553,29 +553,13 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
         Some(false) => FeishuReplyRenderer::Post,
         None => settings.feishu_reply_renderer,
     };
-    let mut connectors = normalize_connectors(
+    let connectors = normalize_connectors(
         settings.connectors,
         settings.default_work_dir.clone(),
         settings.reset_binding_session_on_bridge_start,
         settings.feishu_auto_approve,
         feishu_reply_renderer,
     );
-    let mut ensured = BridgeSettings {
-        enabled: settings.enabled,
-        auto_start: settings.auto_start,
-        admin_port: settings.admin_port,
-        skills_mode: BridgeSkillsMode::Disabled,
-        feishu_reply_renderer,
-        feishu_auto_approve: settings.feishu_auto_approve,
-        reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
-        feishu_reply_cards: None,
-        default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
-        work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
-        connectors: std::mem::take(&mut connectors),
-    };
-    ensure_default_feishu_connector(&mut ensured);
-    ensure_default_weixin_connector(&mut ensured);
-    connectors = ensured.connectors;
     let derived_feishu = connectors
         .iter()
         .find(|connector| connector.platform == BridgePlatform::Feishu);
@@ -597,8 +581,8 @@ fn normalize_bridge_settings(settings: BridgeSettings) -> BridgeSettings {
             .unwrap_or(settings.feishu_auto_approve),
         reset_binding_session_on_bridge_start: settings.reset_binding_session_on_bridge_start,
         feishu_reply_cards: None,
-        default_work_dir: ensured.default_work_dir,
-        work_dir_presets: ensured.work_dir_presets,
+        default_work_dir: normalize_work_dir_value(settings.default_work_dir.as_deref()),
+        work_dir_presets: normalize_work_dir_presets(settings.work_dir_presets),
         connectors,
     }
 }
@@ -884,19 +868,6 @@ fn ensure_default_feishu_connector(bridge_settings: &mut BridgeSettings) {
     bridge_settings.connectors.push(connector);
 }
 
-fn ensure_default_weixin_connector(bridge_settings: &mut BridgeSettings) {
-    if bridge_settings
-        .connectors
-        .iter()
-        .any(|connector| connector.platform == BridgePlatform::Weixin)
-    {
-        return;
-    }
-    bridge_settings
-        .connectors
-        .push(default_connector(BridgePlatform::Weixin, 1));
-}
-
 fn sync_bridge_mirror(bridge_settings: &BridgeSettings, app_settings: &mut AppSettings) -> bool {
     let next_admin_override = if bridge_settings.admin_port == DEFAULT_BRIDGE_ADMIN_PORT {
         None
@@ -978,6 +949,18 @@ mod tests {
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
         assert_eq!(bridge_settings.connectors.len(), 3);
+        assert!(bridge_settings
+            .connectors
+            .iter()
+            .any(|connector| connector.platform == BridgePlatform::Telegram));
+        assert!(bridge_settings
+            .connectors
+            .iter()
+            .any(|connector| connector.platform == BridgePlatform::Feishu));
+        assert!(bridge_settings
+            .connectors
+            .iter()
+            .any(|connector| connector.platform == BridgePlatform::Weixin));
         assert!(!app_settings.bridge_enabled);
         assert!(!app_settings.bridge_auto_start);
         assert!(bridge_settings_path.exists());
@@ -1023,6 +1006,7 @@ mod tests {
             bridge_settings.default_work_dir.as_deref(),
             Some("D:/workspace")
         );
+        assert!(bridge_settings.connectors.is_empty());
     }
 
     #[test]
@@ -1119,7 +1103,14 @@ mod tests {
                 path: "D:/repo".to_string(),
             }]
         );
-        assert_eq!(bridge_settings.connectors.len(), 3);
+        assert_eq!(bridge_settings.connectors.len(), 1);
+        assert_eq!(
+            bridge_settings
+                .connectors
+                .first()
+                .map(|connector| connector.platform),
+            Some(BridgePlatform::Telegram)
+        );
         assert!(app_settings.bridge_enabled);
         assert!(app_settings.bridge_auto_start);
         assert_eq!(app_settings.bridge_admin_port_override, Some(60_112));
@@ -1775,19 +1766,143 @@ mod tests {
         )
         .expect("delete connector");
 
-        assert_eq!(saved.connectors.len(), 2);
+        assert_eq!(saved.connectors.len(), 1);
         assert!(saved
             .connectors
             .iter()
             .any(|connector| connector.id == "feishu-default"));
-        assert!(saved
-            .connectors
-            .iter()
-            .any(|connector| connector.id == "weixin-default"));
 
         let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
         assert!(reloaded_secrets.connectors.contains_key("feishu-default"));
         assert!(!reloaded_secrets.connectors.contains_key("feishu-2"));
         assert_eq!(reloaded_secrets.feishu.app_id.as_deref(), Some("app-one"));
+    }
+
+    #[test]
+    fn delete_connector_allows_removing_only_feishu_connector() {
+        let temp = TempDirGuard::new("delete-only-feishu-connector");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(&settings_path, &AppSettings::default()).expect("seed app settings");
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: true,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
+                feishu_reply_renderer: FeishuReplyRenderer::Streaming,
+                feishu_auto_approve: true,
+                reset_binding_session_on_bridge_start: true,
+                feishu_reply_cards: None,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                connectors: vec![default_connector(BridgePlatform::Feishu, 1)],
+            },
+        )
+        .expect("seed bridge settings");
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                connectors: BTreeMap::from([(
+                    "feishu-default".to_string(),
+                    BridgeConnectorSecrets {
+                        telegram: None,
+                        feishu: Some(BridgeFeishuSecrets {
+                            app_id: Some("app-one".to_string()),
+                            app_secret: Some("secret-one".to_string()),
+                            verification_token: None,
+                            encrypt_key: None,
+                        }),
+                        weixin: None,
+                    },
+                )]),
+                telegram: Default::default(),
+                feishu: Default::default(),
+                weixin: Default::default(),
+            },
+        )
+        .expect("seed bridge secrets");
+
+        let saved = delete_connector_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            "feishu-default",
+        )
+        .expect("delete only feishu connector");
+
+        assert!(saved
+            .connectors
+            .iter()
+            .all(|connector| connector.platform != BridgePlatform::Feishu));
+        let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
+        assert!(!reloaded_secrets.connectors.contains_key("feishu-default"));
+    }
+
+    #[test]
+    fn delete_connector_allows_removing_only_weixin_connector() {
+        let temp = TempDirGuard::new("delete-only-weixin-connector");
+        let settings_path = temp.path.join("settings.json");
+        let bridge_settings_path = temp.path.join("bridge_settings.json");
+        let bridge_secrets_path = temp.path.join("bridge_secrets.json");
+
+        write_json(&settings_path, &AppSettings::default()).expect("seed app settings");
+        write_json(
+            &bridge_settings_path,
+            &BridgeSettings {
+                enabled: true,
+                auto_start: false,
+                admin_port: DEFAULT_BRIDGE_ADMIN_PORT,
+                skills_mode: BridgeSkillsMode::Disabled,
+                feishu_reply_renderer: FeishuReplyRenderer::Streaming,
+                feishu_auto_approve: true,
+                reset_binding_session_on_bridge_start: true,
+                feishu_reply_cards: None,
+                default_work_dir: None,
+                work_dir_presets: vec![],
+                connectors: vec![default_connector(BridgePlatform::Weixin, 1)],
+            },
+        )
+        .expect("seed bridge settings");
+        write_json(
+            &bridge_secrets_path,
+            &BridgeSecrets {
+                connectors: BTreeMap::from([(
+                    "weixin-default".to_string(),
+                    BridgeConnectorSecrets {
+                        telegram: None,
+                        feishu: None,
+                        weixin: Some(BridgeWeixinSecrets {
+                            bot_token: Some("bot-token".to_string()),
+                            base_url: None,
+                            account_id: Some("owner".to_string()),
+                            owner_user_id: Some("owner".to_string()),
+                        }),
+                    },
+                )]),
+                telegram: Default::default(),
+                feishu: Default::default(),
+                weixin: Default::default(),
+            },
+        )
+        .expect("seed bridge secrets");
+
+        let saved = delete_connector_files(
+            &settings_path,
+            &bridge_settings_path,
+            &bridge_secrets_path,
+            "weixin-default",
+        )
+        .expect("delete only weixin connector");
+
+        assert!(saved
+            .connectors
+            .iter()
+            .all(|connector| connector.platform != BridgePlatform::Weixin));
+        let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
+        assert!(!reloaded_secrets.connectors.contains_key("weixin-default"));
     }
 }

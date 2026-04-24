@@ -57,9 +57,12 @@ pub fn evaluate_auth_mode(
     };
 
     let provider_api_configured = provider_has_credential(provider);
+    let kimi_api_default_selected = backend_manager::kimi_api_default_selected_in_view(view);
 
     AuthModeSnapshot {
-        auth_mode: if kimi_login_state == KimiLoginHealthState::Verified {
+        auth_mode: if kimi_api_default_selected && provider_api_configured {
+            AuthMode::ProviderApi
+        } else if kimi_login_state == KimiLoginHealthState::Verified {
             AuthMode::KimiLogin
         } else if provider_api_configured {
             AuthMode::ProviderApi
@@ -316,6 +319,31 @@ mod tests {
         assert_eq!(
             snapshot.provider_api_active_provider.as_deref(),
             Some("moonshot")
+        );
+    }
+
+    #[test]
+    fn auth_mode_prefers_default_kimi_api_over_verified_login() {
+        let snapshot = evaluate_auth_mode(
+            &KimiCliConfigCenterView {
+                default_provider: Some(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID.to_string()),
+                model: Some(backend_manager::KIMI_CODING_PLAN_MODEL_ID.to_string()),
+                default_model: Some(backend_manager::KIMI_CODING_PLAN_MODEL_ID.to_string()),
+                providers: vec![ProviderEntry {
+                    key: backend_manager::KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+                    api_key: Some("secret".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            KimiLoginHealthState::Verified,
+        );
+
+        assert_eq!(snapshot.auth_mode, AuthMode::ProviderApi);
+        assert!(snapshot.provider_api_configured);
+        assert_eq!(
+            snapshot.provider_api_active_provider.as_deref(),
+            Some(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID)
         );
     }
 

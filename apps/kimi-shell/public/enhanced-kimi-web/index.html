@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kimi Web 本地增强版</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          "Source Sans 3",
+          "Noto Sans SC",
+          "Microsoft YaHei UI",
+          "Segoe UI Variable Text",
+          sans-serif;
+        background: #fbf8f2;
+        color: #1f252d;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      .enhanced-shell {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      .enhanced-shell {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        background: #fbf8f2;
+      }
+
+      .enhanced-shell[data-theme="dark"] {
+        color-scheme: dark;
+        background: #101418;
+        color: #f2eee7;
+      }
+
+      .enhanced-toolbar {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 12px;
+        border-bottom: 1px solid #e5ded2;
+        background: #f2eee7;
+      }
+
+      .enhanced-shell[data-theme="dark"] .enhanced-toolbar {
+        border-color: #262b35;
+        background: #171a21;
+      }
+
+      .enhanced-title {
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .enhanced-title strong {
+        font-size: 13px;
+        line-height: 1.2;
+        white-space: nowrap;
+      }
+
+      .enhanced-title span,
+      .enhanced-meta {
+        color: #7a746b;
+        font-size: 12px;
+        line-height: 1.25;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .enhanced-shell[data-theme="dark"] .enhanced-title span,
+      .enhanced-shell[data-theme="dark"] .enhanced-meta {
+        color: #c9c0b2;
+      }
+
+      .enhanced-frame-wrap {
+        position: relative;
+        min-height: 0;
+        background: #fff;
+      }
+
+      .enhanced-shell[data-theme="dark"] .enhanced-frame-wrap {
+        background: #0f1115;
+      }
+
+      .enhanced-frame {
+        width: 100%;
+        height: 100%;
+        display: block;
+        border: 0;
+        background: transparent;
+      }
+
+      .enhanced-loading {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        gap: 10px;
+        align-content: center;
+        background: color-mix(in srgb, #fbf8f2 86%, transparent);
+        color: #3d433f;
+        transition:
+          opacity 160ms cubic-bezier(0.2, 0.8, 0.2, 1),
+          visibility 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+
+      .enhanced-shell[data-theme="dark"] .enhanced-loading {
+        background: color-mix(in srgb, #101418 86%, transparent);
+        color: #f2eee7;
+      }
+
+      .enhanced-loading.is-hidden {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      .enhanced-loading p {
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .enhanced-spinner {
+        width: 24px;
+        height: 24px;
+        border: 2px solid color-mix(in srgb, #b67a28 28%, transparent);
+        border-top-color: #b67a28;
+        border-radius: 50%;
+        animation: enhanced-spin 720ms linear infinite;
+      }
+
+      @keyframes enhanced-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (max-width: 720px) {
+        .enhanced-title span {
+          display: none;
+        }
+
+        .enhanced-meta {
+          max-width: 42vw;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="enhanced-shell" data-theme="light">
+      <header class="enhanced-toolbar">
+        <div class="enhanced-title">
+          <strong>Kimi Web 本地增强版</strong>
+          <span>基于开源 Web 的桌面壳增强体验</span>
+        </div>
+        <div class="enhanced-meta" id="enhanced-meta">来源 commit 1e45df06da69</div>
+      </header>
+      <section class="enhanced-frame-wrap">
+        <iframe
+          id="kimi-frame"
+          title="Kimi Code Web Workspace"
+          class="enhanced-frame"
+          referrerpolicy="no-referrer"
+          allow="clipboard-read; clipboard-write"
+        ></iframe>
+        <div class="enhanced-loading" id="enhanced-loading">
+          <div class="enhanced-spinner" aria-hidden="true"></div>
+          <p>正在接入 Kimi Web...</p>
+        </div>
+      </section>
+    </main>
+    <script>
+      (function () {
+        const SHELL_READY_SOURCE = "kimi-app-enhanced-web-ready";
+        const THEME_SYNC_SOURCE = "kimi-shell-theme-sync";
+        const THEME_BRIDGE_SOURCE = "kimi-shell-theme-bridge";
+        const SESSION_SYNC_SOURCE = "kimi-shell-session-sync";
+        const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
+        const PREFILL_SYNC_SOURCE = "kimi-shell-prefill-sync";
+        const PREFILL_BRIDGE_SOURCE = "kimi-shell-prefill-bridge";
+        const EXTERNAL_LINK_BRIDGE_SOURCE = "kimi-shell-external-link-bridge";
+
+        const frame = document.getElementById("kimi-frame");
+        const loading = document.getElementById("enhanced-loading");
+        const shell = document.querySelector(".enhanced-shell");
+        const params = new URLSearchParams(window.location.search);
+        const upstreamUrl = params.get("workspaceUrl") || params.get("upstream");
+        const initialTheme = params.get("theme") === "dark" ? "dark" : "light";
+        let frameReady = false;
+        let pendingMessages = [];
+
+        function setTheme(theme) {
+          const nextTheme = theme === "dark" ? "dark" : "light";
+          shell?.setAttribute("data-theme", nextTheme);
+          document.documentElement.style.colorScheme = nextTheme;
+        }
+
+        function targetOrigin() {
+          try {
+            return upstreamUrl ? new URL(upstreamUrl).origin : "*";
+          } catch {
+            return "*";
+          }
+        }
+
+        function postToFrame(payload) {
+          if (!frame?.contentWindow) {
+            return;
+          }
+          if (!frameReady) {
+            pendingMessages.push(payload);
+            return;
+          }
+          frame.contentWindow.postMessage(payload, targetOrigin());
+        }
+
+        function flushPendingMessages() {
+          const queued = pendingMessages;
+          pendingMessages = [];
+          for (const payload of queued) {
+            postToFrame(payload);
+          }
+        }
+
+        function sendShellReady() {
+          window.parent?.postMessage(
+            {
+              source: SHELL_READY_SOURCE,
+              ready: true,
+              variant: "enhanced_local_wrapper",
+              upstreamUrl,
+            },
+            "*",
+          );
+        }
+
+        setTheme(initialTheme);
+
+        if (upstreamUrl && frame) {
+          frame.src = upstreamUrl;
+        } else if (loading) {
+          loading.innerHTML = "<p>缺少 Kimi Web 工作区地址。</p>";
+        }
+
+        frame?.addEventListener("load", () => {
+          frameReady = true;
+          loading?.classList.add("is-hidden");
+          flushPendingMessages();
+          sendShellReady();
+        });
+
+        window.addEventListener("message", (event) => {
+          const data = event.data;
+          if (!data || typeof data !== "object") {
+            return;
+          }
+
+          if (data.source === THEME_SYNC_SOURCE) {
+            setTheme(data.theme);
+            postToFrame(data);
+            return;
+          }
+
+          if (data.source === SESSION_SYNC_SOURCE || data.source === PREFILL_SYNC_SOURCE) {
+            postToFrame(data);
+            return;
+          }
+
+          if (data.source === THEME_BRIDGE_SOURCE) {
+            setTheme(data.theme);
+            window.parent?.postMessage(data, "*");
+            return;
+          }
+
+          if (
+            data.source === SESSION_BRIDGE_SOURCE ||
+            data.source === PREFILL_BRIDGE_SOURCE ||
+            data.source === EXTERNAL_LINK_BRIDGE_SOURCE
+          ) {
+            window.parent?.postMessage(data, "*");
+          }
+        });
+
+        window.setTimeout(sendShellReady, 1200);
+      })();
+    </script>
+  </body>
+</html>

@@ -40,6 +40,22 @@ export type WebviewRuntimeKind = "evergreen" | "fixed" | "unknown";
 
 export type MainCreateMode = "auto" | "manual";
 
+export type WorkspaceWebMode = "official" | "enhanced_local";
+
+export type EnhancedWebHealthState =
+  | "not_configured"
+  | "ready"
+  | "missing_assets"
+  | "fallback_active"
+  | "error";
+
+export interface EnhancedWebHealth {
+  state: EnhancedWebHealthState;
+  message: string;
+  sourceCommit?: string;
+  checkedAtMs?: number;
+}
+
 export type StartupPhase =
   | "idle"
   | "prefill_surface_shown"
@@ -156,6 +172,10 @@ export interface AppStatus {
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
   providerApiHealth: ProviderApiHealth;
+  workspaceWebMode: WorkspaceWebMode;
+  enhancedWebSourceCommit?: string;
+  enhancedWebHealth: EnhancedWebHealth;
+  enhancedWebLastFallbackReason?: string;
   logsDir: string;
   hotkey: string;
 }
@@ -798,6 +818,10 @@ export interface DiagnosticsInfo {
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
   providerApiHealth: ProviderApiHealth;
+  workspaceWebMode: WorkspaceWebMode;
+  enhancedWebSourceCommit?: string;
+  enhancedWebHealth: EnhancedWebHealth;
+  enhancedWebLastFallbackReason?: string;
   startupTrace: string[];
   appLogPath: string;
   backendLogPath: string;
@@ -1031,6 +1055,22 @@ export interface InstallSettingsView {
   preferredSource: InstallSource;
   mirrorPreset: InstallMirrorPreset;
   customMirrorConfig: InstallCustomMirrorConfig;
+}
+
+export interface WorkspaceWebSettingsView {
+  mode: WorkspaceWebMode;
+  autoFallback: boolean;
+  pinnedCommit?: string;
+  lastKnownGoodCommit?: string;
+  lastFallbackReason?: string;
+  sourceCommit?: string;
+  health: EnhancedWebHealth;
+  disclaimer: string;
+}
+
+export interface WorkspaceWebSettingsInput {
+  mode: WorkspaceWebMode;
+  autoFallback: boolean;
 }
 
 export type InstallMirrorHealthCategory =

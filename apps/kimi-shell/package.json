@@ -1,7 +1,7 @@
 {
   "name": "appskimi-shell",
   "private": true,
-  "version": "0.0.39",
+  "version": "0.0.41",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,6 +21,9 @@
     "tauri:build:webview:fixed": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant fixed",
     "verify:public-artifacts:no-abs-paths": "powershell -ExecutionPolicy Bypass -File scripts/verify_public_artifacts_no_abs_paths.ps1",
     "verify:tracked-markdown:no-abs-paths": "powershell -ExecutionPolicy Bypass -File scripts/verify_tracked_markdown_no_abs_paths.ps1",
+    "sync:kimi-web": "powershell -ExecutionPolicy Bypass -File scripts/sync_kimi_cli_web.ps1",
+    "check:enhanced-web:i18n": "node scripts/check_enhanced_web_i18n.mjs",
+    "check:enhanced-web:compliance": "node scripts/check_enhanced_web_compliance.mjs",
     "check:nfr:security": "node scripts/check_capabilities.mjs",
     "check:nfr:port-conflict": "powershell -ExecutionPolicy Bypass -File scripts/nfr_port_conflict.ps1",
     "check:nfr:reliability": "powershell -ExecutionPolicy Bypass -File scripts/nfr_reliability.ps1"

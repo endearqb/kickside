@@ -67,6 +67,8 @@ import type {
   WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
   WorkspaceSkillTarget,
+  WorkspaceWebMode,
+  WorkspaceWebSettingsView,
 } from "@/app/types";
 import {
   formatAuthMode,
@@ -215,6 +217,8 @@ type ControlCenterViewProps = {
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
+  workspaceWebSettings: WorkspaceWebSettingsView;
+  workspaceWebSettingsBusy: boolean;
   installMirrorHealthReport: InstallMirrorHealthReport | null;
   installMirrorHealthBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
@@ -267,6 +271,7 @@ type ControlCenterViewProps = {
   onOpenKimiConfigDir: () => Promise<void>;
   onSaveKimiCliApiConfig: () => Promise<void>;
   onSetKimiCliApiAsDefault: () => Promise<void>;
+  onSetKimiLoginAsDefault: () => Promise<void>;
   onPickKimiPath: () => Promise<void>;
   onSavePathAndRetry: () => Promise<void>;
   onEnableContextMenu: () => Promise<void>;
@@ -331,6 +336,9 @@ type ControlCenterViewProps = {
   ) => Promise<MainWindowCloseBehavior>;
   onInstallSourceChange: (source: "official" | "mirror") => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
+  onWorkspaceWebModeChange: (mode: WorkspaceWebMode) => Promise<unknown>;
+  onWorkspaceWebAutoFallbackChange: (enabled: boolean) => Promise<unknown>;
+  onFallbackWorkspaceWebToOfficial: (reason?: string) => Promise<unknown>;
   onRefreshPowerShellPreflight: () => Promise<PowerShellPreflightSummary>;
   onInstallDependencies: () => Promise<void>;
   onInstallKimi: () => Promise<void>;
@@ -445,6 +453,41 @@ function bridgePlatformLabel(platform: BridgePlatform): string {
     return "微信";
   }
   return "飞书";
+}
+
+function formatWorkspaceWebMode(mode: WorkspaceWebMode): string {
+  return mode === "enhanced_local" ? "本地增强版" : "官方 Web";
+}
+
+function formatEnhancedWebHealth(state: WorkspaceWebSettingsView["health"]["state"]): string {
+  switch (state) {
+    case "ready":
+      return "可用";
+    case "fallback_active":
+      return "已回退";
+    case "missing_assets":
+      return "资源缺失";
+    case "error":
+      return "异常";
+    default:
+      return "未配置";
+  }
+}
+
+function formatEnhancedWebHealthTone(
+  state: WorkspaceWebSettingsView["health"]["state"],
+): "neutral" | "success" | "warning" | "danger" {
+  switch (state) {
+    case "ready":
+      return "success";
+    case "fallback_active":
+    case "missing_assets":
+      return "warning";
+    case "error":
+      return "danger";
+    default:
+      return "neutral";
+  }
 }
 
 function defaultBridgeConnectorLabel(platform: BridgePlatform, index: number): string {
@@ -728,6 +771,8 @@ export function ControlCenterView({
   installSource,
   installSettings,
   installSettingsBusy,
+  workspaceWebSettings,
+  workspaceWebSettingsBusy,
   installMirrorHealthReport,
   installMirrorHealthBusy,
   powershellPreflight,
@@ -768,6 +813,7 @@ export function ControlCenterView({
   onOpenKimiConfigDir,
   onSaveKimiCliApiConfig,
   onSetKimiCliApiAsDefault,
+  onSetKimiLoginAsDefault,
   onPickKimiPath,
   onSavePathAndRetry,
   onEnableContextMenu,
@@ -821,6 +867,9 @@ export function ControlCenterView({
   onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
   onSaveInstallSettings,
+  onWorkspaceWebModeChange,
+  onWorkspaceWebAutoFallbackChange,
+  onFallbackWorkspaceWebToOfficial,
   onRefreshPowerShellPreflight,
   onInstallDependencies,
   onInstallKimi,
@@ -834,7 +883,6 @@ export function ControlCenterView({
   installMessage,
 }: ControlCenterViewProps) {
   const [authCardView, setAuthCardView] = useState<"login" | "api">("login");
-  const [installProbeRequested, setInstallProbeRequested] = useState(false);
   const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
   const [bridgeOverviewPendingConnectorId, setBridgeOverviewPendingConnectorId] =
     useState<string | null>(null);
@@ -1239,25 +1287,6 @@ export function ControlCenterView({
     }
   }, [activeControlSection, shouldRenderInlineBridgeTask]);
 
-  useEffect(() => {
-    if (installProbe) {
-      setInstallProbeRequested(true);
-      return;
-    }
-    if (installProbeRequested || activeControlSection !== "onboarding") {
-      return;
-    }
-    setInstallProbeRequested(true);
-    void onRefreshInstallProbe().catch(() => {
-      // Error state is handled by the caller; keep the one-shot gate latched.
-    });
-  }, [
-    activeControlSection,
-    installProbe,
-    installProbeRequested,
-    onRefreshInstallProbe,
-  ]);
-
   const installSecondaryAction = (
     <Button
       type="button"
@@ -1339,16 +1368,28 @@ export function ControlCenterView({
 
   const authSecondaryAction =
     authCardView === "login" ? (
-      <Button
-        type="button"
-        variant="ghost"
-        icon={<Minus size={15} />}
-        className="cc-action-btn"
-        onClick={() => void onLogoutKimiLogin()}
-        disabled={loginProbeBusy || !canLogoutKimi}
-      >
-        退出登录
-      </Button>
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          icon={<Check size={14} />}
+          className="cc-action-btn"
+          onClick={() => void onSetKimiLoginAsDefault()}
+          disabled={actionBusy || configCenterBusy || configCenterDirty}
+        >
+          设为默认登录
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          icon={<Minus size={15} />}
+          className="cc-action-btn"
+          onClick={() => void onLogoutKimiLogin()}
+          disabled={loginProbeBusy || !canLogoutKimi}
+        >
+          退出登录
+        </Button>
+      </>
     ) : (
       <Button
         type="button"
@@ -1363,7 +1404,7 @@ export function ControlCenterView({
           !kimiApiConfigView?.templateConfigured
         }
       >
-        设为默认
+        设为默认 API
       </Button>
     );
 
@@ -1613,8 +1654,8 @@ export function ControlCenterView({
       await onDeleteBridgeConnector(connectorId);
       setSelectedBridgeConnectorId(nextSelectedConnectorId);
       setBridgeDeleteConfirm(null);
-    } catch (error) {
-      setBridgeConnectorTaskError(`删除机器人失败：${String(error)}`);
+    } catch {
+      setBridgeConnectorTaskError("删除机器人失败，请稍后重试或查看日志。");
     }
   }
 
@@ -2428,22 +2469,21 @@ export function ControlCenterView({
                           <article className="cc-brief-item">
                             <strong>API Key</strong>
                             <span>{kimiApiConfigView?.hasApiKey ? "已保存" : "待填写"}</span>
+                            <Input
+                              id="kimi-api-key-onboarding"
+                              className="cc-brief-inline-input"
+                              type="password"
+                              value={kimiApiKeyInput}
+                              onChange={(event) =>
+                                onKimiApiKeyInputChange(event.currentTarget.value)
+                              }
+                              placeholder={
+                                kimiApiConfigView?.hasApiKey
+                                  ? "已保存，如需替换请重新输入"
+                                  : "sk-..."
+                              }
+                            />
                           </article>
-                        </div>
-                        <div className="cc-workdir-row">
-                          <Input
-                            id="kimi-api-key-onboarding"
-                            type="password"
-                            value={kimiApiKeyInput}
-                            onChange={(event) =>
-                              onKimiApiKeyInputChange(event.currentTarget.value)
-                            }
-                            placeholder={
-                              kimiApiConfigView?.hasApiKey
-                                ? "已保存，如需替换请重新输入"
-                                : "sk-..."
-                            }
-                          />
                         </div>
                         <p className="hint cc-step-meta">
                           保存时会把同一个 API Key 同步写入 provider、search、fetch 三处配置。
@@ -2575,6 +2615,105 @@ export function ControlCenterView({
         </section>
 
         <section className="cc-runtime-columns">
+          <section className="cc-card cc-web-experience-card">
+            <ControlCenterCardHeader
+              title="Web 体验"
+              titleMeta="Kimi Web"
+              titleMetaPlacement="below"
+              statusLabel={formatWorkspaceWebMode(workspaceWebSettings.mode)}
+              statusTone={
+                workspaceWebSettings.mode === "enhanced_local" ? "accent" : "neutral"
+              }
+            />
+            <div className="cc-card-body cc-web-experience-body">
+              <ControlCenterSegmentedControl
+                ariaLabel="Kimi Web 体验模式"
+                className="cc-web-mode-switch"
+                value={workspaceWebSettings.mode}
+                onChange={(value) => {
+                  void onWorkspaceWebModeChange(value);
+                }}
+                disabled={workspaceWebSettingsBusy}
+                items={[
+                  {
+                    value: "official",
+                    label: "官方 Web",
+                    description: "稳定兜底",
+                  },
+                  {
+                    value: "enhanced_local",
+                    label: "本地增强版",
+                    description: "i18n 与桌面优化",
+                  },
+                ]}
+              />
+              <div className="cc-web-experience-grid">
+                <ControlCenterMetricCard
+                  label="增强版健康"
+                  value={formatEnhancedWebHealth(workspaceWebSettings.health.state)}
+                  meta={workspaceWebSettings.health.message}
+                />
+                <ControlCenterMetricCard
+                  label="上游来源"
+                  value={
+                    workspaceWebSettings.sourceCommit
+                      ? workspaceWebSettings.sourceCommit.slice(0, 12)
+                      : "-"
+                  }
+                  meta="MoonshotAI/kimi-cli web/"
+                />
+                <ControlCenterMetricCard
+                  label="最近可用版本"
+                  value={
+                    workspaceWebSettings.lastKnownGoodCommit
+                      ? workspaceWebSettings.lastKnownGoodCommit.slice(0, 12)
+                      : "-"
+                  }
+                  meta={workspaceWebSettings.lastFallbackReason ?? "暂无回退记录"}
+                />
+              </div>
+              <ControlCenterToggleField
+                label="增强版失败时自动回退"
+                description="加载失败或入口超时时自动切回官方 Web，避免阻塞工作区。"
+                checked={workspaceWebSettings.autoFallback}
+                onChange={(checked) => {
+                  void onWorkspaceWebAutoFallbackChange(checked);
+                }}
+                disabled={workspaceWebSettingsBusy}
+              />
+              <div className="cc-web-experience-footer">
+                <ControlCenterStatusBadge
+                  tone={formatEnhancedWebHealthTone(workspaceWebSettings.health.state)}
+                >
+                  {formatEnhancedWebHealth(workspaceWebSettings.health.state)}
+                </ControlCenterStatusBadge>
+                <p className="hint">{workspaceWebSettings.disclaimer}</p>
+              </div>
+              <div className="cc-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  icon={<RefreshCcw size={15} />}
+                  className="cc-action-btn"
+                  onClick={() => void onWorkspaceWebModeChange("enhanced_local")}
+                  disabled={workspaceWebSettingsBusy}
+                >
+                  使用本地增强版
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon={<RefreshCw size={15} />}
+                  className="cc-action-btn"
+                  onClick={() => void onFallbackWorkspaceWebToOfficial("manual_fallback")}
+                  disabled={workspaceWebSettingsBusy}
+                >
+                  回退官方 Web
+                </Button>
+              </div>
+            </div>
+          </section>
+
           <section className="cc-card">
             <header className="cc-card-header">
               <h3>风险摘要</h3>
@@ -2651,6 +2790,24 @@ export function ControlCenterView({
               <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
               <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
               <DiagnosticItem label="Auth Mode" value={formatAuthMode(diagnostics?.authMode)} />
+              <DiagnosticItem
+                label="Workspace Web Mode"
+                value={formatWorkspaceWebMode(diagnostics?.workspaceWebMode ?? "official")}
+              />
+              <DiagnosticItem
+                label="Enhanced Web Health"
+                value={formatEnhancedWebHealth(
+                  diagnostics?.enhancedWebHealth.state ?? "not_configured",
+                )}
+              />
+              <DiagnosticItem
+                label="Enhanced Web Source"
+                value={diagnostics?.enhancedWebSourceCommit ?? "-"}
+              />
+              <DiagnosticItem
+                label="Enhanced Web Fallback"
+                value={diagnostics?.enhancedWebLastFallbackReason ?? "-"}
+              />
               <DiagnosticItem
                 label="Provider API Health"
                 value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)}

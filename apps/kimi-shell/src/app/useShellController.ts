@@ -111,6 +111,9 @@ import type {
   WorkspacePaneState,
   WorkspaceSplitOrder,
   WorkspaceViewKind,
+  WorkspaceWebMode,
+  WorkspaceWebSettingsInput,
+  WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 import {
@@ -170,6 +173,7 @@ const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY = "moonshot_search";
 const KIMI_CODING_PLAN_FETCH_SERVICE_KEY = "moonshot_fetch";
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
+const ENHANCED_WEB_READY_SOURCE = "kimi-app-enhanced-web-ready";
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
@@ -354,6 +358,20 @@ function createDefaultBridgeSettings(): BridgeSettings {
       createDefaultBridgeConnector("feishu"),
       createDefaultBridgeConnector("weixin"),
     ],
+  };
+}
+
+function createDefaultWorkspaceWebSettings(): WorkspaceWebSettingsView {
+  return {
+    mode: "official",
+    autoFallback: true,
+    sourceCommit: undefined,
+    health: {
+      state: "not_configured",
+      message: "尚未读取本地增强版状态。",
+    },
+    disclaimer:
+      "本地增强版基于 MoonshotAI/kimi-cli 开源 Web 构建，由本应用维护；不代表 MoonshotAI 官方背书。",
   };
 }
 
@@ -549,6 +567,9 @@ export function useShellController() {
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
     () => createDefaultInstallSettingsView(),
   );
+  const [workspaceWebSettings, setWorkspaceWebSettings] =
+    useState<WorkspaceWebSettingsView>(() => createDefaultWorkspaceWebSettings());
+  const [workspaceWebSettingsBusy, setWorkspaceWebSettingsBusy] = useState(false);
   const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
     () => createDefaultBridgeSettings(),
   );
@@ -651,6 +672,7 @@ export function useShellController() {
   const [workspaceSplitRatio, setWorkspaceSplitRatio] =
     useState<number>(() => getInitialWorkspaceSplitRatio());
   const [isWorkspaceSplitDragging, setIsWorkspaceSplitDragging] = useState(false);
+  const [workspaceFrameReloadToken, setWorkspaceFrameReloadToken] = useState(0);
   const [workspaceEmbedState, setWorkspaceEmbedState] =
     useState<WorkspaceEmbedState>("idle");
   const [chatEmbedState, setChatEmbedState] = useState<WorkspacePaneState>("idle");
@@ -703,7 +725,7 @@ export function useShellController() {
   const shutdownElapsedBaseRef = useRef<number>(0);
   const shutdownElapsedStartedAtRef = useRef<number>(0);
   const shutdownElapsedTimerRef = useRef<number | null>(null);
-  const workspaceRemoteUrlRef = useRef<string | null>(null);
+  const workspaceFrameLoadIdentityRef = useRef<string | null>(null);
   const chatRemoteUrlRef = useRef<string | null>(null);
   const hashRoute = parseHashRoute(routeHash);
   const isWorkspaceImportPickerRoute = hashRoute === "workspace-import-picker";
@@ -759,6 +781,9 @@ export function useShellController() {
       : workspacePort
         ? `http://127.0.0.1:${workspacePort}`
         : null;
+  const workspaceFrameKey = remoteUrl
+    ? `${remoteUrl}::${workspaceWebSettings.mode}::${workspaceFrameReloadToken}`
+    : "workspace-empty";
   const chatRemoteUrl = KIMI_CHAT_REMOTE_URL;
   const isWorkspaceSplit = workspaceLayoutMode === "split";
   const chatOrigin = useMemo(() => {
@@ -1027,22 +1052,22 @@ export function useShellController() {
   }
 
   function startWorkspacePane(
-    nextUrl: string | null,
-    previousUrl: string | null,
+    nextLoadIdentity: string | null,
+    previousLoadIdentity: string | null,
     setPaneState: Dispatch<SetStateAction<WorkspacePaneState>>,
-    rememberUrl: (url: string | null) => void,
+    rememberLoadIdentity: (identity: string | null) => void,
   ) {
-    if (!nextUrl) {
-      rememberUrl(null);
+    if (!nextLoadIdentity) {
+      rememberLoadIdentity(null);
       setPaneState("idle");
       return null;
     }
 
-    if (previousUrl === nextUrl) {
+    if (previousLoadIdentity === nextLoadIdentity) {
       return null;
     }
 
-    rememberUrl(nextUrl);
+    rememberLoadIdentity(nextLoadIdentity);
     setPaneState("loading");
     return window.setTimeout(() => {
       setPaneState((current) => (current === "ready" ? current : "blocked"));
@@ -2079,6 +2104,19 @@ export function useShellController() {
         return;
       }
 
+      if (payload.source === ENHANCED_WEB_READY_SOURCE) {
+        if (workspaceWebSettings.mode === "enhanced_local") {
+          void invoke<WorkspaceWebSettingsView>("mark_enhanced_web_ready")
+            .then((nextSettings) => {
+              setWorkspaceWebSettings(nextSettings);
+            })
+            .catch(() => {
+              // Health persistence is best-effort; the iframe itself is already usable.
+            });
+        }
+        return;
+      }
+
       if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
         const externalUrl = payload.url?.trim();
         if (!externalUrl) {
@@ -2168,7 +2206,7 @@ export function useShellController() {
 
     window.addEventListener("message", handleWorkspaceBridgeMessage);
     return () => window.removeEventListener("message", handleWorkspaceBridgeMessage);
-  }, [chatOrigin, tauriRuntime, workspaceOrigin]);
+  }, [chatOrigin, tauriRuntime, workspaceOrigin, workspaceWebSettings.mode]);
 
   useEffect(() => {
     if (!pendingPrefill) {
@@ -2189,6 +2227,21 @@ export function useShellController() {
 
     dispatchPendingSessionBridge("workspace_state_change");
   }, [dispatchPendingSessionBridge, status?.state, workspaceEmbedState, workspaceOrigin]);
+
+  useEffect(() => {
+    if (
+      workspaceWebSettings.mode !== "enhanced_local" ||
+      !workspaceWebSettings.autoFallback ||
+      workspaceEmbedState !== "blocked"
+    ) {
+      return;
+    }
+
+    void handleFallbackWorkspaceWebToOfficial("enhanced_web_load_blocked").then(() => {
+      void refreshStatus();
+      void refreshDiagnostics();
+    });
+  }, [workspaceEmbedState, workspaceWebSettings.autoFallback, workspaceWebSettings.mode]);
 
   useEffect(() => {
     if (status?.state === "running") {
@@ -2230,12 +2283,89 @@ export function useShellController() {
     return data;
   }
 
+  async function handleRefreshInstallProbe() {
+    setInstallBusy(true);
+    setInstallMessage("正在检测安装环境...");
+    setActionError(null);
+    try {
+      const data = await refreshInstallProbe();
+      setInstallMessage("环境检测完成。");
+      return data;
+    } catch (error) {
+      const detail = String(error);
+      setInstallMessage(detail);
+      setActionError(detail);
+      throw error;
+    } finally {
+      setInstallBusy(false);
+    }
+  }
+
   async function refreshInstallSettings() {
     const data = await invoke<InstallSettingsView>("get_install_settings");
     setInstallSettings(data);
     setInstallSource(data.preferredSource);
-    void refreshInstallMirrorHealth(data);
     return data;
+  }
+
+  async function refreshWorkspaceWebSettings() {
+    const data = await invoke<WorkspaceWebSettingsView>("get_workspace_web_settings");
+    setWorkspaceWebSettings(data);
+    return data;
+  }
+
+  async function saveWorkspaceWebSettings(input: WorkspaceWebSettingsInput) {
+    setWorkspaceWebSettingsBusy(true);
+    try {
+      const data = await invoke<WorkspaceWebSettingsView>("save_workspace_web_settings", {
+        input,
+      });
+      setWorkspaceWebSettings(data);
+      setActionError(null);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWorkspaceWebSettingsBusy(false);
+    }
+  }
+
+  async function handleWorkspaceWebModeChange(mode: WorkspaceWebMode) {
+    const data = await saveWorkspaceWebSettings({
+      mode,
+      autoFallback: workspaceWebSettings.autoFallback,
+    });
+    setWorkspaceFrameReloadToken((current) => current + 1);
+    setWorkspaceEmbedState("loading");
+    return data;
+  }
+
+  async function handleWorkspaceWebAutoFallbackChange(autoFallback: boolean) {
+    return saveWorkspaceWebSettings({
+      mode: workspaceWebSettings.mode,
+      autoFallback,
+    });
+  }
+
+  async function handleFallbackWorkspaceWebToOfficial(reason = "manual_fallback") {
+    setWorkspaceWebSettingsBusy(true);
+    try {
+      const data = await invoke<WorkspaceWebSettingsView>(
+        "fallback_workspace_web_to_official",
+        { reason },
+      );
+      setWorkspaceWebSettings(data);
+      setWorkspaceFrameReloadToken((current) => current + 1);
+      setWorkspaceEmbedState("loading");
+      setActionError(null);
+      return data;
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setWorkspaceWebSettingsBusy(false);
+    }
   }
 
   async function saveCurrentInstallSettings(input: InstallSettingsView) {
@@ -2244,7 +2374,6 @@ export function useShellController() {
       const data = await invoke<InstallSettingsView>("save_install_settings", { input });
       setInstallSettings(data);
       setInstallSource(data.preferredSource);
-      void refreshInstallMirrorHealth(data);
       return data;
     } finally {
       setInstallSettingsBusy(false);
@@ -2373,8 +2502,8 @@ export function useShellController() {
   }) {
     setActionError(null);
     try {
-      const currentProbe = await refreshInstallProbe();
-      if (alreadyInstalled(currentProbe)) {
+      const currentProbe = installProbe;
+      if (currentProbe && alreadyInstalled(currentProbe)) {
         setInstallMessage(alreadyMessage);
         return currentProbe;
       }
@@ -2404,7 +2533,7 @@ export function useShellController() {
     }
     void refreshOnboarding();
     void refreshInstallSettings();
-    void refreshInstallMirrorHealth();
+    void refreshWorkspaceWebSettings();
     void refreshPowerShellPreflight();
     void refreshBridgeSettings();
     void refreshBridgeStatus();
@@ -2966,6 +3095,22 @@ export function useShellController() {
     }
   }
 
+  async function handleSetKimiLoginAsDefault() {
+    setActionBusy(true);
+    setConfigCenterBusy(true);
+    setActionError(null);
+    try {
+      await invoke("set_kimi_login_as_default");
+      await loadKimiCliConfigCenter();
+      await refreshCoreState();
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setActionBusy(false);
+      setConfigCenterBusy(false);
+    }
+  }
+
   async function handleSaveKimiCliConfigCenter() {
     setActionBusy(true);
     setConfigCenterBusy(true);
@@ -3354,6 +3499,7 @@ export function useShellController() {
   async function handleDeleteBridgeConnector(connectorId: string) {
     setBridgeBusy(true);
     setActionError(null);
+    const deleteFailureMessage = "删除机器人失败，请稍后重试或查看日志。";
     const shouldRestart =
       bridgeStatus.state === "running" ||
       bridgeStatus.state === "starting" ||
@@ -3391,18 +3537,12 @@ export function useShellController() {
       }
 
       if (restartError || refreshError) {
-        const details = [
-          restartError ? `重启 Bridge 失败：${restartError}` : null,
-          refreshError ? `刷新 Bridge 状态失败：${refreshError}` : null,
-        ]
-          .filter(Boolean)
-          .join("；");
-        setActionError(`机器人已删除。${details}`);
+        setActionError("机器人已删除，但刷新运行状态失败，请查看日志后手动重启 IM Bridge。");
       }
       return saved;
     } catch (error) {
-      setActionError(`删除机器人失败：${String(error)}`);
-      throw error;
+      setActionError(deleteFailureMessage);
+      throw new Error(deleteFailureMessage);
     } finally {
       setBridgeBusy(false);
     }
@@ -3734,8 +3874,7 @@ export function useShellController() {
   async function handleInstallDependencies() {
     setActionError(null);
     try {
-      const probe = await refreshInstallProbe();
-      if (probe.gitReady && probe.uvReady && probe.python313Ready) {
+      if (installProbe?.gitReady && installProbe.uvReady && installProbe.python313Ready) {
         setInstallMessage("检测到依赖已安装。");
         window.alert("依赖已安装，无需重复安装。");
         return;
@@ -3758,8 +3897,7 @@ export function useShellController() {
   async function handleInstallKimi() {
     setActionError(null);
     try {
-      const probe = await refreshInstallProbe();
-      if (probe.kimiReady) {
+      if (installProbe?.kimiReady) {
         setInstallMessage("检测到 Kimi CLI 已安装。");
         window.alert("Kimi CLI 已安装，无需重复安装。");
         return;
@@ -4344,11 +4482,11 @@ export function useShellController() {
 
   useEffect(() => {
     const timer = startWorkspacePane(
-      remoteUrl,
-      workspaceRemoteUrlRef.current,
+      remoteUrl ? workspaceFrameKey : null,
+      workspaceFrameLoadIdentityRef.current,
       setWorkspaceEmbedState,
-      (url) => {
-        workspaceRemoteUrlRef.current = url;
+      (identity) => {
+        workspaceFrameLoadIdentityRef.current = identity;
       },
     );
 
@@ -4357,7 +4495,7 @@ export function useShellController() {
         window.clearTimeout(timer);
       }
     };
-  }, [remoteUrl]);
+  }, [remoteUrl, workspaceFrameKey]);
 
   useEffect(() => {
     const timer = startWorkspacePane(
@@ -4586,6 +4724,7 @@ export function useShellController() {
     hotkeyOwnerLabel,
     canOpenWorkspace,
     remoteUrl,
+    workspaceFrameKey,
     workspaceIframeRef,
     stepCompletion,
     kimiApiConfigView,
@@ -4599,6 +4738,8 @@ export function useShellController() {
     installSource,
     installSettings,
     installSettingsBusy,
+    workspaceWebSettings,
+    workspaceWebSettingsBusy,
     powershellPreflight,
     installBusy:
       installSessionSnapshot.status === "starting" ||
@@ -4630,8 +4771,9 @@ export function useShellController() {
     refreshSkillCenterState,
     refreshSkillDiscoveryState,
     refreshWorkspaceSkillManagementState,
-    refreshInstallProbe,
+    refreshInstallProbe: handleRefreshInstallProbe,
     refreshInstallSettings,
+    refreshWorkspaceWebSettings,
     refreshInstallMirrorHealth,
     refreshPowerShellPreflight,
     refreshOnboarding: async () => {
@@ -4649,6 +4791,7 @@ export function useShellController() {
     handleCloseControlTask,
     handleSaveKimiCliApiConfig,
     handleSetKimiCliApiAsDefault,
+    handleSetKimiLoginAsDefault,
     handleConfigCenterDraftChange,
     handleResetConfigCenterDraft,
     handleSaveKimiCliConfigCenter,
@@ -4688,6 +4831,9 @@ export function useShellController() {
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
+    handleWorkspaceWebModeChange,
+    handleWorkspaceWebAutoFallbackChange,
+    handleFallbackWorkspaceWebToOfficial,
     handleInstallDependencies: handleQuickInstallCore,
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,

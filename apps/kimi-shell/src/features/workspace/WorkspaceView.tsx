@@ -22,6 +22,7 @@ type WorkspaceViewProps = {
   workspaceSplitRatio: number;
   isSplitDragging: boolean;
   codeRemoteUrl: string | null;
+  codeFrameKey: string;
   chatRemoteUrl: string;
   workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
@@ -46,6 +47,7 @@ export function WorkspaceView({
   workspaceSplitRatio,
   isSplitDragging,
   codeRemoteUrl,
+  codeFrameKey,
   chatRemoteUrl,
   workspaceIframeRef,
   chatIframeRef,
@@ -207,6 +209,7 @@ export function WorkspaceView({
       {codeRemoteUrl ? (
         <div className="workspace-embed">
           <iframe
+            key={codeFrameKey}
             ref={workspaceIframeRef}
             src={codeRemoteUrl}
             title="Kimi Code Web Workspace"

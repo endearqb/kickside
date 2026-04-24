@@ -1,0 +1,9 @@
+{
+  "variant": "enhanced_local_wrapper",
+  "upstreamRepository": "https://github.com/MoonshotAI/kimi-cli",
+  "upstreamPath": "web/",
+  "upstreamCommit": "1e45df06da698151d2dc29a700722c37432e86ce",
+  "license": "Apache-2.0",
+  "maintainer": "Kimi App",
+  "disclaimer": "本地增强版基于 MoonshotAI/kimi-cli 开源 Web 构建，由本应用维护；不代表 MoonshotAI 官方背书。"
+}

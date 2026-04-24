@@ -69,9 +69,9 @@
 - [x] 撰写 `apps/kimi-shell/docs/release-notes-0.0.42.md`
 - [x] 撰写 `update/updatenote_202604250034.md`
 - [x] 运行本次发版所需验证命令并记录结果
-- [ ] 提交当前工作区改动并推送 `main`
-- [ ] 创建并推送 `v0.0.42` tag
-- [ ] 创建 GitHub release 并上传 `0.0.42` 的 NSIS / MSI 安装包
+- [x] 提交当前工作区改动并推送 `main`
+- [x] 创建并推送 `v0.0.42` tag
+- [x] 创建 GitHub release 并上传 `0.0.42` 的 NSIS / MSI 安装包
 
 ### Review
 - 发版边界：当前版本号已统一到 `0.0.42`，本次发版内容包含两类改动：一是 `kimi-cli/web` 上游源码基线与维护边界落库，二是本地增强版 same-origin 注入的第二阶段中文固定文案扩展；运行时仍保持官方 workspace proxy + 注入模式。
@@ -79,4 +79,7 @@
 - 安装包产物：已确认本地存在 `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.42_x64-setup.exe` 与 `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.42_x64_en-US.msi`，可用于 GitHub release 上传。
 - 自动化验证：`pnpm --dir apps/kimi-shell check:enhanced-web:i18n`、`pnpm --dir apps/kimi-shell check:enhanced-web:compliance`、`pnpm --dir apps/kimi-shell verify:tracked-markdown:no-abs-paths`、`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 已于 2026-04-25 通过。
 - diff 检查：`git diff --check` 已于 2026-04-25 执行，未发现内容级错误，仅剩当前工作区 CRLF 提示。
-- 仍待完成：提交并推送 `main`、创建 `v0.0.42` tag、创建 GitHub release 并上传两个安装包。
+- Git 提交：已创建 `f170ddf release: ship v0.0.42`，并已推送到 `origin/main`。
+- 标签：`v0.0.42` 已创建并推送到 GitHub。
+- Releases：已创建 `Kimi Desktop Shell v0.0.42`，地址为 `https://github.com/endearqb/kimi-app/releases/tag/v0.0.42`；已上传 `0.0.42` 的 NSIS 与 MSI 安装包，且已设置为 latest。
+- 已知限制：本轮仍未完成安装版 UI 点击回归；Rust 测试二进制在当前 Windows 环境仍受既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 影响，未能执行到断言阶段。

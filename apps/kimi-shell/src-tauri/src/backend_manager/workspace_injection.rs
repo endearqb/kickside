@@ -89,22 +89,93 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
 <script data-kimi-shell-enhanced-web>
 (function () {
   const READY_SOURCE = "kimi-app-enhanced-web-ready";
-  const translations = new Map([
-    ["Create a session to begin", "创建会话后开始"],
-    ["Click the + button in the sidebar to start a new session", "点击侧栏的 + 按钮开始新会话"],
-    ["Create new session", "新建会话"],
-    ["Search sessions...", "搜索会话..."],
-    ["Search sessions", "搜索会话"],
-    ["SESSIONS", "会话"],
-    ["Sessions", "会话"],
-    ["Archived", "已归档"],
-    ["Untitled", "未命名"],
-    ["Refresh", "刷新"],
-    ["New Session", "新建会话"],
-    ["New session", "新建会话"],
-    ["Collapse sidebar", "收起侧栏"],
-    ["Expand sidebar", "展开侧栏"]
-  ]);
+  const translationGroups = {
+    sessions_sidebar: [
+      ["Create a session to begin", "创建会话后开始"],
+      ["Click the + button in the sidebar to start a new session", "点击侧栏的 + 按钮开始新会话"],
+      ["Create new session", "新建会话"],
+      ["Search sessions...", "搜索会话..."],
+      ["Search sessions", "搜索会话"],
+      ["SESSIONS", "会话"],
+      ["Sessions", "会话"],
+      ["Archived", "已归档"],
+      ["Untitled", "未命名"],
+      ["Refresh", "刷新"],
+      ["Refresh sessions", "刷新会话"],
+      ["Refresh Sessions", "刷新会话"],
+      ["New Session", "新建会话"],
+      ["New session", "新建会话"],
+      ["New session here", "在此新建会话"],
+      ["Close sidebar", "关闭侧栏"],
+      ["Clear search", "清除搜索"],
+      ["List view", "列表视图"],
+      ["Grouped view", "分组视图"],
+      ["Grouped by folder", "按文件夹分组"],
+      ["Delete session", "删除会话"],
+      ["Archive session", "归档会话"],
+      ["Unarchive session", "取消归档会话"],
+      ["Delete Session", "删除会话"],
+      ["Are you sure you want to delete", "确定要删除"],
+      ["This action cannot be undone.", "此操作无法撤销。"],
+      ["Cancel", "取消"],
+      ["Delete", "删除"],
+      ["Collapse sidebar", "收起侧栏"],
+      ["Expand sidebar", "展开侧栏"]
+    ],
+    create_session_dialog: [
+      ["Create New Session", "新建会话"],
+      ["Search directories or type a new path", "搜索目录或输入新路径"],
+      ["Search directories or type a path...", "搜索目录或输入路径..."],
+      ["No matching directories.", "没有匹配的目录。"],
+      ["Loading directories...", "正在加载目录..."],
+      ["Type a path to start a new session.", "输入路径以开始新会话。"],
+      ["Custom Path", "自定义路径"],
+      ["Current Directory", "当前目录"],
+      ["Recent Directories", "最近目录"],
+      ["Directory Not Found", "目录不存在"],
+      ["The directory", "目录"],
+      ["does not exist. Would you like to create it?", "不存在。是否创建该目录？"],
+      ["Create Directory", "创建目录"]
+    ],
+    message_search: [
+      ["Search Messages", "搜索消息"],
+      ["Search in conversation...", "在当前会话中搜索..."],
+      ["No messages found", "未找到消息"],
+      ["Jump to message", "跳转到消息"],
+      ["User", "用户"],
+      ["Assistant", "助手"],
+      ["Thinking", "思考中"]
+    ],
+    workspace_header: [
+      ["Open sessions sidebar", "打开会话侧栏"],
+      ["Hide workspace files", "隐藏工作区文件"],
+      ["Show workspace files", "显示工作区文件"],
+      ["Search messages", "搜索消息"],
+      ["Fold all blocks", "折叠全部区块"],
+      ["Unfold all blocks", "展开全部区块"],
+      ["Double-click to rename", "双击以重命名"]
+    ],
+    approval_dialog: [
+      ["Approve", "批准"],
+      ["Approving...", "批准中..."],
+      ["Approve for session", "批准本会话内后续操作"],
+      ["Decline", "拒绝"],
+      ["Declining...", "拒绝中..."],
+      ["Decline with feedback", "带反馈拒绝"],
+      ["Cancel feedback", "取消反馈"],
+      ["Tell the model what to do instead...", "告诉模型改为执行什么..."]
+    ],
+    error_boundary: [
+      ["Approval action failed", "批准操作失败"],
+      ["Question response failed", "问题回复失败"],
+      ["Something went wrong", "出现了一些问题"],
+      ["An unexpected error occurred", "发生了未预期的错误"],
+      ["Copied", "已复制"],
+      ["Copy error", "复制错误信息"],
+      ["Try again", "重试"]
+    ]
+  };
+  const translations = new Map(Object.values(translationGroups).flat());
   const attrNames = ["placeholder", "aria-label", "title"];
   let scheduled = false;
 

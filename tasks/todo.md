@@ -287,9 +287,9 @@
 - [x] 新增 `apps/kimi-shell/docs/release-notes-0.0.41.md`
 - [x] 新增今天的 `update/updatenote_20260424*.md`
 - [x] 验证文档、版本号、安装包资产和基础检查
-- [ ] 提交到 `main` 并推送 GitHub
-- [ ] 创建/推送 `v0.0.40`、`v0.0.41` GitHub Releases，并上传对应 NSIS/MSI 资产
-- [ ] 记录发布结果与验证回顾
+- [x] 提交到 `main` 并推送 GitHub
+- [x] 创建/推送 `v0.0.40`、`v0.0.41` GitHub Releases，并上传对应 NSIS/MSI 资产
+- [x] 记录发布结果与验证回顾
 
 ### Plan Confirmation
 - 当前 `tasks/todo.md` 232 行，未超过 300 行，不需要归档。
@@ -306,3 +306,12 @@
 - `pnpm --dir apps/kimi-shell verify:tracked-markdown:no-abs-paths` 通过。
 - `git diff --check` 通过，仅输出当前工作区 CRLF 提示。
 - 已确认本地存在 `0.0.40` / `0.0.41` 的 NSIS 与 MSI 安装包资产。
+
+### Review
+- 发布说明：新增 `apps/kimi-shell/docs/release-notes-0.0.40.md` 与 `apps/kimi-shell/docs/release-notes-0.0.41.md`，分别覆盖本地增强版产品化、增强版同源注入/切换修复、后端模块化和桥接/安装/auth 操作流修正。
+- 更新说明：新增 `update/updatenote_202604241713.md`，合并说明 2026-04-24 的 `v0.0.40` / `v0.0.41` 更新。
+- GitHub：`main` 已推送到 `origin/main`，提交为 `dbb9c6d release: ship v0.0.41`。
+- 标签：`v0.0.40` 与 `v0.0.41` 已推送到 GitHub。
+- Releases：已创建 `Kimi Desktop Shell v0.0.40` 与 `Kimi Desktop Shell v0.0.41`；`v0.0.41` 为 GitHub latest。
+- 资产：每个 release 均已上传对应 NSIS 与 MSI 安装包。
+- 已知限制：本轮未完成安装版 UI 点击回归；Rust 测试二进制在当前 Windows 环境仍受既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 影响，未能执行到断言阶段。

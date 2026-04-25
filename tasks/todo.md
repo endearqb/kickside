@@ -142,9 +142,9 @@
 - [x] 撰写 `apps/kimi-shell/docs/release-notes-0.0.43.md`
 - [x] 撰写 `update/updatenote_202604251248.md`
 - [x] 运行本次发版所需验证命令并记录结果
-- [ ] 提交当前工作区改动并推送 `main`
-- [ ] 创建并推送 `v0.0.43` tag
-- [ ] 创建 GitHub release 并上传 `0.0.43` 的 NSIS / MSI 安装包
+- [x] 提交当前工作区改动并推送 `main`
+- [x] 创建并推送 `v0.0.43` tag
+- [x] 创建 GitHub release 并上传 `0.0.43` 的 NSIS / MSI 安装包
 
 ### Review
 - 发版边界：当前版本号已统一到 `0.0.43`。本次发版内容集中在两块：一是增强版官方 Web 的第三阶段中文注入扩展与左上角品牌标题 `Kimi 小助手` 注入；二是控制中心安装流程区的快捷操作与镜像检测交互调整。
@@ -152,3 +152,6 @@
 - 安装包产物：已确认本地存在 `apps/kimi-shell/src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_0.0.43_x64-setup.exe` 与 `apps/kimi-shell/src-tauri/target/release/bundle/msi/Kimi Desktop Shell_0.0.43_x64_en-US.msi`，可用于 GitHub release 上传。
 - 自动化验证：`pnpm --dir apps/kimi-shell check:enhanced-web:i18n`、`pnpm --dir apps/kimi-shell check:enhanced-web:compliance`、`pnpm --dir apps/kimi-shell verify:tracked-markdown:no-abs-paths`、`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 已于 2026-04-25 通过。
 - diff 检查：`git diff --check` 已于 2026-04-25 执行，未发现内容级错误，仅剩当前工作区 CRLF 提示。
+- Git 提交：已创建 `261a3e6 release: ship v0.0.43`，并已推送到 `origin/main`。
+- 标签：`v0.0.43` 已创建并推送到 GitHub。
+- Releases：已创建 `Kimi Desktop Shell v0.0.43`，地址为 `https://github.com/endearqb/kimi-app/releases/tag/v0.0.43`；已上传 `0.0.43` 的 NSIS 与 MSI 安装包，且已设置为 latest。

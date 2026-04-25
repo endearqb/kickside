@@ -23,6 +23,27 @@
   - `approval-dialog.tsx` 的 `approval.description` / `approval.sender`
   - 服务端错误正文、模型输出正文、用户消息正文
 
+## 当前注入覆盖状态（第三阶段）
+
+- 在第二阶段基础上继续由注入覆盖：
+  - `components/kimi-cli-brand.tsx` 中左上角品牌标题 `Kimi Code`，仅替换可见标题为 `Kimi 小助手`
+  - `components/ai-elements/reasoning.tsx` 中的 `Thought`、`Thinking...`、`Thought for {n}s`
+  - `components/ai-elements/tool.tsx` 中的 `Edit`、`Read`、`Search` 及同类固定工具标签
+  - `features/chat/components/activity-status-indicator.tsx` 中的固定状态文案，如 `Awaiting input`、`Waiting for approval...`
+  - `features/chat/components/chat-prompt-composer.tsx` 中的输入框占位、上传状态、展开/收起、排队发送等固定提示
+  - `features/sessions/sessions.tsx` 中的右键菜单与批量选择条固定文案，如 `Rename`、`Archive`、`Select Multiple`
+  - `features/chat/components/prompt-toolbar/toolbar-context.tsx` 中的 `% context` 与 token 用量说明
+- 允许的动态句式仅限：
+  - `Thought for {n}s`
+  - `{percent}% context`
+  - `{n} selected`
+- 第三阶段仍不在注入范围内：
+  - `components/kimi-cli-brand.tsx` 的 logo 图片 `/logo.png`、版本号文本和外链语义
+  - `question-dialog.tsx` 的 `currentQuestion.*`
+  - `approval-dialog.tsx` 的 `approval.description` / `approval.sender`
+  - 服务端错误正文、模型输出正文、用户消息正文
+  - 文件路径、URL、工具参数本体
+
 ## 适合优先迁到源码 patch 的文本
 
 ### 会话与侧栏

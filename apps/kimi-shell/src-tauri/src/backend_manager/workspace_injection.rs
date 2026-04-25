@@ -90,6 +90,9 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
 (function () {
   const READY_SOURCE = "kimi-app-enhanced-web-ready";
   const translationGroups = {
+    brand_identity: [
+      ["Kimi Code", "Kimi 小助手"]
+    ],
     sessions_sidebar: [
       ["Create a session to begin", "创建会话后开始"],
       ["Click the + button in the sidebar to start a new session", "点击侧栏的 + 按钮开始新会话"],
@@ -122,6 +125,26 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
       ["Collapse sidebar", "收起侧栏"],
       ["Expand sidebar", "展开侧栏"]
     ],
+    ai_reasoning_and_tools: [
+      ["Thought", "思考过程"],
+      ["Thinking...", "思考中..."],
+      ["Copy", "复制"],
+      ["Copied!", "已复制！"],
+      ["Read", "读取"],
+      ["Read Media", "读取媒体"],
+      ["Write", "写入"],
+      ["Edit", "编辑"],
+      ["Find Files", "查找文件"],
+      ["Search", "搜索"],
+      ["Shell", "命令行"],
+      ["Web Search", "网页搜索"],
+      ["Fetch URL", "获取 URL"],
+      ["Agent Task", "代理任务"],
+      ["Create Agent", "创建代理"],
+      ["Think", "思考"],
+      ["Todo List", "待办列表"],
+      ["Send Mail", "发送邮件"]
+    ],
     create_session_dialog: [
       ["Create New Session", "新建会话"],
       ["Search directories or type a new path", "搜索目录或输入新路径"],
@@ -144,7 +167,7 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
       ["Jump to message", "跳转到消息"],
       ["User", "用户"],
       ["Assistant", "助手"],
-      ["Thinking", "思考中"]
+      ["Thinking", "思考模式"]
     ],
     workspace_header: [
       ["Open sessions sidebar", "打开会话侧栏"],
@@ -165,6 +188,54 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
       ["Cancel feedback", "取消反馈"],
       ["Tell the model what to do instead...", "告诉模型改为执行什么..."]
     ],
+    chat_activity_and_composer: [
+      ["Awaiting input", "等待输入"],
+      ["Waiting for approval...", "等待批准..."],
+      ["Connecting...", "连接中..."],
+      ["Loading history...", "加载历史中..."],
+      ["Reading files...", "读取文件中..."],
+      ["Writing files...", "写入文件中..."],
+      ["Editing code...", "编辑代码中..."],
+      ["Running command...", "运行命令中..."],
+      ["Searching files...", "搜索文件中..."],
+      ["Searching content...", "搜索内容中..."],
+      ["Fetching web content...", "获取网页内容中..."],
+      ["Searching the web...", "搜索网络中..."],
+      ["Running agent...", "运行代理中..."],
+      ["An error occurred", "发生错误"],
+      ["Uploading files...", "上传文件中..."],
+      ["Uploading files…", "上传文件中..."],
+      ["Create a session to start...", "创建会话后开始..."],
+      ["Starting environment...", "启动环境中..."],
+      ["Add a follow-up message...", "继续输入后续消息..."],
+      ["Ask anything, / for commands, @ to mention files", "输入任何内容，/ 调出命令，@ 提及文件"],
+      ["Collapse input", "收起输入框"],
+      ["Expand input", "展开输入框"],
+      ["Stop generation", "停止生成"],
+      ["Queue message", "排队发送消息"]
+    ],
+    session_context_menu_and_multiselect: [
+      ["Rename", "重命名"],
+      ["Archive", "归档"],
+      ["Unarchive", "取消归档"],
+      ["Select Multiple", "批量选择"],
+      ["Select all", "全选"],
+      ["Deselect all", "取消全选"],
+      ["Load more", "加载更多"]
+    ],
+    toolbar_context_usage: [
+      ["Model context usage", "模型上下文占用"],
+      ["Input Tokens", "输入 Token"],
+      ["Output Tokens", "输出 Token"],
+      ["Regular", "常规"],
+      ["Cache Read", "缓存读取"],
+      ["Cache Write", "缓存写入"],
+      ["Total Input", "总输入"],
+      ["Generated", "已生成"],
+      ["Tokens processed without cache", "未命中缓存处理的 Token"],
+      ["Tokens loaded from cache", "从缓存读取的 Token"],
+      ["Tokens written to cache", "写入缓存的 Token"]
+    ],
     error_boundary: [
       ["Approval action failed", "批准操作失败"],
       ["Question response failed", "问题回复失败"],
@@ -183,9 +254,28 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function translatePattern(value) {
+    let match = value.match(/^Thought for (\d+)s$/);
+    if (match) {
+      return "思考了 " + match[1] + " 秒";
+    }
+
+    match = value.match(/^(\d+(?:\.\d+)?)% context$/i);
+    if (match) {
+      return match[1] + "% 上下文";
+    }
+
+    match = value.match(/^(\d+)\s+selected$/i);
+    if (match) {
+      return "已选 " + match[1] + " 项";
+    }
+
+    return "";
+  }
+
   function translated(value) {
     const key = normalizeText(value);
-    return translations.get(key) || "";
+    return translations.get(key) || translatePattern(key);
   }
 
   function markEnhancementContext(element, originalText) {

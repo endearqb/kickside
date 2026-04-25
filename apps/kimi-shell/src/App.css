@@ -2001,6 +2001,16 @@
   gap: 10px 16px;
 }
 
+.cc-install-primary-action-stack {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.cc-install-secondary-task-actions .cc-action-btn {
+  min-width: 104px;
+}
+
 .cc-install-danger-actions {
   padding-left: 16px;
   border-left: 1px solid color-mix(in srgb, var(--error) 22%, var(--chrome-border));
@@ -6792,6 +6802,10 @@ input:focus {
   .cc-install-primary-action-groups {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .cc-install-primary-action-stack {
+    justify-items: start;
   }
 
   .cc-install-danger-actions {

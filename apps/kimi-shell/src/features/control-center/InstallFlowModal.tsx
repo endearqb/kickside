@@ -364,7 +364,6 @@ export function InstallFlowTaskContent({
     () => catalog?.tasks.find((task) => task.id === session.taskId),
     [catalog, session.taskId],
   );
-  const optionalTasks = catalog?.tasks.filter((task) => task.group === "optional") ?? [];
   const isBusy =
     session.status === "starting" ||
     session.status === "running" ||
@@ -373,6 +372,8 @@ export function InstallFlowTaskContent({
   const primaryTask = catalog?.tasks.find((task) => task.id === primaryTaskId);
   const quickInstallAvailability = getTaskAvailability("quick_install_core", probe, isBusy);
   const upgradeAvailability = getTaskAvailability("upgrade_kimi", probe, isBusy);
+  const installGitAvailability = getTaskAvailability("install_git", probe, isBusy);
+  const installNodejsAvailability = getTaskAvailability("install_nodejs", probe, isBusy);
   const uninstallAvailability = getTaskAvailability("uninstall_kimi", probe, isBusy);
   const activeTaskForCommands = activeTask ?? primaryTask;
   const currentStepCommand =
@@ -503,26 +504,50 @@ export function InstallFlowTaskContent({
             <p>保留安装、升级、卸载和详细选项入口。</p>
           </div>
           <div className="cc-install-primary-action-groups">
-            <div className="cc-install-flow-actions">
-              <Button
-                type="button"
-                className="cc-action-btn"
-                onClick={() => void onStartTask("quick_install_core")}
-                disabled={quickInstallAvailability.disabled}
-                title={quickInstallAvailability.reason}
-              >
-                一键安装 Kimi CLI
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="cc-action-btn"
-                onClick={() => void onStartTask("upgrade_kimi")}
-                disabled={upgradeAvailability.disabled}
-                title={upgradeAvailability.reason}
-              >
-                升级 Kimi
-              </Button>
+            <div className="cc-install-primary-action-stack">
+              <div className="cc-install-flow-actions">
+                <Button
+                  type="button"
+                  className="cc-action-btn"
+                  onClick={() => void onStartTask("quick_install_core")}
+                  disabled={quickInstallAvailability.disabled}
+                  title={quickInstallAvailability.reason}
+                >
+                  一键安装 Kimi CLI
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="cc-action-btn"
+                  onClick={() => void onStartTask("upgrade_kimi")}
+                  disabled={upgradeAvailability.disabled}
+                  title={upgradeAvailability.reason}
+                >
+                  升级 Kimi
+                </Button>
+              </div>
+              <div className="cc-install-flow-actions cc-install-secondary-task-actions">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="cc-action-btn"
+                  onClick={() => void onStartTask("install_git")}
+                  disabled={installGitAvailability.disabled}
+                  title={installGitAvailability.reason}
+                >
+                  安装 Git
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="cc-action-btn"
+                  onClick={() => void onStartTask("install_nodejs")}
+                  disabled={installNodejsAvailability.disabled}
+                  title={installNodejsAvailability.reason}
+                >
+                  安装 Node.js
+                </Button>
+              </div>
             </div>
             <div className="cc-install-flow-actions cc-install-danger-actions">
               <Button
@@ -569,13 +594,7 @@ export function InstallFlowTaskContent({
                 <button
                   type="button"
                   className={`cc-source-switch-btn ${installSource === "mirror" ? "active" : ""}`}
-                  onClick={() => {
-                    onSourceChange("mirror");
-                    void onRefreshMirrorHealth({
-                      ...mirrorDraft,
-                      preferredSource: "mirror",
-                    }).catch(() => {});
-                  }}
+                  onClick={() => onSourceChange("mirror")}
                   disabled={isBusy}
                 >
                   镜像源
@@ -583,6 +602,7 @@ export function InstallFlowTaskContent({
               </div>
             </div>
 
+            {installSource === "mirror" ? (
             <div className="cc-install-mirror-config-card">
               <div className="cc-install-console-head">
                 <div>
@@ -598,12 +618,12 @@ export function InstallFlowTaskContent({
                     onClick={() =>
                       void onRefreshMirrorHealth({
                         ...mirrorDraft,
-                        preferredSource: installSource,
+                        preferredSource: "mirror",
                       }).catch(() => {})
                     }
                     disabled={installMirrorHealthBusy || isBusy}
                   >
-                    重新检测
+                    检测镜像源
                   </Button>
                   <Button
                     type="button"
@@ -732,6 +752,7 @@ export function InstallFlowTaskContent({
                 </div>
               ) : null}
             </div>
+            ) : null}
 
             <div className="cc-install-console-head">
               <div>
@@ -817,36 +838,6 @@ export function InstallFlowTaskContent({
               </div>
             </div>
 
-            {optionalTasks.length ? (
-              <div className="cc-install-mirror-config-card">
-                <div className="cc-install-console-head">
-                  <div>
-                    <h4>可选增强</h4>
-                    <p>Git / Node.js 仅在需要时安装。</p>
-                  </div>
-                </div>
-                <div className="cc-install-task-list">
-                  {optionalTasks.map((task) => {
-                    const availability = getTaskAvailability(task.id, probe, isBusy);
-                    return (
-                      <div key={task.id} className="cc-install-task-item">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="cc-action-btn"
-                          onClick={() => void onStartTask(task.id)}
-                          disabled={availability.disabled}
-                          title={availability.reason}
-                        >
-                          {task.title}
-                        </Button>
-                        <p className="hint cc-install-task-hint">{availability.reason ?? " "}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : null}
       </section>

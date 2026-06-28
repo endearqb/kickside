@@ -52,6 +52,7 @@ pnpm tauri build
 可选检查命令：
 
 ```bash
+pnpm test
 pnpm check:nfr:security
 pnpm check:nfr:port-conflict
 pnpm check:nfr:reliability

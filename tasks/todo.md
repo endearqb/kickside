@@ -1,3 +1,19 @@
+# Workspace Grid v1 foundation
+
+## Checklist
+- [x] 读取目标文件，确认 Workspace Grid 先落 WG-0/WG-1 基础切片
+- [x] 建立 README First、架构和设计系统上下文
+- [x] 确认 DR-A：Workspace Grid v1 采用 `zustand` 作为独立状态切片试点
+- [x] 确认 DR-B：v1 外部页承载只承诺可见 fallback + 外部打开，不要求自动子 Webview
+- [x] 新增 Vitest 基线、`pnpm test`、workspace-grid 状态/迁移/URL 纯逻辑和单测
+- [x] 运行 `pnpm test`、`tsc --noEmit` 与 `git diff --check`
+
+## Review
+- 本轮只完成 WG-0/WG-1 的最小可验证基础：`workspace-grid` 新目录包含 Pane/Slot 分离类型、预设、旧双窗 localStorage 迁移、zustand store、selector、`paneUrl` 与 `urlSafety`。
+- 已新增 accepted ADR：`.ai/decisions/2026-06-28-workspace-grid-v1.md`。
+- 现有 `WorkspaceView` 和 `useShellController` 未接入新 store，双窗 UI 行为保持不变；WG-2 才替换渲染器。
+- 验证结果：`pnpm --dir apps/kimi-shell test` 通过；`.\node_modules\.bin\tsc.cmd --noEmit`（`apps/kimi-shell`）通过；`git diff --check` 通过，仅有既有 CRLF 提示。
+
 # kimi-code v3 迁移与 IM Bridge 安全门禁
 
 ## Checklist

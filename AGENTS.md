@@ -1,11 +1,16 @@
-rg 在这个环境里起不来，用 PowerShell 直接抓取对应片段
+## 总纲
+
+本项目的 AI 协作原则是：先理解，再行动；先收敛不确定性，再修改文件；先尊重已有上下文，再生成新内容。
+
+`.ai/CONSTITUTION.md` 是项目级治理宪法，规定抽象、单向门决策、验证、完成状态和重构治理的最高长期规则。本文件 `AGENTS.md` 是 Agent 的可执行工作规程。Agent 的目标不是最快产生代码，而是在最小误解、最小破坏、最小副作用的前提下完成用户目标。README First 负责确保 Agent 先读到项目上下文，`.ai/architecture/` 负责提供复杂任务所需的长期架构事实入口，本质不确定性最小化协议负责把 prompt 转换为可验证的任务契约。
+
+---
 
 ## Design System
 Always read DESIGN.md before making any visual or UI decisions.
 All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.
-
 
 ## 工作流编排
 
@@ -22,7 +27,6 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 - 每个子代理专注单一任务，确保执行聚焦
 
 ### 3. 自我改进循环
-- 每次被用户纠正后：将经验规律更新到 `tasks/lessons.md`
 - 为自己制定规则，防止重犯同类错误
 - 持续迭代这些经验，直到错误率下降
 - 每次会话开始时回顾与当前项目相关的经验
@@ -47,14 +51,85 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 
 ---
 
-## 任务管理
+## 本质不确定性最小化协议
 
-1. **先写计划**：将计划写入 `tasks/todo.md`，包含可勾选的条目，如果 `todo.md` 超过300行，请先把当前的 `todo.md`  重命名增加日期后缀，备份到 `tasks/history/` 后新建 `todo.md`，并保留原todo文档中最新的20行
-2. **确认计划**：开始实施前进行检查确认
-3. **追踪进度**：完成后逐项标记
-4. **说明变更**：每步提供高层级摘要
-5. **记录结果**：在 `tasks/todo.md` 中添加回顾章节
-6. **沉淀经验**：被纠正后更新 `tasks/lessons.md`
+本项目要求 AI 在面对任何用户 prompt 时，不得直接把 prompt 当作完整需求执行。AI 必须先尽可能降低任务中的本质不确定性，再进行文件查询、创建、修改或删除。
+
+本协议的目标不是消除所有不确定性，而是通过阅读上下文、识别假设、缩小范围、验证约束和记录决策，尽可能减少因误解需求、误判边界、忽略隐含约定而造成的错误修改。
+
+### 1. 核心定义
+
+#### 1.1 本质不确定性
+
+本质不确定性指来自问题本身、用户意图、业务语义、架构权衡、接口契约、数据含义、验收标准和长期维护影响的不确定性。
+
+常见表现包括：
+
+1. 用户真正想解决的问题不清楚。
+2. prompt 只描述了操作，没有描述目标。
+3. 需求边界不明确。
+4. 业务规则或领域概念缺失。
+5. 多种实现方案都合理，但取舍标准不清楚。
+6. 修改可能影响公共 API、数据结构、状态流、权限、性能或安全性。
+7. 现有 README、代码、测试或实际行为之间存在冲突。
+8. 用户要求的结果与项目已有约定不一致。
+9. 验收标准不明确，无法判断“做到什么程度算完成”。
+
+#### 1.2 偶然不确定性
+
+偶然不确定性指由于 AI 尚未读取文件、尚未搜索代码、尚未查看 README、尚未理解项目结构、尚未检查测试或尚未运行验证命令而产生的不确定性。
+
+偶然不确定性必须优先通过工程动作消除，包括：
+
+1. 阅读 `AGENTS.md`。
+2. 阅读相关路径上的 `README.md`。
+3. 搜索相关代码、类型、测试、配置和文档。
+4. 检查调用方和依赖方。
+5. 查看已有命名、目录结构和实现模式。
+6. 运行或说明必要的验证命令。
+
+AI 不得把可以通过读取项目上下文解决的问题，转嫁给用户反复确认。
+
+### 2. Prompt 到任务契约的转换
+
+AI 在执行任务前，必须把用户 prompt 转换为内部任务契约。
+
+任务契约至少包括：
+
+```txt
+1. 用户目标：
+   用户真正想达成什么结果？
+
+2. 直接交付物：
+   本次需要输出文档、修改代码、创建文件、删除文件，还是只提供建议？
+
+3. 影响范围：
+   涉及哪些目录、文件、模块、接口、测试或配置？
+
+4. 非目标：
+   哪些事情本次不应该做？
+
+5. 约束条件：
+   是否存在技术栈、架构、风格、性能、安全、兼容性或业务约束？
+
+6. 验收标准：
+   如何判断本次任务已经完成？
+
+7. 不确定性清单：
+   当前还有哪些会影响实现选择的不确定点？
+
+8. 假设清单：
+   如果无法完全确认，AI 准备基于哪些保守假设继续执行？
+
+9. 架构事实入口：
+   本次是否需要读取 `.ai/architecture/`，需要读取哪些主题文档？
+
+10. 验证入口：
+   本次完成后应运行哪些最小必要验证？
+
+11. 文档触发：
+   是否需要更新 README、`.ai/architecture/`、`.ai/decisions/`、`.ai/changes/`？
+
 
 ---
 
@@ -63,3 +138,161 @@ In QA mode, flag any code that doesn't match DESIGN.md.
 - **简洁优先**：每次改动尽可能简单，影响尽量少的代码
 - **杜绝懒惰**：找到根本原因，不打临时补丁，保持高级开发者标准
 - **最小影响**：变更只触及必要之处，避免引入新 Bug
+
+---
+
+## README First 项目上下文规则
+
+本仓库采用 README First 机制。任何 AI Agent 在读取、分析、修改、创建或删除项目文件前，都必须先建立文档上下文，避免绕过目录职责、重复实现或破坏既有边界。
+
+`.ai/CONSTITUTION.md` 规定项目治理宪法；`README_First.md` 解释 README First 原则和文档分层；本文件 `AGENTS.md` 规定可执行规则。`README_FIRST_EXECUTION_PLAN.md` 是 README First 初始化历史执行方案，不作为日常规则入口。
+
+### 1. 必读顺序
+
+执行文件操作前必须依次阅读：
+
+1. 根目录 `AGENTS.md`。
+2. 根目录 `.ai/CONSTITUTION.md`。
+3. 根目录 `README_First.md`。
+4. 根目录 `README.md`。
+5. 必要的 `.ai/architecture/` 架构事实文档。
+6. 当前任务涉及路径上的目录 `README.md`，从上到下读取。
+7. 与任务直接相关的源代码、配置、测试、调用方或文档。
+
+例如修改 `hte-v2/apps/web/src/features/plant/ui/PlantPage.tsx` 时，应先阅读 `AGENTS.md`、`.ai/CONSTITUTION.md`、`README_First.md`、根 README；若涉及 UI、权限、API、CI 或架构边界，还应读取 `.ai/architecture/` 对应主题；再读取 `hte-v2/README.md`、`hte-v2/apps/README.md`、`hte-v2/apps/web/README.md`、`hte-v2/apps/web/src/README.md`、`hte-v2/apps/web/src/features/README.md`、`hte-v2/apps/web/src/features/plant/README.md`。
+
+如果某一级目录没有 README，继续读取其上级 README，并基于真实文件结构判断职责；不得凭空假设目录约定。
+
+### 1.1 `.ai/architecture` 读取触发条件
+
+以下任务必须先读取 `.ai/architecture/README.md`，再按主题读取对应文档：
+
+1. 3 步以上或涉及架构权衡的复杂任务。
+2. 涉及 API、OpenAPI、sqlc、migration、权限、授权、CI gate、evidence、数据流、模块拆分或公共类型的任务。
+3. 需要判断当前系统事实、目标方向、已知缺口、豁免规则或验证入口的任务。
+
+主题入口：
+
+- 当前事实与缺口：`.ai/architecture/current-state.md`
+- 模块职责与系统地图：`.ai/architecture/module-map.md`
+- 依赖边界：`.ai/architecture/dependency-boundaries.md`
+- 验证命令：`.ai/architecture/verification-gates.md`
+- 权限和 ontology：`.ai/architecture/authorization-ontology.md`
+
+### 2. 规则优先级
+
+当不同文档说明存在冲突时，先区分规范权威与事实权威。
+
+规范权威优先级如下：
+
+1. `.ai/CONSTITUTION.md` 的项目宪法规则。
+2. 根目录 `AGENTS.md` 的可执行工作规程。
+3. `.ai/decisions/` 中 accepted ADR。
+4. 距离目标文件最近的目录 README。
+5. 上级目录 README、领域规范和设计系统文档。
+
+事实权威优先级如下：
+
+1. 运行结果、数据库结构、自动化测试和 CI gate。
+2. OpenAPI、migration、schema、generated code 等可执行契约。
+3. 源码。
+4. `.ai/architecture/` 当前事实摘要。
+5. README、`.ai/changes/` 和计划文档。
+
+如果 README 与代码事实冲突，必须先指出冲突，再决定是更新 README 还是修正代码，不得静默忽略。
+
+### 3. 查询、分析、增删改查前检查
+
+查询文件或回答问题前必须先阅读相关 README，并基于 README 与实际文件内容回答；不得把未读取上下文的推测当作项目事实。
+
+新增文件前必须确认：
+
+1. 当前目录是否允许新增此类文件。
+2. 是否已有类似功能、工具或测试。
+3. 命名、导出、测试、依赖管理是否符合 README 约定。
+4. 是否需要同步更新目录 README。
+
+修改文件前必须确认：
+
+1. 修改是否违反当前目录职责边界。
+2. 是否影响公共 API、数据结构、状态管理、路由、配置或测试。
+3. 是否需要同步修改调用方、测试、文档或类型定义。
+
+删除文件前必须确认：
+
+1. 文件是否仍被引用。
+2. 删除后是否需要更新索引、导出、测试、文档或 README。
+3. 删除是否会破坏目录 README 中描述的职责或约定。
+
+### 4. 修改完成后的记录
+
+每次完成修改后，普通修改记录写入：
+
+```txt
+.ai/changes/YYYY-MM-DD.md
+```
+
+记录格式：
+
+```md
+## YYYY-MM-DD-HH - 简短标题
+
+- 用户目标：
+- 涉及目录：
+- 修改内容：
+- 修改原因：
+- 本次已消除的不确定性：
+- 本次采用的关键假设：
+- 剩余不确定性：
+- 影响范围：
+- 验证方式：
+- 是否更新 README：
+- 是否更新 `.ai/architecture`：
+- 是否需要新增或更新 `.ai/decisions`：
+- 后续注意事项：
+```
+
+只有当目录职责、公共接口、依赖边界、文件组织方式、运行方式或长期维护规则发生变化时，才同步更新对应目录 README。普通 bugfix、文案、局部样式、内部实现重构通常只记录到 `.ai/changes/`。
+
+长期架构决策、跨目录约定和技术路线写入：
+
+```txt
+.ai/decisions/
+```
+
+### 5. README 更新触发条件
+
+以下情况必须更新对应目录 README：
+
+1. 新增或删除核心文件。
+2. 改变目录职责。
+3. 改变公共 API、导出方式、数据结构或模块边界。
+4. 新增、废弃或修改重要约定。
+5. 引入新的依赖、构建方式、测试方式或运行方式。
+6. 修改会影响未来 AI 或开发者理解该目录。
+
+### 6. 禁止行为
+
+AI 不得：
+
+1. 在未阅读相关 README 的情况下修改文件。
+2. 绕过目录约定直接新增文件。
+3. 删除 README 中标记为核心或受保护的文件。
+4. 在 README 中堆积无长期价值的流水账。
+5. 修改 README 以掩盖错误实现。
+6. 忽略 README 与实际代码之间的冲突。
+7. 将密钥、令牌、密码、私有凭据或敏感配置写入 README 或 `.ai/changes/`。
+
+### 7. 标准执行流程
+
+```txt
+1. 定位任务影响范围
+2. 阅读 AGENTS.md
+3. 阅读 .ai/CONSTITUTION.md、README_First.md、根 README 和相关路径 README
+4. 复杂任务或架构/API/权限/CI/数据流相关任务，读取 .ai/architecture 对应主题
+5. 检查 README、.ai/architecture 与实际文件是否一致
+6. 执行必要的增删改查
+7. 运行或说明验证方式
+8. 将普通修改写入 .ai/changes/YYYY-MM-DD.md
+9. 如涉及宪法规则、长期规则、架构事实或决策变化，更新 .ai/CONSTITUTION.md、README、.ai/architecture 或 .ai/decisions
+```

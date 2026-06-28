@@ -14,7 +14,7 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 
 ## Key Highlights
 
-- Persistent desktop shell for `Kimi Code Web` and `Kimi Chat`, with Workspace Grid presets, resizable saved layouts, external WebviewWindow fallback, and view switching
+- Persistent desktop shell for `Kimi Code Web` and `Kimi Chat`, with Workspace Grid presets, resizable saved layouts, embedded external Webview panes, WebviewWindow fallback, and view switching
 - Windows Explorer context-menu launch for folders, single files, and multi-file selections, with folder handoff and file-to-workspace import
 - Guided Quick Setup flow for first-run onboarding and everyday recovery tasks
 - Built-in install and upgrade center with PowerShell preflight checks and dependency status

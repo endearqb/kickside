@@ -1,4 +1,10 @@
-import { useEffect, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import {
   Code2,
   ExternalLink,
@@ -14,6 +20,11 @@ import {
 } from "lucide-react";
 import type { WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import {
+  createEmbeddedExternalWebview,
+  type EmbeddedExternalWebviewBounds,
+  type EmbeddedExternalWebviewController,
+} from "@/services/externalWebviewService";
 import { buildCodePaneUrl } from "./paneUrl";
 import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
 
@@ -256,8 +267,16 @@ function PaneContent({
   onOpenTauriWebviewUrl,
   onResumePane,
 }: PaneContentProps) {
+  const embedHostRef = useRef<HTMLDivElement | null>(null);
+  const embeddedControllerRef =
+    useRef<EmbeddedExternalWebviewController | null>(null);
   const [externalState, setExternalState] =
     useState<WorkspacePaneState>("loading");
+  const [embeddedStatus, setEmbeddedStatus] = useState<
+    "idle" | "opening" | "active" | "failed"
+  >("idle");
+  const [embeddedError, setEmbeddedError] = useState("");
+  const sourceUrl = source.url ?? "";
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -271,6 +290,94 @@ function PaneContent({
 
     return () => window.clearTimeout(timer);
   }, [pane.id, pane.kind, source.url]);
+
+  useEffect(() => {
+    setEmbeddedStatus("idle");
+    setEmbeddedError("");
+    return () => {
+      void closeEmbeddedController(embeddedControllerRef).catch(() => undefined);
+    };
+  }, [pane.id, sourceUrl]);
+
+  useEffect(() => {
+    if (
+      embeddedStatus === "idle" ||
+      pane.mountPolicy === "eager" ||
+      (pane.mountPolicy === "on-focus" && active)
+    ) {
+      return;
+    }
+
+    void closeEmbeddedController(embeddedControllerRef)
+      .then(() => setEmbeddedStatus("idle"))
+      .catch((error) => {
+        setEmbeddedStatus("failed");
+        setEmbeddedError(`嵌入式 Webview 关闭失败：${formatError(error)}`);
+      });
+  }, [active, embeddedStatus, pane.mountPolicy]);
+
+  useEffect(() => {
+    if (embeddedStatus !== "active") {
+      return;
+    }
+
+    const host = embedHostRef.current;
+    const controller = embeddedControllerRef.current;
+    if (!host || !controller) {
+      return;
+    }
+
+    const sync = () => {
+      const nextHost = embedHostRef.current;
+      const nextController = embeddedControllerRef.current;
+      if (!nextHost || !nextController) {
+        return;
+      }
+      void nextController
+        .sync(rectToEmbeddedBounds(nextHost.getBoundingClientRect()))
+        .catch((error) => {
+          setEmbeddedStatus("failed");
+          setEmbeddedError(`嵌入式 Webview 同步失败：${formatError(error)}`);
+        });
+    };
+
+    sync();
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+    resizeObserver?.observe(host);
+    window.addEventListener("resize", sync);
+    window.addEventListener("scroll", sync, true);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("scroll", sync, true);
+    };
+  }, [embeddedStatus, pane.id, sourceUrl]);
+
+  async function handleOpenEmbeddedWebview() {
+    const host = embedHostRef.current;
+    if (!host || !sourceUrl) {
+      return;
+    }
+
+    setEmbeddedStatus("opening");
+    setEmbeddedError("");
+
+    try {
+      await closeEmbeddedController(embeddedControllerRef);
+      embeddedControllerRef.current = await createEmbeddedExternalWebview({
+        url: sourceUrl,
+        title: source.title,
+        bounds: rectToEmbeddedBounds(host.getBoundingClientRect()),
+      });
+      setExternalState("ready");
+      setEmbeddedStatus("active");
+    } catch (error) {
+      setEmbeddedStatus("failed");
+      setEmbeddedError(`嵌入式 Webview 打开失败：${formatError(error)}`);
+    }
+  }
 
   if (!source.url) {
     return (
@@ -302,8 +409,6 @@ function PaneContent({
       </div>
     );
   }
-
-  const sourceUrl = source.url;
 
   if (
     pane.mountPolicy === "suspended" ||
@@ -353,7 +458,17 @@ function PaneContent({
   const loadState = pane.kind === "external" ? externalState : source.loadState;
 
   return (
-    <div className="workspace-embed">
+    <div
+      ref={embedHostRef}
+      className={`workspace-embed${
+        embeddedStatus === "active" ? " is-native-webview" : ""
+      }`}
+    >
+      {embeddedStatus === "active" ? (
+        <div className="workspace-native-webview-host" aria-live="polite">
+          <p>{source.title} 已由嵌入式 Webview 承载</p>
+        </div>
+      ) : null}
       <iframe
         key={source.frameKey}
         ref={source.iframeRef}
@@ -404,15 +519,29 @@ function PaneContent({
                 在浏览器打开
               </Button>
               {pane.kind === "external" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  icon={<Globe2 size={14} />}
-                  className="cc-action-btn cc-doc-btn"
-                  onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
-                >
-                  在应用窗口打开
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<Globe2 size={14} />}
+                    className="cc-action-btn cc-doc-btn"
+                    onClick={() => {
+                      void handleOpenEmbeddedWebview();
+                    }}
+                    disabled={embeddedStatus === "opening"}
+                  >
+                    {embeddedStatus === "opening" ? "正在嵌入" : "在窗格内打开"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<Globe2 size={14} />}
+                    className="cc-action-btn cc-doc-btn"
+                    onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
+                  >
+                    在应用窗口打开
+                  </Button>
+                </>
               ) : null}
               {pane.kind === "code" ? (
                 <Button
@@ -426,11 +555,35 @@ function PaneContent({
                 </Button>
               ) : null}
             </div>
+            {embeddedStatus === "failed" && embeddedError ? (
+              <p className="workspace-fallback-error">{embeddedError}</p>
+            ) : null}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+function rectToEmbeddedBounds(rect: DOMRect | DOMRectReadOnly): EmbeddedExternalWebviewBounds {
+  return {
+    x: rect.left,
+    y: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+async function closeEmbeddedController(
+  controllerRef: MutableRefObject<EmbeddedExternalWebviewController | null>,
+): Promise<void> {
+  const controller = controllerRef.current;
+  controllerRef.current = null;
+  await controller?.close();
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface PaneSourceInput {

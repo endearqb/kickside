@@ -3,12 +3,19 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
-import { openExternalWebviewWindow } from "@/services/externalWebviewService";
+import {
+  createEmbeddedExternalWebview,
+  openExternalWebviewWindow,
+} from "@/services/externalWebviewService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
 import { WorkspaceGridView } from "./WorkspaceGridView";
 
 vi.mock("@/services/externalWebviewService", () => ({
+  createEmbeddedExternalWebview: vi.fn(async () => ({
+    close: vi.fn(async () => undefined),
+    sync: vi.fn(async () => undefined),
+  })),
   openExternalWebviewWindow: vi.fn(async () => undefined),
 }));
 
@@ -156,6 +163,49 @@ describe("WorkspaceGridView", () => {
     expect(openExternalWebviewWindow).toHaveBeenCalledWith({
       url: "https://example.com/path",
       title: "example.com",
+    });
+  });
+
+  it("embeds blocked external panes in a child Tauri webview", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "prompt").mockReturnValue("https://example.com/path#secret");
+    useWorkspaceGridStore.getState().setPreset("1x3");
+    render(<WorkspaceGridView {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
+    const embedHosts = document.querySelectorAll(".workspace-embed");
+    const embedHost = embedHosts[embedHosts.length - 1] as HTMLDivElement;
+    Object.defineProperty(embedHost, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        width: 420,
+        height: 240,
+        top: 20,
+        right: 430,
+        bottom: 260,
+        left: 10,
+        x: 10,
+        y: 20,
+        toJSON: () => ({}),
+      }),
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(8_000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "在窗格内打开" }));
+    });
+
+    expect(createEmbeddedExternalWebview).toHaveBeenCalledWith({
+      url: "https://example.com/path",
+      title: "example.com",
+      bounds: {
+        x: 10,
+        y: 20,
+        width: 420,
+        height: 240,
+      },
     });
   });
 });

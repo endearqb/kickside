@@ -2829,6 +2829,28 @@ input:focus {
   min-height: 0;
 }
 
+.workspace-embed.is-native-webview .workspace-iframe {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.workspace-native-webview-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  color: var(--text-secondary);
+  background: var(--surface);
+}
+
+.workspace-native-webview-host p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .workspace-stage {
   width: 100%;
   height: 100%;
@@ -3248,6 +3270,10 @@ input:focus {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.workspace-fallback-error {
+  color: var(--error);
 }
 
 .workspace-empty {

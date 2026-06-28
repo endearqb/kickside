@@ -1,3 +1,16 @@
+# Workspace Grid embedded external Webview
+
+## Checklist
+- [x] 增加 Tauri v2 子 `Webview` service，复用现有 `urlSafety`
+- [x] 外部页 blocked fallback 增加“在窗格内打开”
+- [x] 子 Webview 根据 pane bounds 创建，并在 resize/scroll/source change/unmount 时同步或销毁
+- [x] 给 main capability 增加 create/focus/position/size/close 子 Webview 权限
+- [x] 组件测试覆盖 iframe 超时后调用嵌入式子 Webview
+
+## Review
+- 本轮推进 WG-7 的窗格内承载方案：被 iframe 阻止的外部页可选择嵌入式 Tauri 子 Webview，独立 WebviewWindow 仍作为退路。
+- 仍未解决 per-pane localStorage namespace；真实 Tauri 桌面中 z-order/focus/DPI 行为还需要人工点击验证。
+
 # Workspace Grid external WebviewWindow fallback
 
 ## Checklist
@@ -8,7 +21,7 @@
 
 ## Review
 - 本轮推进 WG-7 的退路方案：被 iframe 阻止的外部页可在独立应用 WebviewWindow 承载。
-- 仍未实现嵌入式子 Webview 按 pane geometry 放置，也未解决 per-pane localStorage namespace。
+- 嵌入式子 Webview 已在后续切片补齐；仍未解决 per-pane localStorage namespace。
 
 # Workspace Grid resizable custom tracks
 
@@ -22,7 +35,7 @@
 
 ## Review
 - 本轮推进 WG-8 的“逐缝拖拽 resize + 持久化 custom template”；custom template 先实现为当前 preset 的列/行 `fr` track sizes。
-- 仍未实现 WG-7 子 Webview、per-pane localStorage namespace。
+- 后续已补齐 WG-7 子 Webview；仍未实现 per-pane localStorage namespace。
 
 # Workspace Grid named layouts
 

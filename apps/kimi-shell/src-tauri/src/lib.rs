@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod api_v1_client;
 mod app_state;
 mod auth_state;
 mod backend_manager;
@@ -16,20 +18,23 @@ mod log_manager;
 mod onboarding_http;
 mod open_request;
 mod port_manager;
+mod runtime_locator;
 mod settings_store;
 mod shortcut_manager;
 mod skill_center;
 mod skill_center_store;
 mod skill_projection;
+mod token_resolver;
 mod tray_manager;
 mod types;
 mod weixin_onboarding;
 mod window_manager;
 mod workspace_import;
+#[allow(dead_code)]
 mod workspace_session;
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Instant;
 
@@ -45,10 +50,10 @@ use types::{
     FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
     InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
     InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCliApiConfigInput,
-    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, KimiLoginHealthSource,
-    KimiLoginHealthState, LoginProbeResult, MainWindowCloseBehavior, MainWindowCloseDecisionInput,
-    OnboardingStatus, OnboardingStep, PowerShellPreflightSummary, SessionSkillState,
-    ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
+    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, KimiDoctorResult,
+    KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult, MainWindowCloseBehavior,
+    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
+    SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
     SkillDiscoverySnapshot, SkillProjectionRecord, SkillRecommendation,
     StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput, StartupMonitorReason,
     StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
@@ -94,6 +99,10 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         active_session_id,
         active_session_work_dir,
         session_source,
+        runtime_origin,
+        server_token_path,
+        server_token_redacted,
+        workspace_url,
         startup_attempt_id,
         startup_phase,
         startup_failure_kind,
@@ -137,6 +146,13 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             runtime.session_source.clone(),
+            runtime.runtime_origin.clone(),
+            runtime
+                .server_token_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            runtime.server_token_redacted.clone(),
+            runtime.workspace_url.clone(),
             runtime.startup_attempt_id,
             runtime.startup_phase,
             runtime.startup_failure_kind,
@@ -169,6 +185,10 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         active_session_id,
         active_session_work_dir,
         session_source,
+        runtime_origin,
+        server_token_path,
+        server_token_redacted,
+        workspace_url,
         startup_attempt_id,
         startup_phase,
         startup_failure_kind,
@@ -265,10 +285,12 @@ fn notify_frontend_ready(app: AppHandle) -> Result<FrontendReadyAck, String> {
             .lock()
             .map_err(|_| "runtime state mutex is poisoned".to_string())?;
 
-        let workspace_url = runtime
-            .workspace_port
-            .or(runtime.active_port)
-            .map(|port| format!("http://127.0.0.1:{port}"));
+        let workspace_url = runtime.workspace_url.clone().or_else(|| {
+            runtime
+                .workspace_port
+                .or(runtime.active_port)
+                .map(|port| format!("http://127.0.0.1:{port}"))
+        });
 
         (runtime.state, runtime.start_cycle_id, workspace_url)
     };
@@ -1165,6 +1187,10 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         launch_command,
         cli_contract_ok,
         cli_contract_error,
+        runtime_origin,
+        server_token_path,
+        server_token_redacted,
+        workspace_url,
         webview_runtime_kind,
         webview_runtime_version,
         startup_pending,
@@ -1212,6 +1238,13 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
             runtime.launch_command.clone(),
             runtime.cli_contract_ok,
             runtime.cli_contract_error.clone(),
+            runtime.runtime_origin.clone(),
+            runtime
+                .server_token_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
+            runtime.server_token_redacted.clone(),
+            runtime.workspace_url.clone(),
             runtime.webview_runtime_kind,
             runtime.webview_runtime_version.clone(),
             runtime.startup_pending,
@@ -1273,6 +1306,10 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         launch_command,
         cli_contract_ok,
         cli_contract_error,
+        runtime_origin,
+        server_token_path,
+        server_token_redacted,
+        workspace_url,
         kimi_version,
         version_error,
         last_error,
@@ -1443,6 +1480,42 @@ fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
         message,
         kimi_path: Some(kimi_path.to_string_lossy().to_string()),
         exit_code: output.status.code(),
+    })
+}
+
+#[tauri::command]
+fn run_kimi_doctor(app: AppHandle) -> Result<KimiDoctorResult, String> {
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let kimi_path = resolve_kimi_path_for_login(&app, &settings)?;
+    let shell_path = kimi_locator::locate_shell_path();
+
+    let mut process = Command::new(&kimi_path);
+    command_utils::configure_kimi_query_command(&mut process);
+    process
+        .arg("doctor")
+        .stdin(Stdio::null())
+        .env("NO_COLOR", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1");
+    if let Some(path) = shell_path.as_ref() {
+        process.env("KIMI_SHELL_PATH", path);
+    }
+
+    let output = process
+        .output()
+        .map_err(|error| format!("failed to run `{} doctor`: {}", kimi_path.display(), error))?;
+    let secrets = collect_kimi_doctor_redaction_values();
+    let stdout = redact_and_limit_doctor_output(&String::from_utf8_lossy(&output.stdout), &secrets);
+    let stderr = redact_and_limit_doctor_output(&String::from_utf8_lossy(&output.stderr), &secrets);
+
+    Ok(KimiDoctorResult {
+        succeeded: output.status.success(),
+        exit_code: output.status.code(),
+        command: format!("{} doctor", kimi_path.display()),
+        kimi_path: kimi_path.to_string_lossy().to_string(),
+        shell_path: shell_path.map(|path| path.to_string_lossy().to_string()),
+        stdout,
+        stderr,
     })
 }
 
@@ -1712,6 +1785,7 @@ pub fn run() {
             skip_onboarding,
             ack_api_config_step,
             probe_kimi_login,
+            run_kimi_doctor,
             logout_kimi_login
         ])
         .build(tauri::generate_context!())
@@ -2183,6 +2257,81 @@ fn summarize_command_output(
 
     let truncated: String = merged.chars().take(max_chars).collect();
     format!("{truncated}…")
+}
+
+fn collect_kimi_doctor_redaction_values() -> Vec<String> {
+    let mut values = Vec::new();
+    for key in [
+        "KIMI_API_KEY",
+        "MOONSHOT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+    ] {
+        if let Ok(value) = std::env::var(key) {
+            push_doctor_redaction_value(&mut values, Some(value.as_str()));
+        }
+    }
+
+    if let Ok(config) = backend_manager::load_kimi_cli_config_center() {
+        for provider in config.providers {
+            push_doctor_redaction_value(&mut values, provider.api_key.as_deref());
+            push_doctor_redaction_value(&mut values, provider.auth_token.as_deref());
+            push_doctor_redaction_value(&mut values, provider.secret_access_key.as_deref());
+            for entry in provider.env.iter().chain(provider.custom_headers.iter()) {
+                if is_sensitive_key(&entry.key) {
+                    push_doctor_redaction_value(&mut values, Some(entry.value.as_str()));
+                }
+            }
+        }
+        for service in config.services {
+            push_doctor_redaction_value(&mut values, service.api_key.as_deref());
+        }
+        for server in config.mcp_servers {
+            for entry in server.env {
+                if is_sensitive_key(&entry.key) {
+                    push_doctor_redaction_value(&mut values, Some(entry.value.as_str()));
+                }
+            }
+        }
+    }
+
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    values
+}
+
+fn push_doctor_redaction_value(values: &mut Vec<String>, value: Option<&str>) {
+    let Some(trimmed) = value.map(str::trim).filter(|value| value.len() >= 4) else {
+        return;
+    };
+    if trimmed.starts_with("${") || trimmed.contains("[REDACTED]") {
+        return;
+    }
+    values.push(trimmed.to_string());
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.contains("key")
+        || lower.contains("token")
+        || lower.contains("secret")
+        || lower.contains("password")
+}
+
+fn redact_and_limit_doctor_output(output: &str, secrets: &[String]) -> String {
+    let mut redacted = output.trim().to_string();
+    for secret in secrets {
+        redacted = redacted.replace(secret, "[REDACTED]");
+    }
+
+    let max_chars = 12_000usize;
+    if redacted.chars().count() <= max_chars {
+        return redacted;
+    }
+
+    let truncated: String = redacted.chars().take(max_chars).collect();
+    format!("{truncated}\n...[truncated]")
 }
 
 fn query_kimi_version(kimi_path: &str) -> Result<String, String> {

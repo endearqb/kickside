@@ -12,6 +12,7 @@ pub const HEALTH_CHECK_INTERVAL_MS: u64 = 200;
 pub const HEALTH_REQUEST_TIMEOUT_MS: u64 = 500;
 pub const STARTUP_TIMEOUT_SECS: u64 = 20;
 const OVERRIDE_BASE_PORT_ENV: &str = "KIMI_SHELL_BASE_PORT";
+const HEALTH_PATHS: [&str; 3] = ["/api/v1/healthz", "/healthz", "/openapi.json"];
 
 pub fn choose_start_port() -> u16 {
     if let Some(port) = read_override_start_port() {
@@ -43,12 +44,14 @@ pub fn wait_for_ready_port(base_port: u16) -> Option<u16> {
 }
 
 fn is_healthy(client: &reqwest::blocking::Client, port: u16) -> bool {
-    let url = format!("http://127.0.0.1:{port}/healthz");
-    client
-        .get(url)
-        .send()
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
+    HEALTH_PATHS.iter().any(|path| {
+        let url = format!("http://127.0.0.1:{port}{path}");
+        client
+            .get(url)
+            .send()
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    })
 }
 
 fn read_override_start_port() -> Option<u16> {

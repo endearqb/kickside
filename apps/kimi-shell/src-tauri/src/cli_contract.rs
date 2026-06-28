@@ -2,18 +2,21 @@ use std::{path::Path, process::Command};
 
 use crate::command_utils;
 
-const REQUIRED_WEB_FLAGS: [&str; 3] = ["--no-open", "--host", "--port"];
+const REQUIRED_SERVER_RUN_FLAGS: [&str; 2] = ["--foreground", "--port"];
 
-pub fn verify_kimi_web_contract(kimi_path: &Path) -> Result<(), String> {
+pub fn verify_kimi_server_contract(kimi_path: &Path) -> Result<(), String> {
     let mut process = Command::new(kimi_path);
     command_utils::configure_kimi_query_command(&mut process);
-    let output = process.arg("web").arg("--help").output().map_err(|error| {
-        format!(
-            "failed to run `{} web --help`: {}",
-            kimi_path.display(),
-            error
-        )
-    })?;
+    let output = process
+        .args(["server", "run", "--help"])
+        .output()
+        .map_err(|error| {
+            format!(
+                "failed to run `{} server run --help`: {}",
+                kimi_path.display(),
+                error
+            )
+        })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -30,13 +33,13 @@ pub fn verify_kimi_web_contract(kimi_path: &Path) -> Result<(), String> {
         .map(|code| code.to_string())
         .unwrap_or_else(|| "terminated".to_string());
     Err(format!(
-        "incompatible `kimi web` help output (status {status}), missing flags: {}",
+        "incompatible `kimi server run` help output (status {status}), missing flags: {}",
         missing.join(", ")
     ))
 }
 
 fn missing_required_flags(help_text_lowercase: &str) -> Vec<&'static str> {
-    REQUIRED_WEB_FLAGS
+    REQUIRED_SERVER_RUN_FLAGS
         .iter()
         .copied()
         .filter(|flag| !help_text_lowercase.contains(flag))
@@ -49,15 +52,15 @@ mod tests {
 
     #[test]
     fn required_flags_parser_detects_all_flags_present() {
-        let help = "usage: kimi web [--no-open] [--host 127.0.0.1] [--port 5494]";
+        let help = "usage: kimi server run [--foreground] [--port 5494]";
         let missing = missing_required_flags(&help.to_lowercase());
         assert!(missing.is_empty());
     }
 
     #[test]
     fn required_flags_parser_detects_missing_flags() {
-        let help = "usage: kimi web [--host 127.0.0.1]";
+        let help = "usage: kimi server run [--foreground]";
         let missing = missing_required_flags(&help.to_lowercase());
-        assert_eq!(missing, vec!["--no-open", "--port"]);
+        assert_eq!(missing, vec!["--port"]);
     }
 }

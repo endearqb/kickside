@@ -5,14 +5,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 type Logger struct {
-	mu     sync.Mutex
-	file   *os.File
-	logger *log.Logger
+	mu      sync.Mutex
+	file    *os.File
+	logger  *log.Logger
+	secrets []string
 }
 
 func New(path string) (*Logger, error) {
@@ -36,7 +39,43 @@ func (l *Logger) Printf(format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	prefix := time.Now().Format("2006/01/02 15:04:05 -07:00 ")
-	l.logger.Printf(prefix+format, args...)
+	message := fmt.Sprintf(format, args...)
+	l.logger.Print(prefix + l.redactLocked(message))
+}
+
+func (l *Logger) RegisterSecret(value string) {
+	if l == nil {
+		return
+	}
+	secret := strings.TrimSpace(value)
+	if len(secret) < 4 {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, existing := range l.secrets {
+		if existing == secret {
+			return
+		}
+	}
+	l.secrets = append(l.secrets, secret)
+	sort.Slice(l.secrets, func(i, j int) bool {
+		return len(l.secrets[i]) > len(l.secrets[j])
+	})
+}
+
+func (l *Logger) RegisterSecrets(values ...string) {
+	for _, value := range values {
+		l.RegisterSecret(value)
+	}
+}
+
+func (l *Logger) redactLocked(message string) string {
+	redacted := message
+	for _, secret := range l.secrets {
+		redacted = strings.ReplaceAll(redacted, secret, "[REDACTED]")
+	}
+	return redacted
 }
 
 func (l *Logger) Close() error {

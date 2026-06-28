@@ -234,6 +234,10 @@ pub struct AppStatus {
     pub active_session_id: Option<String>,
     pub active_session_work_dir: Option<String>,
     pub session_source: Option<String>,
+    pub runtime_origin: Option<String>,
+    pub server_token_path: Option<String>,
+    pub server_token_redacted: Option<String>,
+    pub workspace_url: Option<String>,
     pub startup_attempt_id: u64,
     pub startup_phase: StartupPhase,
     pub startup_failure_kind: Option<StartupFailureKind>,
@@ -750,11 +754,33 @@ pub struct BridgeStatus {
     pub pid: Option<u32>,
     pub admin_port: u16,
     pub version: Option<String>,
+    #[serde(default)]
+    pub kimi_runtime_locator: BridgeRuntimeLocatorStatus,
+    #[serde(default)]
+    pub runtime_adapter: BridgeRuntimeAdapterStatus,
     #[serde(default, alias = "channels")]
     pub connectors: Vec<BridgeConnectorStatus>,
     pub pending_approvals: usize,
     pub bindings: usize,
     pub last_error_code: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRuntimeLocatorStatus {
+    pub configured: bool,
+    pub path: Option<String>,
+    pub readable: bool,
+    pub health: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeRuntimeAdapterStatus {
+    pub name: Option<String>,
+    pub state: String,
     pub last_error: Option<String>,
 }
 
@@ -1175,6 +1201,10 @@ pub struct DiagnosticsInfo {
     pub launch_command: Option<String>,
     pub cli_contract_ok: Option<bool>,
     pub cli_contract_error: Option<String>,
+    pub runtime_origin: Option<String>,
+    pub server_token_path: Option<String>,
+    pub server_token_redacted: Option<String>,
+    pub workspace_url: Option<String>,
     pub kimi_version: Option<String>,
     pub version_error: Option<String>,
     pub last_error: Option<String>,
@@ -1339,6 +1369,18 @@ pub struct LoginProbeResult {
     pub message: String,
     pub kimi_path: Option<String>,
     pub exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiDoctorResult {
+    pub succeeded: bool,
+    pub exit_code: Option<i32>,
+    pub command: String,
+    pub kimi_path: String,
+    pub shell_path: Option<String>,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1729,6 +1771,8 @@ pub struct InstallFlowCatalog {
 pub struct InstallProbeStatus {
     pub winget_ready: bool,
     pub git_ready: bool,
+    pub git_bash_ready: bool,
+    pub kimi_shell_path: Option<String>,
     pub uv_ready: bool,
     pub python313_ready: bool,
     pub kimi_ready: bool,

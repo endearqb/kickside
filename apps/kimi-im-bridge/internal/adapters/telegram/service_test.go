@@ -350,6 +350,61 @@ func TestServiceProcessCallbackResolvesApproval(t *testing.T) {
 	}
 }
 
+func TestServiceRedeliversPendingApprovals(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, botAPI, _ := newTestService(t, Config{BotToken: "token"})
+	if err := storeHandle.CreateApprovalTicket(context.Background(), domain.ApprovalTicket{
+		ApprovalID:         "approval-recovered-1",
+		KimiSessionID:      "session-1",
+		TurnID:             "turn-1",
+		StepID:             "step-1",
+		RequestKind:        "shell",
+		Prompt:             "run command",
+		Platform:           platformID,
+		ChatID:             "555",
+		ThreadID:           "7",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "telegram:555:7:approval-recovered-1",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket returned error: %v", err)
+	}
+
+	count, err := service.RedeliverPendingApprovals(context.Background())
+	if err != nil {
+		t.Fatalf("RedeliverPendingApprovals returned error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one redelivered approval, got %d", count)
+	}
+	if len(botAPI.sendCalls) != 1 {
+		t.Fatalf("expected one approval message, got %d", len(botAPI.sendCalls))
+	}
+	call := botAPI.sendCalls[0]
+	if call.ChatID != int64(555) || call.MessageThreadID == nil || *call.MessageThreadID != 7 {
+		t.Fatalf("unexpected approval target: %+v", call)
+	}
+	if call.ReplyMarkup == nil {
+		t.Fatalf("expected approval keyboard")
+	}
+	event, err := storeHandle.GetDeliveryEventByKey(context.Background(), "telegram:approval:approval-recovered-1")
+	if err != nil {
+		t.Fatalf("GetDeliveryEventByKey returned error: %v", err)
+	}
+	if event == nil || event.Status != "sent" {
+		t.Fatalf("expected sent delivery event, got %+v", event)
+	}
+
+	count, err = service.RedeliverPendingApprovals(context.Background())
+	if err != nil {
+		t.Fatalf("second RedeliverPendingApprovals returned error: %v", err)
+	}
+	if count != 0 || len(botAPI.sendCalls) != 1 {
+		t.Fatalf("expected duplicate delivery to be skipped, count=%d sends=%d", count, len(botAPI.sendCalls))
+	}
+}
+
 func TestServiceStartUsesPersistedOffset(t *testing.T) {
 	t.Parallel()
 

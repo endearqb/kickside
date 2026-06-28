@@ -39,6 +39,7 @@ import type {
   ContextMenuStatus,
   ControlSectionId,
   DiagnosticsInfo,
+  KimiDoctorResult,
   InstallFlowCatalog,
   InstallMirrorHealthReport,
   InstallSettingsView,
@@ -146,6 +147,7 @@ type ControlCenterViewProps = {
   surface: ControlCenterSurface;
   status: AppStatus | null;
   diagnostics: DiagnosticsInfo | null;
+  kimiDoctorResult: KimiDoctorResult | null;
   onboarding: OnboardingStatus | null;
   contextMenuStatus: ContextMenuStatus | null;
   activeControlSection: ControlSectionId;
@@ -153,6 +155,7 @@ type ControlCenterViewProps = {
   stepCompletion: StepCompletion;
   actionBusy: boolean;
   diagnosticsBusy: boolean;
+  kimiDoctorBusy: boolean;
   contextMenuBusy: boolean;
   loginProbeBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
@@ -231,6 +234,7 @@ type ControlCenterViewProps = {
   onWorkDirInputChange: (value: string) => void;
   onRefreshCoreState: () => Promise<void>;
   onRefreshDiagnostics: () => Promise<void>;
+  onRunKimiDoctor: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;
   onRefreshBridgeSettings: () => Promise<BridgeSettings>;
   onRefreshBridgeStatus: () => Promise<BridgeStatus>;
@@ -612,6 +616,14 @@ function formatLoginCheckTimestamp(value?: number): string {
   });
 }
 
+function formatKimiDoctorOutput(result: KimiDoctorResult): string {
+  const chunks = [
+    result.stdout ? `stdout\n${result.stdout}` : "",
+    result.stderr ? `stderr\n${result.stderr}` : "",
+  ].filter(Boolean);
+  return chunks.join("\n\n") || "kimi doctor 未返回输出。";
+}
+
 function isFeishuOnboardingActive(
   session: FeishuConnectorOnboardingSession | null,
 ): boolean {
@@ -706,6 +718,7 @@ export function ControlCenterView({
   surface,
   status,
   diagnostics,
+  kimiDoctorResult,
   onboarding,
   contextMenuStatus,
   activeControlSection,
@@ -713,6 +726,7 @@ export function ControlCenterView({
   stepCompletion,
   actionBusy,
   diagnosticsBusy,
+  kimiDoctorBusy,
   contextMenuBusy,
   loginProbeBusy,
   mainWindowCloseBehavior,
@@ -785,6 +799,7 @@ export function ControlCenterView({
   onWorkDirInputChange,
   onRefreshCoreState,
   onRefreshDiagnostics,
+  onRunKimiDoctor,
   onRefreshContextMenuStatus,
   onRefreshBridgeSettings,
   onRefreshBridgeStatus,
@@ -2771,8 +2786,31 @@ export function ControlCenterView({
           <RuntimePanel active={runtimePanelExpanded && activeRuntimePanel === "core"} onOpen={() => { void handleSelectRuntimePanel("core"); }} title="核心运行诊断">
             <div className="cc-actions">
               <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
+              <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 kimi doctor</Button>
               <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
             </div>
+            {kimiDoctorResult && (
+              <>
+                <div className="diagnostics-grid">
+                  <DiagnosticItem
+                    label="Kimi Doctor"
+                    value={kimiDoctorResult.succeeded ? "通过" : "未通过"}
+                  />
+                  <DiagnosticItem
+                    label="Doctor Exit Code"
+                    value={String(kimiDoctorResult.exitCode ?? "-")}
+                  />
+                  <DiagnosticItem label="Doctor Command" value={kimiDoctorResult.command} />
+                  <DiagnosticItem label="Doctor Kimi Path" value={kimiDoctorResult.kimiPath} />
+                  <DiagnosticItem
+                    label="Doctor Shell Path"
+                    value={kimiDoctorResult.shellPath ?? "-"}
+                  />
+                </div>
+                <h4 className="log-tail-title">kimi doctor 输出</h4>
+                <pre className="log-tail">{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
+              </>
+            )}
             <div className="diagnostics-grid">
               <DiagnosticItem label="State" value={diagnostics?.state ?? "-"} />
               <DiagnosticItem label="Active Port" value={String(diagnostics?.activePort ?? "-")} />

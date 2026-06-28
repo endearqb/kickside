@@ -24,7 +24,7 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 
 ## What The App Does
 
-- Launches and monitors the local Kimi Web backend
+- Launches and monitors the local `kimi-code` server runtime
 - Shows a prefill/startup surface before handing off to the main workspace
 - Keeps `Kimi Code Web` and `Kimi Chat` mounted inside one shell, reducing refresh-heavy workflow switching
 - Handles workspace bootstrap from normal launch, plus Windows Explorer open requests for folders, single files, and multi-file selections

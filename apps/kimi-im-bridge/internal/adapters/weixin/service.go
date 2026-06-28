@@ -285,12 +285,12 @@ func (s *Service) processMessage(ctx context.Context, message WeixinMessage) err
 		ChatID:      strings.TrimSpace(message.FromUserID),
 		ThreadID:    "",
 	}
-	binding, err := s.resolveOrCreateBinding(ctx, key)
+	binding, err := s.resolveBinding(ctx, key)
 	if err != nil {
 		return err
 	}
 	if contextToken := strings.TrimSpace(message.ContextToken); contextToken != "" {
-		if binding.ContextToken != contextToken {
+		if binding != nil && binding.ContextToken != contextToken {
 			if err := s.bindings.UpdateBindingContextToken(ctx, binding.BindingID, contextToken); err != nil {
 				return err
 			}
@@ -313,17 +313,27 @@ func (s *Service) processMessage(ctx context.Context, message WeixinMessage) err
 		RawRef:      fmt.Sprintf("weixin:%s", normalizeMessageID(message.MessageID)),
 	}
 
-	typingSession, typingErr := s.startTypingSession(ctx, *binding)
-	if typingErr != nil {
-		s.logf(
-			"channel event=warn platform=%s operation=send_typing connector=%s err=%q",
-			platformID,
-			s.connectorID(),
-			typingErr.Error(),
-		)
+	typingBinding := binding
+	if typingBinding == nil && strings.TrimSpace(message.ContextToken) != "" {
+		typingBinding = &domain.SessionBinding{
+			Key:          key,
+			WorkDir:      strings.TrimSpace(s.config.DefaultWorkDir),
+			ContextToken: strings.TrimSpace(message.ContextToken),
+		}
 	}
-	if typingSession != nil {
-		defer typingSession.stop()
+	if typingBinding != nil {
+		typingSession, typingErr := s.startTypingSession(ctx, *typingBinding)
+		if typingErr != nil {
+			s.logf(
+				"channel event=warn platform=%s operation=send_typing connector=%s err=%q",
+				platformID,
+				s.connectorID(),
+				typingErr.Error(),
+			)
+		}
+		if typingSession != nil {
+			defer typingSession.stop()
+		}
 	}
 
 	result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
@@ -338,10 +348,37 @@ func (s *Service) processMessage(ctx context.Context, message WeixinMessage) err
 	if err != nil {
 		return err
 	}
+	if binding == nil {
+		binding = &result.Binding
+		if contextToken := strings.TrimSpace(message.ContextToken); contextToken != "" {
+			if err := s.bindings.UpdateBindingContextToken(ctx, binding.BindingID, contextToken); err != nil {
+				s.logf(
+					"channel event=warn platform=%s operation=update_context_token connector=%s binding=%s err=%q",
+					platformID,
+					s.connectorID(),
+					binding.BindingID,
+					err.Error(),
+				)
+			} else {
+				binding.ContextToken = contextToken
+			}
+		}
+	}
 	if strings.TrimSpace(result.ReplyText) == "" {
 		return nil
 	}
 	return s.sendReply(ctx, result.Binding, result.ReplyText)
+}
+
+func (s *Service) resolveBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
+	binding, err := s.bindings.ResolveBinding(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if binding != nil && binding.WorkDir == "" {
+		binding.WorkDir = strings.TrimSpace(s.config.DefaultWorkDir)
+	}
+	return binding, nil
 }
 
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {

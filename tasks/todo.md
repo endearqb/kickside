@@ -1,3 +1,58 @@
+# kimi-code v3 迁移与 IM Bridge 安全门禁
+
+## Checklist
+- [x] 读取粘贴的 v3 整合目标，收敛当前线程目标
+- [x] 建立 README First 上下文并记录 `.ai/CONSTITUTION.md` / `.ai/architecture` 缺失风险
+- [x] 盘点 Shell backend、workspace session 与 Bridge 启动 token 触点
+- [x] 修复 Bridge admin / host-control token 命令行暴露：Shell 改 env，sidecar 支持 env/token-file
+- [x] 切换 Shell 后端主路径到 `kimi server run --foreground --port <port>`
+- [x] 新增 server token resolver，生成 `/#token=` workspace URL
+- [x] 暂停 P1A 默认 workspace proxy 与旧 `/api/sessions` bootstrap
+- [x] 补 `.ai/architecture` 当前事实和验证入口
+- [x] 新增 Rust `api_v1_client` 薄客户端，统一 Bearer 与 envelope 解包
+- [x] 写出 Shell `kimi_runtime_locator.json`，并传给 Bridge sidecar
+- [x] Bridge status 暴露 runtime locator 配置/可读/health 状态
+- [x] 用 `/api/v1` 替换 Shell workspace/session 调用，并恢复 DirectServer ready 后 session bootstrap
+- [x] 新增 Bridge `RuntimeAdapter` 契约与 `KimiCodeServerAdapter` REST 地基，并在 status 暴露 runtime adapter 状态
+- [x] Bridge admin `/api/v1/*` 改为 `{ ok, data, error, requestId }` envelope，Shell client 兼容新旧响应
+- [x] Bridge stdout/stderr、bridge log tail 与 Go logger 纳入已知 secret redaction
+- [x] 运行最小验证并记录结果
+- [x] 把 Bridge channel prompt 主路径切到 `KimiCodeServerAdapter`
+- [x] 接入 `/api/v1/ws` prompt 事件流的最小内容/状态/approval 映射
+- [x] 完成 server pending approval reconcile 与本地持久 projection
+- [x] 实现 ACPAdapter 实验性 stdio/JSON-RPC smoke
+- [x] 实现 SDKAdapter wrapper
+- [x] 通过 Bridge metadata 映射 server prompt controls：model、thinking、permission、plan、swarm、goal
+- [x] P3 安装主链路移除 uv/Python：Kimi 安装改官方 install.ps1，升级改 `kimi upgrade`，core ready 不再依赖 uv/Python
+- [x] P3 Git Bash 检测与 `KIMI_SHELL_PATH` 配置：Shell 启动 server 时自动注入检测到的 Git Bash 路径
+- [x] P3 Bridge sidecar installed-build smoke：重建 bundled `kimi-im-bridge.exe`，token-file 启动、health/status envelope、runtime stop 和输出 redaction 通过
+- [x] P4A `kimi doctor`：控制中心运行诊断面板可直接执行 `kimi doctor`，展示 exit code、路径与脱敏输出
+- [x] 后续：把 server-only recovered approvals 重新投递成 Telegram/Feishu IM approval card
+- [x] 后续：把 ACPAdapter manual approval 从 live auto/cancel 升级为当前进程内异步 resolve
+- [x] 收口本地开发门禁与剩余 P5 真凭证手工门禁边界
+
+## Review
+- 已先落 v3 明确标为高风险的 Bridge secret transport 门禁，并开始 P1A DirectServer 主路径迁移。
+- DirectServer 主路径已推进：Rust lifecycle 现在启动 `kimi server run --foreground --port <port>`，读取 `KIMI_CODE_HOME/server.token`，并把 `/#token=` URL 交给前端。
+- P1B 地基已推进：新增 `api_v1_client`，Shell workspace/session 调用已改到 `/api/v1`，Shell 写出不含明文 token 的 runtime locator，Bridge 接收 locator 并在 status 中报告可读性。
+- P4C 主路径已推进：Bridge 新增 `RuntimeAdapter` 契约和 `KimiCodeServerAdapter` REST/WS 客户端；Telegram/Feishu/Weixin 通过 bridgecore orchestrator 优先走 server-backed runtime provider，创建新 binding 时使用 server 返回的真实 session id，旧 synthetic binding 会在 server run 后 rebind。
+- `/api/v1/ws` 已接入 prompt 事件流的最小映射，覆盖 assistant/thinking delta、status、turn/prompt completion 和 approval requested/resolved。
+- Server pending approval reconcile 已接入：Bridge 启动时按本地 pending 与已知 server session/binding 查询 server pending，保留仍 pending 的审批、将 server 确认不存在的本地 pending 标为 `stale_failed`，并为同一 session 下 server-only pending 重建带 chat context 的本地 projection。
+- `internal/runtime` 已补 `SDKAdapter` wrapper 与实验性 `ACPAdapter`。ACPAdapter 具备 stdio JSON-RPC transport、initialize/session/new/session/resume/session/prompt/session/cancel 的 smoke 覆盖；manual approval 已在当前进程内支持 live async resolve，但尚无跨 Bridge 重启恢复。
+- Server provider 已从 `MetadataJSON` 读取 `runtime_controls` / `controls`，映射 model、thinking、permission mode、plan、swarm 和 goal controls；未新增配置 UI。
+- P3 安装链路已推进：Shell quick/core Kimi 安装不再串联 uv/Python，改用 Kimi Code 官方 Windows installer；升级改走 `kimi upgrade`；卸载清理托管 Kimi CLI binary/npm package；旧 `backend_manager/install_compat.rs` uv/Python 安装路径已删除；安装文档同步移除 uv/Python 主路径。
+- P3 Git Bash 已接入：Shell 会检测现有 `KIMI_SHELL_PATH`、Git for Windows `bash.exe` 常见路径或 PATH `bash`，启动 `kimi server run` 时写入 `KIMI_SHELL_PATH`，安装面板展示 Git Bash 状态和检测路径。
+- P3 Bridge sidecar installed-build smoke 已补：`apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe` 已由当前 Go 源码重建，使用 token files 启动后 `/healthz`、`/api/v1/status` envelope、`/api/v1/runtime/stop` 和 stdout/stderr/log token redaction 检查通过。
+- P4A `kimi doctor` 已接入：控制中心运行诊断面板新增手动运行入口，Shell 后端调用本机 `kimi doctor` 并对已知 API key / token / secret 做精确值脱敏后返回 UI。
+- Recovered approval redelivery 已接入：Telegram/Feishu adapter 启动后会扫描 pending approvals，用既有 delivery key 幂等重投递 approval card；Feishu 仅在 binding 有 last inbound message id 时重投递以保持线程/回复上下文。
+- ACPAdapter manual approval 已从 auto/cancel smoke 升级为 live async：`session/request_permission` 会在 manual mode 下登记 pending approval、发出 approval event，并等待 `ResolveApproval` 返回 ACP selected/cancelled outcome；跨 Bridge 重启恢复仍未实现。
+- Admin API 已收紧：sidecar `/api/v1/*` 返回稳定 envelope，Rust `BridgeHttpClient` 已支持 envelope unwrap，并保留旧裸 JSON 兼容。
+- Bridge 日志安全门禁已推进：Go logger 会 redaction admin/host-control 与平台密钥；Shell 托管的 sidecar stdout/stderr 通过 redactor 写入 bridge log，UI log tail 与失败摘要也会二次 redaction。
+- 本地代码门禁已收口到 P4C：Shell 自有 UI 不新增独立 prompt composer/全局 approval inbox，主交互继续由官方 Kimi Code Web 承载；Bridge approval 由 IM card 与 Bridge runtime panel 承载。
+- P5 未在本地自动完成：真实 Telegram/Feishu/Weixin 凭证、NSIS/MSI 安装包环境、OpenAPI/AsyncAPI CI 快照和发布回退仍是发布前手工/专用环境门禁，不阻塞本轮代码合并。
+- 验证结果：`go test ./...`（`apps/kimi-im-bridge`）通过；`cargo check` 通过；`cargo test --no-run` 通过；`.\node_modules\.bin\tsc.cmd --noEmit` 通过；`git diff --check` 通过。
+- 已知限制：Rust 测试二进制运行在当前 Windows 环境仍报既有 `STATUS_ENTRYPOINT_NOT_FOUND`，未执行到断言阶段。
+
 # 上游 Web 基线与中文化脚手架
 
 ## Checklist

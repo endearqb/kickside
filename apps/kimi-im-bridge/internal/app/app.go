@@ -24,21 +24,23 @@ import (
 	telegramplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/telegram"
 	weixinplatform "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/platforms/weixin"
 	kimiprovider "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/providers/kimi"
+	runtimeadapterprovider "github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/providers/runtimeadapter"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
 
 type Options struct {
-	Version          string
-	ConfigPath       string
-	SecretsPath      string
-	DBPath           string
-	LogFilePath      string
-	AdminPort        int
-	AdminToken       string
-	HostControlURL   string
-	HostControlToken string
-	SkillsDir        string
+	Version                string
+	ConfigPath             string
+	SecretsPath            string
+	DBPath                 string
+	LogFilePath            string
+	AdminPort              int
+	AdminToken             string
+	HostControlURL         string
+	HostControlToken       string
+	KimiRuntimeLocatorPath string
+	SkillsDir              string
 }
 
 type Service struct {
@@ -72,6 +74,10 @@ type managedAdapter interface {
 	Done() <-chan struct{}
 }
 
+type recoveredApprovalRedeliverer interface {
+	RedeliverPendingApprovals(context.Context) (int, error)
+}
+
 func New(options Options) (*Service, error) {
 	settings, err := config.LoadOrCreateSettings(options.ConfigPath)
 	if err != nil {
@@ -86,6 +92,7 @@ func New(options Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	registerLoggerSecrets(logger, options, secrets)
 	storeHandle, err := store.Open(options.DBPath)
 	if err != nil {
 		_ = logger.Close()
@@ -110,14 +117,7 @@ func New(options Options) (*Service, error) {
 		}
 		service.skillsAuthFilePath = authFilePath
 	}
-	service.provider = kimiprovider.NewProvider(
-		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{
-			SkillsDir:    strings.TrimSpace(options.SkillsDir),
-			AuthFilePath: service.skillsAuthFilePath,
-		}),
-		storeHandle,
-		storeHandle,
-	)
+	service.provider = newRuntimeProvider(options, service.skillsAuthFilePath, storeHandle, logger)
 	service.orchestrator = bridgecore.NewOrchestrator(
 		service.bindings,
 		service.provider,
@@ -146,6 +146,36 @@ func New(options Options) (*Service, error) {
 		service.logger.Printf("runtime reconciled orphan approvals after restart: count=%d", reconciled)
 	}
 	return service, nil
+}
+
+func newRuntimeProvider(
+	options Options,
+	authFilePath string,
+	storeHandle *store.Store,
+	logger *logging.Logger,
+) bridgecore.RuntimeProvider {
+	sdkProvider := kimiprovider.NewProvider(
+		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{
+			SkillsDir:    strings.TrimSpace(options.SkillsDir),
+			AuthFilePath: authFilePath,
+		}),
+		storeHandle,
+		storeHandle,
+	)
+	locatorPath := strings.TrimSpace(options.KimiRuntimeLocatorPath)
+	if locatorPath == "" {
+		logger.Printf("bridge runtime provider selected: sdk")
+		return sdkProvider
+	}
+	adapter, err := runtime.NewKimiCodeServerAdapter(runtime.KimiCodeServerAdapterOptions{
+		RuntimeLocatorPath: locatorPath,
+	})
+	if err != nil {
+		logger.Printf("bridge runtime provider server unavailable; falling back to sdk: %v", err)
+		return sdkProvider
+	}
+	logger.Printf("bridge runtime provider selected: server")
+	return runtimeadapterprovider.NewProvider(adapter, storeHandle, storeHandle)
 }
 
 func (s *Service) Start() error {
@@ -313,18 +343,71 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 		}
 	}
 
+	locatorStatus := inspectRuntimeLocator(s.options.KimiRuntimeLocatorPath)
 	return domain.BridgeStatus{
-		State:            state,
-		StartedAt:        startedAt,
-		PID:              os.Getpid(),
-		AdminPort:        s.options.AdminPort,
-		Version:          s.options.Version,
-		Channels:         channels,
-		PendingApprovals: pendingApprovals,
-		Bindings:         bindings,
-		LastErrorCode:    lastErrorCode,
-		LastError:        lastError,
+		State:              state,
+		StartedAt:          startedAt,
+		PID:                os.Getpid(),
+		AdminPort:          s.options.AdminPort,
+		Version:            s.options.Version,
+		KimiRuntimeLocator: locatorStatus,
+		RuntimeAdapter:     runtimeAdapterStatus(locatorStatus),
+		Channels:           channels,
+		PendingApprovals:   pendingApprovals,
+		Bindings:           bindings,
+		LastErrorCode:      lastErrorCode,
+		LastError:          lastError,
 	}, nil
+}
+
+func inspectRuntimeLocator(path string) domain.RuntimeLocatorStatus {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return domain.RuntimeLocatorStatus{}
+	}
+	status := domain.RuntimeLocatorStatus{
+		Configured: true,
+		Path:       path,
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		status.LastError = fmt.Sprintf("read locator: %v", err)
+		return status
+	}
+	var payload struct {
+		Health string `json:"health"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		status.LastError = fmt.Sprintf("decode locator: %v", err)
+		return status
+	}
+	status.Readable = true
+	status.Health = strings.TrimSpace(payload.Health)
+	return status
+}
+
+func runtimeAdapterStatus(locator domain.RuntimeLocatorStatus) domain.RuntimeAdapterStatus {
+	status := domain.RuntimeAdapterStatus{
+		Name:  "server",
+		State: "unavailable",
+	}
+	if !locator.Configured {
+		return status
+	}
+	if locator.LastError != "" {
+		status.State = "degraded"
+		status.LastError = locator.LastError
+		return status
+	}
+	if locator.Readable && locator.Health == "ready" {
+		status.State = "ready"
+		return status
+	}
+	status.State = "degraded"
+	if locator.Health != "" {
+		status.LastError = fmt.Sprintf("runtime health is %s", locator.Health)
+	}
+	return status
 }
 
 func (s *Service) fallbackChannelStatuses(state domain.BridgeRuntimeState) []domain.ChannelStatus {
@@ -549,6 +632,14 @@ func (s *Service) startAdapters() error {
 		}
 		adapters = append(adapters, adapter)
 		s.logger.Printf("bridge adapter started: %s", adapter.Name())
+		if redeliverer, ok := adapter.(recoveredApprovalRedeliverer); ok {
+			count, err := redeliverer.RedeliverPendingApprovals(adapterCtx)
+			if err != nil {
+				s.logger.Printf("bridge recovered approval redelivery failed: adapter=%s err=%v", adapter.Name(), err)
+			} else if count > 0 {
+				s.logger.Printf("bridge recovered approval redelivery queued: adapter=%s count=%d", adapter.Name(), count)
+			}
+		}
 	}
 
 	s.mu.Lock()
@@ -705,6 +796,41 @@ func secretWeixinOwnerUserID(secrets config.BridgeSecrets, connectorID string) s
 		return ""
 	}
 	return strings.TrimSpace(connector.Weixin.OwnerUserID)
+}
+
+func registerLoggerSecrets(logger *logging.Logger, options Options, secrets config.BridgeSecrets) {
+	if logger == nil {
+		return
+	}
+	logger.RegisterSecrets(options.AdminToken, options.HostControlToken)
+	if secrets.Telegram != nil {
+		logger.RegisterSecret(secrets.Telegram.BotToken)
+	}
+	if secrets.Feishu != nil {
+		logger.RegisterSecrets(
+			secrets.Feishu.AppSecret,
+			secrets.Feishu.VerificationToken,
+			secrets.Feishu.EncryptKey,
+		)
+	}
+	if secrets.Weixin != nil {
+		logger.RegisterSecret(secrets.Weixin.BotToken)
+	}
+	for _, connector := range secrets.Connectors {
+		if connector.Telegram != nil {
+			logger.RegisterSecret(connector.Telegram.BotToken)
+		}
+		if connector.Feishu != nil {
+			logger.RegisterSecrets(
+				connector.Feishu.AppSecret,
+				connector.Feishu.VerificationToken,
+				connector.Feishu.EncryptKey,
+			)
+		}
+		if connector.Weixin != nil {
+			logger.RegisterSecret(connector.Weixin.BotToken)
+		}
+	}
 }
 
 func (s *Service) decorateBindingRecords(items []domain.BindingRecord) []domain.BindingRecord {

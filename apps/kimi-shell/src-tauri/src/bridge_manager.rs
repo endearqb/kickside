@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    io::{BufRead, BufReader, Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -21,9 +22,9 @@ use crate::{
     types::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
         BridgeChannelStatus, BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView,
-        BridgeMaskedSecretValue, BridgeRuntimeState, BridgeSecretsMaskView,
-        BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings, BridgeStatus,
-        BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
+        BridgeMaskedSecretValue, BridgeRuntimeAdapterStatus, BridgeRuntimeLocatorStatus,
+        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
+        BridgeSettings, BridgeStatus, BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
     },
 };
 
@@ -35,6 +36,11 @@ const BRIDGE_SKILLS_DIR_SEGMENT: &str = ".agents";
 const BRIDGE_SKILLS_SUBDIR_SEGMENT: &str = "skills";
 const BRIDGE_START_BIND_RETRY_LIMIT: usize = 1;
 const DEV_WORKSPACE_FALLBACK_ENV: &str = "KIMI_DEV_ALLOW_WORKSPACE_FALLBACK";
+const BRIDGE_ADMIN_TOKEN_ENV: &str = "KIMI_IM_BRIDGE_ADMIN_TOKEN";
+const BRIDGE_ADMIN_TOKEN_FILE_ENV: &str = "KIMI_IM_BRIDGE_ADMIN_TOKEN_FILE";
+const BRIDGE_HOST_CONTROL_TOKEN_ENV: &str = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN";
+const BRIDGE_HOST_CONTROL_TOKEN_FILE_ENV: &str = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN_FILE";
+const KIMI_APP_RUNTIME_LOCATOR_FILE_ENV: &str = "KIMI_APP_RUNTIME_LOCATOR_FILE";
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -528,7 +534,11 @@ pub fn get_bridge_log_tail(
 ) -> anyhow::Result<Vec<String>> {
     let path = log_manager::bridge_log_path(app)?;
     let limit = max_lines.unwrap_or(80).clamp(1, 400);
-    Ok(log_manager::read_log_tail(&path, limit))
+    let secrets = bridge_redaction_values(app, None);
+    Ok(log_manager::read_log_tail(&path, limit)
+        .into_iter()
+        .map(|line| redact_bridge_log_line(&line, &secrets))
+        .collect())
 }
 
 pub fn get_bridge_secrets_mask_view(app: &AppHandle) -> anyhow::Result<BridgeSecretsMaskView> {
@@ -634,9 +644,14 @@ fn start_bridge_once(
             settings.admin_port
         ),
     );
-    let child = command
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn bridge sidecar from {binary_source}"))?;
+    spawn_bridge_stdio_redactors(
+        app,
+        &mut child,
+        bridge_redaction_values(app, Some(admin_token)),
+    )?;
     let pid = child.id();
 
     {
@@ -774,7 +789,6 @@ fn build_bridge_command(
     admin_token: &str,
 ) -> anyhow::Result<Command> {
     let state = app.state::<AppState>();
-    let (stdout, stderr) = open_bridge_stdio_logs(app)?;
     let mut command = Command::new(binary_path);
     command
         .arg("--config")
@@ -787,19 +801,23 @@ fn build_bridge_command(
         .arg(log_manager::bridge_log_path(app)?)
         .arg("--admin-port")
         .arg(settings.admin_port.to_string())
-        .arg("--admin-token")
-        .arg(admin_token)
+        .arg("--kimi-runtime-locator")
+        .arg(&state.runtime_locator_path)
+        .env(
+            KIMI_APP_RUNTIME_LOCATOR_FILE_ENV,
+            &state.runtime_locator_path,
+        )
         .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr);
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_bridge_token_env(&mut command, admin_token, None);
 
     match bridge_host_control::ensure_running(app) {
         Ok(port) => {
             command
                 .arg("--host-control-url")
-                .arg(format!("http://127.0.0.1:{port}"))
-                .arg("--host-control-token")
-                .arg(admin_token);
+                .arg(format!("http://127.0.0.1:{port}"));
+            configure_bridge_token_env(&mut command, admin_token, Some(admin_token));
         }
         Err(error) => {
             log_manager::append_line(
@@ -822,7 +840,30 @@ fn build_bridge_command(
     Ok(command)
 }
 
-fn open_bridge_stdio_logs(app: &AppHandle) -> anyhow::Result<(Stdio, Stdio)> {
+fn configure_bridge_token_env(
+    command: &mut Command,
+    admin_token: &str,
+    host_control_token: Option<&str>,
+) {
+    command
+        .env_remove(BRIDGE_ADMIN_TOKEN_FILE_ENV)
+        .env(BRIDGE_ADMIN_TOKEN_ENV, admin_token)
+        .env_remove(BRIDGE_HOST_CONTROL_TOKEN_FILE_ENV);
+    match host_control_token {
+        Some(token) => {
+            command.env(BRIDGE_HOST_CONTROL_TOKEN_ENV, token);
+        }
+        None => {
+            command.env_remove(BRIDGE_HOST_CONTROL_TOKEN_ENV);
+        }
+    }
+}
+
+fn spawn_bridge_stdio_redactors(
+    app: &AppHandle,
+    child: &mut Child,
+    secrets: Vec<String>,
+) -> anyhow::Result<()> {
     let path = log_manager::bridge_log_path(app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -832,15 +873,46 @@ fn open_bridge_stdio_logs(app: &AppHandle) -> anyhow::Result<(Stdio, Stdio)> {
             )
         })?;
     }
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("failed to open bridge stdio log: {}", path.display()))?;
-    let stdout = file
-        .try_clone()
-        .context("failed to clone bridge stdio log handle")?;
-    Ok((Stdio::from(stdout), Stdio::from(file)))
+    if let Some(stdout) = child.stdout.take() {
+        spawn_bridge_stdio_redactor(path.clone(), stdout, secrets.clone(), "stdout");
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_bridge_stdio_redactor(path, stderr, secrets, "stderr");
+    }
+    Ok(())
+}
+
+fn spawn_bridge_stdio_redactor<R>(
+    path: PathBuf,
+    reader: R,
+    secrets: Vec<String>,
+    stream_name: &'static str,
+) where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
+            return;
+        };
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let redacted = redact_bridge_log_line(&line, &secrets);
+                    if write!(file, "[bridge {stream_name}] {redacted}").is_err() {
+                        break;
+                    }
+                    if !redacted.ends_with('\n') && writeln!(file).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }
 
 fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<ResolvedSourcePath> {
@@ -1135,6 +1207,8 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
             runtime.admin_port
         },
         version: runtime.version.clone(),
+        kimi_runtime_locator: BridgeRuntimeLocatorStatus::default(),
+        runtime_adapter: BridgeRuntimeAdapterStatus::default(),
         connectors,
         pending_approvals: runtime.pending_approvals,
         bindings: runtime.bindings,
@@ -1493,9 +1567,11 @@ fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> 
 }
 
 fn enrich_bridge_failure_message(app: &AppHandle, message: &str) -> String {
+    let secrets = bridge_redaction_values(app, None);
     let tail = log_manager::read_log_tail(&app.state::<AppState>().bridge_log_path, 12);
     let relevant = tail
         .into_iter()
+        .map(|line| redact_bridge_log_line(&line, &secrets))
         .rev()
         .find(|line| !line.trim().is_empty())
         .unwrap_or_default();
@@ -1665,6 +1741,79 @@ fn mask_secret_value(value: &str) -> String {
     let prefix: String = chars.iter().take(3).collect();
     let suffix: String = chars[chars.len().saturating_sub(2)..].iter().collect();
     format!("{prefix}***{suffix}")
+}
+
+fn bridge_redaction_values(app: &AppHandle, extra_secret: Option<&str>) -> Vec<String> {
+    let mut values = Vec::new();
+    push_bridge_redaction_value(&mut values, extra_secret);
+
+    if let Ok(runtime) = app
+        .state::<AppState>()
+        .bridge_runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))
+    {
+        push_bridge_redaction_value(&mut values, Some(runtime.admin_token.as_str()));
+    }
+
+    if let Ok(secrets) = bridge_settings_store::load_secrets_or_default(app) {
+        push_bridge_secret_values(
+            &mut values,
+            &secrets.telegram,
+            &secrets.feishu,
+            &secrets.weixin,
+        );
+        for connector in secrets.connectors.values() {
+            if let Some(telegram) = &connector.telegram {
+                push_bridge_redaction_value(&mut values, telegram.bot_token.as_deref());
+            }
+            if let Some(feishu) = &connector.feishu {
+                push_bridge_redaction_value(&mut values, feishu.app_secret.as_deref());
+                push_bridge_redaction_value(&mut values, feishu.verification_token.as_deref());
+                push_bridge_redaction_value(&mut values, feishu.encrypt_key.as_deref());
+            }
+            if let Some(weixin) = &connector.weixin {
+                push_bridge_redaction_value(&mut values, weixin.bot_token.as_deref());
+            }
+        }
+    }
+
+    values.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+    values.dedup();
+    values
+}
+
+fn push_bridge_secret_values(
+    values: &mut Vec<String>,
+    telegram: &crate::types::BridgeTelegramSecrets,
+    feishu: &crate::types::BridgeFeishuSecrets,
+    weixin: &crate::types::BridgeWeixinSecrets,
+) {
+    push_bridge_redaction_value(values, telegram.bot_token.as_deref());
+    push_bridge_redaction_value(values, feishu.app_secret.as_deref());
+    push_bridge_redaction_value(values, feishu.verification_token.as_deref());
+    push_bridge_redaction_value(values, feishu.encrypt_key.as_deref());
+    push_bridge_redaction_value(values, weixin.bot_token.as_deref());
+}
+
+fn push_bridge_redaction_value(values: &mut Vec<String>, value: Option<&str>) {
+    let Some(value) = value else {
+        return;
+    };
+    let trimmed = value.trim();
+    if trimmed.len() >= 4 {
+        values.push(trimmed.to_string());
+    }
+}
+
+fn redact_bridge_log_line(line: &str, secrets: &[String]) -> String {
+    let mut redacted = line.to_string();
+    let mut ordered = secrets.iter().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| right.len().cmp(&left.len()));
+    for secret in ordered {
+        redacted = redacted.replace(secret, "[REDACTED]");
+    }
+    redacted
 }
 
 #[cfg(unix)]
@@ -1988,6 +2137,8 @@ mod tests {
             pid: Some(4242),
             admin_port: 60_110,
             version: Some("0.1.0".to_string()),
+            kimi_runtime_locator: BridgeRuntimeLocatorStatus::default(),
+            runtime_adapter: BridgeRuntimeAdapterStatus::default(),
             connectors: vec![BridgeChannelStatus {
                 connector_id: "telegram-default".to_string(),
                 connector_label: "Telegram 机器人 01".to_string(),
@@ -2149,6 +2300,67 @@ mod tests {
         let masked = mask_optional_secret(Some("secret-token"));
         assert!(masked.configured);
         assert_eq!(masked.masked_value.as_deref(), Some("sec***en"));
+    }
+
+    #[test]
+    fn redact_bridge_log_line_hides_registered_values() {
+        let secrets = vec![
+            "admin-token-secret".to_string(),
+            "host-control-secret".to_string(),
+        ];
+
+        let redacted = redact_bridge_log_line(
+            "admin=admin-token-secret host=host-control-secret",
+            &secrets,
+        );
+
+        assert!(!redacted.contains("admin-token-secret"));
+        assert!(!redacted.contains("host-control-secret"));
+        assert_eq!(redacted, "admin=[REDACTED] host=[REDACTED]");
+    }
+
+    #[test]
+    fn redact_bridge_log_line_uses_longest_values_first() {
+        let secrets = vec!["abcdef".to_string(), "abcd".to_string()];
+
+        let redacted = redact_bridge_log_line("token=abcdef", &secrets);
+
+        assert_eq!(redacted, "token=[REDACTED]");
+    }
+
+    #[test]
+    fn configure_bridge_token_env_keeps_tokens_out_of_args() {
+        let mut command = Command::new("kimi-im-bridge");
+        command.arg("--admin-port").arg("60110");
+
+        configure_bridge_token_env(&mut command, "admin-secret", Some("host-secret"));
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(!args.iter().any(|arg| arg.contains("secret")));
+
+        let envs = command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert!(envs.contains(&(
+            BRIDGE_ADMIN_TOKEN_ENV.to_string(),
+            Some("admin-secret".to_string())
+        )));
+        assert!(envs.contains(&(
+            BRIDGE_HOST_CONTROL_TOKEN_ENV.to_string(),
+            Some("host-secret".to_string())
+        )));
+        assert!(envs.contains(&(BRIDGE_ADMIN_TOKEN_FILE_ENV.to_string(), None)));
+        assert!(envs.contains(&(BRIDGE_HOST_CONTROL_TOKEN_FILE_ENV.to_string(), None)));
     }
 
     #[test]

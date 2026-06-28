@@ -18,11 +18,10 @@ use url::Url;
 
 use crate::{
     app_state::{unix_time_millis, AppState},
-    cli_contract, command_utils, kimi_locator, log_manager, port_manager, settings_store,
-    skill_center,
+    cli_contract, command_utils, kimi_locator, log_manager, port_manager, runtime_locator,
+    settings_store, skill_center, token_resolver,
     types::{
-        AppSettings, BackendState, EnvOverrideStatus, InstallCommandCatalog, InstallCommandEntry,
-        InstallCommandStep, InstallProbeStatus, KeyValueEntry, KimiCliApiConfigInput,
+        AppSettings, BackendState, EnvOverrideStatus, KeyValueEntry, KimiCliApiConfigInput,
         KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, LoopControlEntry,
         McpServerEntry, ModelEntry, ProviderEntry, ServiceEntry, TypedFieldEntry, TypedFieldType,
         WorkspaceWebMode,
@@ -31,10 +30,11 @@ use crate::{
 };
 
 mod config;
-mod install_compat;
 mod lifecycle;
 mod system_open;
+#[allow(dead_code)]
 mod workspace_injection;
+#[allow(dead_code)]
 mod workspace_proxy;
 
 #[allow(unused_imports)]
@@ -45,14 +45,11 @@ pub use config::{
     load_kimi_cli_api_config, load_kimi_cli_config_center, save_kimi_cli_api_config,
     save_kimi_cli_config_center, set_kimi_cli_api_as_default, set_kimi_login_as_default,
 };
-#[allow(unused_imports)]
-pub use install_compat::{
-    get_install_command_catalog, get_install_probe_status, install_kimi_cli,
-    install_kimi_dependencies, install_nodejs, upgrade_kimi_cli,
-};
 pub use lifecycle::{restart_backend, set_session_work_dir, start_backend, stop_backend};
 pub use system_open::{open_external_url, open_folder, open_kimi_config_dir, open_logs_folder};
 
 const SHUTDOWN_TIMEOUT_SECS: u64 = 4;
+#[allow(dead_code)]
 const KIMI_HOST: &str = "127.0.0.1";
+#[allow(dead_code)]
 const MAX_UPSTREAM_HEADER_BYTES: usize = 64 * 1024;

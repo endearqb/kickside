@@ -13,7 +13,7 @@ use encoding_rs::GBK;
 use tauri::{ipc::Channel, AppHandle};
 
 use crate::{
-    backend_manager, command_utils, log_manager, settings_store,
+    backend_manager, command_utils, kimi_locator, log_manager, settings_store,
     types::{
         AppSettings, InstallCustomMirrorConfig, InstallFlowCatalog, InstallLogChunk,
         InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
@@ -31,6 +31,8 @@ const FALLBACK_REPROBE_INTERVAL_MS: u64 = 2_000;
 const FALLBACK_REPROBE_TIMEOUT_MS: u64 = 120_000;
 const EXECUTION_POLICY_SUGGESTION: &str =
     "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned";
+const KIMI_CODE_INSTALL_SCRIPT_URL: &str = "https://code.kimi.com/kimi-code/install.ps1";
+const KIMI_CODE_NPM_PACKAGE: &str = "@moonshot-ai/kimi-code";
 const DEFAULT_GIT_MIRROR_RELEASE_PAGES: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/",
     "https://mirrors.ustc.edu.cn/github-release/git-for-windows/git/LatestRelease/",
@@ -368,28 +370,20 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::QuickInstallCore,
                 "Quick Core Install",
-                "Install uv, Python 3.13, and Kimi CLI in sequence.",
+                "Install Kimi Code CLI from the official installer.",
                 InstallTaskGroup::Core,
                 true,
                 false,
                 false,
-                vec![
-                    step_uv_official(),
-                    step_python_official(),
-                    step_kimi_official(),
-                ],
-                vec![
-                    step_uv_mirror(&mirror_config),
-                    step_python_mirror(&mirror_config),
-                    step_kimi_mirror(&mirror_config),
-                ],
+                vec![step_kimi_official()],
+                vec![step_kimi_mirror(&mirror_config)],
                 None,
             ),
             task(
                 InstallTaskId::InstallUv,
-                "Install uv",
-                "Install or repair the uv CLI.",
-                InstallTaskGroup::Core,
+                "Install uv (legacy)",
+                "Legacy repair task for old Python-based Kimi CLI installs.",
+                InstallTaskGroup::Optional,
                 false,
                 false,
                 false,
@@ -399,9 +393,9 @@ fn build_install_flow_catalog_with_mirror_config(
             ),
             task(
                 InstallTaskId::InstallPython313,
-                "Install Python 3.13",
-                "Prepare the Python 3.13 runtime required by Kimi CLI.",
-                InstallTaskGroup::Core,
+                "Install Python 3.13 (legacy)",
+                "Legacy repair task for old Python-based Kimi CLI installs.",
+                InstallTaskGroup::Optional,
                 false,
                 false,
                 false,
@@ -412,7 +406,7 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::InstallKimi,
                 "Install Kimi CLI",
-                "Install Kimi CLI with uv tool.",
+                "Install Kimi Code CLI.",
                 InstallTaskGroup::Core,
                 false,
                 false,
@@ -436,7 +430,7 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::UninstallKimi,
                 "Uninstall Kimi CLI",
-                "Remove only the installed Kimi CLI and keep uv plus Python 3.13.",
+                "Remove only the installed Kimi CLI.",
                 InstallTaskGroup::Core,
                 false,
                 false,
@@ -482,6 +476,8 @@ pub fn get_powershell_preflight() -> PowerShellPreflightSummary {
 pub fn get_install_probe_status(app: &AppHandle) -> InstallProbeStatus {
     let winget_ready = command_exists("winget");
     let git_ready = git_ready();
+    let kimi_shell_path = kimi_locator::locate_shell_path();
+    let git_bash_ready = kimi_shell_path.is_some();
     let uv_ready = uv_ready();
     let python313_ready = python313_ready();
     let kimi_ready = kimi_ready(app);
@@ -490,11 +486,13 @@ pub fn get_install_probe_status(app: &AppHandle) -> InstallProbeStatus {
     InstallProbeStatus {
         winget_ready,
         git_ready,
+        git_bash_ready,
+        kimi_shell_path: kimi_shell_path.map(|path| path.display().to_string()),
         uv_ready,
         python313_ready,
         kimi_ready,
         node_ready,
-        core_ready: uv_ready && python313_ready && kimi_ready,
+        core_ready: kimi_ready,
     }
 }
 
@@ -1412,17 +1410,17 @@ fn step_kimi_official() -> InstallTaskStep {
     step(
         "install_kimi",
         "Install Kimi CLI",
-        "Install Kimi CLI with uv tool and print the installed version.",
+        "Install Kimi Code CLI with the official Windows installer.",
         &kimi_install_command(None),
     )
 }
 
-fn step_kimi_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
+fn step_kimi_mirror(_config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "install_kimi",
         "Install Kimi CLI",
-        "Install Kimi CLI from mirrored PyPI indexes.",
-        &kimi_install_command(Some(&ps_array(&config.pypi_index_urls))),
+        "Install Kimi Code CLI. Mirror source does not change the official Kimi installer.",
+        &kimi_install_command(None),
     )
 }
 
@@ -1439,7 +1437,7 @@ fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "upgrade_kimi",
         "Upgrade Kimi CLI",
-        "Upgrade Kimi CLI from mirrored PyPI indexes.",
+        "Upgrade Kimi CLI. Mirror source does not change the official Kimi upgrade command.",
         &kimi_upgrade_command(Some(&ps_array(&config.pypi_index_urls))),
     )
 }
@@ -1448,88 +1446,63 @@ fn step_uninstall_kimi() -> InstallTaskStep {
     step(
         "uninstall_kimi",
         "Uninstall Kimi CLI",
-        "Remove only the installed Kimi CLI tool and keep uv plus Python 3.13.",
+        "Remove only the managed Kimi CLI binary/package.",
         &kimi_uninstall_command(),
     )
 }
 
 fn kimi_install_command(indexes_expr: Option<&str>) -> String {
-    match indexes_expr {
-        None => {
-            r#"
+    let _ = indexes_expr;
+    r#"
 Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before installing Kimi CLI.' }
-uv python install 3.13
-uv tool install kimi-cli --python 3.13 --upgrade
-Invoke-KimiShellVersionCheck 'kimi' @((Join-Path $HOME '.local\bin\kimi.exe'),(Join-Path $HOME '.cargo\bin\kimi.exe')) @('--version')
+Invoke-RestMethod -Uri '__KIMI_CODE_INSTALL_SCRIPT_URL__' | Invoke-Expression
+Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
 "#
-            .to_string()
-        }
-        Some(indexes_expr) => {
-            r#"
-Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before installing Kimi CLI.' }
-uv python install 3.13
-$indexes = __INDEXES__
-foreach ($index in $indexes) {
-  try {
-    uv tool install kimi-cli --python 3.13 --upgrade -i $index
-    Invoke-KimiShellVersionCheck 'kimi' @((Join-Path $HOME '.local\bin\kimi.exe'),(Join-Path $HOME '.cargo\bin\kimi.exe')) @('--version')
-    exit 0
-  } catch {
-    Write-Host ('Kimi mirror install failed, trying next index: ' + $index)
-  }
-}
-throw 'Kimi mirror install failed.'
-"#
-            .replace("__INDEXES__", indexes_expr)
-        }
-    }
+    .replace(
+        "__KIMI_CODE_INSTALL_SCRIPT_URL__",
+        KIMI_CODE_INSTALL_SCRIPT_URL,
+    )
+    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
 }
 
 fn kimi_upgrade_command(indexes_expr: Option<&str>) -> String {
-    match indexes_expr {
-        None => {
-            r#"
+    let _ = indexes_expr;
+    r#"
 Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before upgrading Kimi CLI.' }
-uv tool upgrade kimi-cli
-if ($LASTEXITCODE -ne 0) { throw "uv tool upgrade kimi-cli failed with exit code $LASTEXITCODE." }
-Invoke-KimiShellVersionCheck 'kimi' @((Join-Path $HOME '.local\bin\kimi.exe'),(Join-Path $HOME '.cargo\bin\kimi.exe')) @('--version')
+Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
+$kimi = Ensure-KimiShellCommandPath 'kimi' __KIMI_CANDIDATE_PATHS__
+& $kimi upgrade
+if ($LASTEXITCODE -ne 0) { throw "kimi upgrade failed with exit code $LASTEXITCODE." }
+Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
 "#
-            .to_string()
-        }
-        Some(indexes_expr) => {
-            r#"
-Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before upgrading Kimi CLI.' }
-$indexes = __INDEXES__
-foreach ($index in $indexes) {
-  try {
-    uv tool upgrade kimi-cli -i $index
-    if ($LASTEXITCODE -ne 0) { throw "uv tool upgrade kimi-cli failed with exit code $LASTEXITCODE." }
-    Invoke-KimiShellVersionCheck 'kimi' @((Join-Path $HOME '.local\bin\kimi.exe'),(Join-Path $HOME '.cargo\bin\kimi.exe')) @('--version')
-    exit 0
-  } catch {
-    [Console]::Error.WriteLine(('Kimi mirror upgrade failed for index ' + $index + ': ' + $_.Exception.Message))
-  }
-}
-throw 'Kimi mirror upgrade failed.'
-"#
-            .replace("__INDEXES__", indexes_expr)
-        }
-    }
+    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
 }
 
 fn kimi_uninstall_command() -> String {
     r#"
 Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before uninstalling Kimi CLI.' }
-uv tool uninstall kimi-cli
-if ($LASTEXITCODE -ne 0) { throw "uv tool uninstall kimi-cli failed with exit code $LASTEXITCODE." }
-if (Get-Command kimi -ErrorAction SilentlyContinue) { throw 'kimi command is still present after uninstall.' }
+$managed = __KIMI_CANDIDATE_PATHS__
+$removed = $false
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+  npm uninstall -g __KIMI_CODE_NPM_PACKAGE__
+  if ($LASTEXITCODE -eq 0) { $removed = $true }
+}
+$binary = Join-Path $HOME '.kimi-code\bin\kimi.exe'
+if (Test-Path $binary) {
+  Remove-Item $binary -Force
+  $removed = $true
+}
+foreach ($candidate in $managed | Where-Object { $_ }) {
+  if (Test-Path $candidate) { throw "managed kimi command is still present after uninstall: $candidate" }
+}
+if (-not $removed) { Write-Host 'No managed Kimi CLI install was found.' }
 "#
-    .to_string()
+    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
+    .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
+}
+
+fn kimi_ps_candidate_paths() -> String {
+    "@((Join-Path $HOME '.kimi-code\\bin\\kimi.exe'),(Join-Path $env:APPDATA 'npm\\kimi.cmd'),(Join-Path $HOME '.local\\bin\\kimi.exe'),(Join-Path $HOME '.cargo\\bin\\kimi.exe'))".to_string()
 }
 
 fn step_git_official() -> InstallTaskStep {
@@ -1651,7 +1624,10 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
   $PSNativeCommandUseErrorActionPreference = $true
 }}
 function Ensure-KimiShellPath {{
-  $dirs = @((Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
+  $dirs = @((Join-Path $HOME '.kimi-code\bin'), (Join-Path $HOME '.local\bin'), (Join-Path $HOME '.cargo\bin'))
+  if ($env:APPDATA) {{
+    $dirs += (Join-Path $env:APPDATA 'npm')
+  }}
   if (Get-Command uv -ErrorAction SilentlyContinue) {{
     try {{
       $uvBinDir = (uv tool dir --bin 2>$null | Select-Object -First 1)
@@ -2055,8 +2031,12 @@ fn python_candidate_paths() -> Vec<PathBuf> {
 fn kimi_candidate_paths() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(home_dir) = user_home_dir() {
+        candidates.push(home_dir.join(".kimi-code").join("bin").join("kimi.exe"));
         candidates.push(home_dir.join(".local").join("bin").join("kimi.exe"));
         candidates.push(home_dir.join(".cargo").join("bin").join("kimi.exe"));
+    }
+    if let Some(app_data) = env::var_os("APPDATA").map(PathBuf::from) {
+        candidates.push(app_data.join("npm").join("kimi.cmd"));
     }
     candidates
 }
@@ -2415,33 +2395,41 @@ mod tests {
     }
 
     #[test]
-    fn core_ready_does_not_depend_on_git() {
+    fn core_ready_only_tracks_kimi_cli() {
         let probe = InstallProbeStatus {
             winget_ready: true,
             git_ready: false,
-            uv_ready: true,
-            python313_ready: true,
+            git_bash_ready: false,
+            kimi_shell_path: None,
+            uv_ready: false,
+            python313_ready: false,
             kimi_ready: true,
             node_ready: false,
             core_ready: true,
         };
         assert!(probe.core_ready);
         assert!(!probe.git_ready);
+        assert!(!probe.uv_ready);
+        assert!(!probe.python313_ready);
     }
 
     #[test]
-    fn upgrade_command_is_pure_upgrade() {
+    fn upgrade_command_uses_kimi_upgrade() {
         let command = kimi_upgrade_command(None);
-        assert!(command.contains("uv tool upgrade kimi-cli"));
+        assert!(command.contains("& $kimi upgrade"));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(!command.contains("uv tool upgrade kimi-cli"));
         assert!(!command.contains("uv python install 3.13"));
         assert!(!command.contains("uv tool install kimi-cli --python 3.13 --upgrade"));
     }
 
     #[test]
-    fn install_command_uses_supported_version_flag() {
+    fn install_command_uses_official_kimi_code_installer() {
         let command = kimi_install_command(None);
+        assert!(command.contains(KIMI_CODE_INSTALL_SCRIPT_URL));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(!command.contains("uv tool install kimi-cli"));
+        assert!(!command.contains("uv python install 3.13"));
         assert!(!command.contains("kimi -v"));
     }
 
@@ -2525,6 +2513,8 @@ mod tests {
     #[test]
     fn step_script_adds_uv_tool_bin_lookup() {
         let script = build_step_script("Write-Output 'ok'");
+        assert!(script.contains(".kimi-code\\bin"));
+        assert!(script.contains("Join-Path $env:APPDATA 'npm'"));
         assert!(script.contains("uv tool dir --bin"));
         assert!(script.contains("$dirs | Where-Object"));
         assert!(script.contains("Format-KimiShellError"));
@@ -2787,6 +2777,8 @@ mod tests {
         let probe = InstallProbeStatus {
             winget_ready: true,
             git_ready: true,
+            git_bash_ready: false,
+            kimi_shell_path: None,
             uv_ready: false,
             python313_ready: false,
             kimi_ready: false,

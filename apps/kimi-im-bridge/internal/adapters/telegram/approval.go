@@ -64,6 +64,74 @@ func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *message
 	}, fmt.Sprintf("telegram:approval:%s", event.ApprovalID), strconv.FormatInt(source.MessageID, 10))
 }
 
+func (s *Service) RedeliverPendingApprovals(ctx context.Context) (int, error) {
+	if s.store == nil {
+		return 0, nil
+	}
+	tickets, err := s.store.ListApprovals(ctx, "pending")
+	if err != nil {
+		return 0, reliability.Wrap("unknown", err)
+	}
+
+	redelivered := 0
+	for _, ticket := range tickets {
+		if !s.shouldRedeliverApproval(ticket) {
+			continue
+		}
+		deliveryKey := fmt.Sprintf("telegram:approval:%s", ticket.ApprovalID)
+		existing, err := s.store.GetDeliveryEventByKey(ctx, deliveryKey)
+		if err != nil {
+			return redelivered, reliability.Wrap("unknown", err)
+		}
+		if existing != nil && existing.Status == "sent" {
+			continue
+		}
+
+		chatID, err := strconv.ParseInt(strings.TrimSpace(ticket.ChatID), 10, 64)
+		if err != nil {
+			return redelivered, reliability.Wrap("payload_invalid", fmt.Errorf("invalid telegram chat id for approval %s: %w", ticket.ApprovalID, err))
+		}
+		threadID, err := optionalInt64FromString(ticket.ThreadID)
+		if err != nil {
+			return redelivered, reliability.Wrap("payload_invalid", fmt.Errorf("invalid telegram thread id for approval %s: %w", ticket.ApprovalID, err))
+		}
+
+		if err := s.sendRecordedText(ctx, outboundTextRequest{
+			ChatID:      chatID,
+			ThreadID:    threadID,
+			Text:        formatApprovalPrompt(ticket.RequestKind, ticket.Prompt),
+			ReplyMarkup: buildApprovalKeyboard(ticket.ApprovalID),
+		}, deliveryKey, ""); err != nil {
+			return redelivered, err
+		}
+		redelivered++
+	}
+	return redelivered, nil
+}
+
+func (s *Service) shouldRedeliverApproval(ticket domain.ApprovalTicket) bool {
+	if strings.TrimSpace(ticket.ApprovalID) == "" || strings.TrimSpace(ticket.ChatID) == "" {
+		return false
+	}
+	if strings.TrimSpace(ticket.Platform) != platformID {
+		return false
+	}
+	connectorID := strings.TrimSpace(ticket.ConnectorID)
+	return connectorID == "" || connectorID == s.connectorID()
+}
+
+func optionalInt64FromString(value string) (*int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 func (s *Service) processCallback(ctx context.Context, query *callbackQuery) (bool, error) {
 	if query == nil {
 		return true, nil

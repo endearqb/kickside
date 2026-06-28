@@ -230,16 +230,32 @@ type ChannelDiagnosticsUpdate struct {
 }
 
 type BridgeStatus struct {
-	State            BridgeRuntimeState `json:"state"`
-	StartedAt        string             `json:"startedAt,omitempty"`
-	PID              int                `json:"pid,omitempty"`
-	AdminPort        int                `json:"adminPort,omitempty"`
-	Version          string             `json:"version,omitempty"`
-	Channels         []ChannelStatus    `json:"channels"`
-	PendingApprovals int                `json:"pendingApprovals"`
-	Bindings         int                `json:"bindings"`
-	LastErrorCode    string             `json:"lastErrorCode,omitempty"`
-	LastError        string             `json:"lastError,omitempty"`
+	State              BridgeRuntimeState   `json:"state"`
+	StartedAt          string               `json:"startedAt,omitempty"`
+	PID                int                  `json:"pid,omitempty"`
+	AdminPort          int                  `json:"adminPort,omitempty"`
+	Version            string               `json:"version,omitempty"`
+	KimiRuntimeLocator RuntimeLocatorStatus `json:"kimiRuntimeLocator"`
+	RuntimeAdapter     RuntimeAdapterStatus `json:"runtimeAdapter"`
+	Channels           []ChannelStatus      `json:"channels"`
+	PendingApprovals   int                  `json:"pendingApprovals"`
+	Bindings           int                  `json:"bindings"`
+	LastErrorCode      string               `json:"lastErrorCode,omitempty"`
+	LastError          string               `json:"lastError,omitempty"`
+}
+
+type RuntimeLocatorStatus struct {
+	Configured bool   `json:"configured"`
+	Path       string `json:"path,omitempty"`
+	Readable   bool   `json:"readable"`
+	Health     string `json:"health,omitempty"`
+	LastError  string `json:"lastError,omitempty"`
+}
+
+type RuntimeAdapterStatus struct {
+	Name      string `json:"name,omitempty"`
+	State     string `json:"state"`
+	LastError string `json:"lastError,omitempty"`
 }
 
 type BridgeSession struct {

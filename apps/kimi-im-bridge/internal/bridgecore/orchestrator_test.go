@@ -29,9 +29,16 @@ func (f *fakeBindings) CreateBinding(_ context.Context, key domain.BindingKey, s
 	return f.binding, nil
 }
 
+func (f *fakeBindings) Rebind(_ context.Context, _ string, sessionID string) error {
+	f.binding.KimiSessionID = sessionID
+	return nil
+}
+
 type fakeRuntime struct {
-	result TurnResult
-	events []TurnEvent
+	result          TurnResult
+	events          []TurnEvent
+	ensuredSession  RuntimeSession
+	ensureCallCount int
 }
 
 func (f *fakeRuntime) RunTurn(_ context.Context, _ RuntimeTarget, _ TurnRequest, sink TurnEventSink) (TurnResult, error) {
@@ -41,6 +48,11 @@ func (f *fakeRuntime) RunTurn(_ context.Context, _ RuntimeTarget, _ TurnRequest,
 		}
 	}
 	return f.result, nil
+}
+
+func (f *fakeRuntime) EnsureSession(_ context.Context, _ RuntimeTarget, _ RuntimeSessionRequest) (RuntimeSession, error) {
+	f.ensureCallCount++
+	return f.ensuredSession, nil
 }
 
 func (f *fakeRuntime) ResolveApproval(context.Context, string, string, string) error  { return nil }
@@ -166,5 +178,52 @@ func TestOrchestratorPersistsSessionAutoApproveFromHandleOptions(t *testing.T) {
 	}
 	if !turns.sessions[len(turns.sessions)-1].AutoApprove {
 		t.Fatalf("expected AutoApprove=true to be persisted, got %+v", turns.sessions[len(turns.sessions)-1])
+	}
+}
+
+func TestOrchestratorCreatesNewBindingWithEnsuredRuntimeSession(t *testing.T) {
+	t.Parallel()
+
+	bindings := &fakeBindings{}
+	turns := &fakeTurns{}
+	events := &fakeEventStore{}
+	runtime := &fakeRuntime{
+		ensuredSession: RuntimeSession{
+			KimiSessionID: "server-session-1",
+			WorkDir:       "D:/workspace",
+			Source:        "server_auto",
+		},
+		result: TurnResult{KimiSessionID: "server-session-1", Status: "completed"},
+		events: []TurnEvent{
+			{Kind: EventTurnStarted, KimiSessionID: "server-session-1"},
+			{Kind: EventContentDelta, KimiSessionID: "server-session-1", TextDelta: "server reply"},
+			{Kind: EventTurnCompleted, KimiSessionID: "server-session-1", Status: "completed"},
+		},
+	}
+
+	orchestrator := NewOrchestrator(bindings, runtime, &fakeApprovals{}, turns, events)
+	result, err := orchestrator.HandleInbound(context.Background(), adapterkit.NormalizedInbound{
+		MessageID:  "msg-1",
+		Platform:   "telegram",
+		ChatID:     "chat-1",
+		Text:       "ping",
+		ReceivedAt: "2026-03-16T00:00:00Z",
+		BindingKey: domain.BindingKey{Platform: "telegram", ChatID: "chat-1"},
+	}, HandleOptions{DefaultWorkDir: "D:/workspace"}, nil)
+	if err != nil {
+		t.Fatalf("HandleInbound returned error: %v", err)
+	}
+
+	if runtime.ensureCallCount != 1 {
+		t.Fatalf("expected runtime EnsureSession once, got %d", runtime.ensureCallCount)
+	}
+	if result.SessionID != "server-session-1" || result.Binding.KimiSessionID != "server-session-1" {
+		t.Fatalf("expected server session id to be persisted, got result=%+v", result)
+	}
+	if bindings.binding == nil || bindings.binding.Source != "server_auto" {
+		t.Fatalf("expected binding source from ensured session, got %+v", bindings.binding)
+	}
+	if len(turns.sessions) == 0 || turns.sessions[len(turns.sessions)-1].KimiSessionID != "server-session-1" {
+		t.Fatalf("expected session upsert with server id, got %+v", turns.sessions)
 	}
 }

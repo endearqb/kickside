@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
@@ -24,6 +25,19 @@ type Service interface {
 	RequestStop() error
 }
 
+type AdminEnvelope struct {
+	Ok        bool        `json:"ok"`
+	Data      any         `json:"data,omitempty"`
+	Error     *AdminError `json:"error,omitempty"`
+	RequestID string      `json:"requestId"`
+}
+
+type AdminError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
+}
+
 func NewHandler(service Service, adminToken string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, request *http.Request) {
@@ -38,125 +52,125 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			return
 		}
 		if request.Method != http.MethodGet {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		status, err := service.Status(request.Context())
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, status)
+		writeAdminData(writer, request, http.StatusOK, status)
 	})
 	mux.HandleFunc("/api/v1/bindings", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodGet {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		bindings, err := service.ListBindings(request.Context())
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"items": bindings})
+		writeAdminData(writer, request, http.StatusOK, map[string]any{"items": bindings})
 	})
 	mux.HandleFunc("/api/v1/sessions", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodGet {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		sessions, err := service.ListSessions(request.Context())
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"items": sessions})
+		writeAdminData(writer, request, http.StatusOK, map[string]any{"items": sessions})
 	})
 	mux.HandleFunc("/api/v1/sessions/import", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodPost {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		var payload domain.SessionImportRequest
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
 			return
 		}
 		session, err := service.ImportSession(request.Context(), payload)
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, session)
+		writeAdminData(writer, request, http.StatusOK, session)
 	})
 	mux.HandleFunc("/api/v1/bindings/", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodDelete && request.Method != http.MethodPatch {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		bindingID := strings.TrimPrefix(request.URL.Path, "/api/v1/bindings/")
 		if bindingID == "" || strings.Contains(bindingID, "/") {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_binding_id"})
+			writeAdminError(writer, request, http.StatusBadRequest, "invalid_binding_id", "invalid binding id", nil)
 			return
 		}
 		if request.Method == http.MethodPatch {
 			var payload domain.BindingUpdate
 			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-				writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+				writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
 				return
 			}
 			record, err := service.UpdateBinding(request.Context(), bindingID, payload)
 			if err != nil {
-				writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 				return
 			}
-			writeJSON(writer, http.StatusOK, record)
+			writeAdminData(writer, request, http.StatusOK, record)
 			return
 		}
 		if err := service.ClearBinding(request.Context(), bindingID); err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+		writeAdminData(writer, request, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/api/v1/approvals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodGet {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		items, err := service.ListApprovals(request.Context(), request.URL.Query().Get("status"))
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"items": items})
+		writeAdminData(writer, request, http.StatusOK, map[string]any{"items": items})
 	})
 	mux.HandleFunc("/api/v1/approvals/", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodPost {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		approvalID, action, ok := parseNestedAction(request.URL.Path, "/api/v1/approvals/")
 		if !ok || action != "resolve" {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_approval_path"})
+			writeAdminError(writer, request, http.StatusBadRequest, "invalid_approval_path", "invalid approval path", nil)
 			return
 		}
 		var payload struct {
@@ -164,28 +178,28 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			ResolutionPayloadJSON string `json:"resolutionPayloadJson,omitempty"`
 		}
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
 			return
 		}
 		if payload.Status == "" {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "missing_status"})
+			writeAdminError(writer, request, http.StatusBadRequest, "missing_status", "status is required", nil)
 			return
 		}
 		if err := service.ResolveApproval(request.Context(), approvalID, payload.Status, payload.ResolutionPayloadJSON); err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+		writeAdminData(writer, request, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("/api/v1/runtime/stop", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorize(writer, request, adminToken) {
 			return
 		}
 		if request.Method != http.MethodPost {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
-		writeJSON(writer, http.StatusAccepted, map[string]string{"status": "stopping"})
+		writeAdminData(writer, request, http.StatusAccepted, map[string]string{"status": "stopping"})
 		go func() {
 			_ = service.RequestStop()
 		}()
@@ -195,20 +209,20 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			return
 		}
 		if request.Method != http.MethodPost {
-			writeJSON(writer, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+			writeAdminError(writer, request, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 			return
 		}
 		var payload runtime.PromptRequest
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
 			return
 		}
 		response, err := service.DebugPrompt(request.Context(), payload)
 		if err != nil {
-			writeJSON(writer, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			writeAdminError(writer, request, http.StatusInternalServerError, "internal_error", err.Error(), nil)
 			return
 		}
-		writeJSON(writer, http.StatusOK, response)
+		writeAdminData(writer, request, http.StatusOK, response)
 	})
 	return mux
 }
@@ -230,14 +244,43 @@ func authorize(writer http.ResponseWriter, request *http.Request, expectedToken 
 		return true
 	}
 	if expectedToken == "" {
-		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "missing_admin_token"})
+		writeAdminError(writer, request, http.StatusUnauthorized, "missing_admin_token", "admin token is not configured", nil)
 		return false
 	}
 	if request.Header.Get("X-Bridge-Admin-Token") != expectedToken {
-		writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		writeAdminError(writer, request, http.StatusUnauthorized, "unauthorized", "invalid admin token", nil)
 		return false
 	}
 	return true
+}
+
+func writeAdminData(writer http.ResponseWriter, request *http.Request, status int, data any) {
+	writeJSON(writer, status, AdminEnvelope{
+		Ok:        true,
+		Data:      data,
+		RequestID: requestID(request),
+	})
+}
+
+func writeAdminError(writer http.ResponseWriter, request *http.Request, status int, code string, message string, details any) {
+	writeJSON(writer, status, AdminEnvelope{
+		Ok: false,
+		Error: &AdminError{
+			Code:    code,
+			Message: message,
+			Details: details,
+		},
+		RequestID: requestID(request),
+	})
+}
+
+func requestID(request *http.Request) string {
+	if request != nil {
+		if id := strings.TrimSpace(request.Header.Get("X-Request-ID")); id != "" {
+			return id
+		}
+	}
+	return fmt.Sprintf("bridge-%d", time.Now().UnixNano())
 }
 
 func writeJSON(writer http.ResponseWriter, status int, payload any) {

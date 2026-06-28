@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,27 @@ type fakeService struct {
 	updated         []string
 	imported        []domain.SessionImportRequest
 	requestStopCall int
+}
+
+type testEnvelope struct {
+	Ok        bool            `json:"ok"`
+	Data      json.RawMessage `json:"data"`
+	Error     *AdminError     `json:"error"`
+	RequestID string          `json:"requestId"`
+}
+
+func decodeAdminData(response *http.Response, target any) error {
+	var envelope testEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if !envelope.Ok {
+		if envelope.Error != nil {
+			return fmt.Errorf("%s: %s", envelope.Error.Code, envelope.Error.Message)
+		}
+		return fmt.Errorf("admin response was not ok")
+	}
+	return json.Unmarshal(envelope.Data, target)
 }
 
 func (f *fakeService) Status(context.Context) (domain.BridgeStatus, error) {
@@ -133,6 +155,13 @@ func TestStatusRequiresAdminToken(t *testing.T) {
 	if response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", response.StatusCode)
 	}
+	var payload testEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode unauthorized envelope: %v", err)
+	}
+	if payload.Ok || payload.Error == nil || payload.Error.Code != "unauthorized" {
+		t.Fatalf("unexpected unauthorized envelope: %+v", payload)
+	}
 }
 
 func TestStatusAndBindingsEndpoints(t *testing.T) {
@@ -179,7 +208,7 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", statusResponse.StatusCode)
 	}
 	var status domain.BridgeStatus
-	if err := json.NewDecoder(statusResponse.Body).Decode(&status); err != nil {
+	if err := decodeAdminData(statusResponse, &status); err != nil {
 		t.Fatalf("failed to decode status response: %v", err)
 	}
 	if status.AdminPort != 60110 {
@@ -199,7 +228,7 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 	var payload struct {
 		Items []domain.BindingRecord `json:"items"`
 	}
-	if err := json.NewDecoder(bindingsResponse.Body).Decode(&payload); err != nil {
+	if err := decodeAdminData(bindingsResponse, &payload); err != nil {
 		t.Fatalf("failed to decode bindings response: %v", err)
 	}
 	if len(payload.Items) != 1 {
@@ -219,7 +248,7 @@ func TestStatusAndBindingsEndpoints(t *testing.T) {
 	var sessionsPayload struct {
 		Items []domain.BridgeSession `json:"items"`
 	}
-	if err := json.NewDecoder(sessionsResponse.Body).Decode(&sessionsPayload); err != nil {
+	if err := decodeAdminData(sessionsResponse, &sessionsPayload); err != nil {
 		t.Fatalf("failed to decode sessions response: %v", err)
 	}
 	if len(sessionsPayload.Items) != 1 || sessionsPayload.Items[0].KimiSessionID != "session-1" {
@@ -262,7 +291,7 @@ func TestStatusEndpointReturnsDegradedSnapshotPayload(t *testing.T) {
 		t.Fatalf("expected degraded snapshot to still return 200, got %d", response.StatusCode)
 	}
 	var status domain.BridgeStatus
-	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+	if err := decodeAdminData(response, &status); err != nil {
 		t.Fatalf("failed to decode status response: %v", err)
 	}
 	if status.State != domain.BridgeStateDegraded || len(status.Channels) != 1 {
@@ -318,7 +347,7 @@ func TestPatchBindingAndImportSessionEndpoints(t *testing.T) {
 		t.Fatalf("expected binding update to be recorded, got %+v", fake.updated)
 	}
 	var updated domain.BindingRecord
-	if err := json.NewDecoder(patchResponse.Body).Decode(&updated); err != nil {
+	if err := decodeAdminData(patchResponse, &updated); err != nil {
 		t.Fatalf("failed to decode patch response: %v", err)
 	}
 	if updated.BindingID != "binding-1" || updated.WorkDir != "D:/workspace" {
@@ -439,7 +468,7 @@ func TestDebugPromptEndpoint(t *testing.T) {
 	}
 
 	var payload runtime.PromptResponse
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+	if err := decodeAdminData(response, &payload); err != nil {
 		t.Fatalf("failed to decode debug prompt response: %v", err)
 	}
 	if payload.KimiSessionID != "session-1" {

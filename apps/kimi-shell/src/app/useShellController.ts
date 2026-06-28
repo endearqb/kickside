@@ -72,6 +72,7 @@ import type {
   KimiCliApiConfigView,
   KimiCliConfigCenterInput,
   KimiCliConfigCenterView,
+  KimiDoctorResult,
   MainWindowCloseBehavior,
   MainWindowCloseDecisionInput,
   MainWindowCloseDecisionRequestPayload,
@@ -380,6 +381,14 @@ function createDefaultBridgeStatus(): BridgeStatus {
     state: "stopped",
     adminPort: 60110,
     version: undefined,
+    kimiRuntimeLocator: {
+      configured: false,
+      readable: false,
+    },
+    runtimeAdapter: {
+      name: "server",
+      state: "unavailable",
+    },
     connectors: [],
     pendingApprovals: 0,
     bindings: 0,
@@ -537,6 +546,7 @@ export function useShellController() {
   const [isLoading, setIsLoading] = useState(true);
   const [actionBusy, setActionBusy] = useState(false);
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [kimiDoctorBusy, setKimiDoctorBusy] = useState(false);
   const [contextMenuBusy, setContextMenuBusy] = useState(false);
   const [loginProbeBusy, setLoginProbeBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -552,6 +562,8 @@ export function useShellController() {
     useState<ContextMenuStatus | null>(null);
   const [loginProbeResult, setLoginProbeResult] =
     useState<LoginProbeResult | null>(null);
+  const [kimiDoctorResult, setKimiDoctorResult] =
+    useState<KimiDoctorResult | null>(null);
   const [kimiPathInput, setKimiPathInput] = useState("");
   const [workDirInput, setWorkDirInput] = useState("");
   const [configCenterView, setConfigCenterView] =
@@ -778,7 +790,9 @@ export function useShellController() {
   const remoteUrl =
     useBootHintWorkspace && bootHint?.workspaceUrl?.trim()
       ? bootHint.workspaceUrl.trim()
-      : workspacePort
+      : status?.workspaceUrl?.trim()
+        ? status.workspaceUrl.trim()
+        : workspacePort
         ? `http://127.0.0.1:${workspacePort}`
         : null;
   const workspaceFrameKey = remoteUrl
@@ -1283,6 +1297,19 @@ export function useShellController() {
       setActionError(String(error));
     } finally {
       setDiagnosticsBusy(false);
+    }
+  }
+
+  async function handleRunKimiDoctor() {
+    setKimiDoctorBusy(true);
+    try {
+      const data = await invoke<KimiDoctorResult>("run_kimi_doctor");
+      setKimiDoctorResult(data);
+      setActionError(null);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setKimiDoctorBusy(false);
     }
   }
 
@@ -3874,9 +3901,9 @@ export function useShellController() {
   async function handleInstallDependencies() {
     setActionError(null);
     try {
-      if (installProbe?.gitReady && installProbe.uvReady && installProbe.python313Ready) {
-        setInstallMessage("检测到依赖已安装。");
-        window.alert("依赖已安装，无需重复安装。");
+      if (installProbe?.kimiReady) {
+        setInstallMessage("检测到 Kimi CLI 已安装。");
+        window.alert("Kimi CLI 已安装，无需重复安装。");
         return;
       }
 
@@ -3884,7 +3911,7 @@ export function useShellController() {
       const summary = await invoke<string>("install_kimi_dependencies", {
         source: installSource,
       });
-      setInstallMessage(summary.trim() || "依赖安装命令执行完成。");
+      setInstallMessage(summary.trim() || "Kimi CLI 安装命令执行完成。");
       await refreshOnboarding();
       await refreshInstallProbe();
     } catch (error) {
@@ -3922,10 +3949,10 @@ export function useShellController() {
       action: "dependencies",
       invokeCommand: "install_kimi_dependencies",
       invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) => probe.gitReady && probe.uvReady,
-      alreadyMessage: "已检测到 Git 和 uv，无需重复安装。",
-      successMessage: "依赖安装复检通过：Git 和 uv 已就绪。",
-      predicate: (probe) => probe.gitReady && probe.uvReady,
+      alreadyInstalled: (probe) => probe.kimiReady,
+      alreadyMessage: "已检测到 Kimi CLI，无需重复安装。",
+      successMessage: "Kimi CLI 安装复检通过。",
+      predicate: (probe) => probe.kimiReady,
     });
   }
 
@@ -3934,10 +3961,10 @@ export function useShellController() {
       action: "kimi",
       invokeCommand: "install_kimi_cli",
       invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) => probe.python313Ready && probe.kimiReady,
-      alreadyMessage: "已检测到 Python 3.13 和 Kimi CLI，无需重复安装。",
-      successMessage: "Kimi 安装复检通过：Python 3.13 和 Kimi CLI 已就绪。",
-      predicate: (probe) => probe.python313Ready && probe.kimiReady,
+      alreadyInstalled: (probe) => probe.kimiReady,
+      alreadyMessage: "已检测到 Kimi CLI，无需重复安装。",
+      successMessage: "Kimi 安装复检通过。",
+      predicate: (probe) => probe.kimiReady,
     });
   }
 
@@ -3946,9 +3973,8 @@ export function useShellController() {
       action: "upgrade_kimi",
       invokeCommand: "upgrade_kimi_cli",
       invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) =>
-        !(probe.uvReady && probe.python313Ready && probe.kimiReady),
-      alreadyMessage: "升级前请先确认 uv、Python 3.13 和 Kimi CLI 已安装。",
+      alreadyInstalled: (probe) => !probe.kimiReady,
+      alreadyMessage: "升级前请先安装 Kimi CLI。",
       successMessage: "Kimi 升级复检通过。",
       predicate: (probe) => probe.kimiReady,
     });
@@ -4632,10 +4658,12 @@ export function useShellController() {
   return {
     status,
     diagnostics,
+    kimiDoctorResult,
     onboarding,
     isLoading,
     actionBusy,
     diagnosticsBusy,
+    kimiDoctorBusy,
     contextMenuBusy,
     loginProbeBusy,
     workspaceImportBusy,
@@ -4758,6 +4786,7 @@ export function useShellController() {
       await refreshCoreState();
     },
     refreshDiagnostics,
+    handleRunKimiDoctor,
     refreshContextMenuStatus,
     refreshBridgeSettings,
     refreshBridgeStatus,

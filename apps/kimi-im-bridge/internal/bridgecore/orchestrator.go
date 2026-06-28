@@ -23,7 +23,12 @@ func (o *Orchestrator) HandleInbound(
 		return HandleResult{}, fmt.Errorf("bridge orchestrator dependencies are incomplete")
 	}
 
-	binding, err := o.resolveOrCreateBinding(ctx, inbound.BindingKey, options.DefaultWorkDir)
+	target := RuntimeTarget{
+		Platform: inbound.Platform,
+		ChatID:   inbound.ChatID,
+		ThreadID: inbound.ThreadID,
+	}
+	binding, err := o.resolveOrCreateBinding(ctx, inbound.BindingKey, target, options.DefaultWorkDir)
 	if err != nil {
 		return HandleResult{}, err
 	}
@@ -67,11 +72,7 @@ func (o *Orchestrator) HandleInbound(
 
 	var reply strings.Builder
 	artifacts := []domain.RuntimeArtifact{}
-	result, runErr := o.runtime.RunTurn(ctx, RuntimeTarget{
-		Platform: inbound.Platform,
-		ChatID:   inbound.ChatID,
-		ThreadID: inbound.ThreadID,
-	}, TurnRequest{
+	result, runErr := o.runtime.RunTurn(ctx, target, TurnRequest{
 		TurnID:        turnID,
 		Prompt:        strings.TrimSpace(inbound.Text),
 		WorkDir:       binding.WorkDir,
@@ -84,6 +85,7 @@ func (o *Orchestrator) HandleInbound(
 		if event.KimiSessionID == "" {
 			event.KimiSessionID = binding.KimiSessionID
 		}
+		eventSessionID := firstNonEmpty(event.KimiSessionID, binding.KimiSessionID)
 		if event.ConnectorID == "" {
 			event.ConnectorID = inbound.ConnectorID
 		}
@@ -113,7 +115,7 @@ func (o *Orchestrator) HandleInbound(
 			if err := o.approvals.CreateApprovalTicket(ctx, domain.ApprovalTicket{
 				ApprovalID:         event.ApprovalID,
 				ConnectorID:        inbound.ConnectorID,
-				KimiSessionID:      binding.KimiSessionID,
+				KimiSessionID:      eventSessionID,
 				TurnID:             turnID,
 				StepID:             approvalStepID(turnID, event.StepIndex),
 				RequestKind:        defaultString(event.RequestKind, "approval"),
@@ -130,6 +132,15 @@ func (o *Orchestrator) HandleInbound(
 		}
 		return o.persistAndEmit(ctx, event, sink)
 	})
+
+	effectiveSessionID := firstNonEmpty(result.KimiSessionID, binding.KimiSessionID)
+	if effectiveSessionID != binding.KimiSessionID {
+		if err := o.bindings.Rebind(ctx, binding.BindingID, effectiveSessionID); err != nil {
+			return HandleResult{}, err
+		}
+		binding.KimiSessionID = effectiveSessionID
+	}
+	turn.KimiSessionID = effectiveSessionID
 
 	turn.Status = result.Status
 	turn.UpdatedAt = nowRFC3339()
@@ -151,7 +162,7 @@ func (o *Orchestrator) HandleInbound(
 		return HandleResult{}, err
 	}
 	if err := o.turns.UpsertSession(ctx, domain.BridgeSession{
-		KimiSessionID: binding.KimiSessionID,
+		KimiSessionID: effectiveSessionID,
 		WorkDir:       binding.WorkDir,
 		LastTurnID:    turnID,
 		LastMessageAt: turn.UpdatedAt,
@@ -169,7 +180,7 @@ func (o *Orchestrator) HandleInbound(
 	return HandleResult{
 		Binding:   *binding,
 		TurnID:    turnID,
-		SessionID: binding.KimiSessionID,
+		SessionID: effectiveSessionID,
 		ReplyText: strings.TrimSpace(reply.String()),
 		Artifacts: artifacts,
 		Renderer:  "interactive",
@@ -184,7 +195,7 @@ func (o *Orchestrator) ResolveApproval(ctx context.Context, approvalID string, s
 	return o.runtime.ResolveApproval(ctx, approvalID, status, payload)
 }
 
-func (o *Orchestrator) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey, defaultWorkDir string) (*domain.SessionBinding, error) {
+func (o *Orchestrator) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey, target RuntimeTarget, defaultWorkDir string) (*domain.SessionBinding, error) {
 	binding, err := o.bindings.ResolveBinding(ctx, key)
 	if err != nil {
 		return nil, err
@@ -195,7 +206,24 @@ func (o *Orchestrator) resolveOrCreateBinding(ctx context.Context, key domain.Bi
 		}
 		return binding, nil
 	}
-	return o.bindings.CreateBinding(ctx, key, uuid.NewString(), strings.TrimSpace(defaultWorkDir), "auto")
+
+	sessionID := uuid.NewString()
+	workDir := strings.TrimSpace(defaultWorkDir)
+	source := "auto"
+	if ensurer, ok := o.runtime.(RuntimeSessionEnsurer); ok {
+		session, err := ensurer.EnsureSession(ctx, target, RuntimeSessionRequest{WorkDir: workDir})
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(session.KimiSessionID) != "" {
+			sessionID = strings.TrimSpace(session.KimiSessionID)
+		}
+		if strings.TrimSpace(session.WorkDir) != "" {
+			workDir = strings.TrimSpace(session.WorkDir)
+		}
+		source = defaultString(session.Source, source)
+	}
+	return o.bindings.CreateBinding(ctx, key, sessionID, workDir, source)
 }
 
 func (o *Orchestrator) persistAndEmit(ctx context.Context, event TurnEvent, sink TurnEventSink) error {

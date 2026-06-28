@@ -159,6 +159,10 @@ export interface AppStatus {
   activeSessionId?: string;
   activeSessionWorkDir?: string;
   sessionSource?: string;
+  runtimeOrigin?: string;
+  serverTokenPath?: string;
+  serverTokenRedacted?: string;
+  workspaceUrl?: string;
   startupAttemptId: number;
   startupPhase: StartupPhase;
   startupFailureKind?: StartupFailureKind;
@@ -242,10 +246,26 @@ export interface BridgeStatus {
   pid?: number;
   adminPort: number;
   version?: string;
+  kimiRuntimeLocator: BridgeRuntimeLocatorStatus;
+  runtimeAdapter: BridgeRuntimeAdapterStatus;
   connectors: BridgeConnectorStatus[];
   pendingApprovals: number;
   bindings: number;
   lastErrorCode?: string;
+  lastError?: string;
+}
+
+export interface BridgeRuntimeLocatorStatus {
+  configured: boolean;
+  path?: string;
+  readable: boolean;
+  health?: string;
+  lastError?: string;
+}
+
+export interface BridgeRuntimeAdapterStatus {
+  name?: string;
+  state: string;
   lastError?: string;
 }
 
@@ -796,6 +816,10 @@ export interface DiagnosticsInfo {
   launchCommand?: string;
   cliContractOk?: boolean;
   cliContractError?: string;
+  runtimeOrigin?: string;
+  serverTokenPath?: string;
+  serverTokenRedacted?: string;
+  workspaceUrl?: string;
   kimiVersion?: string;
   versionError?: string;
   lastError?: string;
@@ -866,6 +890,16 @@ export interface LoginProbeResult {
   message: string;
   kimiPath?: string;
   exitCode?: number;
+}
+
+export interface KimiDoctorResult {
+  succeeded: boolean;
+  exitCode?: number;
+  command: string;
+  kimiPath: string;
+  shellPath?: string;
+  stdout: string;
+  stderr: string;
 }
 
 export interface KimiCliApiConfigView {
@@ -1021,6 +1055,8 @@ export const PROVIDER_TYPE_OPTIONS = [
 export interface InstallProbeStatus {
   wingetReady: boolean;
   gitReady: boolean;
+  gitBashReady: boolean;
+  kimiShellPath?: string;
   uvReady: boolean;
   python313Ready: boolean;
   kimiReady: boolean;

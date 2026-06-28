@@ -399,6 +399,9 @@ export function InstallFlowTaskContent({
     activePreflight && !activePreflight.smokeTestOk
       ? "PowerShell 预检未通过，建议先处理执行策略。"
       : "",
+    probe && !probe.gitBashReady
+      ? "未检测到 Git Bash，Kimi Code 执行 shell 工具可能不可用。请安装 Git for Windows。"
+      : "",
     !probe?.kimiReady && kimiPathInput.trim()
       ? "已填写本地 Kimi 路径，点击“保存路径并重试”后重新探测。"
       : "",
@@ -485,6 +488,11 @@ export function InstallFlowTaskContent({
             <span>Kimi CLI</span>
             <strong>{statusLabel(probe?.kimiReady)}</strong>
             <small>{detectedKimiPath || "尚未探测到可用路径"}</small>
+          </article>
+          <article className="cc-install-overview-card">
+            <span>Git Bash</span>
+            <strong>{statusLabel(probe?.gitBashReady)}</strong>
+            <small>{probe?.kimiShellPath || "未配置 KIMI_SHELL_PATH"}</small>
           </article>
         </div>
 
@@ -913,7 +921,7 @@ export function InstallFlowTaskContent({
             aria-label="卸载 Kimi CLI"
           >
             <h3>卸载 Kimi CLI</h3>
-            <p>仅卸载 Kimi CLI，保留 uv 和 Python 3.13。卸载前会先停止后端，完成后后端保持停止。</p>
+            <p>仅卸载托管的 Kimi CLI。卸载前会先停止后端，完成后后端保持停止。</p>
             <div className="main-close-decision-actions">
               <button
                 type="button"

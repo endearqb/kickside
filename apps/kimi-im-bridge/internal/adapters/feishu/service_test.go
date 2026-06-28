@@ -524,6 +524,75 @@ func TestServiceProcessCardActionResolvesApproval(t *testing.T) {
 	}
 }
 
+func TestServiceRedeliversPendingApprovals(t *testing.T) {
+	t.Parallel()
+
+	service, storeHandle, gateway, _ := newTestService(t, Config{
+		AppID:     "cli_a",
+		AppSecret: "secret",
+	})
+	router := binding.NewRouter(storeHandle)
+	bindingRecord, err := router.CreateBinding(context.Background(), domain.BindingKey{
+		ConnectorID: service.connectorID(),
+		Platform:    platformID,
+		ChatID:      "chat-1",
+		ThreadID:    "thread-1",
+	}, "session-1", "", "auto")
+	if err != nil {
+		t.Fatalf("CreateBinding returned error: %v", err)
+	}
+	if err := storeHandle.UpdateLastInboundMessageID(context.Background(), bindingRecord.BindingID, "msg-source-1"); err != nil {
+		t.Fatalf("UpdateLastInboundMessageID returned error: %v", err)
+	}
+	if err := storeHandle.CreateApprovalTicket(context.Background(), domain.ApprovalTicket{
+		ApprovalID:         "approval-recovered-1",
+		ConnectorID:        service.connectorID(),
+		KimiSessionID:      "session-1",
+		TurnID:             "turn-1",
+		StepID:             "step-1",
+		RequestKind:        "tool",
+		Prompt:             "please approve",
+		Platform:           platformID,
+		ChatID:             "chat-1",
+		ThreadID:           "thread-1",
+		Status:             "pending",
+		RequestPayloadJSON: "{}",
+		DedupeKey:          "feishu:chat-1:thread-1:approval-recovered-1",
+	}); err != nil {
+		t.Fatalf("CreateApprovalTicket returned error: %v", err)
+	}
+
+	count, err := service.RedeliverPendingApprovals(context.Background())
+	if err != nil {
+		t.Fatalf("RedeliverPendingApprovals returned error: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one redelivered approval, got %d", count)
+	}
+	if len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected one approval card reply, got %d", len(gateway.replyCalls))
+	}
+	call := gateway.replyCalls[0]
+	if call.ReplyToMessageID != "msg-source-1" || call.ChatID != "chat-1" || call.MessageType != "interactive" {
+		t.Fatalf("unexpected approval card request: %+v", call)
+	}
+	event, err := storeHandle.GetDeliveryEventByKey(context.Background(), "feishu:approval:approval-recovered-1")
+	if err != nil {
+		t.Fatalf("GetDeliveryEventByKey returned error: %v", err)
+	}
+	if event == nil || event.Status != "sent" || event.TargetMessageID == "" {
+		t.Fatalf("expected sent delivery event with target message id, got %+v", event)
+	}
+
+	count, err = service.RedeliverPendingApprovals(context.Background())
+	if err != nil {
+		t.Fatalf("second RedeliverPendingApprovals returned error: %v", err)
+	}
+	if count != 0 || len(gateway.replyCalls) != 1 {
+		t.Fatalf("expected duplicate delivery to be skipped, count=%d replies=%d", count, len(gateway.replyCalls))
+	}
+}
+
 func TestServiceProcessCardActionShowsHiddenCardForLegacyPresetWorkDir(t *testing.T) {
 	t.Parallel()
 

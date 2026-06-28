@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 use reqwest::blocking::Client;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::types::{
     BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeSessionImportInput,
@@ -33,6 +35,25 @@ struct ApprovalListResponse {
 #[serde(rename_all = "camelCase")]
 struct SessionListResponse {
     items: Vec<AdminBridgeSessionRecord>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeAdminEnvelope {
+    ok: bool,
+    #[serde(default)]
+    data: Option<Value>,
+    #[serde(default)]
+    error: Option<BridgeAdminError>,
+    #[serde(default)]
+    request_id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeAdminError {
+    code: String,
+    message: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -101,29 +122,17 @@ impl BridgeHttpClient {
             .request(reqwest::Method::GET, "/api/v1/status")?
             .send()
             .context("failed to request bridge status")?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().unwrap_or_default();
-            let detail = body.trim();
-            if detail.is_empty() {
-                bail!("bridge status returned error status: {status}");
-            }
-            bail!("bridge status returned error status: {status} {detail}");
-        }
-        response
-            .json::<BridgeStatus>()
-            .context("failed to decode bridge status")
+        decode_admin_response(response, "status")
     }
 
     pub fn list_bindings(&self) -> anyhow::Result<Vec<BindingRecord>> {
         let payload = self
             .request(reqwest::Method::GET, "/api/v1/bindings")?
             .send()
-            .context("failed to request bridge bindings")?
-            .error_for_status()
-            .context("bridge bindings returned error status")?
-            .json::<BindingListResponse>()
-            .context("failed to decode bridge bindings payload")?;
+            .context("failed to request bridge bindings")
+            .and_then(|response| {
+                decode_admin_response::<BindingListResponse>(response, "bindings")
+            })?;
         Ok(payload.items)
     }
 
@@ -131,11 +140,10 @@ impl BridgeHttpClient {
         let payload = self
             .request(reqwest::Method::GET, "/api/v1/sessions")?
             .send()
-            .context("failed to request bridge sessions")?
-            .error_for_status()
-            .context("bridge sessions returned error status")?
-            .json::<SessionListResponse>()
-            .context("failed to decode bridge sessions payload")?;
+            .context("failed to request bridge sessions")
+            .and_then(|response| {
+                decode_admin_response::<SessionListResponse>(response, "sessions")
+            })?;
         Ok(payload
             .items
             .into_iter()
@@ -149,9 +157,8 @@ impl BridgeHttpClient {
             &format!("/api/v1/bindings/{binding_id}"),
         )?
         .send()
-        .context("failed to clear bridge binding")?
-        .error_for_status()
-        .context("bridge clear binding returned error status")?;
+        .context("failed to clear bridge binding")
+        .and_then(|response| decode_admin_empty(response, "clear binding"))?;
         Ok(())
     }
 
@@ -166,11 +173,8 @@ impl BridgeHttpClient {
         )?
         .json(input)
         .send()
-        .context("failed to update bridge binding")?
-        .error_for_status()
-        .context("bridge update binding returned error status")?
-        .json::<BindingRecord>()
-        .context("failed to decode updated bridge binding")
+        .context("failed to update bridge binding")
+        .and_then(|response| decode_admin_response::<BindingRecord>(response, "update binding"))
     }
 
     pub fn list_approvals(
@@ -183,11 +187,10 @@ impl BridgeHttpClient {
         }
         let payload = request
             .send()
-            .context("failed to request bridge approvals")?
-            .error_for_status()
-            .context("bridge approvals returned error status")?
-            .json::<ApprovalListResponse>()
-            .context("failed to decode bridge approvals payload")?;
+            .context("failed to request bridge approvals")
+            .and_then(|response| {
+                decode_admin_response::<ApprovalListResponse>(response, "approvals")
+            })?;
         Ok(payload.items)
     }
 
@@ -198,9 +201,8 @@ impl BridgeHttpClient {
         )?
         .json(input)
         .send()
-        .context("failed to resolve bridge approval")?
-        .error_for_status()
-        .context("bridge resolve approval returned error status")?;
+        .context("failed to resolve bridge approval")
+        .and_then(|response| decode_admin_empty(response, "resolve approval"))?;
         Ok(())
     }
 
@@ -211,20 +213,18 @@ impl BridgeHttpClient {
         self.request(reqwest::Method::POST, "/api/v1/sessions/import")?
             .json(input)
             .send()
-            .context("failed to import bridge session")?
-            .error_for_status()
-            .context("bridge import session returned error status")?
-            .json::<AdminBridgeSessionRecord>()
+            .context("failed to import bridge session")
+            .and_then(|response| {
+                decode_admin_response::<AdminBridgeSessionRecord>(response, "import session")
+            })
             .map(map_admin_session_record)
-            .context("failed to decode imported bridge session")
     }
 
     pub fn stop_runtime(&self) -> anyhow::Result<()> {
         self.request(reqwest::Method::POST, "/api/v1/runtime/stop")?
             .send()
-            .context("failed to request bridge runtime stop")?
-            .error_for_status()
-            .context("bridge runtime stop returned error status")?;
+            .context("failed to request bridge runtime stop")
+            .and_then(|response| decode_admin_empty(response, "runtime stop"))?;
         Ok(())
     }
 
@@ -238,6 +238,88 @@ impl BridgeHttpClient {
             .request(method, format!("{}{}", self.base_url, path))
             .header(ADMIN_TOKEN_HEADER, &self.admin_token))
     }
+}
+
+fn decode_admin_empty(response: reqwest::blocking::Response, label: &str) -> anyhow::Result<()> {
+    let _: Value = decode_admin_response(response, label)?;
+    Ok(())
+}
+
+fn decode_admin_response<T>(response: reqwest::blocking::Response, label: &str) -> anyhow::Result<T>
+where
+    T: DeserializeOwned,
+{
+    let status = response.status();
+    let body = response
+        .text()
+        .with_context(|| format!("failed to read bridge {label} response body"))?;
+    let value = serde_json::from_str::<Value>(&body).with_context(|| {
+        format!(
+            "failed to decode bridge {label} response JSON: {}",
+            truncate_for_error(&body, 240)
+        )
+    })?;
+    let is_envelope = value.get("ok").and_then(Value::as_bool).is_some()
+        && (value.get("data").is_some() || value.get("error").is_some());
+
+    if !status.is_success() {
+        if is_envelope {
+            return bridge_envelope_error(label, status.as_u16(), value);
+        }
+        bail!(
+            "bridge {label} returned error status {status}: {}",
+            truncate_for_error(&body, 240)
+        );
+    }
+
+    let payload = if is_envelope {
+        let envelope: BridgeAdminEnvelope = serde_json::from_value(value)
+            .with_context(|| format!("failed to decode bridge {label} envelope"))?;
+        if !envelope.ok {
+            return bridge_admin_error(label, status.as_u16(), &envelope);
+        }
+        envelope.data.unwrap_or(Value::Null)
+    } else {
+        value
+    };
+
+    serde_json::from_value(payload)
+        .with_context(|| format!("failed to decode bridge {label} payload"))
+}
+
+fn bridge_envelope_error<T>(label: &str, status: u16, value: Value) -> anyhow::Result<T> {
+    let envelope: BridgeAdminEnvelope = serde_json::from_value(value)
+        .with_context(|| format!("failed to decode bridge {label} error envelope"))?;
+    bridge_admin_error(label, status, &envelope)
+}
+
+fn bridge_admin_error<T>(
+    label: &str,
+    status: u16,
+    envelope: &BridgeAdminEnvelope,
+) -> anyhow::Result<T> {
+    let request_id = envelope
+        .request_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!(" request_id={value}"))
+        .unwrap_or_default();
+    if let Some(error) = envelope.error.as_ref() {
+        bail!(
+            "bridge {label} returned error status {status}{request_id}: {} ({})",
+            error.message,
+            error.code
+        );
+    }
+    bail!("bridge {label} returned error status {status}{request_id}")
+}
+
+fn truncate_for_error(value: &str, max_chars: usize) -> String {
+    let mut result = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() > max_chars {
+        result.push_str("...");
+    }
+    result
 }
 
 #[cfg(test)]
@@ -263,7 +345,7 @@ mod tests {
             sender.send(header).expect("header should be forwarded");
 
             let response = Response::from_string(
-                r#"{"state":"running","adminPort":60110,"channels":[],"pendingApprovals":0,"bindings":0}"#,
+                r#"{"ok":true,"data":{"state":"running","adminPort":60110,"channels":[],"pendingApprovals":0,"bindings":0},"requestId":"r1"}"#,
             )
             .with_header(
                 Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
@@ -312,6 +394,31 @@ mod tests {
             receiver.recv().expect("method should be captured"),
             "POST".to_string()
         );
+    }
+
+    #[test]
+    fn envelope_error_includes_code_and_request_id() {
+        let server = Server::http("127.0.0.1:0").expect("test server should bind");
+        let address = format!("http://{}", server.server_addr());
+
+        thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            let response = Response::from_string(
+                r#"{"ok":false,"error":{"code":"unauthorized","message":"invalid admin token"},"requestId":"r-error"}"#,
+            )
+            .with_status_code(401)
+            .with_header(
+                Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                    .expect("content type header"),
+            );
+            request.respond(response).expect("response should be sent");
+        });
+
+        let client = BridgeHttpClient::new(address, "bad-token").expect("client should be created");
+        let error = client.get_status().expect_err("status should fail");
+        let message = error.to_string();
+        assert!(message.contains("unauthorized"));
+        assert!(message.contains("request_id=r-error"));
     }
 
     #[test]

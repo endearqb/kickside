@@ -5,13 +5,14 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    api_v1_client::ApiV1Client,
     app_state::{unix_time_millis, AppState, PendingWorkspaceBootstrap},
-    auth_state, log_manager, settings_store, skill_center,
+    auth_state, log_manager, settings_store, skill_center, token_resolver,
     types::{
         AuthMode, BackendState, KimiLoginHealthSource, KimiLoginHealthState,
         OpenRequestErrorPayload, ProviderApiHealthSource, ProviderApiHealthState,
@@ -23,18 +24,23 @@ use crate::{
 const WORKSPACE_SESSION_BOOTSTRAP_EVENT: &str = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT: &str = "workspace-session-bridge";
 const WORKSPACE_SESSION_POLL_INTERVAL_MS: u64 = 1_200;
-const SESSION_LIST_FETCH_LIMIT: usize = 500;
+const SESSION_LIST_FETCH_LIMIT: usize = 100;
 const BOOTSTRAP_ROUTE_TEMPLATE: &str = "/?session={{session_id}}";
 
 #[derive(Debug, Clone, Deserialize)]
 struct ApiSession {
+    #[serde(alias = "id", alias = "sessionId")]
     session_id: String,
-    #[serde(default)]
+    #[serde(default, alias = "workDir", alias = "cwd", alias = "workspace_root")]
     work_dir: Option<String>,
     #[serde(default)]
     is_running: bool,
-    #[serde(default)]
+    #[serde(default, alias = "updated_at", alias = "updatedAt")]
     last_updated: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,10 +52,59 @@ pub struct WorkspaceSessionRecord {
     pub last_updated: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct CreateSessionRequest {
-    work_dir: String,
-    create_dir: bool,
+impl ApiSession {
+    fn normalized(mut self) -> Self {
+        if self
+            .work_dir
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            self.work_dir = self
+                .metadata
+                .as_ref()
+                .and_then(extract_work_dir_from_metadata);
+        }
+
+        if !self.is_running {
+            self.is_running = self
+                .status
+                .as_deref()
+                .map(is_active_session_status)
+                .unwrap_or(false);
+        }
+
+        self
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum SessionListData {
+    Page { items: Vec<ApiSession> },
+    Sessions { sessions: Vec<ApiSession> },
+    List(Vec<ApiSession>),
+}
+
+impl SessionListData {
+    fn into_sessions(self) -> Vec<ApiSession> {
+        match self {
+            SessionListData::Page { items } => items,
+            SessionListData::Sessions { sessions } => sessions,
+            SessionListData::List(sessions) => sessions,
+        }
+        .into_iter()
+        .map(ApiSession::normalized)
+        .collect()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApiWorkspace {
+    id: String,
+    #[allow(dead_code)]
+    root: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,7 +239,7 @@ pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &
         return;
     }
 
-    let (generation, workspace_port) = {
+    let generation = {
         let state = app.state::<AppState>();
         let lock = state.runtime.lock();
         let Ok(runtime) = lock else {
@@ -201,11 +256,10 @@ pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &
         {
             return;
         }
-        (runtime.generation, runtime.workspace_port)
-    };
-
-    let Some(workspace_port) = workspace_port else {
-        return;
+        if runtime.runtime_origin.is_none() || runtime.server_token_path.is_none() {
+            return;
+        }
+        runtime.generation
     };
 
     let source = source.to_string();
@@ -216,7 +270,7 @@ pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &
             return;
         }
 
-        match fetch_session_by_id(workspace_port, &session_id) {
+        match fetch_session_by_id(&app, &session_id) {
             Ok(Some(snapshot)) => {
                 apply_active_session_snapshot(
                     &app,
@@ -244,7 +298,7 @@ pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &
     });
 }
 
-fn start_session_poller(app: AppHandle, generation: u64, workspace_port: u16) {
+fn start_session_poller(app: AppHandle, generation: u64, _workspace_port: u16) {
     thread::spawn(move || {
         let mut last_error: Option<String> = None;
         loop {
@@ -252,7 +306,7 @@ fn start_session_poller(app: AppHandle, generation: u64, workspace_port: u16) {
                 return;
             }
 
-            match fetch_active_session(workspace_port) {
+            match fetch_active_session(&app) {
                 Ok(snapshot) => {
                     if let Some(error) = last_error.take() {
                         log_manager::append_line(
@@ -283,7 +337,7 @@ fn start_session_poller(app: AppHandle, generation: u64, workspace_port: u16) {
 fn spawn_bootstrap_session(
     app: AppHandle,
     generation: u64,
-    workspace_port: u16,
+    _workspace_port: u16,
     request: PendingWorkspaceBootstrap,
 ) {
     let work_dir = request.work_dir;
@@ -294,7 +348,7 @@ fn spawn_bootstrap_session(
         let existing_session = if force_create_new {
             None
         } else {
-            match fetch_sessions(workspace_port) {
+            match fetch_sessions(&app) {
                 Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
                 Err(error) => {
                     maybe_capture_workspace_auth_failure(&app, &error);
@@ -321,7 +375,7 @@ fn spawn_bootstrap_session(
             );
             (snapshot, "bootstrap_resume_existing")
         } else {
-            let response = create_session_for_work_dir(workspace_port, &work_dir);
+            let response = create_session_for_work_dir(&app, &work_dir);
             let created = match response {
                 Ok(session) => session,
                 Err(error) => {
@@ -404,35 +458,27 @@ fn emit_bootstrap_open_request_error(app: &AppHandle, source: &str, stage: &str,
     window_manager::publish_open_request_error(app, &payload, "workspace_session_bootstrap");
 }
 
-fn fetch_active_session(workspace_port: u16) -> Result<Option<SessionSnapshot>, String> {
-    let sessions = fetch_sessions(workspace_port)?;
+fn fetch_active_session(app: &AppHandle) -> Result<Option<SessionSnapshot>, String> {
+    let sessions = fetch_sessions(app)?;
     Ok(select_active_session(&sessions))
 }
 
 fn fetch_session_by_id(
-    workspace_port: u16,
+    app: &AppHandle,
     session_id: &str,
 ) -> Result<Option<SessionSnapshot>, String> {
-    let sessions = fetch_sessions(workspace_port)?;
+    let sessions = fetch_sessions(app)?;
     Ok(select_session_by_id(&sessions, session_id))
 }
 
 pub fn list_workspace_sessions_for_bridge(
     app: &AppHandle,
 ) -> anyhow::Result<Vec<WorkspaceSessionRecord>> {
-    let workspace_port = {
-        let state = app.state::<AppState>();
-        let runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-        runtime.workspace_port
-    };
-
-    let Some(workspace_port) = workspace_port else {
+    if !runtime_api_ready(app)? {
         return Ok(Vec::new());
-    };
-    let sessions = fetch_sessions(workspace_port).map_err(|error| {
+    }
+
+    let sessions = fetch_sessions(app).map_err(|error| {
         maybe_capture_workspace_auth_failure(app, &error);
         anyhow::anyhow!("failed to list workspace sessions: {error}")
     })?;
@@ -452,19 +498,11 @@ pub fn get_workspace_session_for_bridge(
     app: &AppHandle,
     session_id: &str,
 ) -> anyhow::Result<Option<WorkspaceSessionRecord>> {
-    let workspace_port = {
-        let state = app.state::<AppState>();
-        let runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-        runtime.workspace_port
-    };
-
-    let Some(workspace_port) = workspace_port else {
+    if !runtime_api_ready(app)? {
         return Ok(None);
-    };
-    let sessions = fetch_sessions(workspace_port).map_err(|error| {
+    }
+
+    let sessions = fetch_sessions(app).map_err(|error| {
         maybe_capture_workspace_auth_failure(app, &error);
         anyhow::anyhow!("failed to list workspace sessions: {error}")
     })?;
@@ -480,66 +518,125 @@ pub fn get_workspace_session_for_bridge(
         }))
 }
 
-fn fetch_sessions(workspace_port: u16) -> Result<Vec<ApiSession>, String> {
-    let url = format!(
-        "http://127.0.0.1:{workspace_port}/api/sessions/?limit={SESSION_LIST_FETCH_LIMIT}&offset=0"
-    );
-    let client = Client::builder()
-        .timeout(Duration::from_secs(6))
-        .build()
-        .map_err(|error| format!("failed to build session poll client: {error}"))?;
-
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|error| format!("GET `{url}` failed: {error}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text()
-            .unwrap_or_else(|_| "<failed to read body>".to_string());
-        return Err(format!(
-            "GET `{url}` returned {status}; body={}",
-            truncate_for_log(&body, 220)
-        ));
-    }
-
-    let sessions: Vec<ApiSession> = response
-        .json()
-        .map_err(|error| format!("failed to decode sessions response: {error}"))?;
-    Ok(sessions)
+fn fetch_sessions(app: &AppHandle) -> Result<Vec<ApiSession>, String> {
+    let client = require_runtime_api_client(app)?;
+    fetch_sessions_with_client(&client)
 }
 
-fn create_session_for_work_dir(workspace_port: u16, work_dir: &Path) -> Result<ApiSession, String> {
-    let url = format!("http://127.0.0.1:{workspace_port}/api/sessions/");
-    let body = CreateSessionRequest {
-        work_dir: work_dir.to_string_lossy().to_string(),
-        create_dir: true,
-    };
+fn fetch_sessions_with_client(client: &ApiV1Client) -> Result<Vec<ApiSession>, String> {
+    let path = format!("sessions?page_size={SESSION_LIST_FETCH_LIMIT}");
+    let data = client
+        .get::<SessionListData>(&path)
+        .map_err(|error| format!("GET `/api/v1/{path}` failed: {error:#}"))?;
+    Ok(data.into_sessions())
+}
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(12))
-        .build()
-        .map_err(|error| format!("failed to build bootstrap session client: {error}"))?;
-    let response = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .map_err(|error| format!("POST `{url}` failed: {error}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text()
-            .unwrap_or_else(|_| "<failed to read body>".to_string());
-        return Err(format!(
-            "POST `{url}` returned {status}; body={}",
-            truncate_for_log(&body, 220)
-        ));
+fn create_session_for_work_dir(app: &AppHandle, work_dir: &Path) -> Result<ApiSession, String> {
+    let client = require_runtime_api_client(app)?;
+    let workspace_id = match create_workspace_for_work_dir(&client, work_dir) {
+        Ok(workspace) => Some(workspace.id),
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "workspace registration failed before session create; falling back to metadata.cwd (work_dir={}): {error}",
+                    work_dir.display()
+                ),
+            );
+            None
+        }
+    };
+    let body = create_session_request_body(work_dir, workspace_id.as_deref());
+
+    client
+        .post::<Value, ApiSession>("sessions", &body)
+        .map(ApiSession::normalized)
+        .map_err(|error| format!("POST `/api/v1/sessions` failed: {error:#}"))
+}
+
+fn create_workspace_for_work_dir(
+    client: &ApiV1Client,
+    work_dir: &Path,
+) -> Result<ApiWorkspace, String> {
+    let root = work_dir.to_string_lossy().to_string();
+    let body = json!({ "root": root });
+    client
+        .post::<Value, ApiWorkspace>("workspaces", &body)
+        .map_err(|error| format!("POST `/api/v1/workspaces` failed: {error:#}"))
+}
+
+fn create_session_request_body(work_dir: &Path, workspace_id: Option<&str>) -> Value {
+    if let Some(workspace_id) = workspace_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return json!({ "workspace_id": workspace_id });
     }
 
-    response
-        .json::<ApiSession>()
-        .map_err(|error| format!("failed to decode create session response: {error}"))
+    json!({
+        "metadata": {
+            "cwd": work_dir.to_string_lossy().to_string()
+        }
+    })
+}
+
+fn runtime_api_ready(app: &AppHandle) -> anyhow::Result<bool> {
+    let state = app.state::<AppState>();
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+    Ok(runtime.runtime_origin.is_some() && runtime.server_token_path.is_some())
+}
+
+fn require_runtime_api_client(app: &AppHandle) -> Result<ApiV1Client, String> {
+    let (origin, token_path) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+        (
+            runtime.runtime_origin.clone(),
+            runtime.server_token_path.clone(),
+        )
+    };
+
+    let origin = origin.ok_or_else(|| "kimi-code runtime origin is unavailable".to_string())?;
+    let token_path =
+        token_path.ok_or_else(|| "kimi-code server token path is unavailable".to_string())?;
+    let token = token_resolver::read_server_token_at(&token_path)
+        .map_err(|error| format!("failed to read kimi-code server token: {error:#}"))?;
+
+    ApiV1Client::new(origin, token.value)
+        .map_err(|error| format!("failed to build kimi-code /api/v1 client: {error:#}"))
+}
+
+fn extract_work_dir_from_metadata(metadata: &Value) -> Option<String> {
+    [
+        "cwd",
+        "work_dir",
+        "workDir",
+        "workspace_root",
+        "workspaceRoot",
+        "root",
+    ]
+    .iter()
+    .find_map(|key| {
+        metadata
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+fn is_active_session_status(status: &str) -> bool {
+    matches!(
+        status.trim(),
+        "running" | "awaiting_approval" | "awaiting_question"
+    )
 }
 
 fn maybe_capture_workspace_auth_failure(app: &AppHandle, error: &str) {
@@ -806,14 +903,6 @@ fn normalize_path_for_match_with_case(path: &Path, case_insensitive: bool) -> St
     value
 }
 
-fn truncate_for_log(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
-    }
-    let short: String = value.chars().take(max_chars).collect();
-    format!("{short}...")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -830,6 +919,8 @@ mod tests {
             work_dir: work_dir.map(|item| item.to_string()),
             is_running,
             last_updated: last_updated.map(|item| item.to_string()),
+            status: None,
+            metadata: None,
         }
     }
 
@@ -942,5 +1033,60 @@ mod tests {
         let selected =
             select_latest_session_for_work_dir_with_case(&sessions, Path::new("D:/missing"), true);
         assert!(selected.is_none());
+    }
+
+    #[test]
+    fn decode_api_v1_session_page_extracts_metadata_cwd() {
+        let data = serde_json::from_str::<SessionListData>(
+            r#"{
+                "items": [{
+                    "id": "sess_1",
+                    "updated_at": "2026-06-28T09:00:00Z",
+                    "status": "running",
+                    "metadata": { "cwd": "D:/repo" }
+                }],
+                "has_more": false
+            }"#,
+        )
+        .expect("session page");
+
+        let sessions = data.into_sessions();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "sess_1");
+        assert_eq!(sessions[0].work_dir.as_deref(), Some("D:/repo"));
+        assert!(sessions[0].is_running);
+        assert_eq!(
+            sessions[0].last_updated.as_deref(),
+            Some("2026-06-28T09:00:00Z")
+        );
+    }
+
+    #[test]
+    fn decode_api_v1_session_page_accepts_session_id_alias() {
+        let data = serde_json::from_str::<SessionListData>(
+            r#"[{
+                "session_id": "legacy_1",
+                "workDir": "D:/legacy",
+                "is_running": true
+            }]"#,
+        )
+        .expect("session list");
+
+        let sessions = data.into_sessions();
+        assert_eq!(sessions[0].session_id, "legacy_1");
+        assert_eq!(sessions[0].work_dir.as_deref(), Some("D:/legacy"));
+        assert!(sessions[0].is_running);
+    }
+
+    #[test]
+    fn create_session_body_prefers_workspace_id_when_available() {
+        let body = create_session_request_body(Path::new("D:/repo"), Some("wd_repo_0123456789ab"));
+        assert_eq!(body, json!({ "workspace_id": "wd_repo_0123456789ab" }));
+    }
+
+    #[test]
+    fn create_session_body_falls_back_to_metadata_cwd() {
+        let body = create_session_request_body(Path::new("D:/repo"), None);
+        assert_eq!(body, json!({ "metadata": { "cwd": "D:/repo" } }));
     }
 }

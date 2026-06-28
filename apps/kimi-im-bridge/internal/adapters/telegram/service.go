@@ -39,6 +39,7 @@ type ChannelStore interface {
 	UpdateChannelOffset(context.Context, string, string, string) error
 	TouchChannelInbound(context.Context, string, string) error
 	TouchChannelOutbound(context.Context, string, string) error
+	ListApprovals(context.Context, string) ([]domain.ApprovalTicket, error)
 	GetApprovalByID(context.Context, string) (*domain.ApprovalTicket, error)
 	GetDeliveryEventByKey(context.Context, string) (*domain.DeliveryEvent, error)
 	RecordDeliveryEventIfAbsent(context.Context, domain.DeliveryEvent) (bool, error)
@@ -340,11 +341,6 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 		return false, reliability.Wrap("unknown", err)
 	}
 
-	binding, err := s.resolveOrCreateBinding(ctx, *key)
-	if err != nil {
-		return false, err
-	}
-
 	if s.orchestrator != nil {
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(*inbound, *key), bridgecore.HandleOptions{
 			DefaultWorkDir: strings.TrimSpace(s.config.DefaultWorkDir),
@@ -364,6 +360,11 @@ func (s *Service) processMessage(ctx context.Context, incoming *message) (bool, 
 			return false, err
 		}
 		return true, nil
+	}
+
+	binding, err := s.resolveOrCreateBinding(ctx, *key)
+	if err != nil {
+		return false, err
 	}
 
 	prompt := runtime.PromptRequest{

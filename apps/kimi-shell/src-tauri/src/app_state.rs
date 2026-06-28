@@ -18,6 +18,7 @@ use crate::types::{
     StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
 };
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PendingWorkspaceBootstrap {
     pub work_dir: PathBuf,
@@ -51,6 +52,10 @@ pub struct RuntimeState {
     pub active_session_id: Option<String>,
     pub active_session_work_dir: Option<PathBuf>,
     pub session_source: Option<String>,
+    pub runtime_origin: Option<String>,
+    pub server_token_path: Option<PathBuf>,
+    pub server_token_redacted: Option<String>,
+    pub workspace_url: Option<String>,
     pub startup_open_request_applied: bool,
     pub auth_mode: AuthMode,
     pub provider_api_configured: bool,
@@ -102,6 +107,10 @@ impl Default for RuntimeState {
             active_session_id: None,
             active_session_work_dir: None,
             session_source: None,
+            runtime_origin: None,
+            server_token_path: None,
+            server_token_redacted: None,
+            workspace_url: None,
             startup_open_request_applied: false,
             auth_mode: AuthMode::Unknown,
             provider_api_configured: false,
@@ -218,6 +227,7 @@ pub struct AppState {
     pub bridge_settings_path: PathBuf,
     pub bridge_secrets_path: PathBuf,
     pub bridge_db_path: PathBuf,
+    pub runtime_locator_path: PathBuf,
     pub logs_dir: PathBuf,
     pub bridge_log_path: PathBuf,
     pub instance_id: String,
@@ -269,6 +279,7 @@ impl AppState {
             bridge_settings_path: config_dir.join("bridge_settings.json"),
             bridge_secrets_path: config_dir.join("bridge_secrets.json"),
             bridge_db_path: config_dir.join("bridge.db"),
+            runtime_locator_path: config_dir.join("kimi_runtime_locator.json"),
             logs_dir: logs_dir.clone(),
             bridge_log_path: logs_dir.join("bridge.log"),
             instance_id,

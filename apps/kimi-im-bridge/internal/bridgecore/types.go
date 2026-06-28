@@ -46,10 +46,11 @@ type TurnRequest struct {
 }
 
 type TurnResult struct {
-	Status       string
-	Error        string
-	ContextUsage float64
-	TokenUsage   TokenUsage
+	KimiSessionID string
+	Status        string
+	Error         string
+	ContextUsage  float64
+	TokenUsage    TokenUsage
 }
 
 type TurnEvent struct {
@@ -101,6 +102,7 @@ type HandleResult struct {
 type BindingResolver interface {
 	ResolveBinding(context.Context, domain.BindingKey) (*domain.SessionBinding, error)
 	CreateBinding(context.Context, domain.BindingKey, string, string, string) (*domain.SessionBinding, error)
+	Rebind(context.Context, string, string) error
 }
 
 type RuntimeProvider interface {
@@ -108,6 +110,21 @@ type RuntimeProvider interface {
 	ResolveApproval(context.Context, string, string, string) error
 	ReconcilePendingApprovals(context.Context, string) (int, error)
 	Close() error
+}
+
+type RuntimeSessionRequest struct {
+	KimiSessionID string
+	WorkDir       string
+}
+
+type RuntimeSession struct {
+	KimiSessionID string
+	WorkDir       string
+	Source        string
+}
+
+type RuntimeSessionEnsurer interface {
+	EnsureSession(context.Context, RuntimeTarget, RuntimeSessionRequest) (RuntimeSession, error)
 }
 
 type ApprovalStore interface {

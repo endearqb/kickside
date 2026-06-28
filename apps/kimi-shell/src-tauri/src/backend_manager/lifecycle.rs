@@ -1,5 +1,4 @@
 use super::config::resolve_working_directory;
-use super::workspace_proxy::start_workspace_proxy;
 use super::*;
 
 pub fn start_backend(app: AppHandle) {
@@ -25,6 +24,10 @@ pub fn start_backend(app: AppHandle) {
         runtime.last_error = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
+        runtime.runtime_origin = None;
+        runtime.server_token_path = None;
+        runtime.server_token_redacted = None;
+        runtime.workspace_url = None;
         runtime.generation = runtime.generation.saturating_add(1);
         runtime.start_cycle_id = runtime.generation;
         runtime.start_requested_at_ms = Some(unix_time_millis());
@@ -38,6 +41,7 @@ pub fn start_backend(app: AppHandle) {
     };
 
     workspace_session::clear_active_session_runtime(&app, "start_backend");
+    write_runtime_locator_unavailable(&app, generation, "start_backend");
 
     if let Some(mut stale_child) = stale_child {
         let reason = terminate_child(&mut stale_child);
@@ -50,7 +54,7 @@ pub fn start_backend(app: AppHandle) {
     window_manager::enter_local_boot(&app, "backend_start");
     log_manager::append_line(
         &app,
-        format!("starting kimi web backend (cycle={generation})"),
+        format!("starting kimi-code DirectServer backend (cycle={generation})"),
     );
 
     thread::spawn(move || {
@@ -137,6 +141,10 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
     runtime.last_error = None;
     runtime.effective_work_dir = None;
     runtime.launch_command = None;
+    runtime.runtime_origin = None;
+    runtime.server_token_path = None;
+    runtime.server_token_redacted = None;
+    runtime.workspace_url = None;
     runtime.start_requested_at_ms = None;
     runtime.loading_reported_at_ms = None;
     runtime.loading_reported_cycle_id = None;
@@ -145,9 +153,11 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
     runtime.active_session_id = None;
     runtime.active_session_work_dir = None;
     runtime.session_source = Some("cleared:stop_backend".to_string());
+    let stop_generation = runtime.generation;
     drop(runtime);
 
     workspace_session::clear_active_session_runtime(app, "stop_backend");
+    write_runtime_locator_unavailable(app, stop_generation, "stop_backend");
 
     if let Some(reason) = termination_reason {
         log_manager::append_line(app, format!("backend stopped ({reason})"));
@@ -182,7 +192,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         }
     };
 
-    if let Err(error) = cli_contract::verify_kimi_web_contract(&kimi_path) {
+    if let Err(error) = cli_contract::verify_kimi_server_contract(&kimi_path) {
         {
             let state = app.state::<AppState>();
             let mut runtime = state
@@ -197,7 +207,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         set_crashed(
             app,
             generation,
-            format!("`kimi web` CLI contract check failed: {error}"),
+            format!("`kimi server run` CLI contract check failed: {error}"),
         );
         return Ok(());
     }
@@ -210,8 +220,9 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
 
     let base_port = port_manager::choose_start_port();
     let log_path = log_manager::backend_log_path(app)?;
-    let command_args = build_kimi_web_args(base_port);
+    let command_args = build_kimi_server_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
+    let kimi_shell_path = kimi_locator::locate_shell_path();
 
     let command_description = format!(
         "launch command: {} (cwd: {})",
@@ -219,9 +230,18 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         work_dir.display()
     );
     log_manager::append_line(app, command_description);
+    if let Some(shell_path) = &kimi_shell_path {
+        log_manager::append_line(app, format!("KIMI_SHELL_PATH={}", shell_path.display()));
+    }
 
-    let child = spawn_backend_process(&kimi_path, &work_dir, &command_args, &log_path)
-        .with_context(|| format!("failed to spawn kimi process from {}", kimi_path.display()))?;
+    let child = spawn_backend_process(
+        &kimi_path,
+        &work_dir,
+        &command_args,
+        &log_path,
+        kimi_shell_path.as_ref(),
+    )
+    .with_context(|| format!("failed to spawn kimi process from {}", kimi_path.display()))?;
 
     {
         let state = app.state::<AppState>();
@@ -255,7 +275,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             app,
             generation,
             format!(
-                "Startup timed out. No /healthz response on ports {}-{} within {} seconds.",
+                "Startup timed out. No kimi-code health response on ports {}-{} within {} seconds.",
                 base_port,
                 base_port + (port_manager::PORT_SCAN_COUNT - 1),
                 port_manager::STARTUP_TIMEOUT_SECS
@@ -264,18 +284,21 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let workspace_port = match start_workspace_proxy(app, generation, active_port) {
-        Ok(port) => port,
+    let token = match token_resolver::resolve_server_token_with_retry() {
+        Ok(token) => token,
         Err(error) => {
-            log_manager::append_line(
+            stop_child_for_generation(app, generation);
+            set_crashed(
                 app,
-                format!(
-                    "workspace proxy unavailable; fallback to direct backend port {active_port}: {error:#}"
-                ),
+                generation,
+                format!("kimi-code server token unavailable after startup: {error:#}"),
             );
-            active_port
+            return Ok(());
         }
     };
+    let origin = format!("http://127.0.0.1:{active_port}");
+    let workspace_url = token_resolver::build_workspace_url(&origin, Some(&token.value));
+    let workspace_port = active_port;
 
     {
         let state = app.state::<AppState>();
@@ -290,14 +313,23 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         runtime.state = BackendState::Running;
         runtime.active_port = Some(active_port);
         runtime.workspace_port = Some(workspace_port);
+        runtime.runtime_origin = Some(origin.clone());
+        runtime.server_token_path = Some(token.path.clone());
+        runtime.server_token_redacted = Some(token.redacted.clone());
+        runtime.workspace_url = Some(workspace_url);
         runtime.last_error = None;
         runtime.backend_ready_at_ms = Some(unix_time_millis());
         runtime.last_exit_reason = None;
     }
+    write_runtime_locator_ready(app, &origin, &token.path, &token.redacted, generation);
 
     log_manager::append_line(
         app,
-        format!("backend ready on port {active_port}; workspace proxy on {workspace_port}"),
+        format!(
+            "kimi-code DirectServer ready on {origin}; token_path={}; token={}",
+            token.path.display(),
+            token.redacted
+        ),
     );
     window_manager::mark_backend_ready(app, "backend_ready");
     workspace_session::handle_backend_ready(app, generation, workspace_port);
@@ -330,13 +362,17 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
                     runtime.child = None;
                     runtime.active_port = None;
                     runtime.workspace_port = None;
+                    runtime.runtime_origin = None;
+                    runtime.server_token_path = None;
+                    runtime.server_token_redacted = None;
+                    runtime.workspace_url = None;
                     runtime.last_exit_reason = Some(format!("process_exit:{status}"));
 
                     if matches!(
                         runtime.state,
                         BackendState::Running | BackendState::Starting
                     ) {
-                        let message = format!("kimi web exited unexpectedly: {status}");
+                        let message = format!("kimi-code server exited unexpectedly: {status}");
                         runtime.state = BackendState::Crashed;
                         runtime.last_error = Some(message.clone());
                         Some(message)
@@ -349,6 +385,10 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
                     runtime.child = None;
                     runtime.active_port = None;
                     runtime.workspace_port = None;
+                    runtime.runtime_origin = None;
+                    runtime.server_token_path = None;
+                    runtime.server_token_redacted = None;
+                    runtime.workspace_url = None;
                     runtime.last_exit_reason = Some("monitor_error".to_string());
                     if matches!(
                         runtime.state,
@@ -367,6 +407,7 @@ fn spawn_monitor(app: AppHandle, generation: u64) {
 
         if let Some(message) = crash_message {
             workspace_session::clear_active_session_runtime(&app, "monitor_crash");
+            write_runtime_locator_unavailable(&app, generation, "monitor_crash");
             log_manager::append_line(&app, &message);
             window_manager::show_control_center(&app, "monitor_crash");
             return;
@@ -379,6 +420,7 @@ fn spawn_backend_process(
     work_dir: &PathBuf,
     args: &[String],
     log_path: &PathBuf,
+    kimi_shell_path: Option<&PathBuf>,
 ) -> anyhow::Result<Child> {
     let stdout_file = OpenOptions::new()
         .create(true)
@@ -400,17 +442,22 @@ fn spawn_backend_process(
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
 
+    if let Some(shell_path) = kimi_shell_path {
+        command.env("KIMI_SHELL_PATH", shell_path);
+    }
+
     command.current_dir(work_dir);
 
-    command.spawn().context("failed to spawn kimi web command")
+    command
+        .spawn()
+        .context("failed to spawn kimi-code server command")
 }
 
-fn build_kimi_web_args(base_port: u16) -> Vec<String> {
+fn build_kimi_server_args(base_port: u16) -> Vec<String> {
     vec![
-        "web".to_string(),
-        "--no-open".to_string(),
-        "--host".to_string(),
-        KIMI_HOST.to_string(),
+        "server".to_string(),
+        "run".to_string(),
+        "--foreground".to_string(),
         "--port".to_string(),
         base_port.to_string(),
     ]
@@ -437,6 +484,10 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
         runtime.detected_kimi_path = None;
         runtime.effective_work_dir = None;
         runtime.launch_command = None;
+        runtime.runtime_origin = None;
+        runtime.server_token_path = None;
+        runtime.server_token_redacted = None;
+        runtime.workspace_url = None;
         runtime.backend_ready_at_ms = None;
         runtime.last_exit_reason = Some("missing_kimi".to_string());
         runtime.active_session_id = None;
@@ -445,6 +496,7 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
     }
 
     workspace_session::clear_active_session_runtime(app, "missing_kimi");
+    write_runtime_locator_unavailable(app, generation, "missing_kimi");
     log_manager::append_line(app, &message);
     window_manager::show_missing_kimi(app, "missing_kimi");
 }
@@ -469,12 +521,17 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
         runtime.last_error = Some(message.clone());
         runtime.backend_ready_at_ms = None;
         runtime.last_exit_reason = Some("startup_failed".to_string());
+        runtime.runtime_origin = None;
+        runtime.server_token_path = None;
+        runtime.server_token_redacted = None;
+        runtime.workspace_url = None;
         runtime.active_session_id = None;
         runtime.active_session_work_dir = None;
         runtime.session_source = Some("cleared:crashed".to_string());
     }
 
     workspace_session::clear_active_session_runtime(app, "crashed");
+    write_runtime_locator_unavailable(app, generation, "crashed");
     log_manager::append_line(app, &message);
     window_manager::show_control_center(app, "backend_crashed");
 }
@@ -503,6 +560,34 @@ fn stop_child_for_generation(app: &AppHandle, generation: u64) {
                 runtime.last_exit_reason = Some(format!("stop_child_for_generation:{reason}"));
             }
         }
+    }
+}
+
+fn write_runtime_locator_ready(
+    app: &AppHandle,
+    origin: &str,
+    token_path: &Path,
+    token_redacted: &str,
+    generation: u64,
+) {
+    let path = app.state::<AppState>().runtime_locator_path.clone();
+    if let Err(error) =
+        runtime_locator::write_ready(&path, origin, token_path, token_redacted, generation)
+    {
+        log_manager::append_line(
+            app,
+            format!("failed to write kimi runtime locator ready snapshot: {error:#}"),
+        );
+    }
+}
+
+fn write_runtime_locator_unavailable(app: &AppHandle, generation: u64, source: &str) {
+    let path = app.state::<AppState>().runtime_locator_path.clone();
+    if let Err(error) = runtime_locator::write_unavailable(&path, generation) {
+        log_manager::append_line(
+            app,
+            format!("failed to write kimi runtime locator unavailable snapshot (source={source}): {error:#}"),
+        );
     }
 }
 
@@ -564,12 +649,12 @@ mod tests {
 
     #[test]
     fn launch_args_enforce_local_only_mode() {
-        let args = build_kimi_web_args(57999);
+        let args = build_kimi_server_args(57999);
         let args_joined = args.join(" ");
-        assert!(args_joined.contains("web"));
-        assert!(args_joined.contains("--no-open"));
-        assert!(args_joined.contains("--host 127.0.0.1"));
+        assert!(args_joined.contains("server run"));
+        assert!(args_joined.contains("--foreground"));
         assert!(args_joined.contains("--port 57999"));
+        assert!(!args_joined.contains("--open"));
         assert!(!args_joined.contains("--network"));
         assert!(!args_joined.contains("--public"));
     }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,41 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
+
+func TestInspectRuntimeLocatorReadsHealth(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "kimi_runtime_locator.json")
+	if err := os.WriteFile(path, []byte(`{"health":"ready","tokenRedacted":"abcd***xyz"}`), 0o600); err != nil {
+		t.Fatalf("write locator: %v", err)
+	}
+
+	status := inspectRuntimeLocator(path)
+	if !status.Configured || !status.Readable || status.Health != "ready" {
+		t.Fatalf("unexpected locator status: %+v", status)
+	}
+}
+
+func TestRuntimeAdapterStatusFollowsLocator(t *testing.T) {
+	t.Parallel()
+
+	ready := runtimeAdapterStatus(domain.RuntimeLocatorStatus{
+		Configured: true,
+		Readable:   true,
+		Health:     "ready",
+	})
+	if ready.Name != "server" || ready.State != "ready" || ready.LastError != "" {
+		t.Fatalf("unexpected ready adapter status: %+v", ready)
+	}
+
+	degraded := runtimeAdapterStatus(domain.RuntimeLocatorStatus{
+		Configured: true,
+		LastError:  "read locator: missing",
+	})
+	if degraded.State != "degraded" || degraded.LastError == "" {
+		t.Fatalf("unexpected degraded adapter status: %+v", degraded)
+	}
+}
 
 func TestNewReconcilesPendingApprovalsFromPreviousRuntime(t *testing.T) {
 	t.Parallel()

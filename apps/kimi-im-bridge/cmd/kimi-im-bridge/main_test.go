@@ -1,0 +1,98 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestParseFlagsReadsAdminTokenFromEnv(t *testing.T) {
+	t.Parallel()
+
+	options, err := parseFlagsFrom(requiredArgs(), func(name string) string {
+		if name == adminTokenEnv {
+			return " env-admin-token "
+		}
+		return ""
+	}, os.ReadFile)
+	if err != nil {
+		t.Fatalf("parseFlagsFrom returned error: %v", err)
+	}
+	if options.AdminToken != "env-admin-token" {
+		t.Fatalf("expected env admin token, got %q", options.AdminToken)
+	}
+}
+
+func TestParseFlagsReadsTokensFromFilesBeforeLegacyFlags(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	adminPath := filepath.Join(dir, "admin.token")
+	hostPath := filepath.Join(dir, "host.token")
+	if err := os.WriteFile(adminPath, []byte(" file-admin-token \n"), 0o600); err != nil {
+		t.Fatalf("write admin token: %v", err)
+	}
+	if err := os.WriteFile(hostPath, []byte(" file-host-token \n"), 0o600); err != nil {
+		t.Fatalf("write host token: %v", err)
+	}
+
+	args := append(requiredArgs(),
+		"--admin-token", "legacy-admin-token",
+		"--host-control-token", "legacy-host-token",
+		"--admin-token-file", adminPath,
+		"--host-control-token-file", hostPath,
+	)
+	options, err := parseFlagsFrom(args, func(string) string { return "" }, os.ReadFile)
+	if err != nil {
+		t.Fatalf("parseFlagsFrom returned error: %v", err)
+	}
+	if options.AdminToken != "file-admin-token" {
+		t.Fatalf("expected file admin token, got %q", options.AdminToken)
+	}
+	if options.HostControlToken != "file-host-token" {
+		t.Fatalf("expected file host token, got %q", options.HostControlToken)
+	}
+}
+
+func TestParseFlagsRequiresSecureAdminTokenSource(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseFlagsFrom(requiredArgs(), func(string) string { return "" }, os.ReadFile)
+	if err == nil {
+		t.Fatal("expected missing admin token error")
+	}
+	if !strings.Contains(err.Error(), adminTokenEnv) {
+		t.Fatalf("expected env name in error, got %q", err.Error())
+	}
+}
+
+func TestParseFlagsReadsRuntimeLocatorFromEnv(t *testing.T) {
+	t.Parallel()
+
+	options, err := parseFlagsFrom(requiredArgs(), func(name string) string {
+		switch name {
+		case adminTokenEnv:
+			return "admin-token"
+		case kimiRuntimeLocatorFileEnv:
+			return "D:/kimi/kimi_runtime_locator.json"
+		default:
+			return ""
+		}
+	}, os.ReadFile)
+	if err != nil {
+		t.Fatalf("parseFlagsFrom returned error: %v", err)
+	}
+	if options.KimiRuntimeLocatorPath != "D:/kimi/kimi_runtime_locator.json" {
+		t.Fatalf("expected runtime locator from env, got %q", options.KimiRuntimeLocatorPath)
+	}
+}
+
+func requiredArgs() []string {
+	return []string{
+		"--config", "bridge_settings.json",
+		"--secrets", "bridge_secrets.json",
+		"--db", "bridge.db",
+		"--log-file", "bridge.log",
+	}
+}

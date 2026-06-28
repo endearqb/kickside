@@ -259,17 +259,20 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return false, err
 	}
 
-	binding, _, err := s.resolveOrCreateBindingWithState(ctx, key)
+	binding, err := s.resolveBinding(ctx, key)
 	if err != nil {
 		return false, err
 	}
-	s.maybeSendAutoOnboarding(ctx, event, key, binding)
+	if binding != nil {
+		s.maybeSendAutoOnboarding(ctx, event, key, binding)
+	}
 
 	if s.orchestrator != nil {
-		contextualizedPrompt := s.applyBridgeSkillPromptContext(inbound.Text, *binding)
-		inbound.Text = contextualizedPrompt
+		if binding != nil {
+			inbound.Text = s.applyBridgeSkillPromptContext(inbound.Text, *binding)
+		}
 		var streamer *feishuReplyStreamer
-		if s.streamingRepliesEnabled() {
+		if s.streamingRepliesEnabled() && binding != nil {
 			streamer = s.newReplyStreamer(event, *binding, nil)
 		}
 		result, err := s.orchestrator.HandleInbound(ctx, adapterkit.FromDomainInbound(inbound, key), bridgecore.HandleOptions{
@@ -296,6 +299,9 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 			}
 			return false, err
 		}
+		if binding == nil {
+			s.maybeSendAutoOnboarding(ctx, event, key, &result.Binding)
+		}
 		if len(pendingAttachmentIDs) > 0 {
 			if err := s.store.DeletePendingInboundAttachments(ctx, pendingAttachmentIDs); err != nil {
 				return false, reliability.Wrap("unknown", err)
@@ -319,6 +325,12 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		}
 		return true, nil
 	}
+
+	binding, _, err = s.resolveOrCreateBindingWithState(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	s.maybeSendAutoOnboarding(ctx, event, key, binding)
 
 	prompt := runtime.PromptRequest{
 		Prompt:      s.applyBridgeSkillPromptContext(inbound.Text, *binding),
@@ -431,6 +443,17 @@ func (s *Service) applyBridgeSkillPromptContext(prompt string, binding domain.Se
 func (s *Service) resolveOrCreateBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
 	binding, _, err := s.resolveOrCreateBindingWithState(ctx, key)
 	return binding, err
+}
+
+func (s *Service) resolveBinding(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, error) {
+	binding, err := s.bindings.ResolveBinding(ctx, key)
+	if err != nil {
+		return nil, reliability.Wrap("unknown", err)
+	}
+	if binding != nil && binding.WorkDir == "" {
+		binding.WorkDir = strings.TrimSpace(s.config.DefaultWorkDir)
+	}
+	return binding, nil
 }
 
 func (s *Service) resolveOrCreateBindingWithState(ctx context.Context, key domain.BindingKey) (*domain.SessionBinding, bool, error) {

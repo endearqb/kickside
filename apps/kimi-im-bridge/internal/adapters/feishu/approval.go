@@ -45,6 +45,95 @@ func (s *Service) sendApprovalMessageBridge(ctx context.Context, source *Message
 	}, fmt.Sprintf("feishu:approval:%s", event.ApprovalID), source.MessageID)
 }
 
+func (s *Service) RedeliverPendingApprovals(ctx context.Context) (int, error) {
+	if s.store == nil {
+		return 0, nil
+	}
+	tickets, err := s.store.ListApprovals(ctx, "pending")
+	if err != nil {
+		return 0, reliability.Wrap("unknown", err)
+	}
+
+	redelivered := 0
+	for _, ticket := range tickets {
+		if !s.shouldRedeliverApproval(ticket) {
+			continue
+		}
+		deliveryKey := fmt.Sprintf("feishu:approval:%s", ticket.ApprovalID)
+		existing, err := s.store.GetDeliveryEventByKey(ctx, deliveryKey)
+		if err != nil {
+			return redelivered, reliability.Wrap("unknown", err)
+		}
+		if existing != nil && existing.Status == "sent" {
+			continue
+		}
+
+		replyToMessageID, err := s.recoveredApprovalReplyToMessageID(ctx, ticket)
+		if err != nil {
+			return redelivered, err
+		}
+		if strings.TrimSpace(replyToMessageID) == "" {
+			s.logf("feishu recovered approval redelivery skipped approval=%s chat=%s thread=%s reason=missing_last_inbound_message", ticket.ApprovalID, ticket.ChatID, ticket.ThreadID)
+			continue
+		}
+
+		content, err := buildApprovalCardContent(approvalCardData{
+			ApprovalID:         ticket.ApprovalID,
+			ChatID:             ticket.ChatID,
+			ThreadID:           ticket.ThreadID,
+			KimiSessionID:      ticket.KimiSessionID,
+			RequestKind:        ticket.RequestKind,
+			Prompt:             ticket.Prompt,
+			RequestPayloadJSON: ticket.RequestPayloadJSON,
+		})
+		if err != nil {
+			return redelivered, reliability.Wrap("payload_invalid", err)
+		}
+
+		if err := s.sendRecordedMessage(ctx, SendMessageRequest{
+			ReplyToMessageID: replyToMessageID,
+			ChatID:           ticket.ChatID,
+			MessageType:      "interactive",
+			Content:          content,
+			UUID:             ticket.ApprovalID,
+		}, deliveryKey, replyToMessageID); err != nil {
+			return redelivered, err
+		}
+		redelivered++
+	}
+	return redelivered, nil
+}
+
+func (s *Service) shouldRedeliverApproval(ticket domain.ApprovalTicket) bool {
+	if strings.TrimSpace(ticket.ApprovalID) == "" || strings.TrimSpace(ticket.ChatID) == "" {
+		return false
+	}
+	if strings.TrimSpace(ticket.Platform) != platformID {
+		return false
+	}
+	connectorID := strings.TrimSpace(ticket.ConnectorID)
+	return connectorID == "" || connectorID == s.connectorID()
+}
+
+func (s *Service) recoveredApprovalReplyToMessageID(ctx context.Context, ticket domain.ApprovalTicket) (string, error) {
+	if s.bindings == nil {
+		return "", nil
+	}
+	binding, err := s.bindings.ResolveBinding(ctx, domain.BindingKey{
+		ConnectorID: s.connectorID(),
+		Platform:    platformID,
+		ChatID:      strings.TrimSpace(ticket.ChatID),
+		ThreadID:    strings.TrimSpace(ticket.ThreadID),
+	})
+	if err != nil {
+		return "", reliability.Wrap("unknown", err)
+	}
+	if binding == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(binding.LastInboundMessageID), nil
+}
+
 func (s *Service) processCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
 	if err := s.store.TouchChannelInbound(ctx, s.connectorID(), ""); err != nil {
 		return nil, reliability.Wrap("unknown", err)

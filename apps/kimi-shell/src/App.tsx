@@ -161,6 +161,7 @@ function App() {
   const controlCenterProps = {
     status: shell.status,
     diagnostics: shell.diagnostics,
+    kimiDoctorResult: shell.kimiDoctorResult,
     onboarding: shell.onboarding,
     contextMenuStatus: shell.contextMenuStatus,
     activeControlSection: shell.activeControlSection,
@@ -168,6 +169,7 @@ function App() {
     stepCompletion: shell.stepCompletion,
     actionBusy: shell.actionBusy,
     diagnosticsBusy: shell.diagnosticsBusy,
+    kimiDoctorBusy: shell.kimiDoctorBusy,
     contextMenuBusy: shell.contextMenuBusy,
     loginProbeBusy: shell.loginProbeBusy,
     mainWindowCloseBehavior: shell.mainWindowCloseBehavior,
@@ -242,6 +244,7 @@ function App() {
     onClose: shell.dismissControlCenter,
     onRefreshCoreState: shell.refreshCoreState,
     onRefreshDiagnostics: shell.refreshDiagnostics,
+    onRunKimiDoctor: shell.handleRunKimiDoctor,
     onRefreshContextMenuStatus: shell.refreshContextMenuStatus,
     onRefreshBridgeSettings: shell.refreshBridgeSettings,
     onRefreshBridgeStatus: shell.refreshBridgeStatus,

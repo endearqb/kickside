@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type KeyboardEvent } from "react";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
 import { createGridSession } from "@/services/workspaceGridService";
 import { GRID_PRESETS } from "./gridPresets";
@@ -14,6 +14,7 @@ import type {
   WorkspacePaneKind,
 } from "./gridTypes";
 import { PaneFrame } from "./PaneFrame";
+import { normalizeEmbeddableUrl } from "./urlSafety";
 
 const PRESET_ORDER: WorkspaceGridPresetId[] = [
   "single",
@@ -36,6 +37,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const removePane = useWorkspaceGridStore((state) => state.removePane);
   const maximizePane = useWorkspaceGridStore((state) => state.maximizePane);
   const setActivePane = useWorkspaceGridStore((state) => state.setActivePane);
+  const setPaneMountPolicy = useWorkspaceGridStore(
+    (state) => state.setPaneMountPolicy,
+  );
   const configurePane = useWorkspaceGridStore((state) => state.configurePane);
   const [gridMessage, setGridMessage] = useState("");
   const [sessionBusySlot, setSessionBusySlot] = useState<string | null>(null);
@@ -74,6 +78,15 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     setGridMessage("");
     let input = defaultPaneInput(kind, props.chatRemoteUrl);
 
+    if (kind === "external") {
+      const externalInput = readExternalPaneInput(props.chatRemoteUrl);
+      if (!externalInput) {
+        setGridMessage("已取消添加外部网页");
+        return;
+      }
+      input = externalInput;
+    }
+
     if (kind === "code" && props.effectiveWorkDir && props.codeRemoteUrl) {
       setSessionBusySlot(slotId);
       try {
@@ -86,6 +99,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
         setGridMessage("已创建新的 Code Session");
       } catch (error) {
         setGridMessage(`创建 Code Session 失败：${String(error)}`);
+        return;
       } finally {
         setSessionBusySlot(null);
       }
@@ -103,11 +117,50 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   }
 
   function handleConfigurePane(paneId: string, kind: WorkspacePaneKind) {
-    configurePane(paneId, defaultPaneInput(kind, props.chatRemoteUrl));
+    const input =
+      kind === "external"
+        ? readExternalPaneInput(props.chatRemoteUrl)
+        : defaultPaneInput(kind, props.chatRemoteUrl);
+    if (!input) {
+      setGridMessage("已取消切换外部网页");
+      return;
+    }
+    configurePane(paneId, input);
+  }
+
+  function handleGridKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (
+      event.key !== "ArrowRight" &&
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowLeft" &&
+      event.key !== "ArrowUp"
+    ) {
+      return;
+    }
+
+    const visiblePaneIds = renderedSlots
+      .map((slot) => slot.paneId)
+      .filter((paneId): paneId is string => Boolean(paneId));
+    if (visiblePaneIds.length < 2) {
+      return;
+    }
+
+    const currentIndex = Math.max(0, visiblePaneIds.indexOf(activePaneId ?? ""));
+    const direction =
+      event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex =
+      (currentIndex + direction + visiblePaneIds.length) % visiblePaneIds.length;
+    setActivePane(visiblePaneIds[nextIndex]);
+    event.preventDefault();
   }
 
   return (
-    <section className="workspace-stage workspace-stage-grid-shell">
+    <section
+      className="workspace-stage workspace-stage-grid-shell"
+      aria-label="Workspace Grid"
+      tabIndex={0}
+      onKeyDown={handleGridKeyDown}
+    >
       <div className="workspace-grid-toolbar">
         <div className="workspace-grid-preset-group" aria-label="工作区布局">
           {PRESET_ORDER.map((presetId) => {
@@ -129,7 +182,8 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
           })}
         </div>
         <span className="workspace-grid-status">
-          {gridMessage || `${panes.length} / ${WORKSPACE_GRID_MAX_PANES} 窗格`}
+          {gridMessage ||
+            `${countRunningCodePanes(panes)} 个 Code Session 运行中 · ${panes.length} / ${WORKSPACE_GRID_MAX_PANES} 窗格`}
         </span>
       </div>
       <div className="workspace-grid-canvas" style={gridStyle}>
@@ -178,6 +232,16 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                     removePane(pane.id);
                   }
                 }}
+                onSuspendPane={() => {
+                  if (pane) {
+                    setPaneMountPolicy(pane.id, "suspended");
+                  }
+                }}
+                onResumePane={() => {
+                  if (pane) {
+                    setPaneMountPolicy(pane.id, "eager");
+                  }
+                }}
                 onToggleMaximize={() =>
                   maximizePane(pane?.id === maximizedPaneId ? null : pane?.id ?? null)
                 }
@@ -201,6 +265,24 @@ function defaultPaneInput(
     return { kind, title: "Kimi Chat" };
   }
   return { kind, title: "Kimi.com", url: chatRemoteUrl };
+}
+
+function readExternalPaneInput(chatRemoteUrl: string): AddWorkspacePaneInput | null {
+  const raw = window.prompt("输入要在窗格中打开的网址", chatRemoteUrl);
+  if (raw === null) {
+    return null;
+  }
+
+  const normalized = normalizeEmbeddableUrl(raw);
+  if (!normalized.ok) {
+    return null;
+  }
+  const title = new URL(normalized.url).hostname || "外部网页";
+  return { kind: "external", title, url: normalized.url };
+}
+
+function countRunningCodePanes(panes: WorkspacePane[]): number {
+  return panes.filter((pane) => pane.kind === "code").length;
 }
 
 function codePaneTitle(sessionId: string): string {

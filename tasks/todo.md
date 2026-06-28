@@ -1,3 +1,18 @@
+# Workspace Grid v1 hardening
+
+## Checklist
+- [x] 支持方向键切换 active pane
+- [x] 外部网页 pane 支持输入自定义 `http/https` URL，并继续剥离 fragment
+- [x] mount policy 具备可见挂起/恢复行为，非活跃 on-focus pane 可延迟挂载
+- [x] 顶栏状态展示运行中 Code Session 数量
+- [x] 增加 jsdom + React Testing Library 组件级测试，覆盖键盘切换、自定义外部 URL、挂起/恢复
+- [x] 运行前端、Rust、Go 与 diff gate
+
+## Review
+- 本轮补齐 WG-4/WG-5/WG-6 中上一轮仍偏弱的交互证据：键盘切换、custom external URL、mount policy 行为和状态区运行数量。
+- `jsdom` 固定为 `24.1.3`，避免把本仓库 README 里的 Node 18+ 要求悄悄抬到 Node 20+。
+- 真实已安装应用当前是旧包且窗口为 13x13，不能作为新源码视觉证据；本轮用组件级 jsdom 测试补强 UI 行为证据。
+
 # Workspace Grid renderer and session commands
 
 ## Checklist

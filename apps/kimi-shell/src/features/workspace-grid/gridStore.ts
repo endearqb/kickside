@@ -26,6 +26,10 @@ export interface WorkspaceGridActions {
   movePane: (paneId: string, slotId: string) => void;
   maximizePane: (paneId: string | null) => void;
   setActivePane: (paneId: string | null) => void;
+  setPaneMountPolicy: (
+    paneId: string,
+    mountPolicy: WorkspacePane["mountPolicy"],
+  ) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
 }
@@ -208,6 +212,22 @@ function createWorkspaceGridSlice(
       update(set, storage, (state) => ({
         ...state,
         activePaneId: paneId,
+        updatedAt: Date.now(),
+      }));
+    },
+    setPaneMountPolicy(paneId, mountPolicy) {
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                mountPolicy,
+                updatedAt: Date.now(),
+              }
+            : pane,
+        ),
+        activePaneId: mountPolicy === "suspended" ? state.activePaneId : paneId,
         updatedAt: Date.now(),
       }));
     },

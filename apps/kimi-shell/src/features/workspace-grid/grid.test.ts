@@ -119,6 +119,29 @@ describe("workspace grid store", () => {
       store.getState().addPane({ kind: "external", url: "https://kimi.com/" }),
     ).toBeNull();
   });
+
+  it("persists pane mount policy changes", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPaneMountPolicy("pane-chat", "suspended");
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-chat");
+    expect(pane?.mountPolicy).toBe("suspended");
+  });
+
+  it("reconfigures external panes through URL safety", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().configurePane("pane-chat", {
+      kind: "external",
+      title: "Unsafe",
+      url: "javascript:alert(1)",
+    });
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-chat");
+    expect(pane?.kind).toBe("external");
+    expect(pane?.url).toBeUndefined();
+  });
 });
 
 describe("pane URL helpers", () => {

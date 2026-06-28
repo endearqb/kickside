@@ -9,6 +9,7 @@ import {
   Minimize2,
   Plus,
   RefreshCcw,
+  RefreshCwOff,
   Trash2,
 } from "lucide-react";
 import type { WorkspacePaneState } from "@/app/types";
@@ -43,6 +44,8 @@ interface PaneFrameProps {
   onAddPane: (kind: WorkspacePaneKind) => void;
   onConfigurePane: (kind: WorkspacePaneKind) => void;
   onRemovePane: () => void;
+  onSuspendPane: () => void;
+  onResumePane: () => void;
   onToggleMaximize: () => void;
 }
 
@@ -71,6 +74,8 @@ export function PaneFrame({
   onAddPane,
   onConfigurePane,
   onRemovePane,
+  onSuspendPane,
+  onResumePane,
   onToggleMaximize,
 }: PaneFrameProps) {
   if (!pane) {
@@ -173,6 +178,15 @@ export function PaneFrame({
               <Maximize2 size={14} aria-hidden />
             )}
           </IconButton>
+          {pane.mountPolicy === "suspended" ? (
+            <IconButton label="恢复挂载" onClick={onResumePane}>
+              <RefreshCcw size={14} aria-hidden />
+            </IconButton>
+          ) : (
+            <IconButton label="挂起窗格" onClick={onSuspendPane}>
+              <RefreshCwOff size={14} aria-hidden />
+            </IconButton>
+          )}
           <IconButton label="关闭窗格" onClick={onRemovePane}>
             <Trash2 size={14} aria-hidden />
           </IconButton>
@@ -185,6 +199,8 @@ export function PaneFrame({
         onRetry={onRetry}
         onOpenLogs={onOpenLogs}
         onOpenExternalUrl={onOpenExternalUrl}
+        active={active}
+        onResumePane={onResumePane}
       />
     </article>
   );
@@ -218,18 +234,22 @@ interface PaneContentProps {
   pane: WorkspacePane;
   source: PaneSource;
   actionBusy: boolean;
+  active: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenExternalUrl: (url: string) => void;
+  onResumePane: () => void;
 }
 
 function PaneContent({
   pane,
   source,
   actionBusy,
+  active,
   onRetry,
   onOpenLogs,
   onOpenExternalUrl,
+  onResumePane,
 }: PaneContentProps) {
   const [externalState, setExternalState] =
     useState<WorkspacePaneState>("loading");
@@ -279,6 +299,41 @@ function PaneContent({
   }
 
   const sourceUrl = source.url;
+
+  if (
+    pane.mountPolicy === "suspended" ||
+    pane.mountPolicy === "manual" ||
+    (pane.mountPolicy === "on-focus" && !active)
+  ) {
+    return (
+      <div className="workspace-empty">
+        <div className="workspace-empty-copy">
+          <h3>{pane.mountPolicy === "suspended" ? "窗格已挂起" : "窗格待挂载"}</h3>
+          <p>当前内容暂未挂载，用于减少多窗资源占用。需要查看时可以恢复。</p>
+        </div>
+        <div className="workspace-empty-actions">
+          <Button
+            type="button"
+            icon={<RefreshCcw size={14} />}
+            className="cc-action-btn"
+            onClick={onResumePane}
+          >
+            恢复窗格
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            icon={<ExternalLink size={14} />}
+            className="cc-action-btn cc-doc-btn"
+            onClick={() => onOpenExternalUrl(sourceUrl)}
+          >
+            在浏览器打开
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   const loadState = pane.kind === "external" ? externalState : source.loadState;
 
   return (

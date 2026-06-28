@@ -170,6 +170,19 @@ describe("workspace grid store", () => {
     ).toBeNull();
   });
 
+  it("mounts newly added panes eagerly", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("1x3");
+    const paneId = store.getState().addPane({
+      kind: "external",
+      url: "https://kimi.com/",
+    });
+    const pane = store.getState().panes.find((item) => item.id === paneId);
+
+    expect(pane?.mountPolicy).toBe("eager");
+  });
+
   it("persists pane mount policy changes", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
@@ -222,6 +235,43 @@ describe("workspace grid store", () => {
     expect(store.getState().preset).toBe("1x3");
   });
 
+  it("normalizes damaged persisted grid state before rendering", () => {
+    const persistedPanes = Array.from(
+      { length: WORKSPACE_GRID_MAX_PANES + 2 },
+      (_, index) => persistedPane(`pane-${index}`),
+    );
+    const state = loadWorkspaceGridState(
+      writableStorage({
+        [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
+          version: 1,
+          preset: "missing",
+          panes: persistedPanes,
+          slots: [
+            { id: "ghost", area: "ghost", paneId: "ghost-pane" },
+            { id: "left", area: "left", paneId: "pane-1" },
+            { id: "duplicate", area: "duplicate", paneId: "pane-1" },
+            { id: "right", area: "right", paneId: "pane-0" },
+          ],
+          activePaneId: "ghost-pane",
+          maximizedPaneId: "pane-7",
+          trackSizes: { columns: [1, 2, 3] },
+          updatedAt: 100,
+        }),
+      }),
+      100,
+    );
+
+    expect(state.preset).toBe("1x2");
+    expect(state.panes).toHaveLength(WORKSPACE_GRID_MAX_PANES);
+    expect(state.slots).toEqual([
+      { id: "left", area: "left", paneId: "pane-1" },
+      { id: "right", area: "right", paneId: "pane-0" },
+    ]);
+    expect(state.activePaneId).toBe("pane-0");
+    expect(state.maximizedPaneId).toBeNull();
+    expect(state.trackSizes).toBeUndefined();
+  });
+
   it("persists custom track sizes and clears them when changing presets", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
@@ -254,7 +304,7 @@ describe("pane URL helpers", () => {
   it("builds session URLs from the origin and server session id", () => {
     expect(
       buildCodePaneUrl("http://127.0.0.1:1234/#token=secret", "a/b c"),
-    ).toBe("http://127.0.0.1:1234/sessions/a%2Fb%20c");
+    ).toBe("http://127.0.0.1:1234/sessions/a%2Fb%20c#token=secret");
   });
 });
 
@@ -274,3 +324,18 @@ describe("URL safety", () => {
     });
   });
 });
+
+function persistedPane(id: string) {
+  return {
+    id,
+    kind: "external" as const,
+    carrier: "iframe" as const,
+    title: id,
+    url: "https://example.com/#token=secret",
+    storageNamespace: "",
+    mountPolicy: "eager" as const,
+    loadState: "idle" as const,
+    createdAt: 100,
+    updatedAt: 100,
+  };
+}

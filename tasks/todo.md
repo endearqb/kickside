@@ -1,3 +1,23 @@
+# Workspace Grid hardening review fixes
+
+## Checklist
+- [x] 确认目标文件中的两个决策：Grid 状态切片采用 `zustand`，v1 承载 DoD 以可见 fallback + 外部打开为基线
+- [x] `buildCodePaneUrl` 保留运行时 `#token=` hash，避免纯 session 布局恢复后丢 bootstrap
+- [x] 新增 pane 默认 `mountPolicy: "eager"`，让新加窗格立即可见
+- [x] 现有窗格切换到 Code 时调用 `grid_create_session` 创建真实 server session
+- [x] 嵌入式 Tauri 子 Webview 激活后卸载对应 iframe，避免双 carrier 资源和焦点冲突
+- [x] 持久化 Grid state 加载/恢复时归一化未知 preset、幽灵 slot、重复/超限 pane 和失效 active/maximized pane
+- [x] 补单测和组件测试覆盖上述行为
+- [x] 运行前端、Rust、Go 与 diff gate
+
+## Review
+- 本轮处理 Workspace Grid 审查中剩余的 P1/P2 收口项，保持现有 Pane/Slot + zustand 架构，不引入新的 picker UI 或大范围重构。
+- Code session URL 的 `#token=` 只来自运行时 `codeRemoteUrl`，不会写入 Grid persisted state、saved layout 或 changelog。
+- 切换已有 pane 为 Code 现在与空 slot 新增 Code 一样先建真实 server session，不再产生无 session 的 Code pane。
+- 嵌入式 Webview 成功接管外部页面后，React iframe 不再留在同一 pane DOM 内。
+- 坏 localStorage 会被收敛回可渲染状态；未知 preset fallback 到 `1x2`，pane 上限仍是 6。
+- 验证结果：`pnpm --dir apps/kimi-shell test`、`pnpm --dir apps/kimi-shell exec tsc --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml -- --check`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run`、`go test ./...`（`apps/kimi-im-bridge`）通过。
+
 # Workspace Grid native Webview storage namespace
 
 ## Checklist

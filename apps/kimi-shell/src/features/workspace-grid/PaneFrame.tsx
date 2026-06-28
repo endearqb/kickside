@@ -483,104 +483,107 @@ function PaneContent({
         <div className="workspace-native-webview-host" aria-live="polite">
           <p>{source.title} 已由嵌入式 Webview 承载</p>
         </div>
-      ) : null}
-      <iframe
-        key={source.frameKey}
-        ref={source.iframeRef}
-        src={source.url}
-        title={source.title}
-        className="workspace-iframe"
-        onLoad={() => {
-          if (pane.kind === "external") {
-            setExternalState("ready");
-            return;
-          }
-          source.onLoad();
-        }}
-        onError={source.onError}
-      />
+      ) : (
+        <>
+          <iframe
+            key={source.frameKey}
+            ref={source.iframeRef}
+            src={source.url}
+            title={source.title}
+            className="workspace-iframe"
+            onLoad={() => {
+              if (pane.kind === "external") {
+                setExternalState("ready");
+                return;
+              }
+              source.onLoad();
+            }}
+            onError={source.onError}
+          />
 
-      {loadState === "loading" && (
-        <div className="workspace-overlay">
-          <div className="spinner" aria-hidden />
-          <p className="status-line">正在加载 {source.title}…</p>
-        </div>
-      )}
-
-      {loadState === "blocked" && (
-        <div className="workspace-overlay">
-          <div className="workspace-fallback">
-            <h3>{source.title} 暂时无法在应用内显示</h3>
-            <p>
-              当前页面没有完成窗内加载。可以重试当前视图，或在应用窗口/系统浏览器打开。
-            </p>
-            <div className="workspace-fallback-actions">
-              <Button
-                type="button"
-                icon={<RefreshCcw size={14} />}
-                className="cc-action-btn"
-                onClick={onRetry}
-                disabled={actionBusy}
-              >
-                重试加载
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<ExternalLink size={14} />}
-                className="cc-action-btn cc-doc-btn"
-                onClick={() => onOpenExternalUrl(sourceUrl)}
-              >
-                在浏览器打开
-              </Button>
-              {pane.kind === "external" ? (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    icon={<Globe2 size={14} />}
-                    className="cc-action-btn cc-doc-btn"
-                    onClick={() => {
-                      void handleOpenEmbeddedWebview();
-                    }}
-                    disabled={embeddedStatus === "opening"}
-                  >
-                    {embeddedStatus === "opening" ? "正在嵌入" : "在窗格内打开"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    icon={<Globe2 size={14} />}
-                    className="cc-action-btn cc-doc-btn"
-                    onClick={() =>
-                      onOpenTauriWebviewUrl(
-                        sourceUrl,
-                        source.title,
-                        pane.storageNamespace,
-                      )
-                    }
-                  >
-                    在应用窗口打开
-                  </Button>
-                </>
-              ) : null}
-              {pane.kind === "code" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon={<FileText size={14} />}
-                  className="cc-action-btn"
-                  onClick={onOpenLogs}
-                >
-                  打开日志目录
-                </Button>
-              ) : null}
+          {loadState === "loading" && (
+            <div className="workspace-overlay">
+              <div className="spinner" aria-hidden />
+              <p className="status-line">正在加载 {source.title}…</p>
             </div>
-            {embeddedStatus === "failed" && embeddedError ? (
-              <p className="workspace-fallback-error">{embeddedError}</p>
-            ) : null}
-          </div>
-        </div>
+          )}
+
+          {loadState === "blocked" && (
+            <div className="workspace-overlay">
+              <div className="workspace-fallback">
+                <h3>{source.title} 暂时无法在应用内显示</h3>
+                <p>
+                  当前页面没有完成窗内加载。可以重试当前视图，或在应用窗口/系统浏览器打开。
+                </p>
+                <div className="workspace-fallback-actions">
+                  <Button
+                    type="button"
+                    icon={<RefreshCcw size={14} />}
+                    className="cc-action-btn"
+                    onClick={onRetry}
+                    disabled={actionBusy}
+                  >
+                    重试加载
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<ExternalLink size={14} />}
+                    className="cc-action-btn cc-doc-btn"
+                    onClick={() => onOpenExternalUrl(sourceUrl)}
+                  >
+                    在浏览器打开
+                  </Button>
+                  {pane.kind === "external" ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Globe2 size={14} />}
+                        className="cc-action-btn cc-doc-btn"
+                        onClick={() => {
+                          void handleOpenEmbeddedWebview();
+                        }}
+                        disabled={embeddedStatus === "opening"}
+                      >
+                        {embeddedStatus === "opening" ? "正在嵌入" : "在窗格内打开"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<Globe2 size={14} />}
+                        className="cc-action-btn cc-doc-btn"
+                        onClick={() =>
+                          onOpenTauriWebviewUrl(
+                            sourceUrl,
+                            source.title,
+                            pane.storageNamespace,
+                          )
+                        }
+                      >
+                        在应用窗口打开
+                      </Button>
+                    </>
+                  ) : null}
+                  {pane.kind === "code" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      icon={<FileText size={14} />}
+                      className="cc-action-btn"
+                      onClick={onOpenLogs}
+                    >
+                      打开日志目录
+                    </Button>
+                  ) : null}
+                </div>
+                {embeddedStatus === "failed" && embeddedError ? (
+                  <p className="workspace-fallback-error">{embeddedError}</p>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

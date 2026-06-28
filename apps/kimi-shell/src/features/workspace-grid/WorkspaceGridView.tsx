@@ -166,8 +166,14 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     movePane(paneId, slotId);
   }
 
-  function handleConfigurePane(paneId: string, kind: WorkspacePaneKind) {
-    const input =
+  async function handleConfigurePane(paneId: string, kind: WorkspacePaneKind) {
+    const existingPane = panes.find((pane) => pane.id === paneId);
+    if (existingPane?.kind === kind && kind !== "external") {
+      return;
+    }
+
+    setGridMessage("");
+    let input =
       kind === "external"
         ? readExternalPaneInput(props.chatRemoteUrl)
         : defaultPaneInput(kind, props.chatRemoteUrl);
@@ -175,6 +181,25 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       setGridMessage("已取消切换外部网页");
       return;
     }
+
+    if (kind === "code" && props.effectiveWorkDir && props.codeRemoteUrl) {
+      setSessionBusySlot(paneId);
+      try {
+        const session = await createGridSession(props.effectiveWorkDir);
+        input = {
+          ...input,
+          sessionId: session.sessionId,
+          title: codePaneTitle(session.sessionId),
+        };
+        setGridMessage("已创建新的 Code Session");
+      } catch (error) {
+        setGridMessage(`创建 Code Session 失败：${String(error)}`);
+        return;
+      } finally {
+        setSessionBusySlot(null);
+      }
+    }
+
     configurePane(paneId, input);
   }
 
@@ -403,7 +428,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 }}
                 onConfigurePane={(kind) => {
                   if (pane) {
-                    handleConfigurePane(pane.id, kind);
+                    void handleConfigurePane(pane.id, kind);
                   }
                 }}
                 onRemovePane={() => {

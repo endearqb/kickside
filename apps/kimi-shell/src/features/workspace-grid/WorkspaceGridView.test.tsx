@@ -7,6 +7,7 @@ import {
   createEmbeddedExternalWebview,
   openExternalWebviewWindow,
 } from "@/services/externalWebviewService";
+import { createGridSession } from "@/services/workspaceGridService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
 import { WorkspaceGridView } from "./WorkspaceGridView";
@@ -55,6 +56,7 @@ const props: WorkspaceViewProps = {
 
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     window.localStorage.clear();
     useWorkspaceGridStore.setState(createDefaultWorkspaceGridState(100));
   });
@@ -85,6 +87,24 @@ describe("WorkspaceGridView", () => {
       .panes.find((item) => item.kind === "external");
     expect(pane?.title).toBe("example.com");
     expect(pane?.url).toBe("https://example.com/path");
+  });
+
+  it("creates a server session when switching an existing pane to Code", async () => {
+    render(<WorkspaceGridView {...props} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole("button", { name: "切换为 Code" })[1]);
+    });
+
+    const pane = useWorkspaceGridStore
+      .getState()
+      .panes.find((item) => item.id === "pane-chat");
+    expect(createGridSession).toHaveBeenCalledWith("D:/work");
+    expect(pane).toMatchObject({
+      kind: "code",
+      sessionId: "server-session-1",
+      title: "Kimi Code server-s",
+    });
   });
 
   it("can suspend and resume a pane", () => {
@@ -215,6 +235,10 @@ describe("WorkspaceGridView", () => {
         height: 240,
       },
     });
+    expect(screen.getByText("example.com 已由嵌入式 Webview 承载")).toBeTruthy();
+    expect(
+      document.querySelector('iframe[src="https://example.com/path"]'),
+    ).toBeNull();
   });
 });
 

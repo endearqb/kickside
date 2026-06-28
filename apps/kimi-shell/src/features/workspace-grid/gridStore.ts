@@ -1,6 +1,10 @@
 import { create, type StateCreator } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { materializeGridSlots, normalizeGridTrackSizes } from "./gridPresets";
+import {
+  GRID_PRESETS,
+  materializeGridSlots,
+  normalizeGridTrackSizes,
+} from "./gridPresets";
 import {
   createDefaultWorkspaceGridState,
   migrateLegacyWorkspaceGridState,
@@ -224,7 +228,7 @@ function createWorkspaceGridSlice(
         storageNamespace:
           sanitizeStorageNamespace(input.storageNamespace) ??
           createPaneStorageNamespace(paneId),
-        mountPolicy: "on-focus",
+        mountPolicy: "eager",
         loadState: "idle",
         createdAt: now,
         updatedAt: now,
@@ -403,23 +407,122 @@ function sanitizeGridState(
 ): WorkspaceGridStateV1 | null {
   if (
     parsed.version !== 1 ||
-    !parsed.preset ||
     !Array.isArray(parsed.panes) ||
     !Array.isArray(parsed.slots)
   ) {
     return null;
   }
+
+  const preset = isGridPresetId(parsed.preset) ? parsed.preset : "1x2";
+  const panes = sanitizePanes(parsed.panes);
+  const paneIds = new Set(panes.map((pane) => pane.id));
+  const assignedPaneIds = parsed.slots
+    .map((slot) => slot.paneId)
+    .filter((paneId): paneId is string => Boolean(paneId))
+    .filter((paneId, index, values) => paneIds.has(paneId) && values.indexOf(paneId) === index)
+    .slice(0, GRID_PRESETS[preset].slots.length);
+  const slotPaneIds =
+    assignedPaneIds.length > 0
+      ? assignedPaneIds
+      : panes.slice(0, GRID_PRESETS[preset].slots.length).map((pane) => pane.id);
+  const activePaneId =
+    parsed.activePaneId && paneIds.has(parsed.activePaneId)
+      ? parsed.activePaneId
+      : (panes[0]?.id ?? null);
+  const maximizedPaneId =
+    parsed.maximizedPaneId && paneIds.has(parsed.maximizedPaneId)
+      ? parsed.maximizedPaneId
+      : null;
+
   return {
     version: 1,
-    preset: parsed.preset,
-    panes: parsed.panes.map(sanitizePane),
-    slots: parsed.slots,
-    activePaneId: parsed.activePaneId ?? null,
-    maximizedPaneId: parsed.maximizedPaneId ?? null,
+    preset,
+    panes,
+    slots: materializeGridSlots(preset, slotPaneIds),
+    activePaneId,
+    maximizedPaneId,
     legacySplitRatio: parsed.legacySplitRatio,
-    trackSizes: normalizeGridTrackSizes(parsed.trackSizes, parsed.preset),
+    trackSizes: normalizeGridTrackSizes(parsed.trackSizes, preset),
     updatedAt: parsed.updatedAt ?? Date.now(),
   };
+}
+
+function isGridPresetId(value: unknown): value is WorkspaceGridPresetId {
+  return typeof value === "string" && value in GRID_PRESETS;
+}
+
+function sanitizePanes(panes: unknown[]): WorkspacePane[] {
+  const seenPaneIds = new Set<string>();
+  const sanitizedPanes: WorkspacePane[] = [];
+
+  for (const rawPane of panes) {
+    const pane = sanitizePaneCandidate(rawPane);
+    if (!pane || seenPaneIds.has(pane.id)) {
+      continue;
+    }
+    seenPaneIds.add(pane.id);
+    sanitizedPanes.push(pane);
+    if (sanitizedPanes.length >= WORKSPACE_GRID_MAX_PANES) {
+      break;
+    }
+  }
+
+  return sanitizedPanes;
+}
+
+function sanitizePaneCandidate(value: unknown): WorkspacePane | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const pane = value as Partial<WorkspacePane>;
+  if (typeof pane.id !== "string" || !pane.id.trim()) {
+    return null;
+  }
+
+  const kind = isPaneKind(pane.kind) ? pane.kind : "external";
+  const now = Date.now();
+  return sanitizePane({
+    id: pane.id,
+    kind,
+    carrier: "iframe",
+    title:
+      typeof pane.title === "string" && pane.title.trim()
+        ? pane.title
+        : defaultPaneTitle(kind),
+    sessionId: typeof pane.sessionId === "string" ? pane.sessionId : undefined,
+    url: typeof pane.url === "string" ? pane.url : undefined,
+    storageNamespace:
+      typeof pane.storageNamespace === "string" ? pane.storageNamespace : "",
+    mountPolicy: isMountPolicy(pane.mountPolicy) ? pane.mountPolicy : "eager",
+    loadState: isLoadState(pane.loadState) ? pane.loadState : "idle",
+    createdAt: typeof pane.createdAt === "number" ? pane.createdAt : now,
+    updatedAt: typeof pane.updatedAt === "number" ? pane.updatedAt : now,
+  });
+}
+
+function isPaneKind(value: unknown): value is WorkspacePaneKind {
+  return value === "code" || value === "chat" || value === "external";
+}
+
+function isMountPolicy(value: unknown): value is WorkspacePane["mountPolicy"] {
+  return (
+    value === "eager" ||
+    value === "on-focus" ||
+    value === "manual" ||
+    value === "suspended"
+  );
+}
+
+function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
+  return (
+    value === "idle" ||
+    value === "loading" ||
+    value === "ready" ||
+    value === "blocked" ||
+    value === "empty" ||
+    value === "suspended"
+  );
 }
 
 function sanitizePane(pane: WorkspacePane): WorkspacePane {

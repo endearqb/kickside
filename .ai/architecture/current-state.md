@@ -9,6 +9,7 @@
 - `workspace_session.rs` 使用 `GET /api/v1/sessions?page_size=100`、`POST /api/v1/workspaces { root }` 和 `POST /api/v1/sessions` 的最小映射；session 主键兼容官方 `id`，工作目录优先从 `metadata.cwd` 提取。
 - Workspace Grid 前端已引入 `zustand` 切片，使用 Pane/Slot 分离模型、1/2/3/4/5/6 窗预设、逐缝拖拽 resize + 持久化自定义 track、命名布局保存/恢复、键盘切换、外部页自定义 URL + timeout fallback、嵌入式 Tauri 子 Webview 承载、独立应用 WebviewWindow fallback、native Webview per-pane `dataDirectory` namespace、mount policy 挂起/恢复和 6 窗上限；旧双窗 localStorage 键保留为迁移兼容层。
 - Shell 已暴露 `grid_list_sessions` / `grid_create_session` Tauri command，薄封装既有 `/api/v1` session 建/查逻辑，Grid code pane 使用 server 返回的真实 session id 构造 `/sessions/{id}` URL。
+- Workspace Grid 持久化 state 在加载/恢复时会归一化未知 preset、超限或重复 pane、幽灵 slot 引用和失效 active/maximized pane；Code session pane URL 会从运行时 workspace URL 保留 `#token=` bootstrap，但 token 不写入 persisted state。
 - Shell 在配置目录写入 `kimi_runtime_locator.json`，包含 origin、token path、redacted token、generation、ownership 和 health，不包含明文 token。
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
 - 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和 Kimi install 调官方 Windows installer，upgrade 调 `kimi upgrade`，core ready 只要求 Kimi CLI ready；旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。

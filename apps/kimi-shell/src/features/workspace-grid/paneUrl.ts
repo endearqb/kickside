@@ -1,5 +1,6 @@
 export function buildCodePaneUrl(originOrWorkspaceUrl: string, sessionId: string): string {
-  const origin = new URL(originOrWorkspaceUrl).origin;
-  const url = new URL(`/sessions/${encodeURIComponent(sessionId)}`, origin);
+  const source = new URL(originOrWorkspaceUrl);
+  const url = new URL(`/sessions/${encodeURIComponent(sessionId)}`, source.origin);
+  url.hash = source.hash;
   return url.toString();
 }

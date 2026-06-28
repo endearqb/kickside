@@ -587,7 +587,7 @@ fn create_workspace_for_work_dir(
     client: &ApiV1Client,
     work_dir: &Path,
 ) -> Result<ApiWorkspace, String> {
-    let root = work_dir.to_string_lossy().to_string();
+    let root = api_workspace_root(work_dir);
     let body = json!({ "root": root });
     client
         .post::<Value, ApiWorkspace>("workspaces", &body)
@@ -604,7 +604,7 @@ fn create_session_request_body(work_dir: &Path, workspace_id: Option<&str>) -> V
 
     json!({
         "metadata": {
-            "cwd": work_dir.to_string_lossy().to_string()
+            "cwd": api_workspace_root(work_dir)
         }
     })
 }
@@ -923,7 +923,43 @@ fn parse_last_updated(value: &Option<String>) -> i64 {
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    let normalized = normalize_windows_urlish_path(path);
+    normalized.canonicalize().unwrap_or(normalized)
+}
+
+fn normalize_windows_urlish_path(path: &Path) -> PathBuf {
+    let value = path.to_string_lossy();
+    if let Some(stripped) = strip_windows_drive_urlish_prefix(value.as_ref()) {
+        return PathBuf::from(stripped);
+    }
+
+    path.to_path_buf()
+}
+
+fn api_workspace_root(path: &Path) -> String {
+    let normalized = normalize_path(path);
+    let value = normalized.to_string_lossy();
+    let stripped = strip_windows_drive_urlish_prefix(value.as_ref()).unwrap_or(value.as_ref());
+    stripped.replace('\\', "/")
+}
+
+fn strip_windows_drive_urlish_prefix(value: &str) -> Option<&str> {
+    for prefix in ["/?/", "//?/", r"\\?\"] {
+        let Some(stripped) = value.strip_prefix(prefix) else {
+            continue;
+        };
+
+        let bytes = stripped.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'/' || bytes[2] == b'\\')
+        {
+            return Some(stripped);
+        }
+    }
+
+    None
 }
 
 fn normalize_path_for_match_with_case(path: &Path, case_insensitive: bool) -> String {
@@ -1126,5 +1162,40 @@ mod tests {
     fn create_session_body_falls_back_to_metadata_cwd() {
         let body = create_session_request_body(Path::new("D:/repo"), None);
         assert_eq!(body, json!({ "metadata": { "cwd": "D:/repo" } }));
+    }
+
+    #[test]
+    fn api_workspace_root_strips_windows_urlish_drive_prefix() {
+        assert_eq!(
+            api_workspace_root(Path::new("/?/D:/BaiduSyncdisk/Skill-workspace")),
+            "D:/BaiduSyncdisk/Skill-workspace"
+        );
+        assert_eq!(api_workspace_root(Path::new("D:/repo")), "D:/repo");
+    }
+
+    #[test]
+    fn create_session_body_strips_windows_urlish_metadata_cwd() {
+        let body =
+            create_session_request_body(Path::new("/?/D:/BaiduSyncdisk/Skill-workspace"), None);
+        assert_eq!(
+            body,
+            json!({ "metadata": { "cwd": "D:/BaiduSyncdisk/Skill-workspace" } })
+        );
+    }
+
+    #[test]
+    fn normalize_path_strips_windows_urlish_drive_prefix() {
+        assert_eq!(
+            normalize_windows_urlish_path(Path::new("/?/D:/BaiduSyncdisk/Skill-workspace")),
+            PathBuf::from("D:/BaiduSyncdisk/Skill-workspace")
+        );
+        assert_eq!(
+            normalize_path(Path::new("/?/D:/__kimi_missing_workspace_path_for_test__")),
+            PathBuf::from("D:/__kimi_missing_workspace_path_for_test__")
+        );
+        assert_eq!(
+            normalize_windows_urlish_path(Path::new("D:/repo")),
+            PathBuf::from("D:/repo")
+        );
     }
 }

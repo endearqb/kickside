@@ -360,7 +360,6 @@ function App() {
         themeMode={shell.themeMode}
         activeWorkspaceView={shell.activeWorkspaceView}
         workspaceLayoutMode={shell.workspaceLayoutMode}
-        workspaceSplitOrder={shell.workspaceSplitOrder}
         statusText={shell.statusText}
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}
@@ -377,8 +376,6 @@ function App() {
           void shell.handleOpenFolder(path);
         }}
         onToggleWorkspaceView={shell.handleToggleWorkspaceView}
-        onToggleWorkspaceSplit={shell.handleToggleWorkspaceSplit}
-        onSwapWorkspaceSplitOrder={shell.handleSwapWorkspaceSplitOrder}
         onToggleTheme={shell.handleToggleThemeMode}
         onStartWindowDrag={shell.handleStartWindowDrag}
         onMinimizeWindow={shell.handleMinimizeWindow}
@@ -436,6 +433,7 @@ function App() {
             codeFrameKey={shell.workspaceFrameKey}
             chatRemoteUrl={shell.chatRemoteUrl}
             effectiveWorkDir={shell.status?.effectiveWorkDir}
+            themeMode={shell.themeMode}
             workspaceIframeRef={shell.workspaceIframeRef}
             chatIframeRef={shell.chatIframeRef}
             codePaneState={shell.workspaceEmbedState}
@@ -443,6 +441,9 @@ function App() {
             actionBusy={shell.actionBusy}
             onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
+            onOpenFolder={(path) => {
+              void shell.handleOpenFolder(path);
+            }}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
             onSplitRatioChange={shell.handleWorkspaceSplitRatioChange}
             onSplitDragStateChange={shell.handleWorkspaceSplitDragStateChange}

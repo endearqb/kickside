@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
   type MutableRefObject,
   type RefObject,
 } from "react";
@@ -9,16 +10,19 @@ import {
   Code2,
   ExternalLink,
   FileText,
+  FolderOpen,
   Globe2,
   Maximize2,
   MessageCircle,
   Minimize2,
-  Plus,
+  Moon,
   RefreshCcw,
   RefreshCwOff,
+  Sun,
   Trash2,
 } from "lucide-react";
-import type { WorkspacePaneState } from "@/app/types";
+import { THEME_SYNC_SOURCE } from "@/app/theme";
+import type { Theme, WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import {
   createEmbeddedExternalWebview,
@@ -36,6 +40,8 @@ interface PaneFrameProps {
   active: boolean;
   maximized: boolean;
   canAddPane: boolean;
+  effectiveWorkDir?: string;
+  themeMode: Theme;
   codeRemoteUrl: string | null;
   codeFrameKey: string;
   chatRemoteUrl: string;
@@ -46,6 +52,7 @@ interface PaneFrameProps {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => void;
   onOpenExternalUrl: (url: string) => void;
   onOpenTauriWebviewUrl: (
     url: string,
@@ -62,6 +69,9 @@ interface PaneFrameProps {
   onRemovePane: () => void;
   onSuspendPane: () => void;
   onResumePane: () => void;
+  onPaneThemeChange: (theme: Theme) => void;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
   onToggleMaximize: () => void;
 }
 
@@ -71,6 +81,8 @@ export function PaneFrame({
   active,
   maximized,
   canAddPane,
+  effectiveWorkDir,
+  themeMode,
   codeRemoteUrl,
   codeFrameKey,
   chatRemoteUrl,
@@ -81,6 +93,7 @@ export function PaneFrame({
   actionBusy,
   onRetry,
   onOpenLogs,
+  onOpenFolder,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
   onCodeFrameLoad,
@@ -93,6 +106,9 @@ export function PaneFrame({
   onRemovePane,
   onSuspendPane,
   onResumePane,
+  onPaneThemeChange,
+  onDragStart,
+  onDragEnd,
   onToggleMaximize,
 }: PaneFrameProps) {
   if (!pane) {
@@ -121,15 +137,6 @@ export function PaneFrame({
             <MessageCircle size={14} aria-hidden />
             Chat
           </button>
-          <button
-            type="button"
-            className="workspace-grid-empty-btn"
-            onClick={() => onAddPane("external")}
-            disabled={!canAddPane}
-          >
-            <Plus size={14} aria-hidden />
-            Kimi.com
-          </button>
         </div>
       </div>
     );
@@ -149,6 +156,10 @@ export function PaneFrame({
     onChatFrameLoad,
     onChatFrameError,
   });
+  const paneTheme = pane.theme ?? themeMode;
+  const paneWorkDir =
+    pane.kind === "code" ? pane.workDir?.trim() || effectiveWorkDir?.trim() || "" : "";
+  const nextPaneTheme = paneTheme === "dark" ? "light" : "dark";
 
   return (
     <article
@@ -156,7 +167,18 @@ export function PaneFrame({
       onFocus={onActivate}
       onPointerDown={onActivate}
     >
-      <header className="workspace-grid-pane-header">
+      <header
+        className="workspace-grid-pane-header"
+        draggable
+        onDragStart={(event) => {
+          if (event.target instanceof Element && event.target.closest("button")) {
+            event.preventDefault();
+            return;
+          }
+          onDragStart(event);
+        }}
+        onDragEnd={onDragEnd}
+      >
         <div className="workspace-grid-pane-title">
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
           {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
@@ -164,6 +186,25 @@ export function PaneFrame({
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
+          {pane.kind === "code" ? (
+            <IconButton
+              label="打开此窗格目录"
+              onClick={() => onOpenFolder(paneWorkDir)}
+              disabled={!paneWorkDir}
+            >
+              <FolderOpen size={14} aria-hidden />
+            </IconButton>
+          ) : null}
+          <IconButton
+            label={nextPaneTheme === "dark" ? "切换此窗格为深色主题" : "切换此窗格为浅色主题"}
+            onClick={() => onPaneThemeChange(nextPaneTheme)}
+          >
+            {paneTheme === "dark" ? (
+              <Sun size={14} aria-hidden />
+            ) : (
+              <Moon size={14} aria-hidden />
+            )}
+          </IconButton>
           <IconButton
             label="切换为 Code"
             onClick={() => onConfigurePane("code")}
@@ -177,13 +218,6 @@ export function PaneFrame({
             active={pane.kind === "chat"}
           >
             <MessageCircle size={14} aria-hidden />
-          </IconButton>
-          <IconButton
-            label="切换为 Kimi.com"
-            onClick={() => onConfigurePane("external")}
-            active={pane.kind === "external"}
-          >
-            <Globe2 size={14} aria-hidden />
           </IconButton>
           <IconButton
             label={maximized ? "还原窗格" : "最大化窗格"}
@@ -217,6 +251,8 @@ export function PaneFrame({
         onOpenLogs={onOpenLogs}
         onOpenExternalUrl={onOpenExternalUrl}
         onOpenTauriWebviewUrl={onOpenTauriWebviewUrl}
+        paneTheme={paneTheme}
+        themeSignal={themeMode}
         active={active}
         onResumePane={onResumePane}
       />
@@ -227,19 +263,30 @@ export function PaneFrame({
 interface IconButtonProps {
   label: string;
   active?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
   onClick: () => void;
 }
 
-function IconButton({ label, active = false, children, onClick }: IconButtonProps) {
+function IconButton({
+  label,
+  active = false,
+  disabled = false,
+  children,
+  onClick,
+}: IconButtonProps) {
   return (
     <button
       type="button"
       className={`workspace-grid-icon-btn${active ? " is-active" : ""}`}
       title={label}
       aria-label={label}
+      disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
+        if (disabled) {
+          return;
+        }
         onClick();
       }}
     >
@@ -261,6 +308,8 @@ interface PaneContentProps {
     title: string,
     storageNamespace?: string,
   ) => void;
+  paneTheme: Theme;
+  themeSignal: Theme;
   onResumePane: () => void;
 }
 
@@ -273,9 +322,12 @@ function PaneContent({
   onOpenLogs,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
+  paneTheme,
+  themeSignal,
   onResumePane,
 }: PaneContentProps) {
   const embedHostRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const embeddedControllerRef =
     useRef<EmbeddedExternalWebviewController | null>(null);
   const [externalState, setExternalState] =
@@ -285,6 +337,10 @@ function PaneContent({
   >("idle");
   const [embeddedError, setEmbeddedError] = useState("");
   const sourceUrl = source.url ?? "";
+
+  useEffect(() => {
+    postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
+  }, [paneTheme, sourceUrl, themeSignal]);
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -487,11 +543,18 @@ function PaneContent({
         <>
           <iframe
             key={source.frameKey}
-            ref={source.iframeRef}
+            ref={(node) => {
+              iframeRef.current = node;
+              if (source.iframeRef) {
+                (source.iframeRef as MutableRefObject<HTMLIFrameElement | null>).current =
+                  node;
+              }
+            }}
             src={source.url}
             title={source.title}
             className="workspace-iframe"
             onLoad={() => {
+              postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
               if (pane.kind === "external") {
                 setExternalState("ready");
                 return;
@@ -608,6 +671,25 @@ async function closeEmbeddedController(
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function postThemeToFrame(
+  frame: HTMLIFrameElement | null,
+  sourceUrl: string,
+  theme: Theme,
+): void {
+  if (!frame?.contentWindow || !sourceUrl) {
+    return;
+  }
+
+  try {
+    frame.contentWindow.postMessage(
+      { source: THEME_SYNC_SOURCE, theme },
+      new URL(sourceUrl).origin,
+    );
+  } catch {
+    // The iframe may still be navigating or temporarily at about:blank.
+  }
 }
 
 interface PaneSourceInput {

@@ -1,3 +1,97 @@
+# Windows browser open bugfix
+
+## Checklist
+- [x] 确认 Windows URL 打开错误地复用了 `explorer`
+- [x] 文件夹打开继续用资源管理器
+- [x] URL 打开改用系统默认浏览器关联
+- [x] 运行 Rust check 与 diff gate
+
+## Review
+- `open_external_url` 现在在 Windows 下走 `rundll32 url.dll,FileProtocolHandler <url>`。
+- 只修共享后端函数，覆盖挂起窗格“在浏览器打开”和其他外链入口。
+
+# Workspace Grid pane external link opening
+
+## Checklist
+- [x] 确认现有 Chat/旧 proxy 有 link bridge，但 DirectServer Code pane 不走旧 proxy 注入
+- [x] 将 Tauri main window all-frames 初始化脚本从 chat-only 泛化到所有子 iframe
+- [x] iframe 内跨站 `http/https` 链接和 `window.open` 通过 bridge 交给父窗口
+- [x] 父窗口只接受 workspace origin 或当前 DOM 中 `.workspace-iframe` 的消息
+- [x] 复用现有 `open_external_url`，不新增打开浏览器实现
+- [x] 增加最小 jsdom 测试覆盖已知 iframe source 校验
+- [x] 运行前端、Rust 与 diff gate
+
+## Review
+- 当前窗格内链接按“跨站链接外部打开、同源链接留在窗格内”处理。
+- 这覆盖 Code / Chat / external iframe；native child Webview 内的页面仍由 Webview 自身承载，不在本轮加 hook。
+
+# Workspace Grid pane interaction fixes
+
+## Checklist
+- [x] Code 空窗格和 header 切换 Code 不再自动创建 server session
+- [x] 无 `sessionId` 的 Code pane 打开 Kimi Code Web 根页面，历史 session pane 继续支持 `/sessions/{id}`
+- [x] Code pane 持久化当前 `workDir`，header 增加“打开此窗格目录”
+- [x] pane header 增加每窗独立明暗主题切换，全局主题仍影响未单独设置主题的 pane
+- [x] `addPane(input, targetSlotId)` 支持直接添加到指定空 slot，修复第四格按钮灰掉/不可用的根因
+- [x] 支持拖动 pane header 到另一个 slot 交换或移动窗格
+- [x] 更新 store/component 单测与 current-state 事实
+- [x] 运行前端 test/tsc/build 与 diff gate
+
+## Review
+- 新建/切换 Code pane 现在只打开 Kimi Code Web 根页面，不再调用 `grid_create_session`；旧布局中已经有 `sessionId` 的 pane 仍按历史 session URL 渲染。
+- per-pane 主题通过 iframe `postMessage` 即时同步；同源 Kimi Code Web 仍可能在页面重载后受共享 localStorage 影响，完全隔离需要后续 native Webview 或 Web 侧 storage carrier。
+- 第四格问题由 store 层指定 slot 添加修复，不依赖添加后再 move。
+- 拖拽交换只改变 slot 的 `paneId`，不改变当前 preset、track size 或 pane 内容。
+
+# Workspace Grid toolbar and resize-shadow cleanup
+
+## Checklist
+- [x] 移除 Grid 内自定义布局工具栏
+- [x] 不再渲染“保存布局 / 选择布局 / 已保存自定义布局尺寸”
+- [x] Grid 根布局不再预留工具栏高度
+- [x] resize handle 保留拖拽命中区但不再显示 hover/focus 阴影条
+- [x] active pane 不再额外绘制布局阴影
+- [x] 更新组件测试和 current-state 事实
+- [x] 运行前端 test/tsc/build 与 diff gate
+
+## Review
+- 本轮只删可见 UI 和阴影视觉，不改 Grid store、preset 或 session 创建逻辑。
+- 底层 saved layout helper 仍留给旧状态兼容；没有用户可见入口。
+
+# Workspace Grid session API path payload fix
+
+## Checklist
+- [x] 确认仍失败的 root cause 是 API payload 边界可能继续携带 Windows verbatim/url-ish 前缀
+- [x] 新增 `api_workspace_root`，把 `/?/D:/...` / `\\?\D:\...` 转成 `D:/...`
+- [x] `POST /api/v1/workspaces` 的 `root` 使用同一 helper
+- [x] `POST /api/v1/sessions` fallback 的 `metadata.cwd` 使用同一 helper
+- [x] 补 Rust 单测覆盖坏输入和普通 `D:/repo`
+- [x] 运行 Rust、前端与 diff gate
+
+## Review
+- 本轮只修后端 API payload 字符串，不改前端和 Grid UI。
+- 外层路径归一化保留，但不再作为唯一防线。
+- 验证结果：Rust fmt/check/test no-run、前端 test/tsc、`git diff --check` 均通过。
+
+# Workspace Grid layout entry and path cleanup
+
+## Checklist
+- [x] 读取目标 objective，继续采用 `zustand` Grid slice 与 v1 fallback 决策
+- [x] 修复 `/?/D:/...` workspace root 归一化为 `D:/...`
+- [x] 三窗 preset 改为左侧一格、右侧上下两格
+- [x] Grid 内 preset 数字按钮移到标题栏布局 popover
+- [x] 移除空 pane 的 Kimi.com 添加入口
+- [x] 移除 pane header 的 Kimi.com 切换入口
+- [x] Grid resize/active 视觉改为中性色，不再显示黄色长线
+- [x] 补前端与 Rust 单测覆盖本轮行为
+- [x] 运行完整前端、Rust 与 diff gate
+
+## Review
+- 本轮只调整 Workspace Grid 的入口与修复坏路径，不拆旧 `WorkspaceView` 兼容层。
+- 标题栏 popover 使用现有 6 个 preset，3 列展示；不新增真实 9 窗布局。
+- external pane carrier 代码仍保留，用于已保存布局、fallback 和后续兼容，但 UI 不再提供 Kimi.com 新建/切换按钮。
+- 验证结果：前端 test、tsc、build 通过；Rust fmt/check/test no-run 通过；`git diff --check` 通过。直接执行 Rust test binary 仍受本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 限制。
+
 # Workspace Grid hardening review fixes
 
 ## Checklist

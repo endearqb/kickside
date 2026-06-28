@@ -81,8 +81,7 @@
 }
 
 .icon-btn.titlebar-workspace-toggle,
-.icon-btn.titlebar-split-btn,
-.icon-btn.titlebar-swap-btn {
+.icon-btn.titlebar-layout-btn {
   width: 28px;
   min-width: 28px;
   height: 28px;
@@ -90,11 +89,67 @@
 
 .icon-btn.titlebar-workspace-toggle.is-code,
 .icon-btn.titlebar-workspace-toggle.is-chat,
-.icon-btn.titlebar-split-btn.is-active,
-.icon-btn.titlebar-swap-btn {
+.icon-btn.titlebar-layout-btn.is-active {
   background: var(--accent-soft);
   color: var(--text-primary);
   border-color: color-mix(in srgb, var(--accent) 34%, var(--chrome-border));
+}
+
+.titlebar-layout-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.titlebar-layout-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 246px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--chrome-border) 88%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--surface-muted));
+  box-shadow: 0 12px 28px color-mix(in srgb, #000 16%, transparent);
+}
+
+.titlebar-layout-option {
+  appearance: none;
+  min-width: 0;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.titlebar-layout-option:hover,
+.titlebar-layout-option.is-active {
+  color: var(--text-primary);
+  border-color: var(--chrome-border);
+  background: color-mix(in srgb, var(--text-primary) 7%, var(--surface));
+}
+
+.titlebar-layout-option-count {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.titlebar-layout-option-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
 }
 
 .titlebar-skill-btn {
@@ -2861,93 +2916,39 @@ input:focus {
 
 .workspace-stage-grid-shell {
   display: grid;
-  grid-template-rows: 34px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-rows: minmax(0, 1fr);
   padding: 8px;
   background: var(--surface);
 }
 
-.workspace-grid-toolbar {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.workspace-grid-toolbar-controls {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.workspace-grid-preset-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--chrome-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 92%, var(--surface-muted));
-}
-
-.workspace-grid-preset-btn,
-.workspace-grid-icon-btn,
-.workspace-grid-save-btn,
-.workspace-grid-saved-select {
+.workspace-grid-icon-btn {
   appearance: none;
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--text-secondary);
   background: transparent;
-}
-
-.workspace-grid-preset-btn,
-.workspace-grid-icon-btn,
-.workspace-grid-save-btn {
   display: inline-grid;
   place-items: center;
   cursor: pointer;
 }
 
-.workspace-grid-preset-btn {
-  width: 26px;
-  height: 24px;
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.workspace-grid-preset-btn:hover,
 .workspace-grid-icon-btn:hover,
-.workspace-grid-save-btn:hover,
-.workspace-grid-preset-btn.is-active,
 .workspace-grid-icon-btn.is-active {
   color: var(--text-primary);
   border-color: color-mix(in srgb, var(--accent) 24%, var(--chrome-border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
 }
 
-.workspace-grid-save-btn,
-.workspace-grid-saved-select {
-  height: 26px;
-  padding: 0 8px;
-  font-size: 12px;
-  white-space: nowrap;
+.workspace-grid-icon-btn:disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
-.workspace-grid-saved-select {
-  max-width: 132px;
-  border-color: var(--chrome-border);
-  background: var(--surface);
-}
-
-.workspace-grid-status {
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.workspace-grid-icon-btn:disabled:hover {
+  color: var(--text-tertiary);
+  border-color: transparent;
+  background: transparent;
 }
 
 .workspace-grid-canvas {
@@ -2955,7 +2956,7 @@ input:focus {
   min-height: 0;
   position: relative;
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .workspace-grid-canvas.is-resizing {
@@ -2972,10 +2973,10 @@ input:focus {
   position: absolute;
   z-index: 4;
   border: 0;
+  outline: none;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: transparent;
   opacity: 0;
-  transition: opacity 120ms ease, background 120ms ease;
   touch-action: none;
 }
 
@@ -2996,8 +2997,8 @@ input:focus {
 .workspace-grid-canvas:hover .workspace-grid-resize-handle,
 .workspace-grid-resize-handle:focus-visible,
 .workspace-grid-resize-handle:hover {
-  opacity: 1;
-  background: color-mix(in srgb, var(--accent) 38%, transparent);
+  opacity: 0;
+  background: transparent;
 }
 
 .workspace-grid-pane {
@@ -3013,8 +3014,8 @@ input:focus {
 }
 
 .workspace-grid-pane.is-active {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--chrome-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--chrome-border));
+  box-shadow: none;
 }
 
 .workspace-grid-pane-header {
@@ -3026,6 +3027,11 @@ input:focus {
   padding: 0 6px 0 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--chrome-border) 72%, transparent);
   background: color-mix(in srgb, var(--surface-muted) 62%, var(--surface));
+  cursor: grab;
+}
+
+.workspace-grid-pane-header:active {
+  cursor: grabbing;
 }
 
 .workspace-grid-pane-title {

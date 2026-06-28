@@ -47,6 +47,7 @@ const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(4);
 const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const CHAT_EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-chat-external-link-bridge";
+const EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-external-link-bridge";
 const CHAT_FRAME_ORIGIN: &str = "https://www.kimi.com";
 const DOWNLOAD_SAVE_DIALOG_TITLE: &str = "Save download";
 
@@ -63,11 +64,12 @@ const WORKSPACE_IMPORT_PICKER_HEIGHT: f64 = 560.0;
 const WORKSPACE_IMPORT_PICKER_MIN_WIDTH: f64 = 680.0;
 const WORKSPACE_IMPORT_PICKER_MIN_HEIGHT: f64 = 520.0;
 
-fn chat_external_link_bridge_script() -> String {
+fn frame_external_link_bridge_script() -> String {
     format!(
         r##"
 (function () {{
-  const BRIDGE_SOURCE = "{bridge_source}";
+  const CHAT_BRIDGE_SOURCE = "{chat_bridge_source}";
+  const EXTERNAL_BRIDGE_SOURCE = "{external_bridge_source}";
   const CHAT_ORIGIN = "{chat_origin}";
 
   if (window.top === window) {{
@@ -75,9 +77,7 @@ fn chat_external_link_bridge_script() -> String {
   }}
 
   try {{
-    if (window.location.origin !== CHAT_ORIGIN) {{
-      return;
-    }}
+    var FRAME_ORIGIN = window.location.origin;
   }} catch (_) {{
     return;
   }}
@@ -100,7 +100,11 @@ fn chat_external_link_bridge_script() -> String {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
       return false;
     }}
-    return parsed.origin !== CHAT_ORIGIN;
+    return parsed.origin !== FRAME_ORIGIN;
+  }}
+
+  function bridgeSource() {{
+    return FRAME_ORIGIN === CHAT_ORIGIN ? CHAT_BRIDGE_SOURCE : EXTERNAL_BRIDGE_SOURCE;
   }}
 
   function postExternalUrl(url, reason) {{
@@ -110,7 +114,7 @@ fn chat_external_link_bridge_script() -> String {
       }}
       window.parent.postMessage(
         {{
-          source: BRIDGE_SOURCE,
+          source: bridgeSource(),
           url: url,
           reason: reason || "unknown"
         }},
@@ -179,7 +183,8 @@ fn chat_external_link_bridge_script() -> String {
   }}
 }})();
 "##,
-        bridge_source = CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
+        chat_bridge_source = CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
+        external_bridge_source = EXTERNAL_LINK_BRIDGE_SOURCE,
         chat_origin = CHAT_FRAME_ORIGIN
     )
 }
@@ -1594,10 +1599,10 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
 
     advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
     let app_for_load = app.clone();
-    let chat_external_link_script = chat_external_link_bridge_script();
+    let frame_external_link_script = frame_external_link_bridge_script();
     let builder = match WebviewWindowBuilder::from_config(app, &config) {
         Ok(builder) => builder
-            .initialization_script_for_all_frames(chat_external_link_script)
+            .initialization_script_for_all_frames(frame_external_link_script)
             .on_page_load(move |_window, payload| {
                 let url = payload.url().to_string();
                 if !is_shell_document_url(&url) {

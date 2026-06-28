@@ -1,5 +1,6 @@
 import { type RefObject } from "react";
 import type {
+  Theme,
   WorkspaceLayoutMode,
   WorkspacePaneState,
   WorkspaceSplitOrder,
@@ -17,6 +18,7 @@ export type WorkspaceViewProps = {
   codeFrameKey: string;
   chatRemoteUrl: string;
   effectiveWorkDir?: string;
+  themeMode: Theme;
   workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
@@ -24,6 +26,7 @@ export type WorkspaceViewProps = {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => void;
   onOpenExternalUrl: (url: string) => void;
   onSplitRatioChange: (nextRatio: number) => void;
   onSplitDragStateChange: (isDragging: boolean) => void;

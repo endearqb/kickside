@@ -1,6 +1,5 @@
-import type { MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
 import {
-  ArrowLeftRight,
   Columns2,
   Copy,
   FolderOpen,
@@ -17,14 +16,16 @@ import { Button } from "@/components/ui/button";
 import { KimiCliBrand } from "@/components/kimi-cli-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { GRID_PRESETS } from "@/features/workspace-grid/gridPresets";
+import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import type {
   BackendState,
   Screen,
   Theme,
   WorkspaceLayoutMode,
-  WorkspaceSplitOrder,
   WorkspaceViewKind,
 } from "@/app/types";
+import type { WorkspaceGridPresetId } from "@/features/workspace-grid/gridTypes";
 
 type ParsedPath = {
   fullPath: string;
@@ -42,6 +43,14 @@ type WorkspacePathDisplay = {
 
 const DRAG_BLOCK_SELECTOR =
   ".titlebar-actions, .titlebar-window-controls, button, a, input, textarea, select, [role='button'], [data-no-drag='true']";
+const WORKSPACE_GRID_PRESET_ORDER: WorkspaceGridPresetId[] = [
+  "single",
+  "1x2",
+  "1x3",
+  "2x2",
+  "2x3-5",
+  "2x3",
+];
 
 function isTitlebarDragTarget(target: EventTarget | null): boolean {
   return !(target instanceof Element && target.closest(DRAG_BLOCK_SELECTOR));
@@ -203,7 +212,6 @@ type ShellTitlebarProps = {
   themeMode: Theme;
   activeWorkspaceView: WorkspaceViewKind;
   workspaceLayoutMode: WorkspaceLayoutMode;
-  workspaceSplitOrder: WorkspaceSplitOrder;
   statusText: string;
   shellScreenLabel: string;
   actionBusy: boolean;
@@ -218,8 +226,6 @@ type ShellTitlebarProps = {
   onOpenSkillCenter: () => void;
   onOpenFolder: (path: string) => void;
   onToggleWorkspaceView: () => void;
-  onToggleWorkspaceSplit: () => void;
-  onSwapWorkspaceSplitOrder: () => void;
   onToggleTheme: () => void;
   onStartWindowDrag: () => void;
   onMinimizeWindow: () => void;
@@ -234,7 +240,6 @@ export function ShellTitlebar({
   themeMode,
   activeWorkspaceView,
   workspaceLayoutMode,
-  workspaceSplitOrder,
   statusText,
   shellScreenLabel,
   actionBusy,
@@ -249,8 +254,6 @@ export function ShellTitlebar({
   onOpenSkillCenter,
   onOpenFolder,
   onToggleWorkspaceView,
-  onToggleWorkspaceSplit,
-  onSwapWorkspaceSplitOrder,
   onToggleTheme,
   onStartWindowDrag,
   onMinimizeWindow,
@@ -258,6 +261,9 @@ export function ShellTitlebar({
   onCloseWindow,
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
+  const workspaceGridPreset = useWorkspaceGridStore((state) => state.preset);
+  const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const workspacePathDisplay = formatWorkspacePath(activeSessionWorkDir, effectiveWorkDir);
   const sessionPath = activeSessionWorkDir?.trim() || "";
   const canOpenSessionPath = sessionPath.length > 0;
@@ -265,14 +271,7 @@ export function ShellTitlebar({
     activeWorkspaceView === "code"
       ? "当前显示 Kimi Code Web，切换到 Kimi Chat"
       : "当前显示 Kimi Chat，切换到 Kimi Code Web";
-  const splitToggleLabel =
-    workspaceLayoutMode === "split"
-      ? "切回单栏视图"
-      : "同时显示 Kimi Code Web 与 Kimi Chat";
-  const swapSplitOrderLabel =
-    workspaceSplitOrder === "code_left"
-      ? "切换分栏顺序，将 Kimi Chat 移到左侧"
-      : "切换分栏顺序，将 Kimi Code Web 移到左侧";
+  const layoutToggleLabel = `选择工作区布局，当前 ${GRID_PRESETS[workspaceGridPreset].label}`;
 
   const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
@@ -327,20 +326,40 @@ export function ShellTitlebar({
           />
         ) : null}
         {screen === "workspace" ? (
-          <IconButton
-            icon={<Columns2 size={14} />}
-            label={splitToggleLabel}
-            onClick={onToggleWorkspaceSplit}
-            className={`ghost mini titlebar-split-btn ${workspaceLayoutMode === "split" ? "is-active" : ""}`}
-          />
-        ) : null}
-        {screen === "workspace" && workspaceLayoutMode === "split" ? (
-          <IconButton
-            icon={<ArrowLeftRight size={14} />}
-            label={swapSplitOrderLabel}
-            onClick={onSwapWorkspaceSplitOrder}
-            className="ghost mini titlebar-swap-btn"
-          />
+          <div className="titlebar-layout-menu-wrap">
+            <IconButton
+              icon={<Columns2 size={14} />}
+              label={layoutToggleLabel}
+              onClick={() => setLayoutMenuOpen((current) => !current)}
+              className={`ghost mini titlebar-layout-btn ${layoutMenuOpen ? "is-active" : ""}`}
+            />
+            {layoutMenuOpen ? (
+              <div className="titlebar-layout-popover" role="menu" aria-label="选择工作区布局">
+                {WORKSPACE_GRID_PRESET_ORDER.map((presetId) => {
+                  const preset = GRID_PRESETS[presetId];
+                  const active = presetId === workspaceGridPreset;
+                  return (
+                    <button
+                      type="button"
+                      key={presetId}
+                      className={`titlebar-layout-option${active ? " is-active" : ""}`}
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        setWorkspaceGridPreset(presetId);
+                        setLayoutMenuOpen(false);
+                      }}
+                    >
+                      <span className="titlebar-layout-option-count">
+                        {preset.slots.length}
+                      </span>
+                      <span className="titlebar-layout-option-label">{preset.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {screen === "workspace" ? (
           <ThemeToggle

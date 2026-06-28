@@ -30,11 +30,11 @@ export const GRID_PRESETS: Record<WorkspaceGridPresetId, WorkspaceGridTemplate> 
   },
   "1x3": {
     id: "1x3",
-    label: "三列",
-    columns: "repeat(3, minmax(0, 1fr))",
-    rows: "minmax(0, 1fr)",
-    areas: '"left middle right"',
-    slots: [slot("left"), slot("middle"), slot("right")],
+    label: "三窗布局",
+    columns: "repeat(2, minmax(0, 1fr))",
+    rows: "repeat(2, minmax(0, 1fr))",
+    areas: '"left top" "left bottom"',
+    slots: [slot("left"), slot("top"), slot("bottom")],
   },
   "2x2": {
     id: "2x2",

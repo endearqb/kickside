@@ -11,6 +11,7 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { isKnownWorkspaceIframeSource } from "@/app/linkBridge";
 import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import {
   CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
@@ -502,7 +503,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "这是可选配置；保存并启用外部 IM 通道后，才能从这里直接启动 bridge。",
+        message: "这是可选配置；保存并启用外部 IM 通道后，才能从这里直接启动 bridge。",
     };
   }
 
@@ -510,7 +511,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "存在未保存的外部 IM 通道配置，请先点击“保存并启用”再启动 bridge。",
+        message: "存在未保存的外部 IM 通道配置，请先点击“保存并启用”再启动 bridge。",
     };
   }
 
@@ -2146,17 +2147,22 @@ export function useShellController() {
         if (!externalUrl) {
           return;
         }
-        if (tauriRuntime) {
-          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
-            setActionError(String(error));
-          });
-        } else {
-          try {
-            window.open(externalUrl, "_blank", "noopener,noreferrer");
-          } catch (error) {
-            setActionError(String(error));
-          }
+        void handleOpenExternalUrl(externalUrl);
+        return;
+      }
+
+      if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
+        const externalUrl = payload.url?.trim();
+        if (!externalUrl) {
+          return;
         }
+        if (
+          (!workspaceOrigin || event.origin !== workspaceOrigin) &&
+          !isKnownWorkspaceIframeSource(event.source)
+        ) {
+          return;
+        }
+        void handleOpenExternalUrl(externalUrl);
         return;
       }
 
@@ -2173,25 +2179,6 @@ export function useShellController() {
             .catch(() => {
               // Health persistence is best-effort; the iframe itself is already usable.
             });
-        }
-        return;
-      }
-
-      if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
-        const externalUrl = payload.url?.trim();
-        if (!externalUrl) {
-          return;
-        }
-        if (tauriRuntime) {
-          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
-            setActionError(String(error));
-          });
-        } else {
-          try {
-            window.open(externalUrl, "_blank", "noopener,noreferrer");
-          } catch (error) {
-            setActionError(String(error));
-          }
         }
         return;
       }
@@ -4588,14 +4575,7 @@ export function useShellController() {
     setIsWorkspaceSplitDragging(isDragging);
   }
 
-  const { pushThemeToWorkspace } = useWorkspaceThemeBridge({
-    screen,
-    workspaceEmbedState,
-    workspaceOrigin,
-    themeMode,
-    workspaceIframeRef,
-    setThemeMode,
-  });
+  const { pushThemeToWorkspace } = useWorkspaceThemeBridge();
 
   useEffect(() => {
     const timer = startWorkspacePane(

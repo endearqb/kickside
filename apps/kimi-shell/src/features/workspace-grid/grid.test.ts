@@ -10,7 +10,9 @@ import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
   WORKSPACE_GRID_MAX_PANES,
+  WORKSPACE_GRID_STATE_STORAGE_KEY,
   createWorkspaceGridStore,
+  loadWorkspaceGridState,
   loadWorkspaceGridSavedLayouts,
   saveWorkspaceGridSavedLayouts,
   toPersistedWorkspaceGridState,
@@ -118,6 +120,40 @@ describe("workspace grid store", () => {
 
     expect(createdPaneId).toEqual(expect.stringContaining("pane-external-"));
     expect(lastPane?.url).toBe("https://kimi.com/chat");
+    expect(lastPane?.storageNamespace).toEqual(
+      expect.stringContaining("workspace-grid-pane-external-"),
+    );
+  });
+
+  it("adds stable storage namespaces to legacy persisted panes", () => {
+    const state = loadWorkspaceGridState(
+      writableStorage({
+        [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
+          version: 1,
+          preset: "single",
+          panes: [
+            {
+              id: "pane-code",
+              kind: "code",
+              carrier: "iframe",
+              title: "Kimi Code",
+              mountPolicy: "eager",
+              loadState: "idle",
+              createdAt: 100,
+              updatedAt: 100,
+            },
+          ],
+          slots: [{ id: "main", area: "main", paneId: "pane-code" }],
+          activePaneId: "pane-code",
+          maximizedPaneId: null,
+          updatedAt: 100,
+        }),
+      }),
+      100,
+    );
+    const persisted = toPersistedWorkspaceGridState(state);
+
+    expect(persisted.panes[0]?.storageNamespace).toBe("workspace-grid-pane-code");
   });
 
   it("caps panes at the v1 resource limit", () => {

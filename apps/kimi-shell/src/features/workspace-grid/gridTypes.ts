@@ -31,6 +31,7 @@ export interface WorkspacePane {
   title: string;
   sessionId?: string;
   url?: string;
+  storageNamespace: string;
   mountPolicy: WorkspacePaneMountPolicy;
   loadState: WorkspacePaneLoadState;
   createdAt: number;

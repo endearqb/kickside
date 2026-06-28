@@ -1,3 +1,16 @@
+# Workspace Grid native Webview storage namespace
+
+## Checklist
+- [x] 每个 Grid pane 持有稳定 `storageNamespace`
+- [x] 旧持久化 panes 缺少 namespace 时按 pane id 补齐
+- [x] 嵌入式子 Webview 使用 pane namespace 作为 Tauri `dataDirectory`
+- [x] 独立 WebviewWindow fallback 使用同一个 pane namespace
+- [x] 单测覆盖 legacy pane namespace 补齐，组件测试覆盖 native carrier 调用参数
+
+## Review
+- 本轮推进 WG-8 的 native Webview per-pane localStorage namespace：Tauri `Webview` / `WebviewWindow` carrier 通过 `dataDirectory` 隔离本地存储。
+- 当前仓库没有 `apps/kimi-web`，DirectServer code pane 仍是同源 iframe carrier；iframe 级 localStorage 隔离不能只靠 shell state 补丁完成。
+
 # Workspace Grid embedded external Webview
 
 ## Checklist
@@ -9,7 +22,7 @@
 
 ## Review
 - 本轮推进 WG-7 的窗格内承载方案：被 iframe 阻止的外部页可选择嵌入式 Tauri 子 Webview，独立 WebviewWindow 仍作为退路。
-- 仍未解决 per-pane localStorage namespace；真实 Tauri 桌面中 z-order/focus/DPI 行为还需要人工点击验证。
+- 后续已补齐 native Webview per-pane `dataDirectory` namespace；真实 Tauri 桌面中 z-order/focus/DPI 行为还需要人工点击验证。
 
 # Workspace Grid external WebviewWindow fallback
 
@@ -21,7 +34,7 @@
 
 ## Review
 - 本轮推进 WG-7 的退路方案：被 iframe 阻止的外部页可在独立应用 WebviewWindow 承载。
-- 嵌入式子 Webview 已在后续切片补齐；仍未解决 per-pane localStorage namespace。
+- 嵌入式子 Webview 与 native Webview per-pane `dataDirectory` namespace 已在后续切片补齐。
 
 # Workspace Grid resizable custom tracks
 
@@ -35,7 +48,7 @@
 
 ## Review
 - 本轮推进 WG-8 的“逐缝拖拽 resize + 持久化 custom template”；custom template 先实现为当前 preset 的列/行 `fr` track sizes。
-- 后续已补齐 WG-7 子 Webview；仍未实现 per-pane localStorage namespace。
+- 后续已补齐 WG-7 子 Webview 与 native Webview per-pane `dataDirectory` namespace。
 
 # Workspace Grid named layouts
 
@@ -48,7 +61,7 @@
 
 ## Review
 - 本轮推进 WG-8 的“命名布局保存/恢复”；未引入 modal 或新状态库，先用原生 `prompt`/`select`。
-- 仍未实现 WG-7 子 Webview、per-pane localStorage namespace、逐缝拖拽 resize。
+- 后续已补齐 WG-7 子 Webview、native Webview per-pane `dataDirectory` namespace 和逐缝拖拽 resize。
 
 # Workspace Grid v1 hardening
 

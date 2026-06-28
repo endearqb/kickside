@@ -47,6 +47,7 @@ export interface AddWorkspacePaneInput {
   title?: string;
   sessionId?: string;
   url?: string;
+  storageNamespace?: string;
 }
 
 export function loadWorkspaceGridState(
@@ -220,6 +221,9 @@ function createWorkspaceGridSlice(
         title: input.title ?? defaultPaneTitle(input.kind),
         sessionId: input.sessionId,
         url: sanitizeUrl(input.url),
+        storageNamespace:
+          sanitizeStorageNamespace(input.storageNamespace) ??
+          createPaneStorageNamespace(paneId),
         mountPolicy: "on-focus",
         loadState: "idle",
         createdAt: now,
@@ -320,6 +324,9 @@ function createWorkspaceGridSlice(
                 title: defaultPaneTitle(kind),
                 sessionId: undefined,
                 url: undefined,
+                storageNamespace:
+                  sanitizeStorageNamespace(pane.storageNamespace) ??
+                  createPaneStorageNamespace(pane.id),
                 updatedAt: Date.now(),
               }
             : pane,
@@ -338,6 +345,9 @@ function createWorkspaceGridSlice(
                 title: input.title ?? defaultPaneTitle(input.kind),
                 sessionId: input.sessionId,
                 url: sanitizeUrl(input.url),
+                storageNamespace:
+                  sanitizeStorageNamespace(pane.storageNamespace) ??
+                  createPaneStorageNamespace(pane.id),
                 updatedAt: Date.now(),
               }
             : pane,
@@ -416,6 +426,9 @@ function sanitizePane(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
     url: sanitizeUrl(pane.url),
+    storageNamespace:
+      sanitizeStorageNamespace(pane.storageNamespace) ??
+      createPaneStorageNamespace(pane.id),
   };
 }
 
@@ -458,6 +471,15 @@ function createPaneId(kind: WorkspacePaneKind): string {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2);
   return `pane-${kind}-${random}`;
+}
+
+function createPaneStorageNamespace(paneId: string): string {
+  return `workspace-grid-${sanitizeStorageNamespace(paneId) ?? "pane"}`;
+}
+
+function sanitizeStorageNamespace(namespace?: string): string | undefined {
+  const sanitized = namespace?.trim().replace(/[^a-zA-Z0-9._-]/g, "-");
+  return sanitized || undefined;
 }
 
 function createLayoutId(now: number): string {

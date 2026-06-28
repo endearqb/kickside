@@ -47,7 +47,11 @@ interface PaneFrameProps {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenExternalUrl: (url: string) => void;
-  onOpenTauriWebviewUrl: (url: string, title: string) => void;
+  onOpenTauriWebviewUrl: (
+    url: string,
+    title: string,
+    storageNamespace?: string,
+  ) => void;
   onCodeFrameLoad: () => void;
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
@@ -252,7 +256,11 @@ interface PaneContentProps {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenExternalUrl: (url: string) => void;
-  onOpenTauriWebviewUrl: (url: string, title: string) => void;
+  onOpenTauriWebviewUrl: (
+    url: string,
+    title: string,
+    storageNamespace?: string,
+  ) => void;
   onResumePane: () => void;
 }
 
@@ -370,6 +378,7 @@ function PaneContent({
         url: sourceUrl,
         title: source.title,
         bounds: rectToEmbeddedBounds(host.getBoundingClientRect()),
+        storageNamespace: pane.storageNamespace,
       });
       setExternalState("ready");
       setEmbeddedStatus("active");
@@ -445,7 +454,13 @@ function PaneContent({
               variant="outline"
               icon={<Globe2 size={14} />}
               className="cc-action-btn cc-doc-btn"
-              onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
+              onClick={() =>
+                onOpenTauriWebviewUrl(
+                  sourceUrl,
+                  source.title,
+                  pane.storageNamespace,
+                )
+              }
             >
               在应用窗口打开
             </Button>
@@ -537,7 +552,13 @@ function PaneContent({
                     variant="outline"
                     icon={<Globe2 size={14} />}
                     className="cc-action-btn cc-doc-btn"
-                    onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
+                    onClick={() =>
+                      onOpenTauriWebviewUrl(
+                        sourceUrl,
+                        source.title,
+                        pane.storageNamespace,
+                      )
+                    }
                   >
                     在应用窗口打开
                   </Button>

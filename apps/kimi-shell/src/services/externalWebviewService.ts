@@ -8,6 +8,7 @@ import { normalizeEmbeddableUrl } from "@/features/workspace-grid/urlSafety";
 interface OpenExternalWebviewWindowInput {
   url: string;
   title: string;
+  storageNamespace?: string;
 }
 
 export interface EmbeddedExternalWebviewBounds {
@@ -26,11 +27,13 @@ interface CreateEmbeddedExternalWebviewInput {
   url: string;
   title: string;
   bounds: EmbeddedExternalWebviewBounds;
+  storageNamespace?: string;
 }
 
 export async function openExternalWebviewWindow({
   url,
   title,
+  storageNamespace,
 }: OpenExternalWebviewWindowInput): Promise<void> {
   const normalized = normalizeEmbeddableUrl(url);
   if (!normalized.ok) {
@@ -54,6 +57,7 @@ export async function openExternalWebviewWindow({
     minHeight: 520,
     center: true,
     resizable: true,
+    dataDirectory: createWebviewDataDirectory(storageNamespace),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -67,6 +71,7 @@ export async function openExternalWebviewWindow({
 export async function createEmbeddedExternalWebview({
   url,
   bounds,
+  storageNamespace,
 }: CreateEmbeddedExternalWebviewInput): Promise<EmbeddedExternalWebviewController> {
   const normalized = normalizeEmbeddableUrl(url);
   if (!normalized.ok) {
@@ -82,6 +87,7 @@ export async function createEmbeddedExternalWebview({
     ...normalizeEmbeddedBounds(bounds),
     focus: true,
     dragDropEnabled: false,
+    dataDirectory: createWebviewDataDirectory(storageNamespace),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -126,6 +132,11 @@ function normalizeEmbeddedBounds(
     width: Math.max(1, Math.round(bounds.width)),
     height: Math.max(1, Math.round(bounds.height)),
   };
+}
+
+function createWebviewDataDirectory(storageNamespace?: string): string | undefined {
+  const namespace = storageNamespace?.trim().replace(/[^a-zA-Z0-9._-]/g, "-");
+  return namespace || undefined;
 }
 
 function createExternalWebviewLabel(): string {

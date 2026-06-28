@@ -235,9 +235,13 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     setGridMessage(`已恢复布局：${layout.name}`);
   }
 
-  async function handleOpenTauriWebviewUrl(url: string, title: string) {
+  async function handleOpenTauriWebviewUrl(
+    url: string,
+    title: string,
+    storageNamespace?: string,
+  ) {
     try {
-      await openExternalWebviewWindow({ url, title });
+      await openExternalWebviewWindow({ url, title, storageNamespace });
       setGridMessage("已在独立应用窗口打开");
     } catch (error) {
       setGridMessage(`应用窗口打开失败：${String(error)}`);
@@ -384,8 +388,8 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
                 onOpenExternalUrl={props.onOpenExternalUrl}
-                onOpenTauriWebviewUrl={(url, title) => {
-                  void handleOpenTauriWebviewUrl(url, title);
+                onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
+                  void handleOpenTauriWebviewUrl(url, title, storageNamespace);
                 }}
                 onCodeFrameLoad={props.onCodeFrameLoad}
                 onCodeFrameError={props.onCodeFrameError}

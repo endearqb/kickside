@@ -155,6 +155,9 @@ describe("WorkspaceGridView", () => {
     render(<WorkspaceGridView {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
+    const externalPane = useWorkspaceGridStore
+      .getState()
+      .panes.find((item) => item.kind === "external");
     act(() => {
       vi.advanceTimersByTime(8_000);
     });
@@ -163,6 +166,7 @@ describe("WorkspaceGridView", () => {
     expect(openExternalWebviewWindow).toHaveBeenCalledWith({
       url: "https://example.com/path",
       title: "example.com",
+      storageNamespace: externalPane?.storageNamespace,
     });
   });
 
@@ -173,6 +177,9 @@ describe("WorkspaceGridView", () => {
     render(<WorkspaceGridView {...props} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
+    const externalPane = useWorkspaceGridStore
+      .getState()
+      .panes.find((item) => item.kind === "external");
     const embedHosts = document.querySelectorAll(".workspace-embed");
     const embedHost = embedHosts[embedHosts.length - 1] as HTMLDivElement;
     Object.defineProperty(embedHost, "getBoundingClientRect", {
@@ -200,6 +207,7 @@ describe("WorkspaceGridView", () => {
     expect(createEmbeddedExternalWebview).toHaveBeenCalledWith({
       url: "https://example.com/path",
       title: "example.com",
+      storageNamespace: externalPane?.storageNamespace,
       bounds: {
         x: 10,
         y: 20,

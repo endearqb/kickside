@@ -18,3 +18,7 @@ Accepted
 
 - Grid state must not persist tokens, cookies, or URL fragments.
 - The existing two-pane UI remains the compatibility path until the Grid renderer replaces it.
+
+## Follow-up
+
+- 2026-06-28: WG-7 later added embedded Tauri child Webviews and WebviewWindow fallback for blocked external panes. Native Webview carriers use stable per-pane `dataDirectory` namespaces; iframe carriers still require hosted web-app support for true same-origin localStorage namespacing.

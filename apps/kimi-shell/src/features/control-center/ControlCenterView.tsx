@@ -50,8 +50,9 @@ import type {
   SkillDiscoverySnapshot,
   InstalledSkill,
   KimiCliApiConfigView,
-  KimiCliConfigCenterInput,
-  KimiCliConfigCenterView,
+  KimiCodeAccessConfigInput,
+  KimiCodeAccessConfigTestResult,
+  KimiCodeAccessConfigView,
   MainWindowCloseBehavior,
   OnboardingStatus,
   PowerShellPreflightSummary,
@@ -212,10 +213,12 @@ type ControlCenterViewProps = {
   kimiApiConfigView: KimiCliApiConfigView | null;
   kimiApiKeyInput: string;
   onKimiApiKeyInputChange: (value: string) => void;
-  configCenterView: KimiCliConfigCenterView | null;
-  configCenterDraft: KimiCliConfigCenterInput;
+  configCenterView: KimiCodeAccessConfigView | null;
+  configCenterDraft: KimiCodeAccessConfigInput;
   configCenterBusy: boolean;
   configCenterDirty: boolean;
+  configCenterTesting: boolean;
+  configCenterTestResult: KimiCodeAccessConfigTestResult | null;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
@@ -332,9 +335,10 @@ type ControlCenterViewProps = {
   onUpdateSkill: (skillId: string) => Promise<void>;
   onUninstallSkill: (skillId: string) => Promise<void>;
   onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
-  onConfigCenterDraftChange: (next: KimiCliConfigCenterInput) => void;
+  onConfigCenterDraftChange: (next: KimiCodeAccessConfigInput) => void;
   onResetConfigCenterDraft: () => void;
   onSaveKimiCliConfigCenter: () => Promise<void>;
+  onTestKimiCodeAccessConfig: () => Promise<void>;
   onSaveMainWindowCloseBehavior: (
     behavior: MainWindowCloseBehavior,
   ) => Promise<MainWindowCloseBehavior>;
@@ -781,6 +785,8 @@ export function ControlCenterView({
   configCenterDraft,
   configCenterBusy,
   configCenterDirty,
+  configCenterTesting,
+  configCenterTestResult,
   installProbe,
   installSource,
   installSettings,
@@ -879,6 +885,7 @@ export function ControlCenterView({
   onConfigCenterDraftChange,
   onResetConfigCenterDraft,
   onSaveKimiCliConfigCenter,
+  onTestKimiCodeAccessConfig,
   onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
   onSaveInstallSettings,
@@ -1109,17 +1116,9 @@ export function ControlCenterView({
     status?.providerApiConfigured ??
     Boolean(
       configCenterView &&
-        ((configCenterView.defaultProvider &&
-          configCenterView.providers.some(
-            (entry) =>
-              entry.key.trim() === configCenterView.defaultProvider?.trim() &&
-              (Boolean(entry.apiKey?.trim()) || Boolean(entry.authToken?.trim())),
-          )) ||
-          configCenterView.providers.some(
-            (entry) =>
-              Boolean(entry.key.trim()) &&
-              (Boolean(entry.apiKey?.trim()) || Boolean(entry.authToken?.trim())),
-          )),
+        (configCenterView.provider.apiKeyConfigured ||
+          configCenterView.services.search.apiKeyConfigured ||
+          configCenterView.services.fetch.apiKeyConfigured),
     );
   const providerApiReady = providerApiConfigured && !providerApiHealth?.needsAttention;
   const authStatusLabel = kimiLoginReady || providerApiReady ? "就绪" : providerApiConfigured ? "异常" : "待办";
@@ -2469,7 +2468,7 @@ export function ControlCenterView({
                         <p className="hint cc-step-summary">
                           当前入口：<strong>{formatAuthMode(authMode)}</strong>；
                           Provider API：<strong>{providerApiStatusLabel}</strong>
-                          {kimiApiConfigView?.isDefault ? "；Kimi Coding Plan 已设为默认" : ""}
+                          {kimiApiConfigView?.hasApiKey ? "；Kimi Code 接入已配置" : ""}
                         </p>
                         <div className="cc-brief-list">
                           <article className="cc-brief-item">
@@ -2478,7 +2477,7 @@ export function ControlCenterView({
                           </article>
                           <article className="cc-brief-item">
                             <strong>接口地址</strong>
-                            <span>Kimi Coding Plan</span>
+                            <span>Kimi Code 接入</span>
                             <span>https://api.kimi.com/coding/v1</span>
                           </article>
                           <article className="cc-brief-item">
@@ -2501,7 +2500,7 @@ export function ControlCenterView({
                           </article>
                         </div>
                         <p className="hint cc-step-meta">
-                          保存时会把同一个 API Key 同步写入 provider、search、fetch 三处配置。
+                          保存时只会写入 Kimi App 管理的 provider、model、Search/Fetch 服务字段。
                         </p>
                         <div className="cc-api-inline-actions">
                           <Button
@@ -2512,7 +2511,7 @@ export function ControlCenterView({
                             onClick={() => void onOpenTask("config_center")}
                             disabled={configCenterBusy}
                           >
-                            打开配置中心弹窗
+                            打开接入配置
                           </Button>
                           <Button
                             type="button"
@@ -2527,7 +2526,9 @@ export function ControlCenterView({
                         <p className="hint cc-step-meta">
                           配置文件：
                           <strong>
-                            {kimiApiConfigView?.configPath || configCenterView?.configPath || "~/.kimi/config.toml"}
+                            {kimiApiConfigView?.configPath ||
+                              configCenterView?.configPath ||
+                              "~/.kimi-code/config.toml"}
                           </strong>
                         </p>
                         <p className="hint cc-step-meta">
@@ -2545,12 +2546,12 @@ export function ControlCenterView({
                         ) : null}
                         {!kimiApiConfigView?.templateConfigured ? (
                           <p className="hint cc-step-meta">
-                            当前尚未写入完整的 Kimi Coding Plan 模板，点击“保存”后会自动补齐。
+                            当前尚未写入完整的 Kimi Code 接入配置，点击“保存”后会自动补齐。
                           </p>
                         ) : null}
                         {configCenterDirty ? (
                           <p className="hint cc-step-meta">
-                            配置中心弹窗内存在未保存修改，请先处理高级草稿。
+                            接入配置存在未保存修改，请先处理草稿。
                           </p>
                         ) : null}
                         {configCenterView?.warnings?.length ? (
@@ -3515,13 +3516,8 @@ export function ControlCenterView({
     [configCenterDraft],
   );
   const configWarnings = useMemo(
-    () =>
-      buildWarnings(
-        configCenterDraft,
-        configCenterView?.envOverrides ?? [],
-        configCenterView?.warnings ?? [],
-      ),
-    [configCenterDraft, configCenterView?.envOverrides, configCenterView?.warnings],
+    () => buildWarnings(configCenterDraft, configCenterView?.warnings ?? []),
+    [configCenterDraft, configCenterView?.warnings],
   );
   function closeBridgeConnectorSecretsTask() {
     const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
@@ -3536,8 +3532,8 @@ export function ControlCenterView({
     if (isConfigCenterTask) {
       return (
         <ControlCenterTaskSurface
-          title="Kimi CLI 配置中心"
-          description="按结构编辑 `config.toml`，优先查看摘要，再进入具体配置块。"
+          title="Kimi Code 接入配置"
+          description="仅维护 Kimi API、Search/Fetch 服务和 App 启动时的子 Agent 并发上限。"
           className="cc-config-modal"
           bodyClassName="cc-config-modal-scroll"
           onBack={onCloseTask}
@@ -3562,7 +3558,7 @@ export function ControlCenterView({
                   onClick={onResetConfigCenterDraft}
                   disabled={configCenterBusy || !configCenterDirty}
                 >
-                  重置草稿
+                  重置
                 </Button>
                 <Button
                   type="button"
@@ -3571,7 +3567,7 @@ export function ControlCenterView({
                   onClick={() => void onSaveKimiCliConfigCenter()}
                   disabled={configCenterBusy || configBlockingErrors.length > 0}
                 >
-                  保存配置
+                  保存接入配置
                 </Button>
               </div>
               {configBlockingErrors.length > 0 ? (
@@ -3588,8 +3584,11 @@ export function ControlCenterView({
             dirty={configCenterDirty}
             view={configCenterView}
             draft={configCenterDraft}
+            testResult={configCenterTestResult}
+            testing={configCenterTesting}
             onDraftChange={onConfigCenterDraftChange}
             onOpenConfigDir={onOpenKimiConfigDir}
+            onTestConnection={onTestKimiCodeAccessConfig}
           />
         </ControlCenterTaskSurface>
       );

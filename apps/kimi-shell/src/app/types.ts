@@ -1026,6 +1026,81 @@ export interface KimiCliConfigCenterView extends KimiCliConfigCenterInput {
   warnings: string[];
 }
 
+export interface KimiCodeAccessConfigProviderView {
+  id: string;
+  type: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  apiKeyMasked?: string;
+}
+
+export interface KimiCodeAccessConfigModelView {
+  id: string;
+  provider: string;
+  model: string;
+  maxContextSize: number;
+  exists: boolean;
+}
+
+export interface KimiCodeAccessConfigServiceView {
+  key: string;
+  baseUrl?: string;
+  apiKeyConfigured: boolean;
+  apiKeyMasked?: string;
+  usesProviderApiKey: boolean;
+}
+
+export interface KimiCodeAccessConfigView {
+  kimiCodeHome: string;
+  configPath: string;
+  configExists: boolean;
+  provider: KimiCodeAccessConfigProviderView;
+  model: KimiCodeAccessConfigModelView;
+  services: {
+    search: KimiCodeAccessConfigServiceView;
+    fetch: KimiCodeAccessConfigServiceView;
+  };
+  runtimeLimits: {
+    agentSwarmMaxConcurrency?: number;
+  };
+  warnings: string[];
+}
+
+export type KimiCodeAccessServiceApiKeyMode =
+  | "reuse_provider"
+  | "custom"
+  | "keep_existing"
+  | "clear";
+
+export interface KimiCodeAccessConfigInput {
+  providerBaseUrl: string;
+  providerApiKey?: string;
+  clearProviderApiKey?: boolean;
+  searchBaseUrl: string;
+  searchApiKeyMode?: KimiCodeAccessServiceApiKeyMode;
+  searchApiKey?: string;
+  fetchBaseUrl: string;
+  fetchApiKeyMode?: KimiCodeAccessServiceApiKeyMode;
+  fetchApiKey?: string;
+  agentSwarmMaxConcurrency?: number;
+  clearAgentSwarmMaxConcurrency?: boolean;
+}
+
+export interface KimiCodeAccessEndpointTestResult {
+  url: string;
+  reachable: boolean;
+  statusCode?: number;
+  error?: string;
+}
+
+export interface KimiCodeAccessConfigTestResult {
+  provider: KimiCodeAccessEndpointTestResult;
+  search: KimiCodeAccessEndpointTestResult;
+  fetch: KimiCodeAccessEndpointTestResult;
+  apiKeyConfigured: boolean;
+  warnings: string[];
+}
+
 export type ConfigCenterSectionId =
   | "overview"
   | "providers"

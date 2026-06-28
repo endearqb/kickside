@@ -68,10 +68,10 @@ import type {
   InstallSource,
   InstallTaskId,
   InstalledSkill,
-  KimiCliApiConfigInput,
   KimiCliApiConfigView,
-  KimiCliConfigCenterInput,
-  KimiCliConfigCenterView,
+  KimiCodeAccessConfigInput,
+  KimiCodeAccessConfigTestResult,
+  KimiCodeAccessConfigView,
   KimiDoctorResult,
   MainWindowCloseBehavior,
   MainWindowCloseDecisionInput,
@@ -165,14 +165,11 @@ const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
-const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-for-coding";
-const KIMI_CODING_PLAN_MODEL_ID = "kimi-for-coding";
+const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-app-api-key";
+const KIMI_CODING_PLAN_MODEL_ID = "kimi-app/kimi-for-coding";
 const KIMI_CODING_PLAN_BASE_URL = "https://api.kimi.com/coding/v1";
 const KIMI_CODING_PLAN_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
 const KIMI_CODING_PLAN_FETCH_URL = "https://api.kimi.com/coding/v1/fetch";
-const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE = 262144;
-const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY = "moonshot_search";
-const KIMI_CODING_PLAN_FETCH_SERVICE_KEY = "moonshot_fetch";
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 const ENHANCED_WEB_READY_SOURCE = "kimi-app-enhanced-web-ready";
@@ -224,91 +221,79 @@ function getBridgePlatformConnectors(
   return settings.connectors.filter((connector) => connector.platform === platform);
 }
 
-function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
+function createEmptyConfigCenterInput(): KimiCodeAccessConfigInput {
   return {
-    providers: [],
-    models: [],
-    services: [],
-    defaultProvider: undefined,
-    model: undefined,
-    defaultModel: undefined,
-    defaultService: undefined,
-    defaultEditor: undefined,
-    defaultYolo: undefined,
-    defaultYoloMode: undefined,
-    defaultThinking: undefined,
-    defaultThinkingMode: undefined,
-    localModelDisableAutoPull: undefined,
-    loopControl: {
-      enabled: undefined,
-      maxSteps: undefined,
-      maxRetries: undefined,
-      timeoutMs: undefined,
-      extraFields: [],
-    },
-    mcpServers: [],
+    providerBaseUrl: KIMI_CODING_PLAN_BASE_URL,
+    providerApiKey: undefined,
+    clearProviderApiKey: false,
+    searchBaseUrl: KIMI_CODING_PLAN_SEARCH_URL,
+    searchApiKeyMode: "reuse_provider",
+    searchApiKey: undefined,
+    fetchBaseUrl: KIMI_CODING_PLAN_FETCH_URL,
+    fetchApiKeyMode: "reuse_provider",
+    fetchApiKey: undefined,
+    agentSwarmMaxConcurrency: undefined,
+    clearAgentSwarmMaxConcurrency: false,
   };
 }
 
-function toConfigCenterInput(view: KimiCliConfigCenterView): KimiCliConfigCenterInput {
+function serviceModeFromView(
+  configured: boolean,
+  usesProviderApiKey: boolean,
+): KimiCodeAccessConfigInput["searchApiKeyMode"] {
+  if (usesProviderApiKey) return "reuse_provider";
+  if (configured) return "keep_existing";
+  return "reuse_provider";
+}
+
+function toConfigCenterInput(view: KimiCodeAccessConfigView): KimiCodeAccessConfigInput {
   return {
-    providers: view.providers,
-    models: view.models,
-    services: view.services,
-    defaultProvider: view.defaultProvider,
-    model: view.model,
-    defaultModel: view.defaultModel,
-    defaultService: view.defaultService,
-    defaultEditor: view.defaultEditor,
-    defaultYolo: view.defaultYolo,
-    defaultYoloMode: view.defaultYoloMode,
-    defaultThinking: view.defaultThinking,
-    defaultThinkingMode: view.defaultThinkingMode,
-    localModelDisableAutoPull: view.localModelDisableAutoPull,
-    loopControl: view.loopControl,
-    mcpServers: view.mcpServers,
+    providerBaseUrl: view.provider.baseUrl ?? KIMI_CODING_PLAN_BASE_URL,
+    providerApiKey: undefined,
+    clearProviderApiKey: false,
+    searchBaseUrl: view.services.search.baseUrl ?? KIMI_CODING_PLAN_SEARCH_URL,
+    searchApiKeyMode: serviceModeFromView(
+      view.services.search.apiKeyConfigured,
+      view.services.search.usesProviderApiKey,
+    ),
+    searchApiKey: undefined,
+    fetchBaseUrl: view.services.fetch.baseUrl ?? KIMI_CODING_PLAN_FETCH_URL,
+    fetchApiKeyMode: serviceModeFromView(
+      view.services.fetch.apiKeyConfigured,
+      view.services.fetch.usesProviderApiKey,
+    ),
+    fetchApiKey: undefined,
+    agentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency,
+    clearAgentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency == null,
   };
 }
 
 function cloneConfigCenterInput(
-  input: KimiCliConfigCenterInput,
-): KimiCliConfigCenterInput {
-  return JSON.parse(JSON.stringify(input)) as KimiCliConfigCenterInput;
+  input: KimiCodeAccessConfigInput,
+): KimiCodeAccessConfigInput {
+  return JSON.parse(JSON.stringify(input)) as KimiCodeAccessConfigInput;
 }
 
 function deriveKimiCliApiConfigView(
-  view: KimiCliConfigCenterView | null,
+  view: KimiCodeAccessConfigView | null,
 ): KimiCliApiConfigView | null {
   if (!view) {
     return null;
   }
 
-  const provider = view.providers.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_PROVIDER_ID,
-  );
-  const model = view.models.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_MODEL_ID,
-  );
-  const searchService = view.services.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
-  );
-  const fetchService = view.services.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_FETCH_SERVICE_KEY,
-  );
-  const hasApiKey = Boolean(
-    provider?.apiKey?.trim() || searchService?.apiKey?.trim() || fetchService?.apiKey?.trim(),
-  );
+  const hasApiKey =
+    view.provider.apiKeyConfigured ||
+    view.services.search.apiKeyConfigured ||
+    view.services.fetch.apiKeyConfigured;
   const templateConfigured =
-    provider?.providerType?.trim() === "kimi" &&
-    provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
+    view.provider.type === "kimi" &&
+    view.provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
     hasApiKey &&
-    model?.provider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
-    model.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
-    model.maxContextSize === KIMI_CODING_PLAN_MAX_CONTEXT_SIZE &&
-    searchService?.endpoint?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
-    Boolean(searchService.apiKey?.trim()) &&
-    fetchService?.endpoint?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
-    Boolean(fetchService.apiKey?.trim());
+    view.model.exists &&
+    view.services.search.baseUrl?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
+    view.services.search.apiKeyConfigured &&
+    view.services.fetch.baseUrl?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
+    view.services.fetch.apiKeyConfigured;
 
   return {
     configPath: view.configPath,
@@ -317,10 +302,7 @@ function deriveKimiCliApiConfigView(
     baseUrl: KIMI_CODING_PLAN_BASE_URL,
     hasApiKey,
     templateConfigured,
-    isDefault:
-      view.defaultProvider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
-      view.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
-      view.defaultModel?.trim() === KIMI_CODING_PLAN_MODEL_ID,
+    isDefault: false,
   };
 }
 
@@ -568,13 +550,16 @@ export function useShellController() {
   const [kimiPathInput, setKimiPathInput] = useState("");
   const [workDirInput, setWorkDirInput] = useState("");
   const [configCenterView, setConfigCenterView] =
-    useState<KimiCliConfigCenterView | null>(null);
-  const [configCenterDraft, setConfigCenterDraft] = useState<KimiCliConfigCenterInput>(
+    useState<KimiCodeAccessConfigView | null>(null);
+  const [configCenterDraft, setConfigCenterDraft] = useState<KimiCodeAccessConfigInput>(
     () => createEmptyConfigCenterInput(),
   );
   const [configCenterSnapshot, setConfigCenterSnapshot] =
-    useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
+    useState<KimiCodeAccessConfigInput>(() => createEmptyConfigCenterInput());
   const [configCenterBusy, setConfigCenterBusy] = useState(false);
+  const [configCenterTesting, setConfigCenterTesting] = useState(false);
+  const [configCenterTestResult, setConfigCenterTestResult] =
+    useState<KimiCodeAccessConfigTestResult | null>(null);
   const [kimiApiKeyInput, setKimiApiKeyInput] = useState("");
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
@@ -2339,11 +2324,12 @@ export function useShellController() {
 
   async function loadKimiCliConfigCenter() {
     try {
-      const data = await invoke<KimiCliConfigCenterView>("load_kimi_cli_config_center");
+      const data = await invoke<KimiCodeAccessConfigView>("load_kimi_code_access_config");
       setConfigCenterView(data);
       const nextInput = toConfigCenterInput(data);
       setConfigCenterDraft(nextInput);
       setConfigCenterSnapshot(cloneConfigCenterInput(nextInput));
+      setConfigCenterTestResult(null);
       setActionError(null);
       return data;
     } catch (error) {
@@ -3124,7 +3110,7 @@ export function useShellController() {
     }
   }
 
-  function handleConfigCenterDraftChange(next: KimiCliConfigCenterInput) {
+  function handleConfigCenterDraftChange(next: KimiCodeAccessConfigInput) {
     setConfigCenterDraft(next);
   }
 
@@ -3137,10 +3123,11 @@ export function useShellController() {
     setConfigCenterBusy(true);
     setActionError(null);
     try {
-      await invoke("save_kimi_cli_api_config", {
+      await invoke<KimiCodeAccessConfigView>("save_kimi_code_access_config", {
         input: {
-          apiKey: kimiApiKeyInput.trim() || undefined,
-        } satisfies KimiCliApiConfigInput,
+          ...createEmptyConfigCenterInput(),
+          providerApiKey: kimiApiKeyInput.trim() || undefined,
+        } satisfies KimiCodeAccessConfigInput,
       });
       await loadKimiCliConfigCenter();
       await refreshCoreState();
@@ -3191,12 +3178,15 @@ export function useShellController() {
     setConfigCenterBusy(true);
     setActionError(null);
     try {
-      await invoke("save_kimi_cli_config_center", {
+      const data = await invoke<KimiCodeAccessConfigView>("save_kimi_code_access_config", {
         input: configCenterDraft,
       });
-      await loadKimiCliConfigCenter();
+      setConfigCenterView(data);
+      const nextInput = toConfigCenterInput(data);
+      setConfigCenterDraft(nextInput);
+      setConfigCenterSnapshot(cloneConfigCenterInput(nextInput));
+      setConfigCenterTestResult(null);
       await refreshCoreState();
-      setControlCenterTask(null);
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -4529,6 +4519,37 @@ export function useShellController() {
     }
   }
 
+  async function handleTestKimiCodeAccessConfig() {
+    setConfigCenterTesting(true);
+    setActionError(null);
+    try {
+      const result = await invoke<KimiCodeAccessConfigTestResult>(
+        "test_kimi_code_access_config",
+        {
+          input: {
+            providerBaseUrl: configCenterDraft.providerBaseUrl,
+            providerApiKey: configCenterDraft.providerApiKey?.trim() || undefined,
+            searchBaseUrl: configCenterDraft.searchBaseUrl,
+            searchApiKey:
+              configCenterDraft.searchApiKeyMode === "custom"
+                ? configCenterDraft.searchApiKey?.trim() || undefined
+                : undefined,
+            fetchBaseUrl: configCenterDraft.fetchBaseUrl,
+            fetchApiKey:
+              configCenterDraft.fetchApiKeyMode === "custom"
+                ? configCenterDraft.fetchApiKey?.trim() || undefined
+                : undefined,
+          },
+        },
+      );
+      setConfigCenterTestResult(result);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setConfigCenterTesting(false);
+    }
+  }
+
   function handleToggleWorkspaceView() {
     handleSelectWorkspaceView(activeWorkspaceView === "code" ? "chat" : "code");
   }
@@ -4832,6 +4853,8 @@ export function useShellController() {
     configCenterDraft,
     configCenterBusy,
     configCenterDirty,
+    configCenterTesting,
+    configCenterTestResult,
     installProbe,
     installSource,
     installSettings,
@@ -4894,6 +4917,7 @@ export function useShellController() {
     handleConfigCenterDraftChange,
     handleResetConfigCenterDraft,
     handleSaveKimiCliConfigCenter,
+    handleTestKimiCodeAccessConfig,
     handlePickKimiPath,
     handleSavePathAndRetry,
     handlePickWorkDir,

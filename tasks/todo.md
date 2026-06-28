@@ -359,3 +359,22 @@
 ### Review
 - Phase 0 后端地基已完成；旧全量读取暂保留给 auth/status 兼容，旧全量保存已被拒绝。
 - 验证结果：`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 通过；执行 `cargo test ... config -- --nocapture` 仍受本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 限制。
+
+## SPEC-08 Phase 1：Kimi Code 接入配置面板
+
+### Checklist
+- [x] 新增“Kimi Code 接入配置”面板
+- [x] 新增 API Base URL / API Key 表单
+- [x] 新增 Search / Fetch service 表单
+- [x] 新增子 Agent 并发上限表单
+- [x] 移除 providers/models/services/defaults/loop/MCP 全量编辑区
+- [x] 保留官方配置状态只读诊断
+- [x] 更新控制中心文案
+- [x] 运行 `tsc --noEmit`、前端测试、前端 build 和 `cargo check`
+
+### Review
+- 控制中心已不再暴露全量 Kimi Code `config.toml` 编辑器；当前只允许编辑 SPEC-08 白名单字段，并通过新 Tauri command 保存。
+- 快速 Kimi API 设置入口已复用新的 `save_kimi_code_access_config`，不再调用旧 `save_kimi_cli_api_config` 写入旧路径。
+- 连接测试按钮已接入 `test_kimi_code_access_config`，UI 不展示明文 API key，仅显示配置状态和脱敏结果。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit` 通过；`pnpm --dir apps/kimi-shell test -- --run` 通过（4 files / 36 tests）；`pnpm --dir apps/kimi-shell build` 通过；`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+- 未完成项：旧 provider 的显式迁移按钮尚未实现，留待后续小步补齐。

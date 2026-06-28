@@ -5,6 +5,9 @@ import { GRID_PRESETS } from "./gridPresets";
 import {
   WORKSPACE_GRID_MAX_PANES,
   type AddWorkspacePaneInput,
+  loadWorkspaceGridSavedLayouts,
+  saveWorkspaceGridSavedLayouts,
+  upsertWorkspaceGridSavedLayout,
   useWorkspaceGridStore,
 } from "./gridStore";
 import type {
@@ -41,8 +44,13 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     (state) => state.setPaneMountPolicy,
   );
   const configurePane = useWorkspaceGridStore((state) => state.configurePane);
+  const restoreGridState = useWorkspaceGridStore((state) => state.restoreGridState);
   const [gridMessage, setGridMessage] = useState("");
   const [sessionBusySlot, setSessionBusySlot] = useState<string | null>(null);
+  const [savedLayouts, setSavedLayouts] = useState(() =>
+    loadWorkspaceGridSavedLayouts(),
+  );
+  const [selectedLayoutId, setSelectedLayoutId] = useState("");
 
   const template = GRID_PRESETS[preset];
   const canAddPane = panes.length < WORKSPACE_GRID_MAX_PANES;
@@ -154,6 +162,37 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     event.preventDefault();
   }
 
+  function handleSaveLayout() {
+    const name = window.prompt("保存当前布局名称", GRID_PRESETS[preset].label);
+    const trimmedName = name?.trim();
+    if (!trimmedName) {
+      setGridMessage("已取消保存布局");
+      return;
+    }
+
+    const nextLayouts = upsertWorkspaceGridSavedLayout(
+      savedLayouts,
+      trimmedName,
+      useWorkspaceGridStore.getState(),
+    );
+    saveWorkspaceGridSavedLayouts(nextLayouts);
+    setSavedLayouts(nextLayouts);
+    setSelectedLayoutId(
+      nextLayouts.find((layout) => layout.name === trimmedName)?.id ?? "",
+    );
+    setGridMessage(`已保存布局：${trimmedName}`);
+  }
+
+  function handleRestoreLayout(layoutId: string) {
+    setSelectedLayoutId(layoutId);
+    const layout = savedLayouts.find((item) => item.id === layoutId);
+    if (!layout) {
+      return;
+    }
+    restoreGridState(layout.state);
+    setGridMessage(`已恢复布局：${layout.name}`);
+  }
+
   return (
     <section
       className="workspace-stage workspace-stage-grid-shell"
@@ -162,24 +201,46 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       onKeyDown={handleGridKeyDown}
     >
       <div className="workspace-grid-toolbar">
-        <div className="workspace-grid-preset-group" aria-label="工作区布局">
-          {PRESET_ORDER.map((presetId) => {
-            const presetItem = GRID_PRESETS[presetId];
-            return (
-              <button
-                type="button"
-                key={presetId}
-                className={`workspace-grid-preset-btn${
-                  preset === presetId && !maximizedPaneId ? " is-active" : ""
-                }`}
-                title={presetItem.label}
-                aria-label={presetItem.label}
-                onClick={() => setPreset(presetId)}
-              >
-                {presetItem.slots.length}
-              </button>
-            );
-          })}
+        <div className="workspace-grid-toolbar-controls">
+          <div className="workspace-grid-preset-group" aria-label="工作区布局">
+            {PRESET_ORDER.map((presetId) => {
+              const presetItem = GRID_PRESETS[presetId];
+              return (
+                <button
+                  type="button"
+                  key={presetId}
+                  className={`workspace-grid-preset-btn${
+                    preset === presetId && !maximizedPaneId ? " is-active" : ""
+                  }`}
+                  title={presetItem.label}
+                  aria-label={presetItem.label}
+                  onClick={() => setPreset(presetId)}
+                >
+                  {presetItem.slots.length}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="workspace-grid-save-btn"
+            onClick={handleSaveLayout}
+          >
+            保存布局
+          </button>
+          <select
+            className="workspace-grid-saved-select"
+            aria-label="保存的工作区布局"
+            value={selectedLayoutId}
+            onChange={(event) => handleRestoreLayout(event.currentTarget.value)}
+          >
+            <option value="">选择布局</option>
+            {savedLayouts.map((layout) => (
+              <option key={layout.id} value={layout.id}>
+                {layout.name}
+              </option>
+            ))}
+          </select>
         </div>
         <span className="workspace-grid-status">
           {gridMessage ||

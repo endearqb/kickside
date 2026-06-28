@@ -11,7 +11,10 @@ import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
   WORKSPACE_GRID_MAX_PANES,
   createWorkspaceGridStore,
+  loadWorkspaceGridSavedLayouts,
+  saveWorkspaceGridSavedLayouts,
   toPersistedWorkspaceGridState,
+  upsertWorkspaceGridSavedLayout,
 } from "./gridStore";
 import { normalizeEmbeddableUrl } from "./urlSafety";
 
@@ -19,6 +22,17 @@ function storage(values: Record<string, string>) {
   return {
     getItem(key: string) {
       return values[key] ?? null;
+    },
+  };
+}
+
+function writableStorage(values: Record<string, string> = {}) {
+  return {
+    getItem(key: string) {
+      return values[key] ?? null;
+    },
+    setItem(key: string, value: string) {
+      values[key] = value;
     },
   };
 }
@@ -141,6 +155,35 @@ describe("workspace grid store", () => {
     const pane = store.getState().panes.find((item) => item.id === "pane-chat");
     expect(pane?.kind).toBe("external");
     expect(pane?.url).toBeUndefined();
+  });
+
+  it("saves and restores named layouts without URL fragments", () => {
+    const storage = writableStorage();
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("1x3");
+    store.getState().addPane({
+      kind: "external",
+      title: "Docs",
+      url: "https://example.com/docs#token=secret",
+    });
+    const layouts = upsertWorkspaceGridSavedLayout(
+      [],
+      "Docs layout",
+      store.getState(),
+      200,
+    );
+    saveWorkspaceGridSavedLayouts(layouts, storage);
+
+    const saved = loadWorkspaceGridSavedLayouts(storage);
+    const savedPanes = saved[0]?.state.panes ?? [];
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.state.maximizedPaneId).toBeNull();
+    expect(savedPanes[savedPanes.length - 1]?.url).toBe("https://example.com/docs");
+
+    store.getState().setPreset("single");
+    store.getState().restoreGridState(saved[0]!.state);
+    expect(store.getState().preset).toBe("1x3");
   });
 });
 

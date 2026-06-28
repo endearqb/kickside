@@ -9,12 +9,15 @@ import { normalizeEmbeddableUrl } from "./urlSafety";
 import type {
   WorkspaceGridPersistedState,
   WorkspaceGridPresetId,
+  WorkspaceGridSavedLayout,
   WorkspaceGridStateV1,
   WorkspacePane,
   WorkspacePaneKind,
 } from "./gridTypes";
 
 export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v1";
+export const WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY =
+  "kimi-workspace-grid-saved-layouts-v1";
 export const WORKSPACE_GRID_MAX_PANES = 6;
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
@@ -32,6 +35,7 @@ export interface WorkspaceGridActions {
   ) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
+  restoreGridState: (state: WorkspaceGridPersistedState) => void;
 }
 
 export type WorkspaceGridStore = WorkspaceGridStateV1 & WorkspaceGridActions;
@@ -88,6 +92,76 @@ export function saveWorkspaceGridState(
     WORKSPACE_GRID_STATE_STORAGE_KEY,
     JSON.stringify(toPersistedWorkspaceGridState(state)),
   );
+}
+
+export function loadWorkspaceGridSavedLayouts(
+  storage = getBrowserStorage(),
+): WorkspaceGridSavedLayout[] {
+  if (!storage) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(
+      storage.getItem(WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY) ?? "[]",
+    ) as Partial<WorkspaceGridSavedLayout>[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((layout) => sanitizeSavedLayout(layout))
+      .filter((layout): layout is WorkspaceGridSavedLayout => Boolean(layout));
+  } catch {
+    return [];
+  }
+}
+
+export function saveWorkspaceGridSavedLayouts(
+  layouts: readonly WorkspaceGridSavedLayout[],
+  storage = getBrowserStorage(),
+): void {
+  if (!storage) {
+    return;
+  }
+  storage.setItem(WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY, JSON.stringify(layouts));
+}
+
+export function upsertWorkspaceGridSavedLayout(
+  layouts: readonly WorkspaceGridSavedLayout[],
+  name: string,
+  state: WorkspaceGridStateV1,
+  now = Date.now(),
+): WorkspaceGridSavedLayout[] {
+  const trimmedName = name.trim();
+  const existing = layouts.find((layout) => layout.name === trimmedName);
+  const savedState = {
+    ...toPersistedWorkspaceGridState(state),
+    maximizedPaneId: null,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    return layouts.map((layout) =>
+      layout.id === existing.id
+        ? {
+            ...layout,
+            state: savedState,
+            updatedAt: now,
+          }
+        : layout,
+    );
+  }
+
+  return [
+    ...layouts,
+    {
+      id: createLayoutId(now),
+      name: trimmedName,
+      state: savedState,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
 }
 
 export function createWorkspaceGridStore(
@@ -268,6 +342,17 @@ function createWorkspaceGridSlice(
         updatedAt: Date.now(),
       }));
     },
+    restoreGridState(restoredState) {
+      const sanitized = sanitizeGridState(restoredState);
+      if (!sanitized) {
+        return;
+      }
+      update(set, storage, () => ({
+        ...sanitized,
+        maximizedPaneId: null,
+        updatedAt: Date.now(),
+      }));
+    },
   });
 }
 
@@ -286,33 +371,58 @@ function update(
 function parseWorkspaceGridState(raw: string): WorkspaceGridStateV1 | null {
   try {
     const parsed = JSON.parse(raw) as Partial<WorkspaceGridStateV1>;
-    if (
-      parsed.version !== 1 ||
-      !parsed.preset ||
-      !Array.isArray(parsed.panes) ||
-      !Array.isArray(parsed.slots)
-    ) {
-      return null;
-    }
-    return {
-      version: 1,
-      preset: parsed.preset,
-      panes: parsed.panes.map(sanitizePane),
-      slots: parsed.slots,
-      activePaneId: parsed.activePaneId ?? null,
-      maximizedPaneId: parsed.maximizedPaneId ?? null,
-      legacySplitRatio: parsed.legacySplitRatio,
-      updatedAt: parsed.updatedAt ?? Date.now(),
-    };
+    return sanitizeGridState(parsed);
   } catch {
     return null;
   }
+}
+
+function sanitizeGridState(
+  parsed: Partial<WorkspaceGridStateV1>,
+): WorkspaceGridStateV1 | null {
+  if (
+    parsed.version !== 1 ||
+    !parsed.preset ||
+    !Array.isArray(parsed.panes) ||
+    !Array.isArray(parsed.slots)
+  ) {
+    return null;
+  }
+  return {
+    version: 1,
+    preset: parsed.preset,
+    panes: parsed.panes.map(sanitizePane),
+    slots: parsed.slots,
+    activePaneId: parsed.activePaneId ?? null,
+    maximizedPaneId: parsed.maximizedPaneId ?? null,
+    legacySplitRatio: parsed.legacySplitRatio,
+    updatedAt: parsed.updatedAt ?? Date.now(),
+  };
 }
 
 function sanitizePane(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
     url: sanitizeUrl(pane.url),
+  };
+}
+
+function sanitizeSavedLayout(
+  layout: Partial<WorkspaceGridSavedLayout>,
+): WorkspaceGridSavedLayout | null {
+  if (!layout.id || !layout.name || !layout.state) {
+    return null;
+  }
+  const state = sanitizeGridState(layout.state);
+  if (!state) {
+    return null;
+  }
+  return {
+    id: layout.id,
+    name: layout.name,
+    state,
+    createdAt: layout.createdAt ?? Date.now(),
+    updatedAt: layout.updatedAt ?? Date.now(),
   };
 }
 
@@ -336,6 +446,14 @@ function createPaneId(kind: WorkspacePaneKind): string {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2);
   return `pane-${kind}-${random}`;
+}
+
+function createLayoutId(now: number): string {
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+  return `layout-${now}-${random}`;
 }
 
 function getBrowserStorage(): BrowserStorage | null {

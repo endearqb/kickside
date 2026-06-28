@@ -1,3 +1,16 @@
+# Workspace Grid named layouts
+
+## Checklist
+- [x] 复用现有 sanitized grid state 快照保存命名布局
+- [x] 工具栏支持保存当前布局并从下拉框恢复
+- [x] 恢复布局时清除 transient 最大化状态
+- [x] 单测覆盖 URL fragment 不入保存布局、恢复布局
+- [x] 组件测试覆盖保存后切换预设再恢复
+
+## Review
+- 本轮推进 WG-8 的“命名布局保存/恢复”；未引入 modal 或新状态库，先用原生 `prompt`/`select`。
+- 仍未实现 WG-7 子 Webview、per-pane localStorage namespace、逐缝拖拽 resize。
+
 # Workspace Grid v1 hardening
 
 ## Checklist

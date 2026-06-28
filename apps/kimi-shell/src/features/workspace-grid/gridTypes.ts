@@ -71,3 +71,11 @@ export interface WorkspaceGridStateV1 {
 }
 
 export type WorkspaceGridPersistedState = WorkspaceGridStateV1;
+
+export interface WorkspaceGridSavedLayout {
+  id: string;
+  name: string;
+  state: WorkspaceGridPersistedState;
+  createdAt: number;
+  updatedAt: number;
+}

@@ -43,6 +43,7 @@ const props: WorkspaceViewProps = {
 
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     useWorkspaceGridStore.setState(createDefaultWorkspaceGridState(100));
   });
 
@@ -81,5 +82,23 @@ describe("WorkspaceGridView", () => {
     expect(screen.getByText("窗格已挂起")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "恢复窗格" }));
     expect(useWorkspaceGridStore.getState().panes[0]?.mountPolicy).toBe("eager");
+  });
+
+  it("saves and restores a named layout", () => {
+    vi.spyOn(window, "prompt").mockReturnValue("双窗调试");
+    render(<WorkspaceGridView {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存布局" }));
+    const select = screen.getByRole("combobox", {
+      name: "保存的工作区布局",
+    }) as HTMLSelectElement;
+    const savedLayoutId = select.value;
+
+    fireEvent.click(screen.getByRole("button", { name: "三列" }));
+    expect(useWorkspaceGridStore.getState().preset).toBe("1x3");
+
+    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.change(select, { target: { value: savedLayoutId } });
+    expect(useWorkspaceGridStore.getState().preset).toBe("1x2");
   });
 });

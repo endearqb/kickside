@@ -2853,6 +2853,13 @@ input:focus {
   gap: 8px;
 }
 
+.workspace-grid-toolbar-controls {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .workspace-grid-preset-group {
   display: inline-flex;
   align-items: center;
@@ -2864,14 +2871,21 @@ input:focus {
 }
 
 .workspace-grid-preset-btn,
-.workspace-grid-icon-btn {
+.workspace-grid-icon-btn,
+.workspace-grid-save-btn,
+.workspace-grid-saved-select {
   appearance: none;
   border: 1px solid transparent;
   border-radius: 6px;
-  display: inline-grid;
-  place-items: center;
   color: var(--text-secondary);
   background: transparent;
+}
+
+.workspace-grid-preset-btn,
+.workspace-grid-icon-btn,
+.workspace-grid-save-btn {
+  display: inline-grid;
+  place-items: center;
   cursor: pointer;
 }
 
@@ -2885,11 +2899,26 @@ input:focus {
 
 .workspace-grid-preset-btn:hover,
 .workspace-grid-icon-btn:hover,
+.workspace-grid-save-btn:hover,
 .workspace-grid-preset-btn.is-active,
 .workspace-grid-icon-btn.is-active {
   color: var(--text-primary);
   border-color: color-mix(in srgb, var(--accent) 24%, var(--chrome-border));
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.workspace-grid-save-btn,
+.workspace-grid-saved-select {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workspace-grid-saved-select {
+  max-width: 132px;
+  border-color: var(--chrome-border);
+  background: var(--surface);
 }
 
 .workspace-grid-status {

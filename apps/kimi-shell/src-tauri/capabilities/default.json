@@ -8,6 +8,7 @@
       "windows": ["main", "prefill", "workspace-import-picker"],
       "permissions": [
         "core:default",
+        "core:webview:allow-create-webview-window",
         "dialog:allow-open"
       ]
     },

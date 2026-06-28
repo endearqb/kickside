@@ -6,6 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
+import { openExternalWebviewWindow } from "@/services/externalWebviewService";
 import { createGridSession } from "@/services/workspaceGridService";
 import {
   GRID_PRESETS,
@@ -234,6 +235,15 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     setGridMessage(`已恢复布局：${layout.name}`);
   }
 
+  async function handleOpenTauriWebviewUrl(url: string, title: string) {
+    try {
+      await openExternalWebviewWindow({ url, title });
+      setGridMessage("已在独立应用窗口打开");
+    } catch (error) {
+      setGridMessage(`应用窗口打开失败：${String(error)}`);
+    }
+  }
+
   function handleResizeStart(
     axis: ResizeAxis,
     index: number,
@@ -374,6 +384,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
                 onOpenExternalUrl={props.onOpenExternalUrl}
+                onOpenTauriWebviewUrl={(url, title) => {
+                  void handleOpenTauriWebviewUrl(url, title);
+                }}
                 onCodeFrameLoad={props.onCodeFrameLoad}
                 onCodeFrameError={props.onCodeFrameError}
                 onChatFrameLoad={props.onChatFrameLoad}

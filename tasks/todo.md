@@ -1,3 +1,15 @@
+# Workspace Grid external WebviewWindow fallback
+
+## Checklist
+- [x] 增加外部 URL WebviewWindow service，复用现有 `urlSafety`
+- [x] 外部页挂起/blocked fallback 增加“在应用窗口打开”
+- [x] 给 main capability 增加 `core:webview:allow-create-webview-window`
+- [x] 组件测试覆盖 iframe 超时后调用 WebviewWindow fallback
+
+## Review
+- 本轮推进 WG-7 的退路方案：被 iframe 阻止的外部页可在独立应用 WebviewWindow 承载。
+- 仍未实现嵌入式子 Webview 按 pane geometry 放置，也未解决 per-pane localStorage namespace。
+
 # Workspace Grid resizable custom tracks
 
 ## Checklist

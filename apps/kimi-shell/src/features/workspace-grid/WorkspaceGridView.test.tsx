@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { createRef } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
+import { openExternalWebviewWindow } from "@/services/externalWebviewService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
 import { WorkspaceGridView } from "./WorkspaceGridView";
+
+vi.mock("@/services/externalWebviewService", () => ({
+  openExternalWebviewWindow: vi.fn(async () => undefined),
+}));
 
 vi.mock("@/services/workspaceGridService", () => ({
   createGridSession: vi.fn(async () => ({
@@ -49,6 +54,7 @@ describe("WorkspaceGridView", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -133,6 +139,24 @@ describe("WorkspaceGridView", () => {
       0.5,
       1,
     ]);
+  });
+
+  it("opens blocked external panes in a Tauri webview window", () => {
+    vi.useFakeTimers();
+    vi.spyOn(window, "prompt").mockReturnValue("https://example.com/path#secret");
+    useWorkspaceGridStore.getState().setPreset("1x3");
+    render(<WorkspaceGridView {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
+    act(() => {
+      vi.advanceTimersByTime(8_000);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "在应用窗口打开" }));
+
+    expect(openExternalWebviewWindow).toHaveBeenCalledWith({
+      url: "https://example.com/path",
+      title: "example.com",
+    });
   });
 });
 

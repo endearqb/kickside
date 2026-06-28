@@ -36,6 +36,7 @@ interface PaneFrameProps {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenExternalUrl: (url: string) => void;
+  onOpenTauriWebviewUrl: (url: string, title: string) => void;
   onCodeFrameLoad: () => void;
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
@@ -66,6 +67,7 @@ export function PaneFrame({
   onRetry,
   onOpenLogs,
   onOpenExternalUrl,
+  onOpenTauriWebviewUrl,
   onCodeFrameLoad,
   onCodeFrameError,
   onChatFrameLoad,
@@ -199,6 +201,7 @@ export function PaneFrame({
         onRetry={onRetry}
         onOpenLogs={onOpenLogs}
         onOpenExternalUrl={onOpenExternalUrl}
+        onOpenTauriWebviewUrl={onOpenTauriWebviewUrl}
         active={active}
         onResumePane={onResumePane}
       />
@@ -238,6 +241,7 @@ interface PaneContentProps {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenExternalUrl: (url: string) => void;
+  onOpenTauriWebviewUrl: (url: string, title: string) => void;
   onResumePane: () => void;
 }
 
@@ -249,6 +253,7 @@ function PaneContent({
   onRetry,
   onOpenLogs,
   onOpenExternalUrl,
+  onOpenTauriWebviewUrl,
   onResumePane,
 }: PaneContentProps) {
   const [externalState, setExternalState] =
@@ -329,6 +334,17 @@ function PaneContent({
           >
             在浏览器打开
           </Button>
+          {pane.kind === "external" ? (
+            <Button
+              type="button"
+              variant="outline"
+              icon={<Globe2 size={14} />}
+              className="cc-action-btn cc-doc-btn"
+              onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
+            >
+              在应用窗口打开
+            </Button>
+          ) : null}
         </div>
       </div>
     );
@@ -366,7 +382,7 @@ function PaneContent({
           <div className="workspace-fallback">
             <h3>{source.title} 暂时无法在应用内显示</h3>
             <p>
-              当前页面没有完成窗内加载。可以重试当前视图，或直接在系统浏览器打开。
+              当前页面没有完成窗内加载。可以重试当前视图，或在应用窗口/系统浏览器打开。
             </p>
             <div className="workspace-fallback-actions">
               <Button
@@ -387,6 +403,17 @@ function PaneContent({
               >
                 在浏览器打开
               </Button>
+              {pane.kind === "external" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  icon={<Globe2 size={14} />}
+                  className="cc-action-btn cc-doc-btn"
+                  onClick={() => onOpenTauriWebviewUrl(sourceUrl, source.title)}
+                >
+                  在应用窗口打开
+                </Button>
+              ) : null}
               {pane.kind === "code" ? (
                 <Button
                   type="button"

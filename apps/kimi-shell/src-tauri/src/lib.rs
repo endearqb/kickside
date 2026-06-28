@@ -50,14 +50,15 @@ use types::{
     FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
     InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
     InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCliApiConfigInput,
-    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, KimiDoctorResult,
-    KimiLoginHealthSource, KimiLoginHealthState, LoginProbeResult, MainWindowCloseBehavior,
-    MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep, PowerShellPreflightSummary,
-    SessionSkillState, ShutdownProgressPayload, SkillApplyResult, SkillApplyScope, SkillDetail,
-    SkillDiscoverySnapshot, SkillProjectionRecord, SkillRecommendation,
-    StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
+    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+    KimiCodeAccessConfigInput, KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult,
+    KimiCodeAccessConfigView, KimiDoctorResult, KimiLoginHealthSource, KimiLoginHealthState,
+    LoginProbeResult, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
+    SkillApplyResult, SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
+    SkillRecommendation, StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
+    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
+    SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
     WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
     WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
     WorkspaceSkillTarget, WorkspaceWebSettingsInput, WorkspaceWebSettingsView,
@@ -1055,6 +1056,29 @@ fn save_kimi_cli_config_center(
 }
 
 #[tauri::command]
+fn load_kimi_code_access_config(app: AppHandle) -> Result<KimiCodeAccessConfigView, String> {
+    backend_manager::load_kimi_code_access_config(&app)
+}
+
+#[tauri::command]
+fn save_kimi_code_access_config(
+    app: AppHandle,
+    input: KimiCodeAccessConfigInput,
+) -> Result<KimiCodeAccessConfigView, String> {
+    let view = backend_manager::save_kimi_code_access_config(&app, input)?;
+    sync_provider_api_snapshot_after_config_change(&app)?;
+    Ok(view)
+}
+
+#[tauri::command]
+async fn test_kimi_code_access_config(
+    _app: AppHandle,
+    input: KimiCodeAccessConfigTestInput,
+) -> Result<KimiCodeAccessConfigTestResult, String> {
+    backend_manager::test_kimi_code_access_config(input).await
+}
+
+#[tauri::command]
 fn register_install_session_channel(
     state: State<install_manager::InstallManager>,
     channel: Channel<InstallSessionEvent>,
@@ -1779,6 +1803,9 @@ pub fn run() {
             set_kimi_login_as_default,
             load_kimi_cli_config_center,
             save_kimi_cli_config_center,
+            load_kimi_code_access_config,
+            save_kimi_code_access_config,
+            test_kimi_code_access_config,
             register_install_session_channel,
             get_install_flow_catalog,
             get_install_session_snapshot,

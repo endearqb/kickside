@@ -22,13 +22,18 @@ use crate::{
     settings_store, skill_center, token_resolver,
     types::{
         AppSettings, BackendState, EnvOverrideStatus, KeyValueEntry, KimiCliApiConfigInput,
-        KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView, LoopControlEntry,
-        McpServerEntry, ModelEntry, ProviderEntry, ServiceEntry, TypedFieldEntry, TypedFieldType,
-        WorkspaceWebMode,
+        KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
+        KimiCodeAccessConfigInput, KimiCodeAccessConfigModelView, KimiCodeAccessConfigProviderView,
+        KimiCodeAccessConfigServiceView, KimiCodeAccessConfigServicesView,
+        KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult, KimiCodeAccessConfigView,
+        KimiCodeAccessEndpointTestResult, KimiCodeAccessServiceApiKeyMode,
+        KimiCodeRuntimeLimitsView, LoopControlEntry, McpServerEntry, ModelEntry, ProviderEntry,
+        ServiceEntry, TypedFieldEntry, TypedFieldType, WorkspaceWebMode,
     },
     window_manager, workspace_session,
 };
 
+#[allow(dead_code)]
 mod config;
 mod lifecycle;
 mod system_open;
@@ -42,8 +47,9 @@ pub(crate) use config::{
     kimi_api_default_selected_in_view, KIMI_CODING_PLAN_MODEL_ID, KIMI_CODING_PLAN_PROVIDER_ID,
 };
 pub use config::{
-    load_kimi_cli_api_config, load_kimi_cli_config_center, save_kimi_cli_api_config,
-    save_kimi_cli_config_center, set_kimi_cli_api_as_default, set_kimi_login_as_default,
+    load_kimi_cli_api_config, load_kimi_cli_config_center, load_kimi_code_access_config,
+    save_kimi_cli_api_config, save_kimi_cli_config_center, save_kimi_code_access_config,
+    set_kimi_cli_api_as_default, set_kimi_login_as_default, test_kimi_code_access_config,
 };
 pub use lifecycle::{restart_backend, set_session_work_dir, start_backend, stop_backend};
 pub use system_open::{open_external_url, open_folder, open_kimi_config_dir, open_logs_folder};

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -412,6 +412,7 @@ pub struct AppSettings {
     pub preferred_install_source: InstallSource,
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
+    pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
 }
 
 impl Default for AppSettings {
@@ -437,8 +438,15 @@ impl Default for AppSettings {
             preferred_install_source: InstallSource::Official,
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),
+            kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KimiRuntimeLaunchSettings {
+    pub agent_swarm_max_concurrency: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1570,6 +1578,118 @@ pub struct KimiCliConfigCenterView {
     #[serde(default)]
     pub env_overrides: Vec<EnvOverrideStatus>,
     #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigProviderView {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub provider_type: String,
+    pub base_url: Option<String>,
+    pub api_key_configured: bool,
+    pub api_key_masked: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigModelView {
+    pub id: String,
+    pub provider: String,
+    pub model: String,
+    pub max_context_size: i64,
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigServiceView {
+    pub key: String,
+    pub base_url: Option<String>,
+    pub api_key_configured: bool,
+    pub api_key_masked: Option<String>,
+    pub uses_provider_api_key: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigServicesView {
+    pub search: KimiCodeAccessConfigServiceView,
+    pub fetch: KimiCodeAccessConfigServiceView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeRuntimeLimitsView {
+    pub agent_swarm_max_concurrency: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigView {
+    pub kimi_code_home: String,
+    pub config_path: String,
+    pub config_exists: bool,
+    pub provider: KimiCodeAccessConfigProviderView,
+    pub model: KimiCodeAccessConfigModelView,
+    pub services: KimiCodeAccessConfigServicesView,
+    pub runtime_limits: KimiCodeRuntimeLimitsView,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KimiCodeAccessServiceApiKeyMode {
+    ReuseProvider,
+    Custom,
+    KeepExisting,
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigInput {
+    pub provider_base_url: String,
+    pub provider_api_key: Option<String>,
+    pub clear_provider_api_key: Option<bool>,
+    pub search_base_url: String,
+    pub search_api_key_mode: Option<KimiCodeAccessServiceApiKeyMode>,
+    pub search_api_key: Option<String>,
+    pub fetch_base_url: String,
+    pub fetch_api_key_mode: Option<KimiCodeAccessServiceApiKeyMode>,
+    pub fetch_api_key: Option<String>,
+    pub agent_swarm_max_concurrency: Option<u32>,
+    pub clear_agent_swarm_max_concurrency: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigTestInput {
+    pub provider_base_url: String,
+    pub provider_api_key: Option<String>,
+    pub search_base_url: String,
+    pub search_api_key: Option<String>,
+    pub fetch_base_url: String,
+    pub fetch_api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessEndpointTestResult {
+    pub url: String,
+    pub reachable: bool,
+    pub status_code: Option<u16>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KimiCodeAccessConfigTestResult {
+    pub provider: KimiCodeAccessEndpointTestResult,
+    pub search: KimiCodeAccessEndpointTestResult,
+    pub fetch: KimiCodeAccessEndpointTestResult,
+    pub api_key_configured: bool,
     pub warnings: Vec<String>,
 }
 

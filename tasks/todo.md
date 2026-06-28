@@ -343,3 +343,19 @@
 - Git 提交：已创建 `261a3e6 release: ship v0.0.43`，并已推送到 `origin/main`。
 - 标签：`v0.0.43` 已创建并推送到 GitHub。
 - Releases：已创建 `Kimi Desktop Shell v0.0.43`，地址为 `https://github.com/endearqb/kimi-app/releases/tag/v0.0.43`；已上传 `0.0.43` 的 NSIS 与 MSI 安装包，且已设置为 latest。
+
+## SPEC-08 Phase 0：Kimi Code 接入后端收敛
+
+### Checklist
+- [x] 复用 `KIMI_CODE_HOME` 解析，默认配置路径切到 `~/.kimi-code/config.toml`
+- [x] 新增 Kimi Code 接入配置读取、保存和连接测试命令
+- [x] 保存时只 patch `kimi-app-api-key` provider、`kimi-app/kimi-for-coding` model、`moonshot_search` / `moonshot_fetch` 的白名单字段
+- [x] 保存前创建并轮转 `config.toml.kimi-app-backup-*`
+- [x] API key 只返回掩码状态，不在新命令中返回明文
+- [x] 禁用旧全量 `save_kimi_cli_config_center`
+- [x] 子 Agent 并发上限进入 App settings，并在启动 Kimi Code 时注入 `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`
+- [x] 运行 Rust fmt/check/test-no-run 并记录 Windows test binary 执行限制
+
+### Review
+- Phase 0 后端地基已完成；旧全量读取暂保留给 auth/status 兼容，旧全量保存已被拒绝。
+- 验证结果：`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 通过；执行 `cargo test ... config -- --nocapture` 仍受本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 限制。

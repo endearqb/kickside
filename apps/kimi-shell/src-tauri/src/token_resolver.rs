@@ -38,7 +38,7 @@ pub fn resolve_server_token_with_retry() -> anyhow::Result<ServerToken> {
 }
 
 pub fn server_token_path() -> anyhow::Result<PathBuf> {
-    Ok(resolve_kimi_code_home(|name| env::var_os(name))?.join(SERVER_TOKEN_FILE_NAME))
+    Ok(resolve_kimi_code_home()?.join(SERVER_TOKEN_FILE_NAME))
 }
 
 pub fn read_server_token_at(path: &Path) -> anyhow::Result<ServerToken> {
@@ -59,7 +59,13 @@ fn read_server_token(path: &Path) -> anyhow::Result<ServerToken> {
     read_server_token_at(path)
 }
 
-fn resolve_kimi_code_home(get_env: impl Fn(&str) -> Option<OsString>) -> anyhow::Result<PathBuf> {
+pub fn resolve_kimi_code_home() -> anyhow::Result<PathBuf> {
+    resolve_kimi_code_home_with(|name| env::var_os(name))
+}
+
+fn resolve_kimi_code_home_with(
+    get_env: impl Fn(&str) -> Option<OsString>,
+) -> anyhow::Result<PathBuf> {
     if let Some(path) = get_env(KIMI_CODE_HOME_ENV).map(PathBuf::from) {
         return Ok(path);
     }
@@ -112,7 +118,7 @@ mod tests {
 
     #[test]
     fn resolve_home_prefers_kimi_code_home() {
-        let home = resolve_kimi_code_home(|name| {
+        let home = resolve_kimi_code_home_with(|name| {
             if name == KIMI_CODE_HOME_ENV {
                 Some(OsString::from("D:/kimi-code-home"))
             } else {
@@ -126,7 +132,7 @@ mod tests {
 
     #[test]
     fn resolve_home_defaults_to_user_profile_kimi_code() {
-        let home = resolve_kimi_code_home(|name| {
+        let home = resolve_kimi_code_home_with(|name| {
             if name == "USERPROFILE" {
                 Some(OsString::from("C:/Users/example"))
             } else {

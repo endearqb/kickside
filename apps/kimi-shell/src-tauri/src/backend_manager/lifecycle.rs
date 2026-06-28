@@ -223,6 +223,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     let command_args = build_kimi_server_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
     let kimi_shell_path = kimi_locator::locate_shell_path();
+    let agent_swarm_max_concurrency = settings.kimi_runtime_launch.agent_swarm_max_concurrency;
 
     let command_description = format!(
         "launch command: {} (cwd: {})",
@@ -233,6 +234,12 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     if let Some(shell_path) = &kimi_shell_path {
         log_manager::append_line(app, format!("KIMI_SHELL_PATH={}", shell_path.display()));
     }
+    if let Some(value) = agent_swarm_max_concurrency {
+        log_manager::append_line(
+            app,
+            format!("KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY={value}"),
+        );
+    }
 
     let child = spawn_backend_process(
         &kimi_path,
@@ -240,6 +247,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         &command_args,
         &log_path,
         kimi_shell_path.as_ref(),
+        agent_swarm_max_concurrency,
     )
     .with_context(|| format!("failed to spawn kimi process from {}", kimi_path.display()))?;
 
@@ -421,6 +429,7 @@ fn spawn_backend_process(
     args: &[String],
     log_path: &PathBuf,
     kimi_shell_path: Option<&PathBuf>,
+    agent_swarm_max_concurrency: Option<u32>,
 ) -> anyhow::Result<Child> {
     let stdout_file = OpenOptions::new()
         .create(true)
@@ -444,6 +453,9 @@ fn spawn_backend_process(
 
     if let Some(shell_path) = kimi_shell_path {
         command.env("KIMI_SHELL_PATH", shell_path);
+    }
+    if let Some(value) = agent_swarm_max_concurrency {
+        command.env("KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY", value.to_string());
     }
 
     command.current_dir(work_dir);

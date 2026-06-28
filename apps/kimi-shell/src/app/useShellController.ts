@@ -502,7 +502,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "这是可选配置；保存并启用 IM Bridge 后，才能从这里直接启动 bridge。",
+      message: "这是可选配置；保存并启用外部 IM 通道后，才能从这里直接启动 bridge。",
     };
   }
 
@@ -510,7 +510,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "存在未保存的 IM Bridge 配置，请先点击“保存并启用”再启动 bridge。",
+      message: "存在未保存的外部 IM 通道配置，请先点击“保存并启用”再启动 bridge。",
     };
   }
 
@@ -3411,7 +3411,7 @@ export function useShellController() {
   async function saveBridgeOnboardingInternal() {
     if (!bridgeOnboardingValidation.canSave) {
       throw new Error(
-        bridgeOnboardingValidation.message ?? "当前 IM Bridge 配置不完整，无法保存。",
+        bridgeOnboardingValidation.message ?? "当前外部 IM 通道配置不完整，无法保存。",
       );
     }
 
@@ -3602,7 +3602,7 @@ export function useShellController() {
       }
 
       if (restartError || refreshError) {
-        setActionError("机器人已删除，但刷新运行状态失败，请查看日志后手动重启 IM Bridge。");
+        setActionError("机器人已删除，但刷新运行状态失败，请查看日志后手动重启外部 IM 通道。");
       }
       return saved;
     } catch (error) {

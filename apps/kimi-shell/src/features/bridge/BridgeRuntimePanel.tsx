@@ -61,7 +61,9 @@ function formatTs(value?: string) {
 }
 
 function formatPlatform(platform: BridgePlatform) {
-  return platform === "telegram" ? "Telegram" : "飞书";
+  if (platform === "telegram") return "Telegram";
+  if (platform === "weixin") return "微信";
+  return "飞书";
 }
 
 function formatConnectorState(state?: string) {
@@ -140,6 +142,47 @@ function renderSecretRows(secretsMask: BridgeConnectorSecretsMaskView | null) {
             </span>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (secretsMask.platform === "weixin" && secretsMask.weixin) {
+    return (
+      <div className="bridge-secret-list">
+        <div className="bridge-secret-row">
+          <div className="bridge-secret-copy">
+            <strong>微信 botToken</strong>
+            <small>
+              {secretsMask.weixin.botToken.configured
+                ? secretsMask.weixin.botToken.maskedValue ?? "***"
+                : "未配置"}
+            </small>
+          </div>
+          <span
+            className={`bridge-secret-chip ${
+              secretsMask.weixin.botToken.configured ? "configured" : "empty"
+            }`}
+          >
+            {secretsMask.weixin.botToken.configured ? "已配置" : "未配置"}
+          </span>
+        </div>
+        <div className="bridge-secret-row">
+          <div className="bridge-secret-copy">
+            <strong>微信账号元数据</strong>
+            <small>
+              baseUrl：{secretsMask.weixin.baseUrl ?? "未配置"} · accountId：
+              {secretsMask.weixin.accountId ?? "未配置"} · owner：
+              {secretsMask.weixin.ownerUserId ?? "未配置"}
+            </small>
+          </div>
+          <span
+            className={`bridge-secret-chip ${
+              secretsMask.weixin.botToken.configured ? "configured" : "empty"
+            }`}
+          >
+            {secretsMask.weixin.botToken.configured ? "已配置" : "未配置"}
+          </span>
+        </div>
       </div>
     );
   }

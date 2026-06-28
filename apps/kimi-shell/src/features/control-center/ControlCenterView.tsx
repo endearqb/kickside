@@ -382,7 +382,7 @@ const controlSections: Array<{
   },
   {
     id: "bridge_center",
-    label: "IM Bridge",
+    label: "外部 IM 通道",
     icon: <Play size={15} />,
   },
   {
@@ -427,13 +427,19 @@ function getBridgeDisplayName(settings: BridgeSettings): string {
   const feishuEnabled = settings.connectors.some(
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
+  const telegramEnabled = settings.connectors.some(
+    (connector) => connector.platform === "telegram" && connector.enabled,
+  );
   if (weixinEnabled) {
     return "微信";
   }
   if (feishuEnabled) {
     return "飞书";
   }
-  return "IM Bridge";
+  if (telegramEnabled) {
+    return "Telegram";
+  }
+  return "外部 IM 通道";
 }
 
 function formatOpenBridgeDisplayName(displayName: string): string {
@@ -1613,7 +1619,7 @@ export function ControlCenterView({
     setSelectedBridgeConnectorId(nextConnector.id);
   }
 
-  function handleCreateBridgeConnector(platform: Extract<BridgePlatform, "feishu" | "weixin">) {
+  function handleCreateBridgeConnector(platform: BridgePlatform) {
     setBridgeCreateMenuOpen(false);
     addBridgeConnector(platform);
   }
@@ -2060,7 +2066,7 @@ export function ControlCenterView({
   ].filter((item): item is string => Boolean(item));
   const pendingOverviewCount = overviewBriefs.length;
   const overviewPrimaryMessage =
-    overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、IM Bridge 和技能应用。";
+    overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、外部 IM 通道和 Skill 投影。";
 
   function renderOverviewSection() {
     return (
@@ -3005,7 +3011,7 @@ export function ControlCenterView({
       <div className="cc-bridge-shell">
         <section className="cc-card">
           <ControlCenterCardHeader
-            title="IM Bridge"
+            title="外部 IM 通道配置"
             titleControls={bridgeHeaderControls}
             statusLabel={bridgeStatusLabel}
             statusTone={bridgeRuntimeTone}
@@ -3028,6 +3034,16 @@ export function ControlCenterView({
                     role="menu"
                     aria-label="选择机器人平台"
                   >
+                    <button
+                      type="button"
+                      className="cc-bridge-create-menu-item"
+                      onClick={() => handleCreateBridgeConnector("telegram")}
+                      disabled={bridgeBusy}
+                      role="menuitem"
+                    >
+                      <strong>Telegram</strong>
+                      <small>配置 bot token 后接入 Telegram 私聊或群聊</small>
+                    </button>
                     <button
                       type="button"
                       className="cc-bridge-create-menu-item"
@@ -3136,11 +3152,11 @@ export function ControlCenterView({
                   </>
                 ) : (
                   <ControlCenterEmptyState
-                    className="bridge-workbench-empty"
-                    title="还没有机器人"
-                    description="使用右上角“新建机器人”开始添加微信或飞书机器人。"
-                    icon={<Sparkles size={18} />}
-                  />
+                  className="bridge-workbench-empty"
+                  title="还没有机器人"
+                  description="使用右上角“新建机器人”开始添加 Telegram、微信或飞书机器人。"
+                  icon={<Sparkles size={18} />}
+                />
                 )
               }
               detail={
@@ -3771,6 +3787,7 @@ export function ControlCenterView({
                     <label className="bridge-port-card">
                       <span>botToken</span>
                       <Input
+                        type="password"
                         value={bridgeConnectorSecretDraft.botToken}
                         onChange={(event) =>
                           setBridgeConnectorSecretDraft((current) => ({
@@ -3872,6 +3889,7 @@ export function ControlCenterView({
                       <label className="bridge-port-card">
                         <span>verificationToken</span>
                         <Input
+                          type="password"
                           value={bridgeConnectorSecretDraft.verificationToken}
                           onChange={(event) =>
                             setBridgeConnectorSecretDraft((current) => ({
@@ -4017,6 +4035,49 @@ export function ControlCenterView({
                           }`}
                         >
                           {selectedBridgeConnectorSecrets.feishu.appSecret.configured
+                          ? "已配置"
+                          : "未配置"}
+                      </span>
+                    </div>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>飞书 verificationToken</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.feishu.verificationToken.configured
+                              ? selectedBridgeConnectorSecrets.feishu.verificationToken.maskedValue ??
+                                "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.feishu.verificationToken.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.feishu.verificationToken.configured
+                            ? "已配置"
+                            : "未配置"}
+                        </span>
+                      </div>
+                      <div className="bridge-secret-row">
+                        <div className="bridge-secret-copy">
+                          <strong>飞书 encryptKey</strong>
+                          <small>
+                            {selectedBridgeConnectorSecrets.feishu.encryptKey.configured
+                              ? selectedBridgeConnectorSecrets.feishu.encryptKey.maskedValue ?? "***"
+                              : "未配置"}
+                          </small>
+                        </div>
+                        <span
+                          className={`bridge-secret-chip ${
+                            selectedBridgeConnectorSecrets.feishu.encryptKey.configured
+                              ? "configured"
+                              : "empty"
+                          }`}
+                        >
+                          {selectedBridgeConnectorSecrets.feishu.encryptKey.configured
                             ? "已配置"
                             : "未配置"}
                         </span>
@@ -4536,7 +4597,7 @@ export function ControlCenterView({
             <h3>删除机器人</h3>
             <p>
               {`确定删除机器人“${bridgeDeleteConfirm.connectorLabel}”吗？此操作会立即保存配置${
-                isBridgeRunning ? "并重启 IM Bridge" : ""
+                isBridgeRunning ? "并重启外部 IM 通道" : ""
               }。`}
             </p>
             <div className="main-close-decision-actions">

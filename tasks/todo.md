@@ -396,3 +396,22 @@
 - 前端按钮、chips、容器 tab 和标题栏入口已改为 Skill 投影语义，并隐藏未信任 Skill 的 workspace target 投影候选。
 - 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 均通过。
 - 未完成项：真实桌面点击投影到 `$KIMI_CODE_HOME/skills` 和 `.kimi-code/skills` 仍需人工验证。
+
+## SPEC-08 Phase 3：外部 IM 通道配置
+
+### Checklist
+- [x] Bridge 文案明确为“外部 IM 通道配置”
+- [x] 新建机器人菜单补齐 Telegram / Feishu / Weixin
+- [x] Telegram / Feishu / Weixin 配置 UI 与高级运行面板均保留
+- [x] Telegram bot token、Feishu appSecret / verificationToken / encryptKey、Weixin bot token 不明文展示为已保存值
+- [x] Feishu verificationToken / encryptKey 加入已保存凭据掩码状态
+- [x] Bridge controls 不写官方 `config.toml`，继续通过 runtime metadata/controls
+- [x] approval / binding / session / runtime diagnostics 保留
+- [x] 运行前端、Rust 与 Go bridge 验证
+
+### Review
+- Phase 3 已完成；`apps/kimi-im-bridge` sidecar 名称保持不变，控制中心用户入口改为“外部 IM 通道配置”。
+- 新建机器人入口现在覆盖 Telegram、微信、飞书；高级运行面板可正确显示 Weixin 平台与凭据掩码。
+- secrets 继续只展示 masked/configured 状态，未把完整 token/appSecret/encryptKey 暴露到 UI。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`go test ./...`（`apps/kimi-im-bridge`）均通过。
+- 未完成项：真实桌面三平台创建/保存/高级面板点击仍需人工验证。

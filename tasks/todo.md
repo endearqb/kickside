@@ -93,7 +93,7 @@
 - `WorkspaceView` 现在只作为兼容入口，实际渲染由 `features/workspace-grid/WorkspaceGridView.tsx` 与 `PaneFrame.tsx` 承担。
 - Grid v1 已覆盖 WG-2，并推进 WG-3/WG-4/WG-5/WG-6 的最小闭环；Tauri 子 Webview 和 v2 per-pane 隔离仍留在 WG-7/WG-8。
 - 验证结果：`pnpm --dir apps/kimi-shell test`、`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo fmt -- --check`、`cargo check`、`git diff --check` 通过。
-- 未覆盖项：本轮未启动真实 Tauri 桌面手工创建 3 个 Code session；该项仍需在运行中后端环境验证。
+- 补充验证：使用临时 `KIMI_CODE_HOME` 启动本机 `kimi server run --foreground`，通过 `/api/v1/workspaces` 和 3 次 `/api/v1/sessions` 创建验证，返回 3 个 distinct server session id。
 
 # Workspace Grid v1 foundation
 

@@ -10,6 +10,7 @@ cargo test --no-run
 
 ```powershell
 Set-Location apps/kimi-shell
+pnpm test
 .\node_modules\.bin\tsc.cmd --noEmit
 ```
 

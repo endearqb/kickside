@@ -15,6 +15,7 @@ import type {
 } from "./gridTypes";
 
 export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v1";
+export const WORKSPACE_GRID_MAX_PANES = 6;
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
 
@@ -26,6 +27,7 @@ export interface WorkspaceGridActions {
   maximizePane: (paneId: string | null) => void;
   setActivePane: (paneId: string | null) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
+  configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
 }
 
 export type WorkspaceGridStore = WorkspaceGridStateV1 & WorkspaceGridActions;
@@ -119,6 +121,9 @@ function createWorkspaceGridSlice(
     },
     addPane(input) {
       const state = get();
+      if (state.panes.length >= WORKSPACE_GRID_MAX_PANES) {
+        return null;
+      }
       const firstEmptySlot = state.slots.find((slot) => !slot.paneId);
       if (!firstEmptySlot) {
         return null;
@@ -221,6 +226,25 @@ function createWorkspaceGridSlice(
               }
             : pane,
         ),
+        updatedAt: Date.now(),
+      }));
+    },
+    configurePane(paneId, input) {
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                kind: input.kind,
+                title: input.title ?? defaultPaneTitle(input.kind),
+                sessionId: input.sessionId,
+                url: sanitizeUrl(input.url),
+                updatedAt: Date.now(),
+              }
+            : pane,
+        ),
+        activePaneId: paneId,
         updatedAt: Date.now(),
       }));
     },

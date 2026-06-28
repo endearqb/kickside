@@ -12,9 +12,9 @@ Kimi Desktop Shell 是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，�
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
-- 双 workspace 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持无刷新切换、左右分栏、换位与拖拽调宽
+- Workspace Grid 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持 1/2/3/4/5/6 窗预设、窗格切换、最大化与外部页降级
 - 后端守护与健康探测：拉起 `kimi server run --foreground --port <port>`，读取 `KIMI_CODE_HOME/server.token`，并用 `#token=` 接入 workspace
-- 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，内部状态只保留真实 server session id
+- 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
 - 控制中心：集中提供运行状态、重启后端、工作目录、安装引导与诊断入口
 - Chat 集成收口：跨站链接跳系统浏览器，Windows 安装版下载使用原生“另存为”
 - 右键菜单集成：支持目录空白处、文件、文件夹入口

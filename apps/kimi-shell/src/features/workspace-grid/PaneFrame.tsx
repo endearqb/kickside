@@ -1,0 +1,429 @@
+import { useEffect, useState, type RefObject } from "react";
+import {
+  Code2,
+  ExternalLink,
+  FileText,
+  Globe2,
+  Maximize2,
+  MessageCircle,
+  Minimize2,
+  Plus,
+  RefreshCcw,
+  Trash2,
+} from "lucide-react";
+import type { WorkspacePaneState } from "@/app/types";
+import { Button } from "@/components/ui/button";
+import { buildCodePaneUrl } from "./paneUrl";
+import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
+
+const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
+
+interface PaneFrameProps {
+  pane: WorkspacePane | null;
+  slotLabel: string;
+  active: boolean;
+  maximized: boolean;
+  canAddPane: boolean;
+  codeRemoteUrl: string | null;
+  codeFrameKey: string;
+  chatRemoteUrl: string;
+  workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
+  chatIframeRef: RefObject<HTMLIFrameElement | null>;
+  codePaneState: WorkspacePaneState;
+  chatPaneState: WorkspacePaneState;
+  actionBusy: boolean;
+  onRetry: () => void;
+  onOpenLogs: () => void;
+  onOpenExternalUrl: (url: string) => void;
+  onCodeFrameLoad: () => void;
+  onCodeFrameError: () => void;
+  onChatFrameLoad: () => void;
+  onChatFrameError: () => void;
+  onActivate: () => void;
+  onAddPane: (kind: WorkspacePaneKind) => void;
+  onConfigurePane: (kind: WorkspacePaneKind) => void;
+  onRemovePane: () => void;
+  onToggleMaximize: () => void;
+}
+
+export function PaneFrame({
+  pane,
+  slotLabel,
+  active,
+  maximized,
+  canAddPane,
+  codeRemoteUrl,
+  codeFrameKey,
+  chatRemoteUrl,
+  workspaceIframeRef,
+  chatIframeRef,
+  codePaneState,
+  chatPaneState,
+  actionBusy,
+  onRetry,
+  onOpenLogs,
+  onOpenExternalUrl,
+  onCodeFrameLoad,
+  onCodeFrameError,
+  onChatFrameLoad,
+  onChatFrameError,
+  onActivate,
+  onAddPane,
+  onConfigurePane,
+  onRemovePane,
+  onToggleMaximize,
+}: PaneFrameProps) {
+  if (!pane) {
+    return (
+      <div className="workspace-grid-pane workspace-grid-pane-empty">
+        <div className="workspace-grid-empty-copy">
+          <span>{slotLabel}</span>
+          <strong>空窗格</strong>
+        </div>
+        <div className="workspace-grid-empty-actions">
+          <button
+            type="button"
+            className="workspace-grid-empty-btn"
+            onClick={() => onAddPane("code")}
+            disabled={!canAddPane}
+          >
+            <Code2 size={14} aria-hidden />
+            Code
+          </button>
+          <button
+            type="button"
+            className="workspace-grid-empty-btn"
+            onClick={() => onAddPane("chat")}
+            disabled={!canAddPane}
+          >
+            <MessageCircle size={14} aria-hidden />
+            Chat
+          </button>
+          <button
+            type="button"
+            className="workspace-grid-empty-btn"
+            onClick={() => onAddPane("external")}
+            disabled={!canAddPane}
+          >
+            <Plus size={14} aria-hidden />
+            Kimi.com
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const source = resolvePaneSource({
+    pane,
+    codeRemoteUrl,
+    codeFrameKey,
+    chatRemoteUrl,
+    workspaceIframeRef,
+    chatIframeRef,
+    codePaneState,
+    chatPaneState,
+    onCodeFrameLoad,
+    onCodeFrameError,
+    onChatFrameLoad,
+    onChatFrameError,
+  });
+
+  return (
+    <article
+      className={`workspace-grid-pane${active ? " is-active" : ""}`}
+      onFocus={onActivate}
+      onPointerDown={onActivate}
+    >
+      <header className="workspace-grid-pane-header">
+        <div className="workspace-grid-pane-title">
+          {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
+          {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
+          {pane.kind === "external" ? <Globe2 size={14} aria-hidden /> : null}
+          <span>{pane.title}</span>
+        </div>
+        <div className="workspace-grid-pane-actions">
+          <IconButton
+            label="切换为 Code"
+            onClick={() => onConfigurePane("code")}
+            active={pane.kind === "code"}
+          >
+            <Code2 size={14} aria-hidden />
+          </IconButton>
+          <IconButton
+            label="切换为 Chat"
+            onClick={() => onConfigurePane("chat")}
+            active={pane.kind === "chat"}
+          >
+            <MessageCircle size={14} aria-hidden />
+          </IconButton>
+          <IconButton
+            label="切换为 Kimi.com"
+            onClick={() => onConfigurePane("external")}
+            active={pane.kind === "external"}
+          >
+            <Globe2 size={14} aria-hidden />
+          </IconButton>
+          <IconButton
+            label={maximized ? "还原窗格" : "最大化窗格"}
+            onClick={onToggleMaximize}
+          >
+            {maximized ? (
+              <Minimize2 size={14} aria-hidden />
+            ) : (
+              <Maximize2 size={14} aria-hidden />
+            )}
+          </IconButton>
+          <IconButton label="关闭窗格" onClick={onRemovePane}>
+            <Trash2 size={14} aria-hidden />
+          </IconButton>
+        </div>
+      </header>
+      <PaneContent
+        pane={pane}
+        source={source}
+        actionBusy={actionBusy}
+        onRetry={onRetry}
+        onOpenLogs={onOpenLogs}
+        onOpenExternalUrl={onOpenExternalUrl}
+      />
+    </article>
+  );
+}
+
+interface IconButtonProps {
+  label: string;
+  active?: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}
+
+function IconButton({ label, active = false, children, onClick }: IconButtonProps) {
+  return (
+    <button
+      type="button"
+      className={`workspace-grid-icon-btn${active ? " is-active" : ""}`}
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+interface PaneContentProps {
+  pane: WorkspacePane;
+  source: PaneSource;
+  actionBusy: boolean;
+  onRetry: () => void;
+  onOpenLogs: () => void;
+  onOpenExternalUrl: (url: string) => void;
+}
+
+function PaneContent({
+  pane,
+  source,
+  actionBusy,
+  onRetry,
+  onOpenLogs,
+  onOpenExternalUrl,
+}: PaneContentProps) {
+  const [externalState, setExternalState] =
+    useState<WorkspacePaneState>("loading");
+
+  useEffect(() => {
+    if (pane.kind !== "external" || !source.url) {
+      return;
+    }
+
+    setExternalState("loading");
+    const timer = window.setTimeout(() => {
+      setExternalState((current) => (current === "ready" ? current : "blocked"));
+    }, EXTERNAL_FRAME_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [pane.id, pane.kind, source.url]);
+
+  if (!source.url) {
+    return (
+      <div className="workspace-empty">
+        <div className="workspace-empty-copy">
+          <h3>窗格尚未准备完成</h3>
+          <p>当前窗格没有可用地址。优先重试后端；如果依然没有恢复，再打开日志目录继续排查。</p>
+        </div>
+        <div className="workspace-empty-actions">
+          <Button
+            type="button"
+            icon={<RefreshCcw size={14} />}
+            className="cc-action-btn"
+            onClick={onRetry}
+            disabled={actionBusy}
+          >
+            重试后端启动
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<FileText size={14} />}
+            className="cc-action-btn"
+            onClick={onOpenLogs}
+          >
+            打开日志目录
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const sourceUrl = source.url;
+  const loadState = pane.kind === "external" ? externalState : source.loadState;
+
+  return (
+    <div className="workspace-embed">
+      <iframe
+        key={source.frameKey}
+        ref={source.iframeRef}
+        src={source.url}
+        title={source.title}
+        className="workspace-iframe"
+        onLoad={() => {
+          if (pane.kind === "external") {
+            setExternalState("ready");
+            return;
+          }
+          source.onLoad();
+        }}
+        onError={source.onError}
+      />
+
+      {loadState === "loading" && (
+        <div className="workspace-overlay">
+          <div className="spinner" aria-hidden />
+          <p className="status-line">正在加载 {source.title}…</p>
+        </div>
+      )}
+
+      {loadState === "blocked" && (
+        <div className="workspace-overlay">
+          <div className="workspace-fallback">
+            <h3>{source.title} 暂时无法在应用内显示</h3>
+            <p>
+              当前页面没有完成窗内加载。可以重试当前视图，或直接在系统浏览器打开。
+            </p>
+            <div className="workspace-fallback-actions">
+              <Button
+                type="button"
+                icon={<RefreshCcw size={14} />}
+                className="cc-action-btn"
+                onClick={onRetry}
+                disabled={actionBusy}
+              >
+                重试加载
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                icon={<ExternalLink size={14} />}
+                className="cc-action-btn cc-doc-btn"
+                onClick={() => onOpenExternalUrl(sourceUrl)}
+              >
+                在浏览器打开
+              </Button>
+              {pane.kind === "code" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  icon={<FileText size={14} />}
+                  className="cc-action-btn"
+                  onClick={onOpenLogs}
+                >
+                  打开日志目录
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface PaneSourceInput {
+  pane: WorkspacePane;
+  codeRemoteUrl: string | null;
+  codeFrameKey: string;
+  chatRemoteUrl: string;
+  workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
+  chatIframeRef: RefObject<HTMLIFrameElement | null>;
+  codePaneState: WorkspacePaneState;
+  chatPaneState: WorkspacePaneState;
+  onCodeFrameLoad: () => void;
+  onCodeFrameError: () => void;
+  onChatFrameLoad: () => void;
+  onChatFrameError: () => void;
+}
+
+interface PaneSource {
+  url: string | null;
+  title: string;
+  frameKey: string;
+  iframeRef?: RefObject<HTMLIFrameElement | null>;
+  loadState: WorkspacePaneState;
+  onLoad: () => void;
+  onError: () => void;
+}
+
+function resolvePaneSource({
+  pane,
+  codeRemoteUrl,
+  codeFrameKey,
+  chatRemoteUrl,
+  workspaceIframeRef,
+  chatIframeRef,
+  codePaneState,
+  chatPaneState,
+  onCodeFrameLoad,
+  onCodeFrameError,
+  onChatFrameLoad,
+  onChatFrameError,
+}: PaneSourceInput): PaneSource {
+  if (pane.kind === "code") {
+    const sessionUrl =
+      pane.sessionId && codeRemoteUrl
+        ? buildCodePaneUrl(codeRemoteUrl, pane.sessionId)
+        : null;
+    return {
+      url: sessionUrl ?? codeRemoteUrl,
+      title: "Kimi Code Web",
+      frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
+      iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
+      loadState: codePaneState,
+      onLoad: onCodeFrameLoad,
+      onError: onCodeFrameError,
+    };
+  }
+
+  if (pane.kind === "chat") {
+    return {
+      url: chatRemoteUrl,
+      title: "Kimi Chat",
+      frameKey: `${pane.id}:${chatRemoteUrl}`,
+      iframeRef: pane.id === "pane-chat" ? chatIframeRef : undefined,
+      loadState: chatPaneState,
+      onLoad: onChatFrameLoad,
+      onError: onChatFrameError,
+    };
+  }
+
+  return {
+    url: pane.url ?? chatRemoteUrl,
+    title: pane.title,
+    frameKey: `${pane.id}:${pane.url ?? chatRemoteUrl}`,
+    loadState: "loading",
+    onLoad: () => undefined,
+    onError: () => undefined,
+  };
+}

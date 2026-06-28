@@ -518,6 +518,35 @@ pub fn get_workspace_session_for_bridge(
         }))
 }
 
+pub fn list_workspace_sessions_for_grid(
+    app: &AppHandle,
+) -> Result<Vec<WorkspaceSessionRecord>, String> {
+    if !runtime_api_ready(app).map_err(|error| error.to_string())? {
+        return Ok(Vec::new());
+    }
+
+    let sessions = fetch_sessions(app)?;
+    remember_workspace_paths(app, &sessions);
+    Ok(sessions
+        .into_iter()
+        .map(workspace_session_record_from_api)
+        .collect())
+}
+
+pub fn create_workspace_session_for_grid(
+    app: &AppHandle,
+    workspace_root: &Path,
+) -> Result<WorkspaceSessionRecord, String> {
+    let workspace_root = normalize_path(workspace_root);
+    if workspace_root.as_os_str().is_empty() {
+        return Err("workspace root is required".to_string());
+    }
+
+    let session = create_session_for_work_dir(app, &workspace_root)?;
+    remember_workspace_paths(app, std::slice::from_ref(&session));
+    Ok(workspace_session_record_from_api(session))
+}
+
 fn fetch_sessions(app: &AppHandle) -> Result<Vec<ApiSession>, String> {
     let client = require_runtime_api_client(app)?;
     fetch_sessions_with_client(&client)
@@ -867,6 +896,15 @@ fn session_snapshot_from_api(session: &ApiSession) -> SessionSnapshot {
     SessionSnapshot {
         session_id: session.session_id.clone(),
         work_dir: session.work_dir.clone(),
+    }
+}
+
+fn workspace_session_record_from_api(session: ApiSession) -> WorkspaceSessionRecord {
+    WorkspaceSessionRecord {
+        session_id: session.session_id,
+        work_dir: session.work_dir,
+        is_running: session.is_running,
+        last_updated: session.last_updated,
     }
 }
 

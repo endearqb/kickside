@@ -432,6 +432,7 @@ function App() {
             codeRemoteUrl={shell.remoteUrl}
             codeFrameKey={shell.workspaceFrameKey}
             chatRemoteUrl={shell.chatRemoteUrl}
+            effectiveWorkDir={shell.status?.effectiveWorkDir}
             workspaceIframeRef={shell.workspaceIframeRef}
             chatIframeRef={shell.chatIframeRef}
             codePaneState={shell.workspaceEmbedState}

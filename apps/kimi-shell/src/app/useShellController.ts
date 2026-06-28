@@ -117,6 +117,7 @@ import type {
   WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
+import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import {
   applySkill,
   addInstalledSkillToWorkspaceTarget,
@@ -716,6 +717,17 @@ export function useShellController() {
   );
   const [pendingWorkspaceEntryAfterOnboarding, setPendingWorkspaceEntryAfterOnboarding] =
     useState(false);
+  const workspaceGridPreset = useWorkspaceGridStore((state) => state.preset);
+  const workspaceGridPanes = useWorkspaceGridStore((state) => state.panes);
+  const workspaceGridSlots = useWorkspaceGridStore((state) => state.slots);
+  const workspaceGridActivePaneId = useWorkspaceGridStore(
+    (state) => state.activePaneId,
+  );
+  const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
+  const setWorkspaceGridActivePane = useWorkspaceGridStore(
+    (state) => state.setActivePane,
+  );
+  const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
   const loadingReportCycleRef = useRef<number | null>(null);
@@ -888,6 +900,42 @@ export function useShellController() {
       // Best-effort persistence.
     }
   }, [workspaceSplitRatio]);
+
+  useEffect(() => {
+    const nextLayoutMode = workspaceGridPreset === "single" ? "single" : "split";
+    setWorkspaceLayoutMode((current) =>
+      current === nextLayoutMode ? current : nextLayoutMode,
+    );
+  }, [workspaceGridPreset]);
+
+  useEffect(() => {
+    const activePane = workspaceGridPanes.find(
+      (pane) => pane.id === workspaceGridActivePaneId,
+    );
+    if (activePane?.kind === "code" || activePane?.kind === "chat") {
+      const nextView: WorkspaceViewKind = activePane.kind;
+      setActiveWorkspaceView((current) =>
+        current === nextView ? current : nextView,
+      );
+    }
+  }, [workspaceGridActivePaneId, workspaceGridPanes]);
+
+  useEffect(() => {
+    if (workspaceGridPreset !== "1x2") {
+      return;
+    }
+
+    const firstSlotPane = workspaceGridPanes.find(
+      (pane) => pane.id === workspaceGridSlots[0]?.paneId,
+    );
+    if (firstSlotPane?.kind === "code" || firstSlotPane?.kind === "chat") {
+      const nextOrder =
+        firstSlotPane.kind === "code" ? "code_left" : "chat_left";
+      setWorkspaceSplitOrder((current) =>
+        current === nextOrder ? current : nextOrder,
+      );
+    }
+  }, [workspaceGridPanes, workspaceGridPreset, workspaceGridSlots]);
 
   useEffect(() => {
     pendingPrefillRef.current = pendingPrefill;
@@ -4471,19 +4519,41 @@ export function useShellController() {
 
   function handleSelectWorkspaceView(view: WorkspaceViewKind) {
     setActiveWorkspaceView(view);
+    const pane = workspaceGridPanes.find((item) => item.kind === view);
+    if (!pane) {
+      return;
+    }
+    setWorkspaceGridActivePane(pane.id);
+    if (workspaceGridPreset === "single") {
+      moveWorkspaceGridPane(pane.id, "main");
+    }
   }
 
   function handleToggleWorkspaceView() {
-    setActiveWorkspaceView((current) => (current === "code" ? "chat" : "code"));
+    handleSelectWorkspaceView(activeWorkspaceView === "code" ? "chat" : "code");
   }
 
   function handleToggleWorkspaceSplit() {
+    const nextPreset = workspaceGridPreset === "single" ? "1x2" : "single";
+    setWorkspaceGridPreset(nextPreset);
     setWorkspaceLayoutMode((current) =>
       current === "single" ? "split" : "single",
     );
   }
 
   function handleSwapWorkspaceSplitOrder() {
+    const codePane = workspaceGridPanes.find((pane) => pane.kind === "code");
+    const chatPane = workspaceGridPanes.find((pane) => pane.kind === "chat");
+    if (codePane && chatPane) {
+      setWorkspaceGridPreset("1x2");
+      if (workspaceSplitOrder === "code_left") {
+        moveWorkspaceGridPane(chatPane.id, "left");
+        moveWorkspaceGridPane(codePane.id, "right");
+      } else {
+        moveWorkspaceGridPane(codePane.id, "left");
+        moveWorkspaceGridPane(chatPane.id, "right");
+      }
+    }
     setWorkspaceSplitOrder((current) =>
       current === "code_left" ? "chat_left" : "code_left",
     );

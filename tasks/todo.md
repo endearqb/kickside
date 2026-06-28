@@ -1,3 +1,20 @@
+# Workspace Grid renderer and session commands
+
+## Checklist
+- [x] 替换 `WorkspaceView` 内部写死双窗渲染，改为 `WorkspaceGridView` + `PaneFrame`
+- [x] 接入 1/2/3/4/5/6 预设、空 slot、窗格关闭、最大化和内容切换
+- [x] 外部页使用 timeout fallback + 浏览器打开，不依赖 iframe `onError`
+- [x] 将旧 titlebar 的单窗/双窗/换位按钮同步到 Grid store
+- [x] 新增 `grid_list_sessions` / `grid_create_session` Tauri command 与前端 service
+- [x] 空 Code slot 在存在工作目录时通过 server 创建真实 session，并用 `/sessions/{id}` URL 渲染
+- [x] 运行 Vitest、TypeScript、Vite build、Rust fmt/check 与 diff check
+
+## Review
+- `WorkspaceView` 现在只作为兼容入口，实际渲染由 `features/workspace-grid/WorkspaceGridView.tsx` 与 `PaneFrame.tsx` 承担。
+- Grid v1 已覆盖 WG-2，并推进 WG-3/WG-4/WG-5/WG-6 的最小闭环；Tauri 子 Webview 和 v2 per-pane 隔离仍留在 WG-7/WG-8。
+- 验证结果：`pnpm --dir apps/kimi-shell test`、`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell build`、`cargo fmt -- --check`、`cargo check`、`git diff --check` 通过。
+- 未覆盖项：本轮未启动真实 Tauri 桌面手工创建 3 个 Code session；该项仍需在运行中后端环境验证。
+
 # Workspace Grid v1 foundation
 
 ## Checklist

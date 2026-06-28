@@ -9,6 +9,7 @@ import { GRID_PRESETS } from "./gridPresets";
 import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
+  WORKSPACE_GRID_MAX_PANES,
   createWorkspaceGridStore,
   toPersistedWorkspaceGridState,
 } from "./gridStore";
@@ -103,6 +104,20 @@ describe("workspace grid store", () => {
 
     expect(createdPaneId).toEqual(expect.stringContaining("pane-external-"));
     expect(lastPane?.url).toBe("https://kimi.com/chat");
+  });
+
+  it("caps panes at the v1 resource limit", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("2x3");
+    for (let index = 0; index < WORKSPACE_GRID_MAX_PANES; index += 1) {
+      store.getState().addPane({ kind: "external", url: "https://kimi.com/" });
+    }
+
+    expect(store.getState().panes).toHaveLength(WORKSPACE_GRID_MAX_PANES);
+    expect(
+      store.getState().addPane({ kind: "external", url: "https://kimi.com/" }),
+    ).toBeNull();
   });
 });
 

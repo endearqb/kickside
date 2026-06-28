@@ -101,4 +101,45 @@ describe("WorkspaceGridView", () => {
     fireEvent.change(select, { target: { value: savedLayoutId } });
     expect(useWorkspaceGridStore.getState().preset).toBe("1x2");
   });
+
+  it("persists column resize from a drag handle", () => {
+    useWorkspaceGridStore.getState().setPreset("1x3");
+    render(<WorkspaceGridView {...props} />);
+    const canvas = document.querySelector(".workspace-grid-canvas") as HTMLDivElement;
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        width: 900,
+        height: 600,
+        top: 0,
+        right: 900,
+        bottom: 600,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent(
+      screen.getByRole("button", { name: "调整列 1" }),
+      pointerEvent("pointerdown", 300),
+    );
+    fireEvent(canvas, pointerEvent("pointermove", 450));
+    fireEvent(canvas, pointerEvent("pointerup", 450));
+
+    expect(useWorkspaceGridStore.getState().trackSizes?.columns).toEqual([
+      1.5,
+      0.5,
+      1,
+    ]);
+  });
 });
+
+function pointerEvent(type: string, clientX: number): Event {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperty(event, "clientX", { value: clientX });
+  Object.defineProperty(event, "clientY", { value: 0 });
+  Object.defineProperty(event, "pointerId", { value: 1 });
+  return event;
+}

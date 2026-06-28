@@ -1,6 +1,6 @@
 import { create, type StateCreator } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { materializeGridSlots } from "./gridPresets";
+import { materializeGridSlots, normalizeGridTrackSizes } from "./gridPresets";
 import {
   createDefaultWorkspaceGridState,
   migrateLegacyWorkspaceGridState,
@@ -11,6 +11,7 @@ import type {
   WorkspaceGridPresetId,
   WorkspaceGridSavedLayout,
   WorkspaceGridStateV1,
+  WorkspaceGridTrackSizes,
   WorkspacePane,
   WorkspacePaneKind,
 } from "./gridTypes";
@@ -35,6 +36,7 @@ export interface WorkspaceGridActions {
   ) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
+  setGridTrackSizes: (trackSizes: WorkspaceGridTrackSizes) => void;
   restoreGridState: (state: WorkspaceGridPersistedState) => void;
 }
 
@@ -77,6 +79,7 @@ export function toPersistedWorkspaceGridState(
     activePaneId: state.activePaneId,
     maximizedPaneId: state.maximizedPaneId,
     legacySplitRatio: state.legacySplitRatio,
+    trackSizes: normalizeGridTrackSizes(state.trackSizes, state.preset),
     updatedAt: state.updatedAt,
   };
 }
@@ -193,6 +196,7 @@ function createWorkspaceGridSlice(
           preset,
           slots: materializeGridSlots(preset, assignedPaneIds),
           maximizedPaneId: null,
+          trackSizes: undefined,
           updatedAt: Date.now(),
         };
       });
@@ -342,6 +346,13 @@ function createWorkspaceGridSlice(
         updatedAt: Date.now(),
       }));
     },
+    setGridTrackSizes(trackSizes) {
+      update(set, storage, (state) => ({
+        ...state,
+        trackSizes: normalizeGridTrackSizes(trackSizes, state.preset),
+        updatedAt: Date.now(),
+      }));
+    },
     restoreGridState(restoredState) {
       const sanitized = sanitizeGridState(restoredState);
       if (!sanitized) {
@@ -396,6 +407,7 @@ function sanitizeGridState(
     activePaneId: parsed.activePaneId ?? null,
     maximizedPaneId: parsed.maximizedPaneId ?? null,
     legacySplitRatio: parsed.legacySplitRatio,
+    trackSizes: normalizeGridTrackSizes(parsed.trackSizes, parsed.preset),
     updatedAt: parsed.updatedAt ?? Date.now(),
   };
 }

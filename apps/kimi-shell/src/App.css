@@ -2931,13 +2931,51 @@ input:focus {
 .workspace-grid-canvas {
   min-width: 0;
   min-height: 0;
+  position: relative;
   display: grid;
   gap: 8px;
+}
+
+.workspace-grid-canvas.is-resizing {
+  user-select: none;
 }
 
 .workspace-grid-slot {
   min-width: 0;
   min-height: 0;
+}
+
+.workspace-grid-resize-handle {
+  appearance: none;
+  position: absolute;
+  z-index: 4;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+  touch-action: none;
+}
+
+.workspace-grid-resize-handle.is-columns {
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+}
+
+.workspace-grid-resize-handle.is-rows {
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: row-resize;
+}
+
+.workspace-grid-canvas:hover .workspace-grid-resize-handle,
+.workspace-grid-resize-handle:focus-visible,
+.workspace-grid-resize-handle:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 38%, transparent);
 }
 
 .workspace-grid-pane {

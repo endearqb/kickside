@@ -5,7 +5,7 @@ import {
   WORKSPACE_SPLIT_ORDER_STORAGE_KEY,
   WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
 } from "@/app/theme";
-import { GRID_PRESETS } from "./gridPresets";
+import { GRID_PRESETS, resizeGridTrackSizes } from "./gridPresets";
 import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
@@ -184,6 +184,33 @@ describe("workspace grid store", () => {
     store.getState().setPreset("single");
     store.getState().restoreGridState(saved[0]!.state);
     expect(store.getState().preset).toBe("1x3");
+  });
+
+  it("persists custom track sizes and clears them when changing presets", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("1x3");
+    store.getState().setGridTrackSizes({ columns: [1.8, 0.8, 1] });
+
+    expect(toPersistedWorkspaceGridState(store.getState()).trackSizes?.columns).toEqual([
+      1.8,
+      0.8,
+      1,
+    ]);
+
+    store.getState().setPreset("2x2");
+    expect(store.getState().trackSizes).toBeUndefined();
+  });
+});
+
+describe("workspace grid track resizing", () => {
+  it("resizes adjacent tracks while preserving their combined size", () => {
+    expect(resizeGridTrackSizes([1, 1, 1], 0, 150, 900)).toEqual([
+      1.5,
+      0.5,
+      1,
+    ]);
+    expect(resizeGridTrackSizes([1, 1], 0, 900, 900)).toEqual([1.8, 0.2]);
   });
 });
 

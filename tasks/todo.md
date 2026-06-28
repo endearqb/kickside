@@ -1,3 +1,17 @@
+# Workspace Grid resizable custom tracks
+
+## Checklist
+- [x] 增加 `trackSizes` 持久化字段，保存自定义列/行比例
+- [x] Grid canvas 增加列/行 seam 拖拽 handle
+- [x] preset 切换时清除不匹配的 custom tracks
+- [x] 命名布局保存/恢复自动携带 sanitized track sizes
+- [x] 单测覆盖 track resize clamp、持久化与 preset 清理
+- [x] 组件测试覆盖拖拽 handle 后写入 store
+
+## Review
+- 本轮推进 WG-8 的“逐缝拖拽 resize + 持久化 custom template”；custom template 先实现为当前 preset 的列/行 `fr` track sizes。
+- 仍未实现 WG-7 子 Webview、per-pane localStorage namespace。
+
 # Workspace Grid named layouts
 
 ## Checklist

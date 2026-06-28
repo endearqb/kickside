@@ -2,7 +2,10 @@ import type {
   WorkspaceGridPresetId,
   WorkspaceGridSlot,
   WorkspaceGridTemplate,
+  WorkspaceGridTrackSizes,
 } from "./gridTypes";
+
+const MIN_TRACK_FR = 0.2;
 
 function slot(id: string): { id: string; area: string } {
   return { id, area: id };
@@ -85,4 +88,79 @@ export function materializeGridSlots(
     ...presetSlot,
     paneId: paneIds[index],
   }));
+}
+
+export function getGridTrackCounts(
+  presetId: WorkspaceGridPresetId,
+): { columns: number; rows: number } {
+  const rows = GRID_PRESETS[presetId].areas?.match(/"([^"]+)"/g) ?? [];
+  if (rows.length === 0) {
+    return { columns: 1, rows: 1 };
+  }
+  const columns = rows[0]?.replace(/"/g, "").trim().split(/\s+/).length ?? 1;
+  return { columns, rows: rows.length };
+}
+
+export function normalizeGridTrackSizes(
+  sizes: WorkspaceGridTrackSizes | undefined,
+  presetId: WorkspaceGridPresetId,
+): WorkspaceGridTrackSizes | undefined {
+  const counts = getGridTrackCounts(presetId);
+  const columns = normalizeTrackSizes(sizes?.columns, counts.columns);
+  const rows = normalizeTrackSizes(sizes?.rows, counts.rows);
+  if (!columns && !rows) {
+    return undefined;
+  }
+  return { columns, rows };
+}
+
+export function createEqualTrackSizes(count: number): number[] {
+  return Array.from({ length: count }, () => 1);
+}
+
+export function gridTrackSizesToCss(
+  sizes: readonly number[] | undefined,
+  count: number,
+): string | null {
+  const normalized = normalizeTrackSizes(sizes, count);
+  if (!normalized) {
+    return null;
+  }
+  return normalized.map((size) => `minmax(0, ${size}fr)`).join(" ");
+}
+
+export function resizeGridTrackSizes(
+  sizes: readonly number[],
+  index: number,
+  deltaPx: number,
+  totalPx: number,
+): number[] {
+  if (index < 0 || index >= sizes.length - 1 || totalPx <= 0) {
+    return [...sizes];
+  }
+  const next = sizes.map((size) => Math.max(MIN_TRACK_FR, size));
+  const pairTotal = next[index] + next[index + 1];
+  const totalFr = next.reduce((sum, size) => sum + size, 0);
+  const deltaFr = (deltaPx / totalPx) * totalFr;
+  const first = Math.min(
+    Math.max(next[index] + deltaFr, MIN_TRACK_FR),
+    pairTotal - MIN_TRACK_FR,
+  );
+  next[index] = roundTrack(first);
+  next[index + 1] = roundTrack(pairTotal - first);
+  return next;
+}
+
+function normalizeTrackSizes(
+  sizes: readonly number[] | undefined,
+  count: number,
+): number[] | undefined {
+  if (!sizes || sizes.length !== count || count < 2) {
+    return undefined;
+  }
+  return sizes.map((size) => roundTrack(Math.max(MIN_TRACK_FR, size)));
+}
+
+function roundTrack(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

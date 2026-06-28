@@ -59,6 +59,11 @@ export interface WorkspaceGridTemplate {
   slots: WorkspaceGridTemplateSlot[];
 }
 
+export interface WorkspaceGridTrackSizes {
+  columns?: number[];
+  rows?: number[];
+}
+
 export interface WorkspaceGridStateV1 {
   version: 1;
   preset: WorkspaceGridPresetId;
@@ -67,6 +72,7 @@ export interface WorkspaceGridStateV1 {
   activePaneId: string | null;
   maximizedPaneId: string | null;
   legacySplitRatio?: number;
+  trackSizes?: WorkspaceGridTrackSizes;
   updatedAt: number;
 }
 

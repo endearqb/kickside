@@ -12,7 +12,7 @@ use zip::ZipArchive;
 
 use crate::{
     app_state::AppState,
-    log_manager, skill_center_store, skill_projection,
+    log_manager, skill_center_store, skill_projection, token_resolver,
     types::{
         BackendState, DiscoveredSkillDetail, DiscoveredSkillRecord, InstalledSkill,
         SessionSkillState, SkillApplyResult, SkillApplyScope, SkillDetail,
@@ -189,7 +189,7 @@ pub fn set_skill_trust(app: &AppHandle, skill_id: &str, trusted: bool) -> anyhow
     skill_center_store::save_registry(app, &registry)?;
 
     if !trusted {
-        remove_skill_from_global_state(app, skill_id)?;
+        remove_skill_from_global_state(app, skill_id, None)?;
         for session_state in skill_center_store::load_all_session_states(app)? {
             if let Some(session_id) = session_state.session_id.as_deref() {
                 remove_skill_from_session_state(app, session_id, skill_id)?;
@@ -214,6 +214,7 @@ pub fn apply_skill(
 
     match scope {
         SkillApplyScope::UserGlobalKimi => apply_skill_to_user_global(app, &skill)?,
+        SkillApplyScope::KimiCodeHome => apply_skill_to_kimi_code_home(app, &skill)?,
         SkillApplyScope::SessionKimi => apply_skill_to_active_session(app, &skill)?,
     }
 
@@ -231,7 +232,12 @@ pub fn remove_skill(
     scope: SkillApplyScope,
 ) -> anyhow::Result<SkillApplyResult> {
     match scope {
-        SkillApplyScope::UserGlobalKimi => remove_skill_from_global_state(app, skill_id)?,
+        SkillApplyScope::UserGlobalKimi => {
+            remove_skill_from_global_state(app, skill_id, Some(SkillApplyScope::UserGlobalKimi))?
+        }
+        SkillApplyScope::KimiCodeHome => {
+            remove_skill_from_global_state(app, skill_id, Some(SkillApplyScope::KimiCodeHome))?
+        }
         SkillApplyScope::SessionKimi => {
             let session_id = active_session_id(app)?
                 .ok_or_else(|| anyhow::anyhow!("no active session available"))?;
@@ -613,7 +619,7 @@ pub fn uninstall_skill(app: &AppHandle, skill_id: &str) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("bundled skills cannot be uninstalled"));
     }
 
-    remove_skill_from_global_state(app, skill_id)?;
+    remove_skill_from_global_state(app, skill_id, None)?;
     for session_state in skill_center_store::load_all_session_states(app)? {
         if let Some(session_id) = session_state.session_id.as_deref() {
             remove_skill_from_session_state(app, session_id, skill_id)?;
@@ -817,6 +823,9 @@ pub fn add_installed_skill_to_workspace_target(
     let skill = skill_center_store::find_skill(&registry, skill_id)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    if !skill.trusted {
+        return Err(anyhow::anyhow!("skill must be trusted before applying"));
+    }
     let container_root = resolve_workspace_target_container_path(&target, container_kind)?;
     let target_path = container_root.join(&skill.projection_name);
     if target_path.exists() {
@@ -886,7 +895,7 @@ pub fn scan_discoverable_skills(app: &AppHandle) -> anyhow::Result<SkillDiscover
 
     for root in &workspaces {
         let root_path = PathBuf::from(&root.path);
-        for (container_kind, container_path) in discovery_container_paths(&root_path) {
+        for (container_kind, container_path) in discovery_container_paths(root, &root_path) {
             for record in scan_discovery_container_records_inner(
                 &registry,
                 root,
@@ -1424,6 +1433,20 @@ fn rematerialize_projection(
 
 fn apply_skill_to_user_global(app: &AppHandle, skill: &InstalledSkill) -> anyhow::Result<()> {
     let target_root = user_global_skills_dir()?;
+    apply_skill_to_global_root(app, skill, SkillApplyScope::UserGlobalKimi, &target_root)
+}
+
+fn apply_skill_to_kimi_code_home(app: &AppHandle, skill: &InstalledSkill) -> anyhow::Result<()> {
+    let target_root = kimi_code_home_skills_dir()?;
+    apply_skill_to_global_root(app, skill, SkillApplyScope::KimiCodeHome, &target_root)
+}
+
+fn apply_skill_to_global_root(
+    app: &AppHandle,
+    skill: &InstalledSkill,
+    scope: SkillApplyScope,
+    target_root: &Path,
+) -> anyhow::Result<()> {
     let target_path = target_root.join(&skill.projection_name);
     let mut projections = skill_center_store::load_global_projections(app)?;
     if projections.iter().any(|projection| {
@@ -1433,14 +1456,14 @@ fn apply_skill_to_user_global(app: &AppHandle, skill: &InstalledSkill) -> anyhow
     }
     if target_path.exists() {
         return Err(anyhow::anyhow!(
-            "名称冲突：用户全局目录中已存在 {}",
+            "名称冲突：目标目录中已存在 {}",
             target_path.display()
         ));
     }
     let method = skill_projection::materialize_skill(Path::new(&skill.local_path), &target_path)?;
     projections.push(SkillProjectionRecord {
         skill_id: skill.id.clone(),
-        scope: SkillApplyScope::UserGlobalKimi,
+        scope,
         target_path: target_path.to_string_lossy().to_string(),
         projection_name: skill.projection_name.clone(),
         applied_at: skill_center_store::now_timestamp(),
@@ -1496,11 +1519,17 @@ fn apply_skill_to_active_session(app: &AppHandle, skill: &InstalledSkill) -> any
     skill_center_store::save_session_state(app, &state)
 }
 
-fn remove_skill_from_global_state(app: &AppHandle, skill_id: &str) -> anyhow::Result<()> {
+fn remove_skill_from_global_state(
+    app: &AppHandle,
+    skill_id: &str,
+    scope: Option<SkillApplyScope>,
+) -> anyhow::Result<()> {
     let mut projections = skill_center_store::load_global_projections(app)?;
     let mut removed = Vec::new();
     projections.retain(|projection| {
-        if projection.skill_id == skill_id.trim() {
+        if projection.skill_id == skill_id.trim()
+            && scope.map(|value| projection.scope == value).unwrap_or(true)
+        {
             removed.push(projection.clone());
             false
         } else {
@@ -1552,7 +1581,9 @@ fn load_global_projection_for_skill(
 ) -> anyhow::Result<Option<SkillProjectionRecord>> {
     Ok(skill_center_store::load_global_projections(app)?
         .into_iter()
-        .find(|projection| projection.skill_id == skill_id))
+        .find(|projection| {
+            projection.skill_id == skill_id && projection.scope == SkillApplyScope::UserGlobalKimi
+        }))
 }
 
 fn current_active_session_state(app: &AppHandle) -> anyhow::Result<SessionSkillState> {
@@ -1728,21 +1759,36 @@ fn discovery_roots(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot
     Ok(deduped)
 }
 
-fn discovery_container_paths(root: &Path) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
+fn project_skill_container_paths(root: &Path) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
     vec![
         (
             SkillDiscoveryContainerKind::Agents,
             root.join(".agents").join("skills"),
         ),
         (
-            SkillDiscoveryContainerKind::Codex,
-            root.join(".codex").join("skills"),
-        ),
-        (
-            SkillDiscoveryContainerKind::Claude,
-            root.join(".claude").join("skills"),
+            SkillDiscoveryContainerKind::KimiCode,
+            root.join(".kimi-code").join("skills"),
         ),
     ]
+}
+
+fn user_home_discovery_container_paths(root: &Path) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
+    let mut paths = project_skill_container_paths(root);
+    paths.push((
+        SkillDiscoveryContainerKind::LegacyAgents,
+        root.join(".config").join("agents").join("skills"),
+    ));
+    paths
+}
+
+fn discovery_container_paths(
+    root: &WorkspaceDiscoveryRoot,
+    root_path: &Path,
+) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
+    match root.scope {
+        SkillDiscoveryScope::UserHome => user_home_discovery_container_paths(root_path),
+        SkillDiscoveryScope::Workspace => project_skill_container_paths(root_path),
+    }
 }
 
 fn build_workspace_skill_target(
@@ -1760,15 +1806,18 @@ fn build_workspace_skill_target(
         root_path: skill_center_store::path_to_display_string(root_path),
         read_only,
         is_current,
-        container_roots: discovery_container_paths(root_path)
-            .into_iter()
-            .map(
-                |(container_kind, container_path)| WorkspaceSkillTargetContainerRoot {
-                    container_kind,
-                    container_path: skill_center_store::path_to_display_string(&container_path),
-                },
-            )
-            .collect(),
+        container_roots: match scope {
+            SkillDiscoveryScope::UserHome => user_home_discovery_container_paths(root_path),
+            SkillDiscoveryScope::Workspace => project_skill_container_paths(root_path),
+        }
+        .into_iter()
+        .map(
+            |(container_kind, container_path)| WorkspaceSkillTargetContainerRoot {
+                container_kind,
+                container_path: skill_center_store::path_to_display_string(&container_path),
+            },
+        )
+        .collect(),
     }
 }
 
@@ -2011,6 +2060,28 @@ fn resolve_workspace_skill_profile(
 }
 
 fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
+    let target = user_home_dir()?.join(".agents").join("skills");
+    fs::create_dir_all(&target).with_context(|| {
+        format!(
+            "failed to create user global skills dir: {}",
+            target.display()
+        )
+    })?;
+    Ok(target)
+}
+
+fn kimi_code_home_skills_dir() -> anyhow::Result<PathBuf> {
+    let target = token_resolver::resolve_kimi_code_home()?.join("skills");
+    fs::create_dir_all(&target).with_context(|| {
+        format!(
+            "failed to create Kimi Code home skills dir: {}",
+            target.display()
+        )
+    })?;
+    Ok(target)
+}
+
+fn user_home_dir() -> anyhow::Result<PathBuf> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .or_else(|| {
@@ -2020,14 +2091,7 @@ fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
         })
         .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))?;
-    let target = home.join(".config").join("agents").join("skills");
-    fs::create_dir_all(&target).with_context(|| {
-        format!(
-            "failed to create user global skills dir: {}",
-            target.display()
-        )
-    })?;
-    Ok(target)
+    Ok(home)
 }
 
 fn run_git(args: &[&str], cwd: Option<&Path>) -> anyhow::Result<()> {
@@ -2153,14 +2217,51 @@ mod tests {
     }
 
     #[test]
-    fn user_global_dir_is_under_config_agents_skills() {
+    fn user_global_dir_is_under_home_agents_skills() {
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .expect("home");
         let dir = user_global_skills_dir().expect("global dir");
         assert!(dir.starts_with(home));
-        assert!(dir.to_string_lossy().contains(".config"));
+        assert!(dir.ends_with(Path::new(".agents").join("skills")));
+        assert!(!dir.to_string_lossy().contains(".config"));
+    }
+
+    #[test]
+    fn project_container_paths_include_agents_and_kimi_code() {
+        let root = Path::new("D:/repo");
+        let paths = project_skill_container_paths(root);
+
+        assert_eq!(
+            paths,
+            vec![
+                (
+                    SkillDiscoveryContainerKind::Agents,
+                    root.join(".agents").join("skills")
+                ),
+                (
+                    SkillDiscoveryContainerKind::KimiCode,
+                    root.join(".kimi-code").join("skills")
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn user_home_discovery_keeps_config_agents_as_legacy_only() {
+        let root = Path::new("D:/home");
+        let paths = user_home_discovery_container_paths(root);
+
+        assert!(paths.contains(&(
+            SkillDiscoveryContainerKind::LegacyAgents,
+            root.join(".config").join("agents").join("skills")
+        )));
+        assert!(!project_skill_container_paths(root)
+            .iter()
+            .any(|(_, path)| path
+                .components()
+                .any(|part| part.as_os_str() == std::ffi::OsStr::new(".config"))));
     }
 
     #[test]

@@ -416,8 +416,8 @@ export function ShellTitlebar({
                   type="button"
                   className="titlebar-skill-btn"
                   onClick={onOpenSkillCenter}
-                  aria-label="打开技能中心"
-                  title="打开技能中心"
+                  aria-label="打开 Skill 投影与工作区管理"
+                  title="打开 Skill 投影与工作区管理"
                 >
                   <Sparkles size={14} />
                   <span>技能</span>

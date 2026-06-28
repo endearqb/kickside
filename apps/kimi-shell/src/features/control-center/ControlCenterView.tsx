@@ -387,7 +387,7 @@ const controlSections: Array<{
   },
   {
     id: "skill_center",
-    label: "技能中心",
+    label: "Skill 投影",
     icon: <Sparkles size={15} />,
   },
 ];
@@ -2214,7 +2214,7 @@ export function ControlCenterView({
                   >
                     <span className="cc-task-card-icon"><Sparkles size={16} /></span>
                     <span className="cc-task-card-copy">
-                      <strong>打开技能中心</strong>
+                      <strong>打开 Skill 投影与工作区管理</strong>
                     </span>
                   </button>
                 </div>
@@ -3404,12 +3404,12 @@ export function ControlCenterView({
     return (
       <section className="cc-card skill-center-card">
         <ControlCenterCardHeader
-          title="技能中心"
-          titleMeta="Skill Center"
+          title="Skill 投影与工作区管理"
+          titleMeta="Workspace Skills"
           titleControls={
             <div className="skill-center-title-controls">
               <ControlCenterSegmentedControl
-                ariaLabel="技能中心分区切换"
+                ariaLabel="Skill 投影分区切换"
                 className="cc-inline-switch"
                 itemClassName="cc-inline-switch-btn"
                 value={skillCenterSection}

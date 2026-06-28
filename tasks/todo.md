@@ -378,3 +378,21 @@
 - 连接测试按钮已接入 `test_kimi_code_access_config`，UI 不展示明文 API key，仅显示配置状态和脱敏结果。
 - 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit` 通过；`pnpm --dir apps/kimi-shell test -- --run` 通过（4 files / 36 tests）；`pnpm --dir apps/kimi-shell build` 通过；`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
 - 未完成项：旧 provider 的显式迁移按钮尚未实现，留待后续小步补齐。
+
+## SPEC-08 Phase 2：Skill 投影与工作区管理
+
+### Checklist
+- [x] 将控制中心 Skill 分区命名为“Skill 投影与工作区管理”
+- [x] 用户全局默认投影目录改为 `~/.agents/skills`
+- [x] 新增显式投影到 `$KIMI_CODE_HOME/skills`
+- [x] 当前工作区投影容器收敛为 `.agents/skills` 与 `.kimi-code/skills`
+- [x] `~/.config/agents/skills` 只保留为 legacy discovery
+- [x] 未信任 Skill 不可通过普通 apply 或 workspace target copy 投影
+- [x] 运行 `tsc --noEmit`、前端测试、前端 build、Rust check 和 Rust test no-run
+
+### Review
+- Phase 2 已完成目录边界收敛；`.codex/.claude` 保留类型兼容但不再作为新 workspace target 主入口。
+- 后端新增 `kimi_code_home` scope，复用全局投影记录但移除动作按 scope 精确删除。
+- 前端按钮、chips、容器 tab 和标题栏入口已改为 Skill 投影语义，并隐藏未信任 Skill 的 workspace target 投影候选。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 均通过。
+- 未完成项：真实桌面点击投影到 `$KIMI_CODE_HOME/skills` 和 `.kimi-code/skills` 仍需人工验证。

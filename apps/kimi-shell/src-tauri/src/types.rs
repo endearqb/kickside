@@ -842,6 +842,7 @@ pub struct BridgeApprovalRecord {
 #[serde(rename_all = "snake_case")]
 pub enum SkillApplyScope {
     UserGlobalKimi,
+    KimiCodeHome,
     SessionKimi,
 }
 
@@ -909,6 +910,8 @@ pub enum SkillDiscoveryScope {
 #[serde(rename_all = "snake_case")]
 pub enum SkillDiscoveryContainerKind {
     Agents,
+    KimiCode,
+    LegacyAgents,
     Codex,
     Claude,
 }

@@ -10,6 +10,7 @@ import type {
   SkillProjectionRecord,
   SkillRecommendation,
   WorkspaceDiscoveryRoot,
+  SkillDiscoveryContainerKind,
   WorkspaceSkillInventory,
   WorkspaceSkillProfile,
   WorkspaceSkillTarget,
@@ -50,7 +51,7 @@ export function getWorkspaceSkillInventory(targetId: string) {
 
 export function addInstalledSkillToWorkspaceTarget(
   targetId: string,
-  containerKind: "agents" | "codex" | "claude",
+  containerKind: SkillDiscoveryContainerKind,
   skillId: string,
 ) {
   return invoke<WorkspaceSkillInventory>("add_installed_skill_to_workspace_target", {
@@ -62,7 +63,7 @@ export function addInstalledSkillToWorkspaceTarget(
 
 export function removeWorkspaceTargetSkill(
   targetId: string,
-  containerKind: "agents" | "codex" | "claude",
+  containerKind: SkillDiscoveryContainerKind,
   skillPathOrKey: string,
 ) {
   return invoke<WorkspaceSkillInventory>("remove_workspace_target_skill", {

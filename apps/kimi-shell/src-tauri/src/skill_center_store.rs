@@ -756,6 +756,8 @@ pub fn dedupe_discovery_locations(
         };
         let container_kind = match value.container_kind {
             crate::types::SkillDiscoveryContainerKind::Agents => "agents",
+            crate::types::SkillDiscoveryContainerKind::KimiCode => "kimi_code",
+            crate::types::SkillDiscoveryContainerKind::LegacyAgents => "legacy_agents",
             crate::types::SkillDiscoveryContainerKind::Codex => "codex",
             crate::types::SkillDiscoveryContainerKind::Claude => "claude",
         };

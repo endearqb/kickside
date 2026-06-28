@@ -334,7 +334,7 @@ export interface BridgeApprovalRecord {
   resolvedAt?: string;
 }
 
-export type SkillApplyScope = "user_global_kimi" | "session_kimi";
+export type SkillApplyScope = "user_global_kimi" | "kimi_code_home" | "session_kimi";
 
 export type SkillProjectionMethod = "symlink" | "junction" | "copy";
 
@@ -346,7 +346,12 @@ export type SkillSourceType =
 
 export type SkillDiscoveryScope = "user_home" | "workspace";
 
-export type SkillDiscoveryContainerKind = "agents" | "codex" | "claude";
+export type SkillDiscoveryContainerKind =
+  | "agents"
+  | "kimi_code"
+  | "legacy_agents"
+  | "codex"
+  | "claude";
 
 export type SkillUpdateStatusKind =
   | "up_to_date"

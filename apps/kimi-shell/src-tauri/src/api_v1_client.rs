@@ -58,6 +58,17 @@ impl ApiV1Client {
             .and_then(decode_envelope)
     }
 
+    pub fn post_empty<B>(&self, path: &str, body: &B) -> anyhow::Result<()>
+    where
+        B: Serialize + ?Sized,
+    {
+        self.request(reqwest::Method::POST, path)?
+            .json(body)
+            .send()
+            .context("failed to send kimi-code POST request")
+            .and_then(decode_envelope_empty)
+    }
+
     fn request(
         &self,
         method: reqwest::Method,
@@ -96,7 +107,30 @@ where
     decode_envelope_body(status.as_u16(), &body)
 }
 
+fn decode_envelope_empty(response: reqwest::blocking::Response) -> anyhow::Result<()> {
+    let status = response.status();
+    let body = response
+        .text()
+        .context("failed to read kimi-code response body")?;
+    decode_envelope_empty_body(status.as_u16(), &body)
+}
+
 fn decode_envelope_body<T>(status: u16, body: &str) -> anyhow::Result<T>
+where
+    T: DeserializeOwned,
+{
+    let envelope = decode_envelope_status::<T>(status, body)?;
+    envelope
+        .data
+        .ok_or_else(|| anyhow::anyhow!("kimi-code API envelope missing data"))
+}
+
+fn decode_envelope_empty_body(status: u16, body: &str) -> anyhow::Result<()> {
+    let _ = decode_envelope_status::<serde_json::Value>(status, body)?;
+    Ok(())
+}
+
+fn decode_envelope_status<T>(status: u16, body: &str) -> anyhow::Result<ApiEnvelope<T>>
 where
     T: DeserializeOwned,
 {
@@ -128,9 +162,7 @@ where
         );
     }
 
-    envelope
-        .data
-        .ok_or_else(|| anyhow::anyhow!("kimi-code API envelope missing data"))
+    Ok(envelope)
 }
 
 fn truncate_for_error(value: &str, max_chars: usize) -> String {
@@ -186,5 +218,11 @@ mod tests {
         assert!(message.contains("40101"));
         assert!(message.contains("request_id=r1"));
         assert!(message.contains("unauthorized"));
+    }
+
+    #[test]
+    fn decode_empty_success_envelope_allows_missing_data() {
+        decode_envelope_empty_body(200, r#"{"code":0,"msg":"ok","request_id":"r1"}"#)
+            .expect("empty response");
     }
 }

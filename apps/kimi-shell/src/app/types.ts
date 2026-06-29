@@ -100,11 +100,11 @@ export type StartupMonitorTargetRoute =
   | "diagnostics"
   | "control_center";
 
-export type LoginProbeState = "logged_in" | "login_required" | "unknown";
+export type KimiCodeAuthState = "logged_in" | "login_required" | "unknown";
 export type AuthMode = "kimi_login" | "provider_api" | "unknown";
 export type KimiLoginHealthState = "unknown" | "verified" | "auth_required" | "error";
 export type KimiLoginHealthSource =
-  | "manual_probe"
+  | "manual_refresh"
   | "workspace_api"
   | "backend_startup";
 export type ProviderApiHealthState = "unknown" | "auth_required" | "error";
@@ -819,8 +819,6 @@ export interface DiagnosticsInfo {
   configuredWorkDir?: string;
   effectiveWorkDir?: string;
   launchCommand?: string;
-  cliContractOk?: boolean;
-  cliContractError?: string;
   runtimeOrigin?: string;
   serverTokenPath?: string;
   serverTokenRedacted?: string;
@@ -883,15 +881,15 @@ export interface OnboardingStatus {
   providerApiActiveProvider?: string;
   kimiLoginHealth: KimiLoginHealth;
   providerApiHealth: ProviderApiHealth;
-  loginState: LoginProbeState;
-  loginMessage?: string;
+  kimiCodeAuthState: KimiCodeAuthState;
+  kimiCodeAuthMessage?: string;
   workDirConfigured: boolean;
   workDir?: string;
   apiConfigAck: boolean;
 }
 
-export interface LoginProbeResult {
-  state: LoginProbeState;
+export interface KimiCodeAuthResult {
+  state: KimiCodeAuthState;
   message: string;
   kimiPath?: string;
   exitCode?: number;
@@ -907,128 +905,13 @@ export interface KimiDoctorResult {
   stderr: string;
 }
 
-export interface KimiCliApiConfigView {
+export interface KimiCodeAccessSummaryView {
   configPath: string;
   providerId: string;
   model: string;
   baseUrl: string;
   hasApiKey: boolean;
   templateConfigured: boolean;
-  isDefault: boolean;
-}
-
-export interface KimiCliApiConfigInput {
-  apiKey?: string;
-}
-
-export type TypedFieldType =
-  | "string"
-  | "integer"
-  | "float"
-  | "boolean"
-  | "string_array";
-
-export interface KeyValueEntry {
-  key: string;
-  value: string;
-}
-
-export interface TypedFieldEntry {
-  key: string;
-  valueType: TypedFieldType;
-  value: string;
-}
-
-export interface ProviderEntry {
-  key: string;
-  providerType?: string;
-  apiKey?: string;
-  baseUrl?: string;
-  authToken?: string;
-  appId?: string;
-  accessKeyId?: string;
-  secretAccessKey?: string;
-  region?: string;
-  apiVersion?: string;
-  deployment?: string;
-  modelName?: string;
-  env: KeyValueEntry[];
-  customHeaders: KeyValueEntry[];
-  extraFields: TypedFieldEntry[];
-}
-
-export interface ModelEntry {
-  key: string;
-  provider?: string;
-  model?: string;
-  maxContextSize?: number;
-  capabilities: string[];
-  extraFields: TypedFieldEntry[];
-}
-
-export interface ServiceEntry {
-  key: string;
-  provider?: string;
-  model?: string;
-  endpoint?: string;
-  apiKey?: string;
-  timeoutMs?: number;
-  maxRetries?: number;
-  extraFields: TypedFieldEntry[];
-}
-
-export interface LoopControlEntry {
-  enabled?: boolean;
-  maxSteps?: number;
-  maxRetries?: number;
-  timeoutMs?: number;
-  extraFields: TypedFieldEntry[];
-}
-
-export interface McpServerEntry {
-  key: string;
-  command?: string;
-  args: string[];
-  env: KeyValueEntry[];
-  enabled?: boolean;
-  workingDirectory?: string;
-  timeoutMs?: number;
-  extraFields: TypedFieldEntry[];
-}
-
-export interface EnvOverrideStatus {
-  key: string;
-  isSet: boolean;
-  maskedValue?: string;
-  overrides: string[];
-  priority: string;
-}
-
-export interface KimiCliConfigCenterInput {
-  providers: ProviderEntry[];
-  models: ModelEntry[];
-  services: ServiceEntry[];
-  defaultProvider?: string;
-  model?: string;
-  defaultModel?: string;
-  defaultService?: string;
-  defaultEditor?: string;
-  defaultYolo?: boolean;
-  defaultYoloMode?: string;
-  defaultThinking?: boolean;
-  defaultThinkingMode?: string;
-  localModelDisableAutoPull?: boolean;
-  loopControl: LoopControlEntry;
-  mcpServers: McpServerEntry[];
-}
-
-export interface KimiCliConfigCenterView extends KimiCliConfigCenterInput {
-  configPath: string;
-  configDir: string;
-  dataDir: string;
-  dataDirEnvSource?: string;
-  envOverrides: EnvOverrideStatus[];
-  warnings: string[];
 }
 
 export interface KimiCodeAccessConfigProviderView {
@@ -1105,32 +988,6 @@ export interface KimiCodeAccessConfigTestResult {
   apiKeyConfigured: boolean;
   warnings: string[];
 }
-
-export type ConfigCenterSectionId =
-  | "overview"
-  | "providers"
-  | "models"
-  | "services"
-  | "defaults"
-  | "loop_control"
-  | "mcp_servers"
-  | "env_overrides";
-
-export const PROVIDER_TYPE_OPTIONS = [
-  "moonshot",
-  "openai",
-  "anthropic",
-  "azure",
-  "openrouter",
-  "doubao",
-  "siliconflow",
-  "deepseek",
-  "gemini",
-  "vertex_ai",
-  "ollama",
-  "openai-compatible",
-  "custom",
-] as const;
 
 export interface InstallProbeStatus {
   wingetReady: boolean;
@@ -1368,7 +1225,7 @@ export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 export type ControlCenterSurface = "fullscreen" | "modal";
 
 export type ControlCenterTaskId =
-  | "config_center"
+  | "kimi_code_access"
   | "bridge_connector_secrets"
   | "bridge_runtime"
   | "skill_git_import"
@@ -1391,7 +1248,7 @@ export const ONBOARDING_STEP_ORDER: ActionableOnboardingStep[] = [
 export function stepTitle(step: OnboardingStep): string {
   switch (step) {
     case "install_kimi":
-      return "安装 Kimi CLI";
+      return "安装 Kimi Code";
     case "context_menu":
       return "启用右键菜单";
     case "login_kimi":
@@ -1405,14 +1262,14 @@ export function stepTitle(step: OnboardingStep): string {
   }
 }
 
-export function formatLoginState(state?: LoginProbeState): string {
+export function formatKimiCodeAuthState(state?: KimiCodeAuthState): string {
   if (state === "logged_in") return "已登录";
   if (state === "login_required") return "需要登录";
   return "未知";
 }
 
 export function formatAuthMode(mode?: AuthMode): string {
-  if (mode === "kimi_login") return "Kimi 登录";
+  if (mode === "kimi_login") return "Kimi Code Auth";
   if (mode === "provider_api") return "Provider API";
   return "未知";
 }
@@ -1425,7 +1282,7 @@ export function formatKimiLoginHealthState(state?: KimiLoginHealthState): string
 }
 
 export function formatKimiLoginHealthSource(source?: KimiLoginHealthSource): string {
-  if (source === "manual_probe") return "手动检测";
+  if (source === "manual_refresh") return "手动刷新";
   if (source === "workspace_api") return "工作区接口";
   return "启动回填";
 }

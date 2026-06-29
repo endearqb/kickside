@@ -103,7 +103,7 @@ $env:KIMI_SHELL_PATH = $gitBash
 - 官方脚本默认安装到 `%USERPROFILE%\.kimi-code\bin\kimi.exe`，并更新用户 PATH。
 - 旧版 `uv` / Python `kimi-cli` 只作为历史兼容，不再是主安装依赖。
 
-### 2.1 安装 Kimi Code CLI
+### 2.1 安装 Kimi Code
 
 ```powershell
 $ErrorActionPreference='Stop'
@@ -116,7 +116,7 @@ if (Test-Path $kimiBin) {
 }
 ```
 
-### 2.2 升级 Kimi Code CLI
+### 2.2 升级 Kimi Code
 
 ```powershell
 kimi upgrade
@@ -147,7 +147,7 @@ npm install -g @moonshot-ai/kimi-code@latest --registry https://registry.npmmirr
 
 应用内“镜像源”设置仍保留 Git 与历史 uv/Python 字段，用于旧安装链路的手动修复；Kimi Code 主安装不再读取 PyPI 镜像。
 
-## 4. 卸载 Kimi CLI
+## 4. 卸载 Kimi Code
 
 ```powershell
 npm uninstall -g @moonshot-ai/kimi-code

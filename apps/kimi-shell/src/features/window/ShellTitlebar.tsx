@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { KimiCliBrand } from "@/components/kimi-cli-brand";
+import { KimiCodeBrand } from "@/components/kimi-code-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { GRID_PRESETS } from "@/features/workspace-grid/gridPresets";
@@ -404,7 +404,7 @@ export function ShellTitlebar({
             onMouseDown={handleDragZoneMouseDown}
             onDoubleClick={handleDragZoneDoubleClick}
           >
-            <KimiCliBrand compact className="titlebar-brand" />
+            <KimiCodeBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
               {shellScreenLabel} | 状态：{statusText}
             </span>

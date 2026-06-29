@@ -13,7 +13,7 @@ const DEFAULT_PROVIDER_BASE_URL = "https://api.kimi.com/coding/v1";
 const DEFAULT_SEARCH_BASE_URL = "https://api.kimi.com/coding/v1/search";
 const DEFAULT_FETCH_BASE_URL = "https://api.kimi.com/coding/v1/fetch";
 
-type ConfigCenterTaskContentProps = {
+type KimiCodeAccessTaskContentProps = {
   dirty: boolean;
   view: KimiCodeAccessConfigView | null;
   draft: KimiCodeAccessConfigInput;
@@ -111,7 +111,7 @@ export function buildWarnings(
   return warnings;
 }
 
-export function ConfigCenterTaskContent({
+export function KimiCodeAccessTaskContent({
   dirty,
   view,
   draft,
@@ -120,7 +120,7 @@ export function ConfigCenterTaskContent({
   onDraftChange,
   onOpenConfigDir,
   onTestConnection,
-}: ConfigCenterTaskContentProps) {
+}: KimiCodeAccessTaskContentProps) {
   const [visibleSecrets, setVisibleSecrets] = useState<Record<SecretField, boolean>>({
     provider: false,
     search: false,

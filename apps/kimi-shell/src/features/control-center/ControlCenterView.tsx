@@ -49,8 +49,8 @@ import type {
   DiscoveredSkillDetail,
   SkillDiscoverySnapshot,
   InstalledSkill,
-  KimiCliApiConfigView,
   KimiCodeAccessConfigInput,
+  KimiCodeAccessSummaryView,
   KimiCodeAccessConfigTestResult,
   KimiCodeAccessConfigView,
   MainWindowCloseBehavior,
@@ -93,8 +93,8 @@ import { ControlCenterCardHeader } from "@/features/control-center/ControlCenter
 import {
   buildBlockingErrors,
   buildWarnings,
-  ConfigCenterTaskContent,
-} from "@/features/control-center/ConfigCenterModal";
+  KimiCodeAccessTaskContent,
+} from "@/features/control-center/KimiCodeAccessPanel";
 import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
 import {
   InstallFlowTaskContent,
@@ -158,7 +158,7 @@ type ControlCenterViewProps = {
   diagnosticsBusy: boolean;
   kimiDoctorBusy: boolean;
   contextMenuBusy: boolean;
-  loginProbeBusy: boolean;
+  kimiCodeAuthBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
   installAction:
@@ -210,15 +210,15 @@ type ControlCenterViewProps = {
   selectedWorkspaceSkillContainerKind: SkillDiscoveryContainerKind;
   kimiPathInput: string;
   workDirInput: string;
-  kimiApiConfigView: KimiCliApiConfigView | null;
+  kimiCodeAccessSummary: KimiCodeAccessSummaryView | null;
   kimiApiKeyInput: string;
   onKimiApiKeyInputChange: (value: string) => void;
-  configCenterView: KimiCodeAccessConfigView | null;
-  configCenterDraft: KimiCodeAccessConfigInput;
-  configCenterBusy: boolean;
-  configCenterDirty: boolean;
-  configCenterTesting: boolean;
-  configCenterTestResult: KimiCodeAccessConfigTestResult | null;
+  kimiCodeAccessView: KimiCodeAccessConfigView | null;
+  kimiCodeAccessDraft: KimiCodeAccessConfigInput;
+  kimiCodeAccessBusy: boolean;
+  kimiCodeAccessDirty: boolean;
+  kimiCodeAccessTesting: boolean;
+  kimiCodeAccessTestResult: KimiCodeAccessConfigTestResult | null;
   installProbe: InstallProbeStatus | null;
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
@@ -276,15 +276,14 @@ type ControlCenterViewProps = {
   onOpenLogs: () => Promise<void>;
   onOpenFolder: (path: string) => Promise<void>;
   onOpenKimiConfigDir: () => Promise<void>;
-  onSaveKimiCliApiConfig: () => Promise<void>;
-  onSetKimiCliApiAsDefault: () => Promise<void>;
-  onSetKimiLoginAsDefault: () => Promise<void>;
+  onSaveKimiCodeApiKey: () => Promise<void>;
   onPickKimiPath: () => Promise<void>;
   onSavePathAndRetry: () => Promise<void>;
   onEnableContextMenu: () => Promise<void>;
   onDisableContextMenu: () => Promise<void>;
-  onProbeLogin: () => Promise<void>;
-  onLogoutKimiLogin: () => Promise<void>;
+  onStartKimiCodeAuth: () => Promise<void>;
+  onRefreshKimiCodeAuth: () => Promise<void>;
+  onLogoutKimiCodeAuth: () => Promise<void>;
   onPickWorkDir: () => Promise<void>;
   onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<string | null>;
   onSaveWorkDirAndRestart: () => Promise<void>;
@@ -335,9 +334,9 @@ type ControlCenterViewProps = {
   onUpdateSkill: (skillId: string) => Promise<void>;
   onUninstallSkill: (skillId: string) => Promise<void>;
   onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
-  onConfigCenterDraftChange: (next: KimiCodeAccessConfigInput) => void;
-  onResetConfigCenterDraft: () => void;
-  onSaveKimiCliConfigCenter: () => Promise<void>;
+  onKimiCodeAccessDraftChange: (next: KimiCodeAccessConfigInput) => void;
+  onResetKimiCodeAccessDraft: () => void;
+  onSaveKimiCodeAccessConfig: () => Promise<void>;
   onTestKimiCodeAccessConfig: () => Promise<void>;
   onSaveMainWindowCloseBehavior: (
     behavior: MainWindowCloseBehavior,
@@ -631,7 +630,7 @@ function formatKimiDoctorOutput(result: KimiDoctorResult): string {
     result.stdout ? `stdout\n${result.stdout}` : "",
     result.stderr ? `stderr\n${result.stderr}` : "",
   ].filter(Boolean);
-  return chunks.join("\n\n") || "kimi doctor 未返回输出。";
+  return chunks.join("\n\n") || "Kimi Code Doctor 未返回输出。";
 }
 
 function isFeishuOnboardingActive(
@@ -738,7 +737,7 @@ export function ControlCenterView({
   diagnosticsBusy,
   kimiDoctorBusy,
   contextMenuBusy,
-  loginProbeBusy,
+  kimiCodeAuthBusy,
   mainWindowCloseBehavior,
   installBusy,
   installAction,
@@ -784,15 +783,15 @@ export function ControlCenterView({
   selectedWorkspaceSkillContainerKind,
   kimiPathInput,
   workDirInput,
-  kimiApiConfigView,
+  kimiCodeAccessSummary,
   kimiApiKeyInput,
   onKimiApiKeyInputChange,
-  configCenterView,
-  configCenterDraft,
-  configCenterBusy,
-  configCenterDirty,
-  configCenterTesting,
-  configCenterTestResult,
+  kimiCodeAccessView,
+  kimiCodeAccessDraft,
+  kimiCodeAccessBusy,
+  kimiCodeAccessDirty,
+  kimiCodeAccessTesting,
+  kimiCodeAccessTestResult,
   installProbe,
   installSource,
   installSettings,
@@ -838,15 +837,14 @@ export function ControlCenterView({
   onOpenLogs,
   onOpenFolder,
   onOpenKimiConfigDir,
-  onSaveKimiCliApiConfig,
-  onSetKimiCliApiAsDefault,
-  onSetKimiLoginAsDefault,
+  onSaveKimiCodeApiKey,
   onPickKimiPath,
   onSavePathAndRetry,
   onEnableContextMenu,
   onDisableContextMenu,
-  onProbeLogin,
-  onLogoutKimiLogin,
+  onStartKimiCodeAuth,
+  onRefreshKimiCodeAuth,
+  onLogoutKimiCodeAuth,
   onPickWorkDir,
   onPickBridgeConnectorDefaultWorkDir,
   onSaveWorkDirAndRestart,
@@ -888,9 +886,9 @@ export function ControlCenterView({
   onUpdateSkill,
   onUninstallSkill,
   onRecoverWorkspaceSkill,
-  onConfigCenterDraftChange,
-  onResetConfigCenterDraft,
-  onSaveKimiCliConfigCenter,
+  onKimiCodeAccessDraftChange,
+  onResetKimiCodeAccessDraft,
+  onSaveKimiCodeAccessConfig,
   onTestKimiCodeAccessConfig,
   onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
@@ -972,7 +970,7 @@ export function ControlCenterView({
   const effectiveSelectedBridgeConnectorId = bridgeTaskConnectorId ?? selectedBridgeConnectorId;
   const isBridgeConnectorSecretsTask = activeTask === "bridge_connector_secrets";
   const isBridgeRuntimeTask = activeTask === "bridge_runtime";
-  const isConfigCenterTask = activeTask === "config_center";
+  const isKimiCodeAccessTask = activeTask === "kimi_code_access";
   const isSkillGitImportTask = activeTask === "skill_git_import";
   const isSkillImportTask = activeTask === "skill_import";
   const shouldRenderInlineBridgeTask =
@@ -1121,10 +1119,10 @@ export function ControlCenterView({
     onboarding?.providerApiConfigured ??
     status?.providerApiConfigured ??
     Boolean(
-      configCenterView &&
-        (configCenterView.provider.apiKeyConfigured ||
-          configCenterView.services.search.apiKeyConfigured ||
-          configCenterView.services.fetch.apiKeyConfigured),
+      kimiCodeAccessView &&
+        (kimiCodeAccessView.provider.apiKeyConfigured ||
+          kimiCodeAccessView.services.search.apiKeyConfigured ||
+          kimiCodeAccessView.services.fetch.apiKeyConfigured),
     );
   const providerApiReady = providerApiConfigured && !providerApiHealth?.needsAttention;
   const authStatusLabel = kimiLoginReady || providerApiReady ? "就绪" : providerApiConfigured ? "异常" : "待办";
@@ -1201,8 +1199,8 @@ export function ControlCenterView({
   );
   const authBannerTitle =
     onboarding?.kimiLoginHealth.state === "error"
-      ? "Kimi 登录检测异常"
-      : "Kimi 登录需要重新验证";
+      ? "Kimi Code Auth 检测异常"
+      : "Kimi Code Auth 需要重新验证";
   const authBannerMeta = [
     `当前入口：${formatAuthMode(authMode)}`,
     `来源：${formatKimiLoginHealthSource(onboarding?.kimiLoginHealth.source)}`,
@@ -1320,7 +1318,7 @@ export function ControlCenterView({
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
-  const installPrimaryActionLabel = installReady ? "升级 Kimi" : "一键安装 Kimi CLI";
+  const installPrimaryActionLabel = installReady ? "升级 Kimi" : "一键安装 Kimi Code";
   const installPrimaryAction = (
     <Button
       type="button"
@@ -1364,22 +1362,22 @@ export function ControlCenterView({
         type="button"
         icon={<KeyRound size={15} />}
         className="cc-action-btn"
-        onClick={() => void onProbeLogin()}
-        disabled={loginProbeBusy}
+        onClick={() => void onStartKimiCodeAuth()}
+        disabled={kimiCodeAuthBusy}
       >
-        检测或执行登录
+        打开登录
       </Button>
     ) : (
       <Button
         type="button"
         icon={<Check size={14} />}
         className="cc-action-btn"
-        onClick={() => void onSaveKimiCliApiConfig()}
+        onClick={() => void onSaveKimiCodeApiKey()}
         disabled={
           actionBusy ||
-          configCenterBusy ||
-          configCenterDirty ||
-          (!kimiApiConfigView?.hasApiKey && !kimiApiKeyInput.trim())
+          kimiCodeAccessBusy ||
+          kimiCodeAccessDirty ||
+          (!kimiCodeAccessSummary?.hasApiKey && !kimiApiKeyInput.trim())
         }
       >
         保存
@@ -1391,42 +1389,26 @@ export function ControlCenterView({
       <>
         <Button
           type="button"
-          variant="outline"
-          icon={<Check size={14} />}
+          variant="ghost"
+          icon={<RefreshCw size={15} />}
           className="cc-action-btn"
-          onClick={() => void onSetKimiLoginAsDefault()}
-          disabled={actionBusy || configCenterBusy || configCenterDirty}
+          onClick={() => void onRefreshKimiCodeAuth()}
+          disabled={kimiCodeAuthBusy}
         >
-          设为默认登录
+          刷新状态
         </Button>
         <Button
           type="button"
           variant="ghost"
           icon={<Minus size={15} />}
           className="cc-action-btn"
-          onClick={() => void onLogoutKimiLogin()}
-          disabled={loginProbeBusy || !canLogoutKimi}
+          onClick={() => void onLogoutKimiCodeAuth()}
+          disabled={kimiCodeAuthBusy || !canLogoutKimi}
         >
           退出登录
         </Button>
       </>
-    ) : (
-      <Button
-        type="button"
-        variant="outline"
-        icon={<Check size={14} />}
-        className="cc-action-btn"
-        onClick={() => void onSetKimiCliApiAsDefault()}
-        disabled={
-          actionBusy ||
-          configCenterBusy ||
-          configCenterDirty ||
-          !kimiApiConfigView?.templateConfigured
-        }
-      >
-        设为默认 API
-      </Button>
-    );
+    ) : null;
 
   const workDirPrimaryAction = (
     <Button
@@ -1983,7 +1965,7 @@ export function ControlCenterView({
     {
       id: "install",
       index: "01",
-      title: "安装 / 升级 Kimi CLI",
+      title: "安装 / 升级 Kimi Code",
       actionLabel: installPrimaryActionLabel,
       statusLabel: installStatusLabel,
       statusTone: installStatusTone,
@@ -2030,7 +2012,7 @@ export function ControlCenterView({
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
     diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
     authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
-      ? `Kimi 登录：${onboarding.kimiLoginHealth.message || kimiLoginStatusLabel}`
+      ? `Kimi Code Auth：${onboarding.kimiLoginHealth.message || kimiLoginStatusLabel}`
       : null,
     authMode === "provider_api" && onboarding?.providerApiHealth.needsAttention
       ? `Provider API：${onboarding.providerApiHealth.message || providerApiStatusLabel}`
@@ -2050,18 +2032,18 @@ export function ControlCenterView({
   const externalDiscoveryCount = skillDiscoveryRecords.length;
   const imFinalStatusLabel = `${totalBridgeRobotCount} 个`;
   const overviewBriefs = [
-    !installReady ? "Kimi CLI 仍未就绪，建议先完成安装与探测。" : null,
+    !installReady ? "Kimi Code 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
     !authReady ? "尚未建立登录或 Provider API 入口。" : null,
     authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
-      ? "当前入口依赖 Kimi 登录，建议立即重新验证。"
+      ? "当前入口依赖 Kimi Code Auth，建议立即刷新状态。"
       : null,
     authMode === "provider_api" && onboarding?.providerApiHealth.needsAttention
       ? "当前入口依赖 Provider API，最近一次请求认证失败。"
       : null,
     !workDirReady ? "默认工作目录未设置，跨会话上下文还不稳定。" : null,
     bridgeStatus.state === "crashed" ? "Bridge 最近出现崩溃，需要优先检查。" : null,
-    configCenterDirty ? "配置中心存在未保存修改。" : null,
+    kimiCodeAccessDirty ? "控制中心存在未保存修改。" : null,
     bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
   ].filter((item): item is string => Boolean(item));
   const pendingOverviewCount = overviewBriefs.length;
@@ -2426,7 +2408,7 @@ export function ControlCenterView({
                         className={`cc-auth-switch-btn ${authCardView === "login" ? "active" : ""}`}
                         onClick={() => setAuthCardView("login")}
                       >
-                        Kimi 登录
+                        Kimi Code Auth
                       </button>
                       <button
                         type="button"
@@ -2444,7 +2426,7 @@ export function ControlCenterView({
                         </p>
                         <div className="cc-brief-list">
                           <article className="cc-brief-item">
-                            <strong>Kimi 登录</strong>
+                            <strong>Kimi Code Auth</strong>
                             <span className={`cc-status-badge tone-${kimiLoginStatusTone}`}>
                               {kimiLoginStatusLabel}
                             </span>
@@ -2474,7 +2456,7 @@ export function ControlCenterView({
                         <p className="hint cc-step-summary">
                           当前入口：<strong>{formatAuthMode(authMode)}</strong>；
                           Provider API：<strong>{providerApiStatusLabel}</strong>
-                          {kimiApiConfigView?.hasApiKey ? "；Kimi Code 接入已配置" : ""}
+                          {kimiCodeAccessSummary?.hasApiKey ? "；Kimi Code 接入已配置" : ""}
                         </p>
                         <div className="cc-brief-list">
                           <article className="cc-brief-item">
@@ -2488,7 +2470,7 @@ export function ControlCenterView({
                           </article>
                           <article className="cc-brief-item">
                             <strong>API Key</strong>
-                            <span>{kimiApiConfigView?.hasApiKey ? "已保存" : "待填写"}</span>
+                            <span>{kimiCodeAccessSummary?.hasApiKey ? "已保存" : "待填写"}</span>
                             <Input
                               id="kimi-api-key-onboarding"
                               className="cc-brief-inline-input"
@@ -2498,7 +2480,7 @@ export function ControlCenterView({
                                 onKimiApiKeyInputChange(event.currentTarget.value)
                               }
                               placeholder={
-                                kimiApiConfigView?.hasApiKey
+                                kimiCodeAccessSummary?.hasApiKey
                                   ? "已保存，如需替换请重新输入"
                                   : "sk-..."
                               }
@@ -2514,8 +2496,8 @@ export function ControlCenterView({
                             variant="outline"
                             icon={<SlidersHorizontal size={14} />}
                             className="cc-action-btn"
-                            onClick={() => void onOpenTask("config_center")}
-                            disabled={configCenterBusy}
+                            onClick={() => void onOpenTask("kimi_code_access")}
+                            disabled={kimiCodeAccessBusy}
                           >
                             打开接入配置
                           </Button>
@@ -2532,8 +2514,8 @@ export function ControlCenterView({
                         <p className="hint cc-step-meta">
                           配置文件：
                           <strong>
-                            {kimiApiConfigView?.configPath ||
-                              configCenterView?.configPath ||
+                            {kimiCodeAccessSummary?.configPath ||
+                              kimiCodeAccessView?.configPath ||
                               "~/.kimi-code/config.toml"}
                           </strong>
                         </p>
@@ -2550,18 +2532,18 @@ export function ControlCenterView({
                             最近摘要：{onboarding.providerApiHealth.message}
                           </p>
                         ) : null}
-                        {!kimiApiConfigView?.templateConfigured ? (
+                        {!kimiCodeAccessSummary?.templateConfigured ? (
                           <p className="hint cc-step-meta">
                             当前尚未写入完整的 Kimi Code 接入配置，点击“保存”后会自动补齐。
                           </p>
                         ) : null}
-                        {configCenterDirty ? (
+                        {kimiCodeAccessDirty ? (
                           <p className="hint cc-step-meta">
                             接入配置存在未保存修改，请先处理草稿。
                           </p>
                         ) : null}
-                        {configCenterView?.warnings?.length ? (
-                          <p className="hint cc-step-meta">当前警告：{configCenterView.warnings[0]}</p>
+                        {kimiCodeAccessView?.warnings?.length ? (
+                          <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
                         ) : null}
                         <p className="hint cc-step-meta">保存成功后将自动标记本步骤完成。</p>
                       </div>
@@ -2793,14 +2775,14 @@ export function ControlCenterView({
           <RuntimePanel active={runtimePanelExpanded && activeRuntimePanel === "core"} onOpen={() => { void handleSelectRuntimePanel("core"); }} title="核心运行诊断">
             <div className="cc-actions">
               <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
-              <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 kimi doctor</Button>
+              <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 Kimi Code Doctor</Button>
               <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
             </div>
             {kimiDoctorResult && (
               <>
                 <div className="diagnostics-grid">
                   <DiagnosticItem
-                    label="Kimi Doctor"
+                    label="Kimi Code Doctor"
                     value={kimiDoctorResult.succeeded ? "通过" : "未通过"}
                   />
                   <DiagnosticItem
@@ -2814,7 +2796,7 @@ export function ControlCenterView({
                     value={kimiDoctorResult.shellPath ?? "-"}
                   />
                 </div>
-                <h4 className="log-tail-title">kimi doctor 输出</h4>
+                <h4 className="log-tail-title">Kimi Code Doctor 输出</h4>
                 <pre className="log-tail">{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
               </>
             )}
@@ -2830,8 +2812,6 @@ export function ControlCenterView({
               <DiagnosticItem label="Shell to Loading (ms)" value={String(diagnostics?.loadingStartupMs ?? "-")} />
               <DiagnosticItem label="Backend Ready (ms)" value={String(diagnostics?.backendReadyMs ?? "-")} />
               <DiagnosticItem label="Loading SLA Met" value={String(diagnostics?.loadingSlaMet ?? "-")} />
-              <DiagnosticItem label="CLI Contract OK" value={String(diagnostics?.cliContractOk ?? "-")} />
-              <DiagnosticItem label="CLI Contract Error" value={diagnostics?.cliContractError ?? "-"} />
               <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
               <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
               <DiagnosticItem label="Auth Mode" value={formatAuthMode(diagnostics?.authMode)} />
@@ -3528,12 +3508,12 @@ export function ControlCenterView({
   }
 
   const configBlockingErrors = useMemo(
-    () => buildBlockingErrors(configCenterDraft),
-    [configCenterDraft],
+    () => buildBlockingErrors(kimiCodeAccessDraft),
+    [kimiCodeAccessDraft],
   );
   const configWarnings = useMemo(
-    () => buildWarnings(configCenterDraft, configCenterView?.warnings ?? []),
-    [configCenterDraft, configCenterView?.warnings],
+    () => buildWarnings(kimiCodeAccessDraft, kimiCodeAccessView?.warnings ?? []),
+    [kimiCodeAccessDraft, kimiCodeAccessView?.warnings],
   );
   function closeBridgeConnectorSecretsTask() {
     const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
@@ -3545,7 +3525,7 @@ export function ControlCenterView({
   }
 
   function renderActiveTask() {
-    if (isConfigCenterTask) {
+    if (isKimiCodeAccessTask) {
       return (
         <ControlCenterTaskSurface
           title="Kimi Code 接入配置"
@@ -3559,7 +3539,7 @@ export function ControlCenterView({
               <div className="cc-config-footer-meta">
                 <span>校验错误：{configBlockingErrors.length}</span>
                 <span>告警：{configWarnings.length}</span>
-                {configCenterDirty ? (
+                {kimiCodeAccessDirty ? (
                   <span className="unsaved">存在未保存变更</span>
                 ) : (
                   <span className="saved">已同步</span>
@@ -3571,8 +3551,8 @@ export function ControlCenterView({
                   variant="outline"
                   className="cc-action-btn"
                   icon={<RefreshCcw size={14} />}
-                  onClick={onResetConfigCenterDraft}
-                  disabled={configCenterBusy || !configCenterDirty}
+                  onClick={onResetKimiCodeAccessDraft}
+                  disabled={kimiCodeAccessBusy || !kimiCodeAccessDirty}
                 >
                   重置
                 </Button>
@@ -3580,8 +3560,8 @@ export function ControlCenterView({
                   type="button"
                   className="cc-action-btn"
                   icon={<Check size={14} />}
-                  onClick={() => void onSaveKimiCliConfigCenter()}
-                  disabled={configCenterBusy || configBlockingErrors.length > 0}
+                  onClick={() => void onSaveKimiCodeAccessConfig()}
+                  disabled={kimiCodeAccessBusy || configBlockingErrors.length > 0}
                 >
                   保存接入配置
                 </Button>
@@ -3596,13 +3576,13 @@ export function ControlCenterView({
             </>
           }
         >
-          <ConfigCenterTaskContent
-            dirty={configCenterDirty}
-            view={configCenterView}
-            draft={configCenterDraft}
-            testResult={configCenterTestResult}
-            testing={configCenterTesting}
-            onDraftChange={onConfigCenterDraftChange}
+          <KimiCodeAccessTaskContent
+            dirty={kimiCodeAccessDirty}
+            view={kimiCodeAccessView}
+            draft={kimiCodeAccessDraft}
+            testResult={kimiCodeAccessTestResult}
+            testing={kimiCodeAccessTesting}
+            onDraftChange={onKimiCodeAccessDraftChange}
             onOpenConfigDir={onOpenKimiConfigDir}
             onTestConnection={onTestKimiCodeAccessConfig}
           />
@@ -4546,7 +4526,7 @@ export function ControlCenterView({
                 <strong>{authBannerTitle}</strong>
                 <p>
                   {onboarding?.kimiLoginHealth.message?.trim() ||
-                    "当前入口依赖 Kimi 登录，最近一次检测表明需要重新处理。"}
+                    "当前入口依赖 Kimi Code Auth，最近一次检测表明需要重新处理。"}
                 </p>
                 <span>{authBannerMeta}</span>
               </div>
@@ -4554,10 +4534,10 @@ export function ControlCenterView({
                 <button
                   type="button"
                   className="shell-login-banner-btn primary"
-                  onClick={() => void onProbeLogin()}
-                  disabled={loginProbeBusy}
+                  onClick={() => void onRefreshKimiCodeAuth()}
+                  disabled={kimiCodeAuthBusy}
                 >
-                  重新登录 / 检测
+                  刷新认证状态
                 </button>
                 <button
                   type="button"

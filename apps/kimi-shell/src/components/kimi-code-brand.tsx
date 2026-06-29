@@ -1,18 +1,18 @@
 import { cn } from "@/lib/utils";
 
-type KimiCliBrandProps = {
+type KimiCodeBrandProps = {
   className?: string;
   compact?: boolean;
   withSubtitle?: boolean;
   subtitle?: string;
 };
 
-export function KimiCliBrand({
+export function KimiCodeBrand({
   className,
   compact = false,
   withSubtitle = false,
   subtitle = "Desktop Shell",
-}: KimiCliBrandProps) {
+}: KimiCodeBrandProps) {
   return (
     <div className={cn("kimi-brand", compact && "compact", className)}>
       <img src="/kimilogo.png" alt="Kimi" width={compact ? 20 : 24} height={compact ? 20 : 24} className="kimi-brand-logo" />

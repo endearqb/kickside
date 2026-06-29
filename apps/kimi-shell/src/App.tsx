@@ -74,10 +74,10 @@ function App() {
   );
   const kimiLoginBannerTitle =
     shell.status?.kimiLoginHealth.state === "error"
-      ? "Kimi 登录检测异常"
-      : "Kimi 登录需要重新验证";
+      ? "Kimi Code Auth 检测异常"
+      : "Kimi Code Auth 需要重新验证";
   const kimiLoginBannerSummary =
-    shell.status?.kimiLoginHealth.message?.trim() || "最近一次检测表明当前登录状态不可用。";
+    shell.status?.kimiLoginHealth.message?.trim() || "最近一次检测表明当前认证状态不可用。";
   const kimiLoginBannerMeta = [
     `状态：${formatKimiLoginHealthState(shell.status?.kimiLoginHealth.state)}`,
     `来源：${formatKimiLoginHealthSource(shell.status?.kimiLoginHealth.source)}`,
@@ -171,7 +171,7 @@ function App() {
     diagnosticsBusy: shell.diagnosticsBusy,
     kimiDoctorBusy: shell.kimiDoctorBusy,
     contextMenuBusy: shell.contextMenuBusy,
-    loginProbeBusy: shell.loginProbeBusy,
+    kimiCodeAuthBusy: shell.kimiCodeAuthBusy,
     mainWindowCloseBehavior: shell.mainWindowCloseBehavior,
     bridgeSettings: shell.bridgeSettings,
     bridgeStatus: shell.bridgeStatus,
@@ -215,18 +215,18 @@ function App() {
     selectedWorkspaceSkillContainerKind: shell.selectedWorkspaceSkillContainerKind,
     kimiPathInput: shell.kimiPathInput,
     workDirInput: shell.workDirInput,
-    kimiApiConfigView: shell.kimiApiConfigView,
+    kimiCodeAccessSummary: shell.kimiCodeAccessSummary,
     kimiApiKeyInput: shell.kimiApiKeyInput,
     onKimiApiKeyInputChange: shell.setKimiApiKeyInput,
     setActiveControlSection: shell.setActiveControlSection,
     setActiveRuntimePanel: shell.setActiveRuntimePanel,
     onWorkDirInputChange: shell.setWorkDirInput,
-    configCenterView: shell.configCenterView,
-    configCenterDraft: shell.configCenterDraft,
-    configCenterBusy: shell.configCenterBusy,
-    configCenterDirty: shell.configCenterDirty,
-    configCenterTesting: shell.configCenterTesting,
-    configCenterTestResult: shell.configCenterTestResult,
+    kimiCodeAccessView: shell.kimiCodeAccessView,
+    kimiCodeAccessDraft: shell.kimiCodeAccessDraft,
+    kimiCodeAccessBusy: shell.kimiCodeAccessBusy,
+    kimiCodeAccessDirty: shell.kimiCodeAccessDirty,
+    kimiCodeAccessTesting: shell.kimiCodeAccessTesting,
+    kimiCodeAccessTestResult: shell.kimiCodeAccessTestResult,
     installProbe: shell.installProbe,
     installSource: shell.installSource,
     installSettings: shell.installSettings,
@@ -276,15 +276,14 @@ function App() {
     onOpenLogs: shell.handleOpenLogs,
     onOpenFolder: shell.handleOpenFolder,
     onOpenKimiConfigDir: shell.handleOpenKimiConfigDir,
-    onSaveKimiCliApiConfig: shell.handleSaveKimiCliApiConfig,
-    onSetKimiCliApiAsDefault: shell.handleSetKimiCliApiAsDefault,
-    onSetKimiLoginAsDefault: shell.handleSetKimiLoginAsDefault,
+    onSaveKimiCodeApiKey: shell.handleSaveKimiCodeApiKey,
     onPickKimiPath: shell.handlePickKimiPath,
     onSavePathAndRetry: shell.handleSavePathAndRetry,
     onEnableContextMenu: shell.handleEnableContextMenu,
     onDisableContextMenu: shell.handleDisableContextMenu,
-    onProbeLogin: shell.handleProbeLogin,
-    onLogoutKimiLogin: shell.handleLogoutKimiLogin,
+    onStartKimiCodeAuth: shell.handleStartKimiCodeAuth,
+    onRefreshKimiCodeAuth: shell.handleRefreshKimiCodeAuth,
+    onLogoutKimiCodeAuth: shell.handleLogoutKimiCodeAuth,
     onPickWorkDir: shell.handlePickWorkDir,
     onPickBridgeConnectorDefaultWorkDir: shell.handlePickBridgeConnectorDefaultWorkDir,
     onSaveWorkDirAndRestart: shell.handleSaveWorkDirAndRestart,
@@ -328,9 +327,9 @@ function App() {
     onUpdateSkill: shell.handleUpdateSkill,
     onUninstallSkill: shell.handleUninstallSkill,
     onRecoverWorkspaceSkill: shell.handleRecoverWorkspaceSkill,
-    onConfigCenterDraftChange: shell.handleConfigCenterDraftChange,
-    onResetConfigCenterDraft: shell.handleResetConfigCenterDraft,
-    onSaveKimiCliConfigCenter: shell.handleSaveKimiCliConfigCenter,
+    onKimiCodeAccessDraftChange: shell.handleKimiCodeAccessDraftChange,
+    onResetKimiCodeAccessDraft: shell.handleResetKimiCodeAccessDraft,
+    onSaveKimiCodeAccessConfig: shell.handleSaveKimiCodeAccessConfig,
     onTestKimiCodeAccessConfig: shell.handleTestKimiCodeAccessConfig,
     onSaveMainWindowCloseBehavior: shell.handleSaveMainWindowCloseBehavior,
     onInstallSourceChange: shell.handleInstallSourceChange,
@@ -400,10 +399,10 @@ function App() {
             <button
               type="button"
               className="shell-login-banner-btn primary"
-              onClick={() => void shell.handleProbeLogin()}
-              disabled={shell.loginProbeBusy}
+              onClick={() => void shell.handleRefreshKimiCodeAuth()}
+              disabled={shell.kimiCodeAuthBusy}
             >
-              重新登录 / 检测
+              刷新认证状态
             </button>
             <button
               type="button"

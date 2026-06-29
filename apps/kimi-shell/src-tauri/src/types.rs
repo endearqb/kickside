@@ -1210,8 +1210,6 @@ pub struct DiagnosticsInfo {
     pub configured_work_dir: Option<String>,
     pub effective_work_dir: Option<String>,
     pub launch_command: Option<String>,
-    pub cli_contract_ok: Option<bool>,
-    pub cli_contract_error: Option<String>,
     pub runtime_origin: Option<String>,
     pub server_token_path: Option<String>,
     pub server_token_redacted: Option<String>,
@@ -1272,7 +1270,7 @@ pub enum OnboardingStep {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum LoginProbeState {
+pub enum KimiCodeAuthState {
     LoggedIn,
     LoginRequired,
     Unknown,
@@ -1300,7 +1298,7 @@ pub enum KimiLoginHealthState {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum KimiLoginHealthSource {
-    ManualProbe,
+    ManualRefresh,
     WorkspaceApi,
     #[default]
     BackendStartup,
@@ -1366,8 +1364,8 @@ pub struct OnboardingStatus {
     pub provider_api_active_provider: Option<String>,
     pub kimi_login_health: KimiLoginHealth,
     pub provider_api_health: ProviderApiHealth,
-    pub login_state: LoginProbeState,
-    pub login_message: Option<String>,
+    pub kimi_code_auth_state: KimiCodeAuthState,
+    pub kimi_code_auth_message: Option<String>,
     pub work_dir_configured: bool,
     pub work_dir: Option<String>,
     pub api_config_ack: bool,
@@ -1375,8 +1373,8 @@ pub struct OnboardingStatus {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LoginProbeResult {
-    pub state: LoginProbeState,
+pub struct KimiCodeAuthResult {
+    pub state: KimiCodeAuthState,
     pub message: String,
     pub kimi_path: Option<String>,
     pub exit_code: Option<i32>,
@@ -1392,196 +1390,6 @@ pub struct KimiDoctorResult {
     pub shell_path: Option<String>,
     pub stdout: String,
     pub stderr: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KimiCliApiConfigView {
-    pub config_path: String,
-    pub provider_id: String,
-    pub model: String,
-    pub base_url: String,
-    pub has_api_key: bool,
-    pub template_configured: bool,
-    pub is_default: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KimiCliApiConfigInput {
-    pub api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum TypedFieldType {
-    #[default]
-    String,
-    Integer,
-    Float,
-    Boolean,
-    StringArray,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct KeyValueEntry {
-    pub key: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TypedFieldEntry {
-    pub key: String,
-    pub value_type: TypedFieldType,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderEntry {
-    pub key: String,
-    pub provider_type: Option<String>,
-    pub api_key: Option<String>,
-    pub base_url: Option<String>,
-    pub auth_token: Option<String>,
-    pub app_id: Option<String>,
-    pub access_key_id: Option<String>,
-    pub secret_access_key: Option<String>,
-    pub region: Option<String>,
-    pub api_version: Option<String>,
-    pub deployment: Option<String>,
-    pub model_name: Option<String>,
-    #[serde(default)]
-    pub env: Vec<KeyValueEntry>,
-    #[serde(default)]
-    pub custom_headers: Vec<KeyValueEntry>,
-    #[serde(default)]
-    pub extra_fields: Vec<TypedFieldEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelEntry {
-    pub key: String,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub max_context_size: Option<i64>,
-    #[serde(default)]
-    pub capabilities: Vec<String>,
-    #[serde(default)]
-    pub extra_fields: Vec<TypedFieldEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ServiceEntry {
-    pub key: String,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub endpoint: Option<String>,
-    pub api_key: Option<String>,
-    pub timeout_ms: Option<i64>,
-    pub max_retries: Option<i64>,
-    #[serde(default)]
-    pub extra_fields: Vec<TypedFieldEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LoopControlEntry {
-    pub enabled: Option<bool>,
-    pub max_steps: Option<i64>,
-    pub max_retries: Option<i64>,
-    pub timeout_ms: Option<i64>,
-    #[serde(default)]
-    pub extra_fields: Vec<TypedFieldEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerEntry {
-    pub key: String,
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: Vec<KeyValueEntry>,
-    pub enabled: Option<bool>,
-    pub working_directory: Option<String>,
-    pub timeout_ms: Option<i64>,
-    #[serde(default)]
-    pub extra_fields: Vec<TypedFieldEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct EnvOverrideStatus {
-    pub key: String,
-    pub is_set: bool,
-    pub masked_value: Option<String>,
-    #[serde(default)]
-    pub overrides: Vec<String>,
-    pub priority: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct KimiCliConfigCenterInput {
-    #[serde(default)]
-    pub providers: Vec<ProviderEntry>,
-    #[serde(default)]
-    pub models: Vec<ModelEntry>,
-    #[serde(default)]
-    pub services: Vec<ServiceEntry>,
-    pub default_provider: Option<String>,
-    pub model: Option<String>,
-    pub default_model: Option<String>,
-    pub default_service: Option<String>,
-    pub default_editor: Option<String>,
-    pub default_yolo: Option<bool>,
-    pub default_yolo_mode: Option<String>,
-    pub default_thinking: Option<bool>,
-    pub default_thinking_mode: Option<String>,
-    pub local_model_disable_auto_pull: Option<bool>,
-    #[serde(default)]
-    pub loop_control: LoopControlEntry,
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServerEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct KimiCliConfigCenterView {
-    pub config_path: String,
-    pub config_dir: String,
-    pub data_dir: String,
-    pub data_dir_env_source: Option<String>,
-    #[serde(default)]
-    pub providers: Vec<ProviderEntry>,
-    #[serde(default)]
-    pub models: Vec<ModelEntry>,
-    #[serde(default)]
-    pub services: Vec<ServiceEntry>,
-    pub default_provider: Option<String>,
-    pub model: Option<String>,
-    pub default_model: Option<String>,
-    pub default_service: Option<String>,
-    pub default_editor: Option<String>,
-    pub default_yolo: Option<bool>,
-    pub default_yolo_mode: Option<String>,
-    pub default_thinking: Option<bool>,
-    pub default_thinking_mode: Option<String>,
-    pub local_model_disable_auto_pull: Option<bool>,
-    #[serde(default)]
-    pub loop_control: LoopControlEntry,
-    #[serde(default)]
-    pub mcp_servers: Vec<McpServerEntry>,
-    #[serde(default)]
-    pub env_overrides: Vec<EnvOverrideStatus>,
-    #[serde(default)]
-    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -618,7 +618,7 @@ fn runtime_api_ready(app: &AppHandle) -> anyhow::Result<bool> {
     Ok(runtime.runtime_origin.is_some() && runtime.server_token_path.is_some())
 }
 
-fn require_runtime_api_client(app: &AppHandle) -> Result<ApiV1Client, String> {
+pub(crate) fn require_runtime_api_client(app: &AppHandle) -> Result<ApiV1Client, String> {
     let (origin, token_path) = {
         let state = app.state::<AppState>();
         let runtime = state

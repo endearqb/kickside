@@ -183,6 +183,23 @@ describe("workspace grid store", () => {
     });
   });
 
+  it("reconfigures a pane to a server session", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "ses_123",
+      workDir: "D:/work",
+    });
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-code");
+    expect(pane).toMatchObject({
+      kind: "code",
+      sessionId: "ses_123",
+      workDir: "D:/work",
+    });
+  });
+
   it("does not persist URL fragments", () => {
     const store = createWorkspaceGridStore(undefined, null);
     const paneId = store.getState().addPane({

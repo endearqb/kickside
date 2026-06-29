@@ -10,7 +10,7 @@ import type {
   PrefillStatusState,
   StartupMonitorStatus,
 } from "@/app/types";
-import { KimiCliBrand } from "@/components/kimi-cli-brand";
+import { KimiCodeBrand } from "@/components/kimi-code-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { Button } from "@/components/ui/button";
 import { pickRandomAgentTip } from "@/lib/agentTips";
@@ -388,7 +388,7 @@ export function PrefillApp() {
       <header className="prefill-titlebar titlebar" onMouseDown={handleTitlebarMouseDown}>
         <div className="prefill-titlebar-left">
           <div className="prefill-titlebar-brand titlebar-drag">
-            <KimiCliBrand compact />
+            <KimiCodeBrand compact />
           </div>
         </div>
 

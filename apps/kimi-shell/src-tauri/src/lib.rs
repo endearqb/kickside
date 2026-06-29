@@ -7,7 +7,6 @@ mod bridge_host_control;
 mod bridge_http_client;
 mod bridge_manager;
 mod bridge_settings_store;
-mod cli_contract;
 mod command_utils;
 mod context_menu;
 mod enhanced_web;
@@ -38,6 +37,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Instant;
 
+use serde::Deserialize;
+use serde_json::json;
 use tauri::{ipc::Channel, AppHandle, Emitter, Manager, RunEvent, State};
 use tauri_plugin_global_shortcut::ShortcutState;
 
@@ -49,13 +50,12 @@ use types::{
     BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo, DiscoveredSkillDetail,
     FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
     InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
-    InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCliApiConfigInput,
-    KimiCliApiConfigView, KimiCliConfigCenterInput, KimiCliConfigCenterView,
-    KimiCodeAccessConfigInput, KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult,
-    KimiCodeAccessConfigView, KimiDoctorResult, KimiLoginHealthSource, KimiLoginHealthState,
-    LoginProbeResult, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
-    OnboardingStep, PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload,
-    SkillApplyResult, SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
+    InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCodeAccessConfigInput,
+    KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult, KimiCodeAccessConfigView,
+    KimiCodeAuthResult, KimiDoctorResult, KimiLoginHealthSource, KimiLoginHealthState,
+    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
+    PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
+    SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
     SkillRecommendation, StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
     StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
     SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
@@ -1009,11 +1009,6 @@ fn open_kimi_config_dir() -> Result<(), String> {
     backend_manager::open_kimi_config_dir()
 }
 
-#[tauri::command]
-fn load_kimi_cli_api_config() -> Result<KimiCliApiConfigView, String> {
-    backend_manager::load_kimi_cli_api_config()
-}
-
 fn sync_provider_api_snapshot_after_config_change(app: &AppHandle) -> Result<(), String> {
     auth_state::reset_provider_api_health(app)?;
     let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
@@ -1021,38 +1016,6 @@ fn sync_provider_api_snapshot_after_config_change(app: &AppHandle) -> Result<(),
         auth_state::resolve_auth_mode_snapshot(app, settings.onboarding_step_acks.login_verified)?;
     auth_state::sync_runtime_auth_snapshot(app, &auth_snapshot)?;
     Ok(())
-}
-
-#[tauri::command]
-fn save_kimi_cli_api_config(app: AppHandle, input: KimiCliApiConfigInput) -> Result<(), String> {
-    backend_manager::save_kimi_cli_api_config(&app, input)?;
-    sync_provider_api_snapshot_after_config_change(&app)
-}
-
-#[tauri::command]
-fn set_kimi_cli_api_as_default(app: AppHandle) -> Result<(), String> {
-    backend_manager::set_kimi_cli_api_as_default(&app)?;
-    sync_provider_api_snapshot_after_config_change(&app)
-}
-
-#[tauri::command]
-fn set_kimi_login_as_default(app: AppHandle) -> Result<(), String> {
-    backend_manager::set_kimi_login_as_default(&app)?;
-    sync_provider_api_snapshot_after_config_change(&app)
-}
-
-#[tauri::command]
-fn load_kimi_cli_config_center() -> Result<KimiCliConfigCenterView, String> {
-    backend_manager::load_kimi_cli_config_center()
-}
-
-#[tauri::command]
-fn save_kimi_cli_config_center(
-    app: AppHandle,
-    input: KimiCliConfigCenterInput,
-) -> Result<(), String> {
-    backend_manager::save_kimi_cli_config_center(&app, input)?;
-    sync_provider_api_snapshot_after_config_change(&app)
 }
 
 #[tauri::command]
@@ -1125,7 +1088,7 @@ fn install_kimi_dependencies(
 }
 
 #[tauri::command]
-fn install_kimi_cli(
+fn install_kimi_code(
     app: AppHandle,
     state: State<install_manager::InstallManager>,
     source: InstallSource,
@@ -1134,7 +1097,7 @@ fn install_kimi_cli(
 }
 
 #[tauri::command]
-fn upgrade_kimi_cli(
+fn upgrade_kimi_code(
     app: AppHandle,
     state: State<install_manager::InstallManager>,
     source: InstallSource,
@@ -1143,7 +1106,7 @@ fn upgrade_kimi_cli(
 }
 
 #[tauri::command]
-fn uninstall_kimi_cli(
+fn uninstall_kimi_code(
     app: AppHandle,
     state: State<install_manager::InstallManager>,
     source: InstallSource,
@@ -1228,8 +1191,6 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         detected_kimi_path,
         effective_work_dir,
         launch_command,
-        cli_contract_ok,
-        cli_contract_error,
         runtime_origin,
         server_token_path,
         server_token_redacted,
@@ -1279,8 +1240,6 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             runtime.launch_command.clone(),
-            runtime.cli_contract_ok,
-            runtime.cli_contract_error.clone(),
             runtime.runtime_origin.clone(),
             runtime
                 .server_token_path
@@ -1347,8 +1306,6 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         configured_work_dir: settings.work_dir,
         effective_work_dir,
         launch_command,
-        cli_contract_ok,
-        cli_contract_error,
         runtime_origin,
         server_token_path,
         server_token_redacted,
@@ -1454,76 +1411,149 @@ fn ack_api_config_step(app: AppHandle, acknowledged: Option<bool>) -> Result<(),
     settings_store::save(&app, &settings).map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct KimiCodeAuthSummary {
+    #[serde(default)]
+    ready: bool,
+    #[serde(default, alias = "managedProvider")]
+    managed_provider: Option<KimiCodeManagedProviderAuth>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct KimiCodeManagedProviderAuth {
+    #[serde(default)]
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KimiCodeOAuthFlowStart {
+    user_code: String,
+    verification_uri_complete: String,
+    expires_in: u64,
+}
+
 #[tauri::command]
-fn probe_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
-    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
-    let auth_snapshot =
-        auth_state::resolve_auth_mode_snapshot(&app, settings.onboarding_step_acks.login_verified)?;
-    auth_state::sync_runtime_auth_snapshot(&app, &auth_snapshot)?;
-    let kimi_path = match resolve_kimi_path_for_login(&app, &settings) {
-        Ok(path) => path,
+fn start_kimi_code_auth(app: AppHandle) -> Result<KimiCodeAuthResult, String> {
+    let client = workspace_session::require_runtime_api_client(&app)?;
+    let flow = client
+        .post::<_, KimiCodeOAuthFlowStart>("oauth/login", &json!({}))
+        .map_err(|error| format!("POST `/api/v1/oauth/login` failed: {error:#}"))?;
+    backend_manager::open_external_url(&app, &flow.verification_uri_complete)?;
+    let message = kimi_code_login_message(&flow);
+    auth_state::update_kimi_login_health(
+        &app,
+        KimiLoginHealthState::AuthRequired,
+        KimiLoginHealthSource::WorkspaceApi,
+        message.clone(),
+        None,
+    )?;
+
+    Ok(KimiCodeAuthResult {
+        state: types::KimiCodeAuthState::LoginRequired,
+        message,
+        kimi_path: current_runtime_kimi_path(&app),
+        exit_code: None,
+    })
+}
+
+#[tauri::command]
+fn refresh_kimi_code_auth(app: AppHandle) -> Result<KimiCodeAuthResult, String> {
+    load_kimi_code_auth(&app)
+}
+
+fn load_kimi_code_auth(app: &AppHandle) -> Result<KimiCodeAuthResult, String> {
+    let client = match workspace_session::require_runtime_api_client(app) {
+        Ok(client) => client,
         Err(error) => {
+            let message = format!("Kimi Code Server 尚未就绪，无法刷新认证状态：{error}");
             auth_state::update_kimi_login_health(
-                &app,
-                KimiLoginHealthState::Error,
-                KimiLoginHealthSource::ManualProbe,
-                error.clone(),
+                app,
+                KimiLoginHealthState::Unknown,
+                KimiLoginHealthSource::WorkspaceApi,
+                message.clone(),
                 None,
             )?;
-            return Err(error);
+            return Ok(KimiCodeAuthResult {
+                state: types::KimiCodeAuthState::Unknown,
+                message,
+                kimi_path: current_runtime_kimi_path(app),
+                exit_code: None,
+            });
         }
     };
 
-    let mut process = Command::new(&kimi_path);
-    command_utils::configure_kimi_query_command(&mut process);
-    let output = process
-        .arg("login")
-        .arg("--json")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
-        .output()
-        .map_err(|error| {
-            let detail = format!(
-                "failed to run `{} login --json`: {}",
-                kimi_path.display(),
-                error
-            );
-            let _ = auth_state::update_kimi_login_health(
-                &app,
+    let summary = match client.get::<KimiCodeAuthSummary>("auth") {
+        Ok(summary) => summary,
+        Err(error) => {
+            let message = format!("Kimi Code Server `/api/v1/auth` 请求失败：{error:#}");
+            auth_state::update_kimi_login_health(
+                app,
                 KimiLoginHealthState::Error,
-                KimiLoginHealthSource::ManualProbe,
-                detail.clone(),
+                KimiLoginHealthSource::WorkspaceApi,
+                message.clone(),
                 None,
-            );
-            detail
-        })?;
+            )?;
+            return Ok(KimiCodeAuthResult {
+                state: types::KimiCodeAuthState::Unknown,
+                message,
+                kimi_path: current_runtime_kimi_path(app),
+                exit_code: None,
+            });
+        }
+    };
 
-    let message = summarize_command_output(
-        &output,
-        "Login command completed.",
-        "Login command failed. Please run `kimi login` manually and try again.",
-    );
-    let health_state = if output.status.success() {
+    let health_state = if summary.ready {
         KimiLoginHealthState::Verified
     } else {
         KimiLoginHealthState::AuthRequired
     };
-
+    let message = kimi_code_auth_message(&summary);
     auth_state::update_kimi_login_health(
-        &app,
+        app,
         health_state,
-        KimiLoginHealthSource::ManualProbe,
+        KimiLoginHealthSource::WorkspaceApi,
         message.clone(),
-        output.status.code(),
+        None,
     )?;
-    let state = auth_state::login_probe_state_from_health(health_state);
 
-    Ok(LoginProbeResult {
-        state,
+    Ok(KimiCodeAuthResult {
+        state: auth_state::kimi_code_auth_state_from_health(health_state),
         message,
-        kimi_path: Some(kimi_path.to_string_lossy().to_string()),
-        exit_code: output.status.code(),
+        kimi_path: current_runtime_kimi_path(app),
+        exit_code: None,
     })
+}
+
+fn kimi_code_auth_message(summary: &KimiCodeAuthSummary) -> String {
+    let managed_status = summary
+        .managed_provider
+        .as_ref()
+        .and_then(|provider| provider.status.as_deref())
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+        .unwrap_or("-");
+
+    if summary.ready {
+        format!("Kimi Code Server 认证已就绪（managed provider: {managed_status}）。")
+    } else {
+        format!("Kimi Code Server 认证未就绪（managed provider: {managed_status}）。请在官方 Kimi Code 界面完成登录后刷新。")
+    }
+}
+
+fn kimi_code_login_message(flow: &KimiCodeOAuthFlowStart) -> String {
+    format!(
+        "已打开 Kimi Code 登录页面。验证码：{}；有效期约 {} 秒。",
+        flow.user_code, flow.expires_in
+    )
+}
+
+fn current_runtime_kimi_path(app: &AppHandle) -> Option<String> {
+    let state = app.state::<AppState>();
+    let runtime = state.runtime.lock().ok()?;
+    runtime
+        .detected_kimi_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1563,67 +1593,25 @@ fn run_kimi_doctor(app: AppHandle) -> Result<KimiDoctorResult, String> {
 }
 
 #[tauri::command]
-fn logout_kimi_login(app: AppHandle) -> Result<LoginProbeResult, String> {
-    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
-    let auth_snapshot =
-        auth_state::resolve_auth_mode_snapshot(&app, settings.onboarding_step_acks.login_verified)?;
-    auth_state::sync_runtime_auth_snapshot(&app, &auth_snapshot)?;
-    let kimi_path = match resolve_kimi_path_for_login(&app, &settings) {
-        Ok(path) => path,
-        Err(error) => {
-            auth_state::update_kimi_login_health(
-                &app,
-                KimiLoginHealthState::Error,
-                KimiLoginHealthSource::ManualProbe,
-                error.clone(),
-                None,
-            )?;
-            return Err(error);
-        }
-    };
-
-    let mut process = Command::new(&kimi_path);
-    command_utils::configure_kimi_query_command(&mut process);
-    let output = process
-        .arg("logout")
-        .arg("--json")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUTF8", "1")
-        .output()
-        .map_err(|error| {
-            let detail = format!(
-                "failed to run `{} logout --json`: {}",
-                kimi_path.display(),
-                error
-            );
-            let _ = auth_state::update_kimi_login_health(
-                &app,
-                KimiLoginHealthState::Error,
-                KimiLoginHealthSource::ManualProbe,
-                detail.clone(),
-                None,
-            );
-            detail
-        })?;
-
-    let message = summarize_command_output(
-        &output,
-        "Logout command completed.",
-        "Logout command finished with a non-zero exit code.",
-    );
+fn logout_kimi_code_auth(app: AppHandle) -> Result<KimiCodeAuthResult, String> {
+    let client = workspace_session::require_runtime_api_client(&app)?;
+    client
+        .post_empty("oauth/logout", &json!({}))
+        .map_err(|error| format!("POST `/api/v1/oauth/logout` failed: {error:#}"))?;
+    let message = "已通过 Kimi Code Server 注销登录。".to_string();
     auth_state::update_kimi_login_health(
         &app,
         KimiLoginHealthState::AuthRequired,
-        KimiLoginHealthSource::ManualProbe,
+        KimiLoginHealthSource::WorkspaceApi,
         message.clone(),
-        output.status.code(),
+        None,
     )?;
 
-    Ok(LoginProbeResult {
-        state: types::LoginProbeState::LoginRequired,
+    Ok(KimiCodeAuthResult {
+        state: types::KimiCodeAuthState::LoginRequired,
         message,
-        kimi_path: Some(kimi_path.to_string_lossy().to_string()),
-        exit_code: output.status.code(),
+        kimi_path: current_runtime_kimi_path(&app),
+        exit_code: None,
     })
 }
 
@@ -1797,12 +1785,6 @@ pub fn run() {
             open_external_url,
             open_folder,
             open_kimi_config_dir,
-            load_kimi_cli_api_config,
-            save_kimi_cli_api_config,
-            set_kimi_cli_api_as_default,
-            set_kimi_login_as_default,
-            load_kimi_cli_config_center,
-            save_kimi_cli_config_center,
             load_kimi_code_access_config,
             save_kimi_code_access_config,
             test_kimi_code_access_config,
@@ -1812,9 +1794,9 @@ pub fn run() {
             start_install_task,
             cancel_install_task,
             install_kimi_dependencies,
-            install_kimi_cli,
-            upgrade_kimi_cli,
-            uninstall_kimi_cli,
+            install_kimi_code,
+            upgrade_kimi_code,
+            uninstall_kimi_code,
             install_nodejs,
             get_install_probe_status,
             get_install_settings,
@@ -1832,9 +1814,10 @@ pub fn run() {
             complete_onboarding,
             skip_onboarding,
             ack_api_config_step,
-            probe_kimi_login,
+            start_kimi_code_auth,
+            refresh_kimi_code_auth,
             run_kimi_doctor,
-            logout_kimi_login
+            logout_kimi_code_auth
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1950,8 +1933,9 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
     let kimi_installed = located_kimi_path.is_some();
     let detected_kimi_path = runtime_detected_kimi_path.or(located_kimi_path);
 
-    let login_state = auth_state::login_probe_state_from_health(kimi_login_health.state);
-    let login_message = if kimi_login_health.message.trim().is_empty() {
+    let kimi_code_auth_state =
+        auth_state::kimi_code_auth_state_from_health(kimi_login_health.state);
+    let kimi_code_auth_message = if kimi_login_health.message.trim().is_empty() {
         None
     } else {
         Some(kimi_login_health.message.clone())
@@ -1996,8 +1980,8 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         provider_api_active_provider: auth_snapshot.provider_api_active_provider,
         kimi_login_health,
         provider_api_health,
-        login_state,
-        login_message,
+        kimi_code_auth_state,
+        kimi_code_auth_message,
         work_dir_configured,
         work_dir,
         api_config_ack,
@@ -2028,7 +2012,7 @@ fn build_startup_monitor_status(
             reason: StartupMonitorReason::MissingKimi,
             elapsed_ms,
             backend_state,
-            detail: Some("未检测到 Kimi CLI，正在进入引导配置。".to_string()),
+            detail: Some("未检测到 Kimi Code，正在进入引导配置。".to_string()),
             target_route: Some(StartupMonitorTargetRoute::Onboarding),
         };
     }
@@ -2278,35 +2262,6 @@ fn resolve_kimi_path_for_login(app: &AppHandle, settings: &AppSettings) -> Resul
     kimi_locator::locate(settings).map_err(|error| error.to_string())
 }
 
-fn summarize_command_output(
-    output: &std::process::Output,
-    success_fallback: &str,
-    failure_fallback: &str,
-) -> String {
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-    let merged = if !stdout.is_empty() && !stderr.is_empty() {
-        format!("{stdout}\n{stderr}")
-    } else if !stdout.is_empty() {
-        stdout
-    } else if !stderr.is_empty() {
-        stderr
-    } else if output.status.success() {
-        success_fallback.to_string()
-    } else {
-        failure_fallback.to_string()
-    };
-
-    let max_chars = 600usize;
-    if merged.chars().count() <= max_chars {
-        return merged;
-    }
-
-    let truncated: String = merged.chars().take(max_chars).collect();
-    format!("{truncated}…")
-}
-
 fn collect_kimi_doctor_redaction_values() -> Vec<String> {
     let mut values = Vec::new();
     for key in [
@@ -2321,26 +2276,9 @@ fn collect_kimi_doctor_redaction_values() -> Vec<String> {
         }
     }
 
-    if let Ok(config) = backend_manager::load_kimi_cli_config_center() {
-        for provider in config.providers {
-            push_doctor_redaction_value(&mut values, provider.api_key.as_deref());
-            push_doctor_redaction_value(&mut values, provider.auth_token.as_deref());
-            push_doctor_redaction_value(&mut values, provider.secret_access_key.as_deref());
-            for entry in provider.env.iter().chain(provider.custom_headers.iter()) {
-                if is_sensitive_key(&entry.key) {
-                    push_doctor_redaction_value(&mut values, Some(entry.value.as_str()));
-                }
-            }
-        }
-        for service in config.services {
-            push_doctor_redaction_value(&mut values, service.api_key.as_deref());
-        }
-        for server in config.mcp_servers {
-            for entry in server.env {
-                if is_sensitive_key(&entry.key) {
-                    push_doctor_redaction_value(&mut values, Some(entry.value.as_str()));
-                }
-            }
+    if let Ok(secrets) = backend_manager::collect_kimi_code_access_secret_values() {
+        for secret in secrets {
+            push_doctor_redaction_value(&mut values, Some(secret.as_str()));
         }
     }
 
@@ -2357,14 +2295,6 @@ fn push_doctor_redaction_value(values: &mut Vec<String>, value: Option<&str>) {
         return;
     }
     values.push(trimmed.to_string());
-}
-
-fn is_sensitive_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    lower.contains("key")
-        || lower.contains("token")
-        || lower.contains("secret")
-        || lower.contains("password")
 }
 
 fn redact_and_limit_doctor_output(output: &str, secrets: &[String]) -> String {
@@ -2774,5 +2704,38 @@ mod tests {
         assert_eq!(status.state, StartupMonitorState::Failed);
         assert_eq!(status.reason, StartupMonitorReason::StartupTimeout);
         assert!(status.target_route.is_none());
+    }
+
+    #[test]
+    fn auth_summary_message_tracks_ready_state() {
+        let ready = kimi_code_auth_message(&KimiCodeAuthSummary {
+            ready: true,
+            managed_provider: Some(KimiCodeManagedProviderAuth {
+                status: Some("authenticated".to_string()),
+            }),
+        });
+        let missing = kimi_code_auth_message(&KimiCodeAuthSummary {
+            ready: false,
+            managed_provider: Some(KimiCodeManagedProviderAuth {
+                status: Some("unauthenticated".to_string()),
+            }),
+        });
+
+        assert!(ready.contains("已就绪"));
+        assert!(ready.contains("authenticated"));
+        assert!(missing.contains("未就绪"));
+        assert!(missing.contains("unauthenticated"));
+    }
+
+    #[test]
+    fn oauth_login_message_includes_code_and_expiry() {
+        let message = kimi_code_login_message(&KimiCodeOAuthFlowStart {
+            user_code: "ABCD-EFGH".to_string(),
+            verification_uri_complete: "https://kimi.example/login?code=ABCD-EFGH".to_string(),
+            expires_in: 600,
+        });
+
+        assert!(message.contains("ABCD-EFGH"));
+        assert!(message.contains("600"));
     }
 }

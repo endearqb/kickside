@@ -46,9 +46,6 @@ const STARTUP_TRACE_LIMIT: usize = 48;
 const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(4);
 const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(15);
-const CHAT_EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-chat-external-link-bridge";
-const EXTERNAL_LINK_BRIDGE_SOURCE: &str = "kimi-shell-external-link-bridge";
-const CHAT_FRAME_ORIGIN: &str = "https://www.kimi.com";
 const DOWNLOAD_SAVE_DIALOG_TITLE: &str = "Save download";
 
 const PREFILL_WIDTH: f64 = 720.0;
@@ -64,129 +61,8 @@ const WORKSPACE_IMPORT_PICKER_HEIGHT: f64 = 560.0;
 const WORKSPACE_IMPORT_PICKER_MIN_WIDTH: f64 = 680.0;
 const WORKSPACE_IMPORT_PICKER_MIN_HEIGHT: f64 = 520.0;
 
-fn frame_external_link_bridge_script() -> String {
-    format!(
-        r##"
-(function () {{
-  const CHAT_BRIDGE_SOURCE = "{chat_bridge_source}";
-  const EXTERNAL_BRIDGE_SOURCE = "{external_bridge_source}";
-  const CHAT_ORIGIN = "{chat_origin}";
-
-  if (window.top === window) {{
-    return;
-  }}
-
-  try {{
-    var FRAME_ORIGIN = window.location.origin;
-  }} catch (_) {{
-    return;
-  }}
-
-  function resolveUrl(rawUrl) {{
-    if (!rawUrl) {{
-      return null;
-    }}
-    try {{
-      return new URL(String(rawUrl), window.location.href);
-    }} catch (_) {{
-      return null;
-    }}
-  }}
-
-  function isExternalHttpUrl(parsed) {{
-    if (!parsed) {{
-      return false;
-    }}
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-      return false;
-    }}
-    return parsed.origin !== FRAME_ORIGIN;
-  }}
-
-  function bridgeSource() {{
-    return FRAME_ORIGIN === CHAT_ORIGIN ? CHAT_BRIDGE_SOURCE : EXTERNAL_BRIDGE_SOURCE;
-  }}
-
-  function postExternalUrl(url, reason) {{
-    try {{
-      if (!window.parent || window.parent === window) {{
-        return;
-      }}
-      window.parent.postMessage(
-        {{
-          source: bridgeSource(),
-          url: url,
-          reason: reason || "unknown"
-        }},
-        "*"
-      );
-    }} catch (_) {{
-      // ignore
-    }}
-  }}
-
-  document.addEventListener(
-    "click",
-    function(event) {{
-      if (
-        event.defaultPrevented ||
-        event.button !== 0 ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {{
-        return;
-      }}
-
-      const target = event && event.target;
-      if (!(target instanceof Element)) {{
-        return;
-      }}
-
-      const anchor = target.closest("a[href]");
-      if (!(anchor instanceof HTMLAnchorElement)) {{
-        return;
-      }}
-
-      const href = anchor.getAttribute("href") || "";
-      if (!href || href.startsWith("#")) {{
-        return;
-      }}
-
-      const resolved = resolveUrl(href);
-      if (!isExternalHttpUrl(resolved)) {{
-        return;
-      }}
-
-      event.preventDefault();
-      event.stopPropagation();
-      postExternalUrl(resolved.toString(), "anchor_click");
-    }},
-    true
-  );
-
-  try {{
-    const nativeWindowOpen = window.open;
-    if (typeof nativeWindowOpen === "function") {{
-      window.open = function(url, target, features) {{
-        const resolved = resolveUrl(typeof url === "string" ? url : String(url || ""));
-        if (isExternalHttpUrl(resolved)) {{
-          postExternalUrl(resolved.toString(), "window_open");
-          return null;
-        }}
-        return nativeWindowOpen.call(window, url, target, features);
-      }};
-    }}
-  }} catch (_) {{
-    // ignore
-  }}
-}})();
-"##,
-        chat_bridge_source = CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
-        external_bridge_source = EXTERNAL_LINK_BRIDGE_SOURCE,
-        chat_origin = CHAT_FRAME_ORIGIN
-    )
+fn frame_workspace_bridge_script() -> String {
+    include_str!("frame_workspace_bridge.js").to_string()
 }
 
 #[cfg(windows)]
@@ -1599,10 +1475,10 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
 
     advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
     let app_for_load = app.clone();
-    let frame_external_link_script = frame_external_link_bridge_script();
+    let frame_workspace_bridge_script = frame_workspace_bridge_script();
     let builder = match WebviewWindowBuilder::from_config(app, &config) {
         Ok(builder) => builder
-            .initialization_script_for_all_frames(frame_external_link_script)
+            .initialization_script_for_all_frames(frame_workspace_bridge_script)
             .on_page_load(move |_window, payload| {
                 let url = payload.url().to_string();
                 if !is_shell_document_url(&url) {

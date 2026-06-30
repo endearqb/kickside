@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
-import { Check, Settings } from "lucide-react";
+import { Check } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
-import {
-  formatBackendState,
-  formatKimiLoginHealthSource,
-  formatKimiLoginHealthState,
-} from "@/app/types";
-import { IconButton } from "@/components/common/IconButton";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import {
@@ -20,75 +14,12 @@ import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
 import "./components/control-center/control-center.css";
 
-function formatLoginCheckTimestamp(value?: number) {
-  if (!value) {
-    return "未记录";
-  }
-
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function App() {
   const shell = useShellController();
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
   const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
-  const bridgeState = shell.bridgeStatus.state;
-  const bridgeStateLabel =
-    bridgeState === "running"
-      ? "IM Running"
-      : bridgeState === "starting" || bridgeState === "stopping"
-        ? "IM Working"
-        : bridgeState === "degraded"
-          ? "IM Error"
-          : bridgeState === "crashed"
-            ? "IM Error"
-            : "IM Pending";
-  const bridgeStateTone =
-    bridgeState === "running"
-      ? "ready"
-      : bridgeState === "starting" || bridgeState === "stopping"
-        ? "progress"
-        : bridgeState === "degraded" || bridgeState === "crashed"
-          ? "error"
-          : "todo";
-  const bridgeStartable = bridgeState === "stopped" || bridgeState === "crashed";
-  const statusChipClass =
-    shell.uiBackendState === "running"
-      ? "saved"
-      : shell.uiBackendState === "crashed"
-        ? "error"
-        : "unsaved";
-  const kimiLoginBannerVisible = Boolean(
-    shell.status?.authMode === "kimi_login" &&
-      shell.status.kimiLoginHealth?.needsAttention &&
-      shell.screen === "workspace" &&
-      !shell.controlCenterModalOpen,
-  );
-  const kimiLoginBannerTitle =
-    shell.status?.kimiLoginHealth.state === "error"
-      ? "Kimi Code Auth 检测异常"
-      : "Kimi Code Auth 需要重新验证";
-  const kimiLoginBannerSummary =
-    shell.status?.kimiLoginHealth.message?.trim() || "最近一次检测表明当前认证状态不可用。";
-  const kimiLoginBannerMeta = [
-    `状态：${formatKimiLoginHealthState(shell.status?.kimiLoginHealth.state)}`,
-    `来源：${formatKimiLoginHealthSource(shell.status?.kimiLoginHealth.source)}`,
-    `时间：${formatLoginCheckTimestamp(shell.status?.kimiLoginHealth.checkedAtMs)}`,
-    shell.status?.kimiLoginHealth.exitCode != null
-      ? `退出码：${shell.status.kimiLoginHealth.exitCode}`
-      : null,
-  ]
-    .filter((item): item is string => Boolean(item))
-    .join(" · ");
-
   useEffect(() => {
     if (!shell.controlCenterModalOpen) {
       return;
@@ -171,7 +102,6 @@ function App() {
     diagnosticsBusy: shell.diagnosticsBusy,
     kimiDoctorBusy: shell.kimiDoctorBusy,
     contextMenuBusy: shell.contextMenuBusy,
-    kimiCodeAuthBusy: shell.kimiCodeAuthBusy,
     mainWindowCloseBehavior: shell.mainWindowCloseBehavior,
     bridgeSettings: shell.bridgeSettings,
     bridgeStatus: shell.bridgeStatus,
@@ -216,8 +146,6 @@ function App() {
     kimiPathInput: shell.kimiPathInput,
     workDirInput: shell.workDirInput,
     kimiCodeAccessSummary: shell.kimiCodeAccessSummary,
-    kimiApiKeyInput: shell.kimiApiKeyInput,
-    onKimiApiKeyInputChange: shell.setKimiApiKeyInput,
     setActiveControlSection: shell.setActiveControlSection,
     setActiveRuntimePanel: shell.setActiveRuntimePanel,
     onWorkDirInputChange: shell.setWorkDirInput,
@@ -231,8 +159,6 @@ function App() {
     installSource: shell.installSource,
     installSettings: shell.installSettings,
     installSettingsBusy: shell.installSettingsBusy,
-    workspaceWebSettings: shell.workspaceWebSettings,
-    workspaceWebSettingsBusy: shell.workspaceWebSettingsBusy,
     installMirrorHealthReport: shell.installMirrorHealthReport,
     installMirrorHealthBusy: shell.installMirrorHealthBusy,
     powershellPreflight: shell.powershellPreflight,
@@ -276,14 +202,10 @@ function App() {
     onOpenLogs: shell.handleOpenLogs,
     onOpenFolder: shell.handleOpenFolder,
     onOpenKimiConfigDir: shell.handleOpenKimiConfigDir,
-    onSaveKimiCodeApiKey: shell.handleSaveKimiCodeApiKey,
     onPickKimiPath: shell.handlePickKimiPath,
     onSavePathAndRetry: shell.handleSavePathAndRetry,
     onEnableContextMenu: shell.handleEnableContextMenu,
     onDisableContextMenu: shell.handleDisableContextMenu,
-    onStartKimiCodeAuth: shell.handleStartKimiCodeAuth,
-    onRefreshKimiCodeAuth: shell.handleRefreshKimiCodeAuth,
-    onLogoutKimiCodeAuth: shell.handleLogoutKimiCodeAuth,
     onPickWorkDir: shell.handlePickWorkDir,
     onPickBridgeConnectorDefaultWorkDir: shell.handlePickBridgeConnectorDefaultWorkDir,
     onSaveWorkDirAndRestart: shell.handleSaveWorkDirAndRestart,
@@ -334,9 +256,6 @@ function App() {
     onSaveMainWindowCloseBehavior: shell.handleSaveMainWindowCloseBehavior,
     onInstallSourceChange: shell.handleInstallSourceChange,
     onSaveInstallSettings: shell.handleSaveInstallSettings,
-    onWorkspaceWebModeChange: shell.handleWorkspaceWebModeChange,
-    onWorkspaceWebAutoFallbackChange: shell.handleWorkspaceWebAutoFallbackChange,
-    onFallbackWorkspaceWebToOfficial: shell.handleFallbackWorkspaceWebToOfficial,
     onRefreshPowerShellPreflight: shell.refreshPowerShellPreflight,
     onInstallDependencies: shell.handleInstallDependencies,
     onInstallKimi: shell.handleInstallKimi,
@@ -357,24 +276,18 @@ function App() {
         screen={shell.screen}
         backendState={shell.uiBackendState}
         themeMode={shell.themeMode}
-        activeWorkspaceView={shell.activeWorkspaceView}
-        workspaceLayoutMode={shell.workspaceLayoutMode}
+        codeRemoteUrl={shell.remoteUrl}
+        chatRemoteUrl={shell.chatRemoteUrl}
         statusText={shell.statusText}
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}
         tauriRuntime={shell.tauriRuntime}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
-        sessionSkillCount={shell.sessionSkillCount}
-        activeSessionWorkDir={shell.status?.activeSessionWorkDir}
-        effectiveWorkDir={shell.status?.effectiveWorkDir}
         onRetry={shell.handleRuntimeOnlyRetry}
         onBackToStatus={shell.backToStatus}
-        onOpenSkillCenter={shell.openSkillCenter}
-        onOpenFolder={(path) => {
-          void shell.handleOpenFolder(path);
-        }}
-        onToggleWorkspaceView={shell.handleToggleWorkspaceView}
+        onOpenControlCenter={shell.openControlCenter}
+        onOpenExternalUrl={shell.handleOpenExternalUrl}
         onToggleTheme={shell.handleToggleThemeMode}
         onStartWindowDrag={shell.handleStartWindowDrag}
         onMinimizeWindow={shell.handleMinimizeWindow}
@@ -388,35 +301,6 @@ function App() {
         result={shell.workspaceImportResult}
         onDismiss={shell.handleDismissWorkspaceImportResult}
       />
-      {kimiLoginBannerVisible ? (
-        <div className="shell-login-banner" role="status" aria-live="polite">
-          <div className="shell-login-banner-copy">
-            <strong>{kimiLoginBannerTitle}</strong>
-            <p>{kimiLoginBannerSummary}</p>
-            <span>{kimiLoginBannerMeta}</span>
-          </div>
-          <div className="shell-login-banner-actions">
-            <button
-              type="button"
-              className="shell-login-banner-btn primary"
-              onClick={() => void shell.handleRefreshKimiCodeAuth()}
-              disabled={shell.kimiCodeAuthBusy}
-            >
-              刷新认证状态
-            </button>
-            <button
-              type="button"
-              className="shell-login-banner-btn"
-              onClick={() => {
-                shell.setActiveControlSection("onboarding");
-                shell.openControlCenter();
-              }}
-            >
-              打开控制中心
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       <div className="shell-stage">
         <div
@@ -595,58 +479,6 @@ function App() {
         </div>
       )}
 
-      <footer className="statusbar" aria-live="polite">
-        <div className="statusbar-left">
-          {shell.screen === "workspace" ? (
-            <IconButton
-              icon={<Settings size={14} />}
-              label="打开控制中心"
-              onClick={shell.openControlCenter}
-              className="ghost mini status-nav-btn status-settings-btn"
-            />
-          ) : null}
-          <span className={`status-indicator ${statusChipClass}`}>
-            {formatBackendState(shell.uiBackendState)}
-          </span>
-          <button
-            type="button"
-            className={`status-bridge-chip tone-${bridgeStateTone} ${bridgeStartable ? "is-action" : "is-static"}`}
-            onClick={() => {
-              if (!bridgeStartable) return;
-              void shell.handleStartBridge();
-            }}
-            disabled={!bridgeStartable || shell.bridgeBusy || shell.actionBusy}
-            aria-label={
-              bridgeStartable
-                ? "一键启动 IM Bridge"
-                : `IM Bridge 当前状态：${bridgeStateLabel}`
-            }
-            title={
-              bridgeStartable
-                ? "IM Bridge 未启动，点击一键启动"
-                : `IM Bridge 当前状态：${bridgeStateLabel}`
-            }
-          >
-            {bridgeStateLabel}
-          </button>
-          {shell.isLoading && (
-            <span className="status-text">Checking backend status...</span>
-          )}
-          {!shell.isLoading && shell.actionError && (
-            <span className="status-text status-error">{shell.actionError}</span>
-          )}
-          {!shell.isLoading && !shell.actionError && shell.status?.message && (
-            <span className="status-text">{shell.status.message}</span>
-          )}
-        </div>
-        <div className="statusbar-right">
-          <span className="status-meta">
-            Theme: {shell.themeMode === "light" ? "Light" : "Dark"}
-          </span>
-          <span className="status-meta">Port: {shell.status?.activePort ?? "-"}</span>
-          <span className="status-meta">PID: {shell.status?.pid ?? "-"}</span>
-        </div>
-      </footer>
     </main>
   );
 }

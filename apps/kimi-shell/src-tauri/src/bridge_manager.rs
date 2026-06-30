@@ -31,9 +31,6 @@ use crate::{
 const BRIDGE_START_TIMEOUT: Duration = Duration::from_secs(20);
 const BRIDGE_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const BRIDGE_POLL_INTERVAL: Duration = Duration::from_millis(120);
-const BUNDLED_BRIDGE_OPS_DIR_NAME: &str = "bridge-ops";
-const BRIDGE_SKILLS_DIR_SEGMENT: &str = ".agents";
-const BRIDGE_SKILLS_SUBDIR_SEGMENT: &str = "skills";
 const BRIDGE_START_BIND_RETRY_LIMIT: usize = 1;
 const DEV_WORKSPACE_FALLBACK_ENV: &str = "KIMI_DEV_ALLOW_WORKSPACE_FALLBACK";
 const BRIDGE_ADMIN_TOKEN_ENV: &str = "KIMI_IM_BRIDGE_ADMIN_TOKEN";
@@ -827,10 +824,6 @@ fn build_bridge_command(
         }
     }
 
-    if let Some(skills_dir) = resolve_bridge_skills_dir(app, settings)? {
-        command.arg("--skills-dir").arg(skills_dir);
-    }
-
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1303,112 +1296,6 @@ fn settings_channels(
         .collect()
 }
 
-pub fn ensure_bundled_bridge_ops_installed(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    let source_dir = resolve_bundled_bridge_ops_dir(app)?;
-    let skills_dir = user_global_skills_dir()?;
-    ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
-}
-
-fn ensure_bundled_bridge_ops_installed_from_source(
-    source_dir: &Path,
-    skills_dir: &Path,
-) -> anyhow::Result<PathBuf> {
-    let target_dir = skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
-    if target_dir.exists() {
-        if target_dir.is_dir() {
-            return Ok(skills_dir.to_path_buf());
-        }
-        return Err(anyhow::anyhow!(
-            "bundled bridge-ops target exists but is not a directory"
-        ));
-    }
-
-    fs::create_dir_all(&skills_dir)
-        .context("failed to create bundled bridge skill parent directory")?;
-    copy_directory_recursive(&source_dir, &target_dir)?;
-    Ok(skills_dir.to_path_buf())
-}
-
-fn resolve_bridge_skills_dir(
-    app: &AppHandle,
-    _settings: &BridgeSettings,
-) -> anyhow::Result<Option<PathBuf>> {
-    Ok(Some(ensure_bundled_bridge_ops_installed(app)?))
-}
-
-fn resolve_bundled_bridge_ops_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    let development_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("..")
-        .join("skills")
-        .join(BUNDLED_BRIDGE_OPS_DIR_NAME);
-    resolve_bundled_bridge_ops_dir_from_sources(
-        app.path().resource_dir().ok(),
-        development_dir,
-        dev_workspace_fallback_enabled(),
-    )
-}
-
-fn resolve_bundled_bridge_ops_dir_from_sources(
-    resource_dir: Option<PathBuf>,
-    development_dir: PathBuf,
-    allow_workspace_fallback: bool,
-) -> anyhow::Result<PathBuf> {
-    let mut checked = Vec::new();
-    if let Some(resource_dir) = resource_dir {
-        let resource_candidates = vec![
-            (
-                "resource_bundle:root",
-                resource_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME),
-            ),
-            (
-                "resource_bundle:skills_subdir",
-                resource_dir
-                    .join("skills")
-                    .join(BUNDLED_BRIDGE_OPS_DIR_NAME),
-            ),
-        ];
-        for (source, candidate) in resource_candidates {
-            if candidate.is_dir() {
-                return Ok(candidate);
-            }
-            checked.push(format!("{source}:missing"));
-        }
-    } else {
-        checked.push("resource_bundle:unavailable".to_string());
-    }
-
-    if allow_workspace_fallback {
-        if development_dir.is_dir() {
-            return Ok(development_dir);
-        }
-        checked.push("workspace_fallback:missing".to_string());
-    } else {
-        checked.push("workspace_fallback:disabled".to_string());
-    }
-
-    Err(anyhow::anyhow!(
-        "bundled bridge-ops skill not found; checked_sources={}",
-        checked.join(", ")
-    ))
-}
-
-fn user_global_skills_dir() -> anyhow::Result<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .or_else(|| {
-            let drive = std::env::var_os("HOMEDRIVE")?;
-            let path = std::env::var_os("HOMEPATH")?;
-            Some(PathBuf::from(drive).join(path).into_os_string())
-        })
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("failed to resolve user home directory"))?;
-    Ok(home
-        .join(BRIDGE_SKILLS_DIR_SEGMENT)
-        .join(BRIDGE_SKILLS_SUBDIR_SEGMENT))
-}
-
 fn resolve_connector_default_work_dir(
     settings: &BridgeSettings,
     connector_id: &str,
@@ -1429,33 +1316,6 @@ fn resolve_connector_default_work_dir(
                 .filter(|value| !value.is_empty())
                 .map(str::to_string)
         })
-}
-
-fn copy_directory_recursive(source_dir: &Path, target_dir: &Path) -> anyhow::Result<()> {
-    if !source_dir.is_dir() {
-        return Err(anyhow::anyhow!(
-            "bundled bridge-ops source is not a directory"
-        ));
-    }
-    fs::create_dir_all(target_dir)
-        .context("failed to create bundled bridge-ops target directory")?;
-
-    for entry in
-        fs::read_dir(source_dir).context("failed to read bundled bridge-ops source directory")?
-    {
-        let entry = entry.context("failed to read bundled bridge-ops entry")?;
-        let source_path = entry.path();
-        let target_path = target_dir.join(entry.file_name());
-        let metadata = entry
-            .metadata()
-            .context("failed to read bundled bridge-ops entry metadata")?;
-        if metadata.is_dir() {
-            copy_directory_recursive(&source_path, &target_path)?;
-            continue;
-        }
-        fs::copy(&source_path, &target_path).context("failed to copy bundled bridge-ops file")?;
-    }
-    Ok(())
 }
 
 fn dev_workspace_fallback_enabled() -> bool {
@@ -2006,34 +1866,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_bundled_bridge_ops_dir_disables_workspace_fallback_by_default() {
-        let err = resolve_bundled_bridge_ops_dir_from_sources(
-            None,
-            PathBuf::from("D:\\MyProject\\kimi-app\\skills\\bridge-ops"),
-            false,
-        )
-        .expect_err("workspace fallback should be disabled by default");
-
-        let message = err.to_string();
-        assert!(message.contains("workspace_fallback:disabled"));
-        assert!(!message.contains("D:\\MyProject\\kimi-app"));
-    }
-
-    #[test]
-    fn resolve_bundled_bridge_ops_dir_allows_workspace_fallback_when_explicitly_enabled() {
-        let temp = TempDirGuard::new("bridge-ops-workspace-fallback");
-        let development_dir = temp.path.join("skills").join(BUNDLED_BRIDGE_OPS_DIR_NAME);
-        fs::create_dir_all(&development_dir).expect("development bridge-ops dir");
-        fs::write(development_dir.join("SKILL.md"), b"# bridge ops").expect("skill file");
-
-        let resolved =
-            resolve_bundled_bridge_ops_dir_from_sources(None, development_dir.clone(), true)
-                .expect("workspace fallback should resolve when explicitly enabled");
-
-        assert_eq!(resolved, development_dir);
-    }
-
-    #[test]
     fn resolve_connector_default_work_dir_prefers_connector_override_then_legacy_default() {
         let settings = BridgeSettings {
             enabled: true,
@@ -2085,40 +1917,6 @@ mod tests {
         assert_eq!(
             resolve_connector_default_work_dir(&settings, "missing").as_deref(),
             Some("D:/global-default")
-        );
-    }
-
-    #[test]
-    fn ensure_bundled_bridge_ops_installed_copies_skill_and_skips_existing_target() {
-        let temp = TempDirGuard::new("bundled-bridge-ops");
-        let source_dir = temp.path.join("source").join("bridge-ops");
-        let skills_dir = temp.path.join("global-skills");
-        let script_dir = source_dir.join("scripts");
-        fs::create_dir_all(&script_dir).expect("script dir");
-        fs::create_dir_all(&skills_dir).expect("skills dir");
-        fs::write(source_dir.join("SKILL.md"), b"# bundled bridge ops").expect("skill file");
-        fs::write(script_dir.join("bridge_ops.ps1"), b"Write-Host bundled").expect("script file");
-
-        let first_skills_dir =
-            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
-                .expect("bundled skill should install");
-        assert_eq!(first_skills_dir, skills_dir);
-        let installed_skill_dir = first_skills_dir.join(BUNDLED_BRIDGE_OPS_DIR_NAME);
-        assert!(installed_skill_dir.join("SKILL.md").exists());
-        assert!(installed_skill_dir
-            .join("scripts")
-            .join("bridge_ops.ps1")
-            .exists());
-
-        fs::write(installed_skill_dir.join("SKILL.md"), b"# user modified").expect("overwrite");
-
-        let second_skills_dir =
-            ensure_bundled_bridge_ops_installed_from_source(&source_dir, &skills_dir)
-                .expect("existing target should be preserved");
-        assert_eq!(second_skills_dir, first_skills_dir);
-        assert_eq!(
-            fs::read_to_string(installed_skill_dir.join("SKILL.md")).expect("read installed skill"),
-            "# user modified"
         );
     }
 

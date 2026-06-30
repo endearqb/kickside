@@ -21,9 +21,8 @@ pub fn resolve_auth_mode_snapshot(
     app: &AppHandle,
     login_verified_fallback: bool,
 ) -> Result<AuthModeSnapshot, String> {
-    let view = backend_manager::load_kimi_code_access_config(app).unwrap_or_default();
     let login_health = read_runtime_login_health(app, login_verified_fallback)?;
-    Ok(evaluate_auth_mode(&view, login_health.state))
+    Ok(evaluate_auth_mode_from_config(app, login_health.state)?)
 }
 
 pub fn evaluate_auth_mode(
@@ -131,8 +130,7 @@ pub fn update_kimi_login_health(
 ) -> Result<KimiLoginHealth, String> {
     let message = message.into().trim().to_string();
     let checked_at_ms = Some(unix_time_millis());
-    let view = backend_manager::load_kimi_code_access_config(app).unwrap_or_default();
-    let next_snapshot = evaluate_auth_mode(&view, next_state);
+    let next_snapshot = evaluate_auth_mode_from_config(app, next_state)?;
     let next = KimiLoginHealth {
         state: next_state,
         source,
@@ -259,6 +257,34 @@ fn sync_legacy_login_verified(app: &AppHandle, next_verified: bool) -> Result<()
     }
     settings.onboarding_step_acks.login_verified = next_verified;
     settings_store::save(app, &settings).map_err(|error| error.to_string())
+}
+
+fn evaluate_auth_mode_from_config(
+    app: &AppHandle,
+    kimi_login_state: KimiLoginHealthState,
+) -> Result<AuthModeSnapshot, String> {
+    let view = backend_manager::load_kimi_code_access_config(app)?;
+    if let Some(error) = view
+        .config_error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let message = format!("Kimi Code Access 配置读取失败：{error}");
+        let _ = update_provider_api_health(
+            app,
+            ProviderApiHealthState::Error,
+            ProviderApiHealthSource::BackendStartup,
+            message,
+            None,
+        );
+        return Ok(AuthModeSnapshot {
+            auth_mode: AuthMode::Unknown,
+            provider_api_configured: false,
+            provider_api_active_provider: None,
+        });
+    }
+    Ok(evaluate_auth_mode(&view, kimi_login_state))
 }
 
 fn normalize_string(value: &str) -> Option<String> {

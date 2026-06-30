@@ -26,55 +26,69 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
     let mut search_api_key = None;
     let mut fetch_base_url = None;
     let mut fetch_api_key = None;
+    let mut config_error = None;
     let mut warnings = Vec::new();
 
     if config_exists {
-        let raw = fs::read_to_string(&config_path).map_err(|error| {
-            format!(
-                "failed to read config file {}: {error}",
-                config_path.display()
-            )
-        })?;
-        let doc = parse_kimi_config_document(&raw, &config_path)?;
-        let root = doc.as_table();
-        let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID);
-        provider_base_url = provider.and_then(|table| table_string(table, "base_url"));
-        provider_api_key = provider.and_then(|table| table_string(table, "api_key"));
+        let doc = match fs::read_to_string(&config_path)
+            .map_err(|error| {
+                format!(
+                    "failed to read config file {}: {error}",
+                    config_path.display()
+                )
+            })
+            .and_then(|raw| parse_kimi_config_document(&raw, &config_path))
+        {
+            Ok(doc) => Some(doc),
+            Err(error) => {
+                warnings.push(format!("配置读取失败：{error}"));
+                config_error = Some(error);
+                None
+            }
+        };
 
-        model_exists = root
-            .get("models")
-            .and_then(Item::as_table)
-            .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
-            .and_then(Item::as_table)
-            .is_some_and(|table| {
-                table_string(table, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
-                    && table_string(table, "model").as_deref() == Some(KIMI_CODING_PLAN_MODEL_NAME)
-                    && table_i64(table, "max_context_size")
-                        == Some(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE)
-            });
+        if let Some(doc) = doc {
+            let root = doc.as_table();
+            let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID);
+            provider_base_url = provider.and_then(|table| table_string(table, "base_url"));
+            provider_api_key = provider.and_then(|table| table_string(table, "api_key"));
 
-        if provider_table(root, LEGACY_KIMI_CODING_PLAN_PROVIDER_ID).is_some()
-            || root
+            model_exists = root
                 .get("models")
                 .and_then(Item::as_table)
-                .and_then(|models| models.get(LEGACY_KIMI_CODING_PLAN_MODEL_ID))
+                .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
                 .and_then(Item::as_table)
-                .is_some()
-        {
-            warnings.push(
-                "发现旧版 Kimi App API 配置。建议迁移到新的 kimi-app-api-key provider。"
-                    .to_string(),
-            );
-        }
+                .is_some_and(|table| {
+                    table_string(table, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
+                        && table_string(table, "model").as_deref()
+                            == Some(KIMI_CODING_PLAN_MODEL_NAME)
+                        && table_i64(table, "max_context_size")
+                            == Some(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE)
+                });
 
-        search_base_url =
-            service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY).and_then(service_base_url);
-        search_api_key = service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY)
-            .and_then(|table| table_string(table, "api_key"));
-        fetch_base_url =
-            service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY).and_then(service_base_url);
-        fetch_api_key = service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY)
-            .and_then(|table| table_string(table, "api_key"));
+            if provider_table(root, LEGACY_KIMI_CODING_PLAN_PROVIDER_ID).is_some()
+                || root
+                    .get("models")
+                    .and_then(Item::as_table)
+                    .and_then(|models| models.get(LEGACY_KIMI_CODING_PLAN_MODEL_ID))
+                    .and_then(Item::as_table)
+                    .is_some()
+            {
+                warnings.push(
+                    "发现旧版 Kimi 小助手 API 配置。建议迁移到新的 kimi-app-api-key provider。"
+                        .to_string(),
+                );
+            }
+
+            search_base_url =
+                service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY).and_then(service_base_url);
+            search_api_key = service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY)
+                .and_then(|table| table_string(table, "api_key"));
+            fetch_base_url =
+                service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY).and_then(service_base_url);
+            fetch_api_key = service_table(root, KIMI_CODING_PLAN_FETCH_SERVICE_KEY)
+                .and_then(|table| table_string(table, "api_key"));
+        }
     }
 
     let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
@@ -86,6 +100,7 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
         kimi_code_home: kimi_code_home.to_string_lossy().to_string(),
         config_path: config_path.to_string_lossy().to_string(),
         config_exists,
+        config_error,
         provider: KimiCodeAccessConfigProviderView {
             id: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
             provider_type: "kimi".to_string(),
@@ -603,11 +618,25 @@ pub fn collect_kimi_code_access_secret_values() -> Result<Vec<String>, String> {
             config_path.display()
         )
     })?;
-    let doc = parse_kimi_config_document(&raw, &config_path)?;
-    let mut values = collect_kimi_code_access_secret_values_from_root(doc.as_table());
+    let mut values = match parse_kimi_config_document(&raw, &config_path) {
+        Ok(doc) => collect_kimi_code_access_secret_values_from_root(doc.as_table()),
+        Err(_) => collect_kimi_code_access_secret_values_from_raw(&raw),
+    };
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values.dedup();
     Ok(values)
+}
+
+fn collect_kimi_code_access_secret_values_from_raw(raw: &str) -> Vec<String> {
+    raw.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let value = trimmed.strip_prefix("api_key")?.trim_start();
+            let value = value.strip_prefix('=')?.trim();
+            Some(value.trim_matches(['"', '\'']).trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+        .collect()
 }
 
 fn collect_kimi_code_access_secret_values_from_root(root: &Table) -> Vec<String> {
@@ -970,6 +999,24 @@ api_key = "sk-other"
                 "sk-provider".to_string(),
                 "sk-search".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn raw_secret_collection_redacts_keys_when_config_is_damaged() {
+        let values = collect_kimi_code_access_secret_values_from_raw(
+            r#"
+[providers."kimi-app-api-key"]
+api_key = "sk-provider"
+bad toml
+[services.moonshot_search]
+api_key = 'sk-search'
+"#,
+        );
+
+        assert_eq!(
+            values,
+            vec!["sk-provider".to_string(), "sk-search".to_string()]
         );
     }
 }

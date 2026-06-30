@@ -244,7 +244,7 @@ export function KimiCodeAccessTaskContent({
             <div>
               <h4>Kimi Code 接入配置</h4>
               <p className="hint">
-                Kimi App 只维护 API Base URL、API Key、Search/Fetch 服务和 App 启动时的子 Agent 并发上限。
+                Kimi 小助手只维护 API Base URL、API Key、Search/Fetch 服务和 App 启动时的子 Agent 并发上限。
               </p>
             </div>
             <span className={`status-pill ${dirty ? "warning" : "success"}`}>
@@ -267,6 +267,9 @@ export function KimiCodeAccessTaskContent({
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
+          ) : null}
+          {view?.configError ? (
+            <p className="hint danger">配置文件无法解析：{view.configError}</p>
           ) : null}
         </section>
 
@@ -408,7 +411,7 @@ export function KimiCodeAccessTaskContent({
               icon={<FolderOpen size={14} />}
               onClick={() => void onOpenConfigDir()}
             >
-              打开官方配置目录
+              打开配置目录 / 查看备份
             </Button>
             <Button
               type="button"

@@ -2,8 +2,8 @@ import {
   useEffect,
   useRef,
   useState,
-  type DragEvent,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import {
@@ -15,15 +15,13 @@ import {
   Maximize2,
   MessageCircle,
   Minimize2,
-  Moon,
   RefreshCcw,
-  RefreshCwOff,
-  Sun,
   Trash2,
 } from "lucide-react";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
 import type { Theme, WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   type EmbeddedExternalWebviewBounds,
@@ -39,6 +37,7 @@ interface PaneFrameProps {
   slotLabel: string;
   active: boolean;
   maximized: boolean;
+  dragging: boolean;
   canAddPane: boolean;
   effectiveWorkDir?: string;
   themeMode: Theme;
@@ -67,11 +66,8 @@ interface PaneFrameProps {
   onAddPane: (kind: WorkspacePaneKind) => void;
   onConfigurePane: (kind: WorkspacePaneKind) => void;
   onRemovePane: () => void;
-  onSuspendPane: () => void;
   onResumePane: () => void;
-  onPaneThemeChange: (theme: Theme) => void;
-  onDragStart: (event: DragEvent<HTMLElement>) => void;
-  onDragEnd: () => void;
+  onPaneDragStart: (event: ReactPointerEvent<HTMLElement>) => void;
   onToggleMaximize: () => void;
 }
 
@@ -80,6 +76,7 @@ export function PaneFrame({
   slotLabel,
   active,
   maximized,
+  dragging,
   canAddPane,
   effectiveWorkDir,
   themeMode,
@@ -104,11 +101,8 @@ export function PaneFrame({
   onAddPane,
   onConfigurePane,
   onRemovePane,
-  onSuspendPane,
   onResumePane,
-  onPaneThemeChange,
-  onDragStart,
-  onDragEnd,
+  onPaneDragStart,
   onToggleMaximize,
 }: PaneFrameProps) {
   if (!pane) {
@@ -159,25 +153,44 @@ export function PaneFrame({
   const paneTheme = pane.theme ?? themeMode;
   const paneWorkDir =
     pane.kind === "code" ? pane.workDir?.trim() || effectiveWorkDir?.trim() || "" : "";
-  const nextPaneTheme = paneTheme === "dark" ? "light" : "dark";
+  const viewToggle =
+    pane.kind === "code"
+      ? {
+          target: "chat" as const,
+          label: "当前 Code，切换为 Chat",
+          icon: <Code2 size={14} aria-hidden />,
+          active: true,
+        }
+      : pane.kind === "chat"
+        ? {
+            target: "code" as const,
+            label: "当前 Chat，切换为 Code",
+            icon: <MessageCircle size={14} aria-hidden />,
+            active: true,
+          }
+        : {
+            target: "code" as const,
+            label: "切换为 Code",
+            icon: <Code2 size={14} aria-hidden />,
+            active: false,
+          };
 
   return (
     <article
-      className={`workspace-grid-pane${active ? " is-active" : ""}`}
+      className={`workspace-grid-pane${active ? " is-active" : ""}${
+        dragging ? " is-dragging-source" : ""
+      }`}
       onFocus={onActivate}
       onPointerDown={onActivate}
     >
       <header
         className="workspace-grid-pane-header"
-        draggable
-        onDragStart={(event) => {
+        onPointerDown={(event) => {
           if (event.target instanceof Element && event.target.closest("button")) {
-            event.preventDefault();
             return;
           }
-          onDragStart(event);
+          onPaneDragStart(event);
         }}
-        onDragEnd={onDragEnd}
       >
         <div className="workspace-grid-pane-title">
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
@@ -196,28 +209,11 @@ export function PaneFrame({
             </IconButton>
           ) : null}
           <IconButton
-            label={nextPaneTheme === "dark" ? "切换此窗格为深色主题" : "切换此窗格为浅色主题"}
-            onClick={() => onPaneThemeChange(nextPaneTheme)}
+            label={viewToggle.label}
+            onClick={() => onConfigurePane(viewToggle.target)}
+            active={viewToggle.active}
           >
-            {paneTheme === "dark" ? (
-              <Sun size={14} aria-hidden />
-            ) : (
-              <Moon size={14} aria-hidden />
-            )}
-          </IconButton>
-          <IconButton
-            label="切换为 Code"
-            onClick={() => onConfigurePane("code")}
-            active={pane.kind === "code"}
-          >
-            <Code2 size={14} aria-hidden />
-          </IconButton>
-          <IconButton
-            label="切换为 Chat"
-            onClick={() => onConfigurePane("chat")}
-            active={pane.kind === "chat"}
-          >
-            <MessageCircle size={14} aria-hidden />
+            {viewToggle.icon}
           </IconButton>
           <IconButton
             label={maximized ? "还原窗格" : "最大化窗格"}
@@ -229,15 +225,6 @@ export function PaneFrame({
               <Maximize2 size={14} aria-hidden />
             )}
           </IconButton>
-          {pane.mountPolicy === "suspended" ? (
-            <IconButton label="恢复挂载" onClick={onResumePane}>
-              <RefreshCcw size={14} aria-hidden />
-            </IconButton>
-          ) : (
-            <IconButton label="挂起窗格" onClick={onSuspendPane}>
-              <RefreshCwOff size={14} aria-hidden />
-            </IconButton>
-          )}
           <IconButton label="关闭窗格" onClick={onRemovePane}>
             <Trash2 size={14} aria-hidden />
           </IconButton>
@@ -673,7 +660,7 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function postThemeToFrame(
+export function postThemeToFrame(
   frame: HTMLIFrameElement | null,
   sourceUrl: string,
   theme: Theme,
@@ -738,7 +725,7 @@ function resolvePaneSource({
         : null;
     return {
       url: sessionUrl ?? codeRemoteUrl,
-      title: "Kimi Code Web",
+      title: getKimiAssistantDisplayName(),
       frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
       iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
       loadState: codePaneState,

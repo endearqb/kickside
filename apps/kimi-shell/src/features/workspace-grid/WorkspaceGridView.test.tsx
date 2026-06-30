@@ -3,6 +3,7 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   openExternalWebviewWindow,
@@ -10,6 +11,7 @@ import {
 import { createGridSession } from "@/services/workspaceGridService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
+import { postThemeToFrame } from "./PaneFrame";
 import { WorkspaceGridView } from "./WorkspaceGridView";
 
 vi.mock("@/services/externalWebviewService", () => ({
@@ -59,12 +61,15 @@ const props: WorkspaceViewProps = {
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.localStorage.clear();
+    if (typeof window.localStorage.clear === "function") {
+      window.localStorage.clear();
+    }
     useWorkspaceGridStore.setState(createDefaultWorkspaceGridState(100));
   });
 
   afterEach(() => {
     cleanup();
+    document.body.replaceChildren();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -91,7 +96,7 @@ describe("WorkspaceGridView", () => {
     render(<WorkspaceGridView {...props} />);
 
     await act(async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: "切换为 Code" })[1]);
+      fireEvent.click(screen.getByRole("button", { name: "当前 Chat，切换为 Code" }));
     });
 
     const pane = useWorkspaceGridStore
@@ -101,7 +106,7 @@ describe("WorkspaceGridView", () => {
     expect(pane).toMatchObject({
       kind: "code",
       sessionId: undefined,
-      title: "Kimi Code",
+      title: getKimiAssistantDisplayName(),
       workDir: "D:/work",
     });
   });
@@ -161,30 +166,63 @@ describe("WorkspaceGridView", () => {
     expect(props.onOpenFolder).toHaveBeenCalledWith("D:/work");
   });
 
-  it("stores an explicit theme only for the clicked pane", () => {
+  it("does not render pane theme controls in pane headers", () => {
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(
-      screen.getAllByRole("button", { name: "切换此窗格为深色主题" })[0],
-    );
-
-    const state = useWorkspaceGridStore.getState();
-    expect(state.panes.find((pane) => pane.id === "pane-code")?.theme).toBe(
-      "dark",
-    );
-    expect(state.panes.find((pane) => pane.id === "pane-chat")?.theme).toBeUndefined();
+    expect(screen.queryByRole("combobox", { name: "窗格主题" })).toBeNull();
   });
 
-  it("swaps panes by dragging one pane header onto another slot", () => {
+  it("keeps the active iframe node when changing layout presets", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    const iframeBefore = document.querySelector(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(iframeBefore).toBeTruthy();
+
+    act(() => {
+      useWorkspaceGridStore.getState().setPreset("2x2");
+    });
+
+    const iframeAfter = document.querySelector(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(iframeAfter).toBe(iframeBefore);
+    expect(props.onCodeFrameLoad).not.toHaveBeenCalled();
+  });
+
+  it("posts pane theme sync payloads to iframe origin", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "https://example.com/path";
+    document.body.append(frame);
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, "https://example.com/path", "dark");
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "dark" },
+      "https://example.com",
+    );
+  });
+
+  it("swaps panes by pointer-dragging one pane header onto another slot", () => {
     render(<WorkspaceGridView {...props} />);
 
     const headers = document.querySelectorAll(".workspace-grid-pane-header");
     const slots = document.querySelectorAll(".workspace-grid-slot");
-    const transfer = createDataTransfer();
+    const canvas = document.querySelector(".workspace-grid-canvas") as HTMLDivElement;
+    setElementRect(slots[0]!, rect(0, 0, 400, 300));
+    setElementRect(slots[1]!, rect(410, 0, 400, 300));
 
-    fireEvent.dragStart(headers[0]!, { dataTransfer: transfer });
-    fireEvent.dragOver(slots[1]!, { dataTransfer: transfer });
-    fireEvent.drop(slots[1]!, { dataTransfer: transfer });
+    fireEvent(headers[0]!, pointerEvent("pointerdown", 40, 12));
+    expect(canvas.classList.contains("is-pane-dragging")).toBe(true);
+
+    fireEvent(canvas, pointerEvent("pointermove", 450, 12));
+    expect(slots[1]!.classList.contains("is-drop-target")).toBe(true);
+
+    fireEvent(canvas, pointerEvent("pointerup", 450, 12));
 
     expect(useWorkspaceGridStore.getState().slots.map((slot) => slot.paneId)).toEqual([
       "pane-chat",
@@ -192,11 +230,12 @@ describe("WorkspaceGridView", () => {
     ]);
   });
 
-  it("can suspend and resume a pane", () => {
+  it("hides the pane header suspend button but can resume a suspended pane", () => {
+    useWorkspaceGridStore.getState().setPaneMountPolicy("pane-code", "suspended");
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "挂起窗格" })[0]);
-
+    expect(screen.queryByRole("button", { name: "挂起窗格" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "恢复挂载" })).toBeNull();
     expect(screen.getByText("窗格已挂起")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "恢复窗格" }));
     expect(useWorkspaceGridStore.getState().panes[0]?.mountPolicy).toBe("eager");
@@ -305,35 +344,34 @@ describe("WorkspaceGridView", () => {
   });
 });
 
-function pointerEvent(type: string, clientX: number): Event {
+function pointerEvent(type: string, clientX: number, clientY = 0): Event {
   const event = new Event(type, { bubbles: true });
   Object.defineProperty(event, "clientX", { value: clientX });
-  Object.defineProperty(event, "clientY", { value: 0 });
+  Object.defineProperty(event, "clientY", { value: clientY });
   Object.defineProperty(event, "pointerId", { value: 1 });
+  Object.defineProperty(event, "button", { value: 0 });
   return event;
 }
 
-function createDataTransfer(): DataTransfer {
-  const values = new Map<string, string>();
+function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
-    dropEffect: "none",
-    effectAllowed: "none",
-    files: [] as unknown as FileList,
-    items: [] as unknown as DataTransferItemList,
-    types: [],
-    clearData: vi.fn((format?: string) => {
-      if (format) {
-        values.delete(format);
-        return;
-      }
-      values.clear();
-    }),
-    getData: vi.fn((format: string) => values.get(format) ?? ""),
-    setData: vi.fn((format: string, data: string) => {
-      values.set(format, data);
-    }),
-    setDragImage: vi.fn(),
-  };
+    width,
+    height,
+    top,
+    right: left + width,
+    bottom: top + height,
+    left,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function setElementRect(element: Element, value: DOMRect) {
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => value,
+  });
 }
 
 function addExternalPaneToGrid() {

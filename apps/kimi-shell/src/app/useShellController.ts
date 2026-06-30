@@ -11,7 +11,11 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { isKnownWorkspaceIframeSource } from "@/app/linkBridge";
+import {
+  isKnownWorkspaceIframeSource,
+  normalizeExternalOpenUrl,
+} from "@/app/linkBridge";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import {
   CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
@@ -77,7 +81,6 @@ import type {
   MainWindowCloseBehavior,
   MainWindowCloseDecisionInput,
   MainWindowCloseDecisionRequestPayload,
-  KimiCodeAuthResult,
   OnboardingStatus,
   OpenRequestErrorPayload,
   PrefillBridgeAck,
@@ -113,8 +116,6 @@ import type {
   WorkspacePaneState,
   WorkspaceSplitOrder,
   WorkspaceViewKind,
-  WorkspaceWebMode,
-  WorkspaceWebSettingsInput,
   WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
@@ -531,7 +532,6 @@ export function useShellController() {
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [kimiDoctorBusy, setKimiDoctorBusy] = useState(false);
   const [contextMenuBusy, setContextMenuBusy] = useState(false);
-  const [kimiCodeAuthBusy, setKimiCodeAuthBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [workspaceImportBusy, setWorkspaceImportBusy] = useState(false);
   const [workspaceImportTargets, setWorkspaceImportTargets] = useState<
@@ -543,8 +543,6 @@ export function useShellController() {
     useState<WorkspaceImportResult | null>(null);
   const [contextMenuStatus, setContextMenuStatus] =
     useState<ContextMenuStatus | null>(null);
-  const [kimiCodeAuthResult, setKimiCodeAuthResult] =
-    useState<KimiCodeAuthResult | null>(null);
   const [kimiDoctorResult, setKimiDoctorResult] =
     useState<KimiDoctorResult | null>(null);
   const [kimiPathInput, setKimiPathInput] = useState("");
@@ -560,14 +558,12 @@ export function useShellController() {
   const [kimiCodeAccessTesting, setKimiCodeAccessTesting] = useState(false);
   const [kimiCodeAccessTestResult, setKimiCodeAccessTestResult] =
     useState<KimiCodeAccessConfigTestResult | null>(null);
-  const [kimiApiKeyInput, setKimiApiKeyInput] = useState("");
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
     () => createDefaultInstallSettingsView(),
   );
   const [workspaceWebSettings, setWorkspaceWebSettings] =
     useState<WorkspaceWebSettingsView>(() => createDefaultWorkspaceWebSettings());
-  const [workspaceWebSettingsBusy, setWorkspaceWebSettingsBusy] = useState(false);
   const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
     () => createDefaultBridgeSettings(),
   );
@@ -971,7 +967,7 @@ export function useShellController() {
         workspaceGridPanes[0];
       const input = {
         kind: "code" as const,
-        title: "Kimi Code",
+        title: getKimiAssistantDisplayName(),
         sessionId,
         workDir: payload.workDir?.trim() || targetPane?.workDir,
       };
@@ -2190,8 +2186,9 @@ export function useShellController() {
         if (!chatOrigin || event.origin !== chatOrigin) {
           return;
         }
-        const externalUrl = payload.url?.trim();
+        const externalUrl = normalizeExternalOpenUrl(payload.url ?? "");
         if (!externalUrl) {
+          console.debug("Ignored unsafe chat external URL bridge payload.");
           return;
         }
         void handleOpenExternalUrl(externalUrl);
@@ -2199,8 +2196,9 @@ export function useShellController() {
       }
 
       if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
-        const externalUrl = payload.url?.trim();
+        const externalUrl = normalizeExternalOpenUrl(payload.url ?? "");
         if (!externalUrl) {
+          console.debug("Ignored unsafe workspace external URL bridge payload.");
           return;
         }
         if (
@@ -2405,46 +2403,21 @@ export function useShellController() {
 
   async function refreshWorkspaceWebSettings() {
     const data = await invoke<WorkspaceWebSettingsView>("get_workspace_web_settings");
+    if (data.mode === "enhanced_local") {
+      const officialData = await invoke<WorkspaceWebSettingsView>(
+        "fallback_workspace_web_to_official",
+        { reason: "official_web_i18n_available" },
+      );
+      setWorkspaceWebSettings(officialData);
+      setWorkspaceFrameReloadToken((current) => current + 1);
+      setWorkspaceEmbedState("loading");
+      return officialData;
+    }
     setWorkspaceWebSettings(data);
     return data;
   }
 
-  async function saveWorkspaceWebSettings(input: WorkspaceWebSettingsInput) {
-    setWorkspaceWebSettingsBusy(true);
-    try {
-      const data = await invoke<WorkspaceWebSettingsView>("save_workspace_web_settings", {
-        input,
-      });
-      setWorkspaceWebSettings(data);
-      setActionError(null);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      throw error;
-    } finally {
-      setWorkspaceWebSettingsBusy(false);
-    }
-  }
-
-  async function handleWorkspaceWebModeChange(mode: WorkspaceWebMode) {
-    const data = await saveWorkspaceWebSettings({
-      mode,
-      autoFallback: workspaceWebSettings.autoFallback,
-    });
-    setWorkspaceFrameReloadToken((current) => current + 1);
-    setWorkspaceEmbedState("loading");
-    return data;
-  }
-
-  async function handleWorkspaceWebAutoFallbackChange(autoFallback: boolean) {
-    return saveWorkspaceWebSettings({
-      mode: workspaceWebSettings.mode,
-      autoFallback,
-    });
-  }
-
   async function handleFallbackWorkspaceWebToOfficial(reason = "manual_fallback") {
-    setWorkspaceWebSettingsBusy(true);
     try {
       const data = await invoke<WorkspaceWebSettingsView>(
         "fallback_workspace_web_to_official",
@@ -2458,8 +2431,6 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       throw error;
-    } finally {
-      setWorkspaceWebSettingsBusy(false);
     }
   }
 
@@ -3087,14 +3058,15 @@ export function useShellController() {
   }
 
   async function handleOpenExternalUrl(url: string) {
-    const trimmed = url.trim();
-    if (!trimmed) {
+    const normalized = normalizeExternalOpenUrl(url);
+    if (!normalized) {
+      console.debug("Ignored unsafe external URL open request.");
       return;
     }
 
     if (tauriRuntime) {
       try {
-        await invoke("open_external_url", { url: trimmed });
+        await invoke("open_external_url", { url: normalized });
         return;
       } catch (error) {
         setActionError(String(error));
@@ -3102,7 +3074,7 @@ export function useShellController() {
     }
 
     try {
-      const opened = window.open(trimmed, "_blank", "noopener,noreferrer");
+      const opened = window.open(normalized, "_blank", "noopener,noreferrer");
       if (!opened) {
         setActionError("Could not open external browser window.");
       }
@@ -3150,28 +3122,6 @@ export function useShellController() {
 
   function handleResetKimiCodeAccessDraft() {
     setKimiCodeAccessDraft(cloneKimiCodeAccessInput(kimiCodeAccessSnapshot));
-  }
-
-  async function handleSaveKimiCodeApiKey() {
-    setActionBusy(true);
-    setKimiCodeAccessBusy(true);
-    setActionError(null);
-    try {
-      await invoke<KimiCodeAccessConfigView>("save_kimi_code_access_config", {
-        input: {
-          ...createEmptyKimiCodeAccessInput(),
-          providerApiKey: kimiApiKeyInput.trim() || undefined,
-        } satisfies KimiCodeAccessConfigInput,
-      });
-      await loadKimiCodeAccessConfig();
-      await refreshCoreState();
-      setKimiApiKeyInput("");
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
-      setKimiCodeAccessBusy(false);
-    }
   }
 
   async function handleSaveKimiCodeAccessConfig() {
@@ -3815,51 +3765,6 @@ export function useShellController() {
       setActionError(String(error));
     } finally {
       setContextMenuBusy(false);
-    }
-  }
-
-  async function handleRefreshKimiCodeAuth() {
-    setKimiCodeAuthBusy(true);
-    setActionError(null);
-    try {
-      const result = await invoke<KimiCodeAuthResult>("refresh_kimi_code_auth");
-      setKimiCodeAuthResult(result);
-      await refreshCoreState();
-    } catch (error) {
-      setActionError(String(error));
-      await refreshCoreState();
-    } finally {
-      setKimiCodeAuthBusy(false);
-    }
-  }
-
-  async function handleStartKimiCodeAuth() {
-    setKimiCodeAuthBusy(true);
-    setActionError(null);
-    try {
-      const result = await invoke<KimiCodeAuthResult>("start_kimi_code_auth");
-      setKimiCodeAuthResult(result);
-      await refreshCoreState();
-    } catch (error) {
-      setActionError(String(error));
-      await refreshCoreState();
-    } finally {
-      setKimiCodeAuthBusy(false);
-    }
-  }
-
-  async function handleLogoutKimiCodeAuth() {
-    setKimiCodeAuthBusy(true);
-    setActionError(null);
-    try {
-      const result = await invoke<KimiCodeAuthResult>("logout_kimi_code_auth");
-      setKimiCodeAuthResult(result);
-      await refreshCoreState();
-    } catch (error) {
-      setActionError(String(error));
-      await refreshCoreState();
-    } finally {
-      setKimiCodeAuthBusy(false);
     }
   }
 
@@ -4765,7 +4670,6 @@ export function useShellController() {
     diagnosticsBusy,
     kimiDoctorBusy,
     contextMenuBusy,
-    kimiCodeAuthBusy,
     workspaceImportBusy,
     actionError,
     workspaceImportTargets,
@@ -4774,7 +4678,6 @@ export function useShellController() {
     shutdownProgress,
     shutdownElapsedMs,
     contextMenuStatus,
-    kimiCodeAuthResult,
     bridgeSettings,
     bridgeStatus,
     bridgeSessions,
@@ -4856,8 +4759,6 @@ export function useShellController() {
     workspaceIframeRef,
     stepCompletion,
     kimiCodeAccessSummary,
-    kimiApiKeyInput,
-    setKimiApiKeyInput,
     kimiCodeAccessView,
     kimiCodeAccessDraft,
     kimiCodeAccessBusy,
@@ -4868,8 +4769,6 @@ export function useShellController() {
     installSource,
     installSettings,
     installSettingsBusy,
-    workspaceWebSettings,
-    workspaceWebSettingsBusy,
     powershellPreflight,
     installBusy:
       installSessionSnapshot.status === "starting" ||
@@ -4920,7 +4819,6 @@ export function useShellController() {
     handleOpenKimiConfigDir,
     handleOpenControlTask,
     handleCloseControlTask,
-    handleSaveKimiCodeApiKey,
     handleKimiCodeAccessDraftChange,
     handleResetKimiCodeAccessDraft,
     handleSaveKimiCodeAccessConfig,
@@ -4961,9 +4859,6 @@ export function useShellController() {
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
-    handleWorkspaceWebModeChange,
-    handleWorkspaceWebAutoFallbackChange,
-    handleFallbackWorkspaceWebToOfficial,
     handleInstallDependencies: handleQuickInstallCore,
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,
@@ -4972,9 +4867,6 @@ export function useShellController() {
     handleCancelInstallTask,
     handleEnableContextMenu,
     handleDisableContextMenu,
-    handleStartKimiCodeAuth,
-    handleRefreshKimiCodeAuth,
-    handleLogoutKimiCodeAuth,
     handleSelectSkill,
     handleOpenSkillFromInsights,
     handleSelectDiscoveredSkill,

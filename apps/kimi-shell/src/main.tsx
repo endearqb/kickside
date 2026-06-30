@@ -3,6 +3,9 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
 import { RootErrorBoundary } from "@/app/RootErrorBoundary";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
+
+const appDisplayName = getKimiAssistantDisplayName();
 
 function markBootFallbackAsMounting() {
   const fallback = document.getElementById("boot-fallback");
@@ -19,12 +22,13 @@ function removeBootFallback() {
 function setupGlobalStartupErrorHandlers() {
   const fallback = document.getElementById("boot-fallback");
   if (!fallback) return;
+  document.title = appDisplayName;
 
   const setFailureMessage = (message: string) => {
     const card = document.getElementById("boot-fallback-card");
     if (!card) return;
     card.innerHTML = `
-      <h1 style="margin:0 0 8px;font-size:15px;line-height:1.35;">Kimi Desktop Shell 启动失败</h1>
+      <h1 style="margin:0 0 8px;font-size:15px;line-height:1.35;">${appDisplayName}启动失败</h1>
       <p style="margin:0;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;">
 ${message}
       </p>

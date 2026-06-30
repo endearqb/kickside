@@ -2,12 +2,12 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
 import { openExternalWebviewWindow } from "@/services/externalWebviewService";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   GRID_PRESETS,
   createEqualTrackSizes,
@@ -41,6 +41,12 @@ interface ResizeDraft {
   startTrackSizes: WorkspaceGridTrackSizes;
 }
 
+interface PaneDragDraft {
+  sourceSlotId: string;
+  targetSlotId: string;
+  pointerId: number;
+}
+
 export function WorkspaceGridView(props: WorkspaceViewProps) {
   const preset = useWorkspaceGridStore((state) => state.preset);
   const panes = useWorkspaceGridStore((state) => state.panes);
@@ -57,14 +63,13 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     (state) => state.setPaneMountPolicy,
   );
   const configurePane = useWorkspaceGridStore((state) => state.configurePane);
-  const setPaneTheme = useWorkspaceGridStore((state) => state.setPaneTheme);
   const setGridTrackSizes = useWorkspaceGridStore(
     (state) => state.setGridTrackSizes,
   );
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [gridMessage, setGridMessage] = useState("");
   const [resizeDraft, setResizeDraft] = useState<ResizeDraft | null>(null);
-  const [draggedSlotId, setDraggedSlotId] = useState<string | null>(null);
+  const [paneDragDraft, setPaneDragDraft] = useState<PaneDragDraft | null>(null);
 
   const template = GRID_PRESETS[preset];
   const trackCounts = getGridTrackCounts(preset);
@@ -151,29 +156,59 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     configurePane(paneId, input);
   }
 
-  function handleSlotDragStart(slotId: string, event: DragEvent<HTMLElement>) {
-    setDraggedSlotId(slotId);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", slotId);
-  }
-
-  function handleSlotDragOver(slotId: string, event: DragEvent<HTMLDivElement>) {
-    const sourceSlotId = draggedSlotId || event.dataTransfer.getData("text/plain");
-    if (!sourceSlotId || sourceSlotId === slotId) {
+  function handlePaneDragStart(
+    slotId: string,
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    if (maximizedPaneId || resizeDraft || event.button !== 0) {
       return;
     }
+    capturePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft({
+      sourceSlotId: slotId,
+      targetSlotId: slotId,
+      pointerId: event.pointerId,
+    });
     event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
   }
 
-  function handleSlotDrop(slotId: string, event: DragEvent<HTMLDivElement>) {
-    const sourceSlotId = draggedSlotId || event.dataTransfer.getData("text/plain");
-    setDraggedSlotId(null);
-    if (!sourceSlotId || sourceSlotId === slotId) {
+  function handlePaneDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
       return;
     }
+    const targetSlotId =
+      getSlotIdAtPoint(canvasRef.current, event.clientX, event.clientY) ??
+      paneDragDraft.targetSlotId;
+    if (targetSlotId !== paneDragDraft.targetSlotId) {
+      setPaneDragDraft({
+        ...paneDragDraft,
+        targetSlotId,
+      });
+    }
     event.preventDefault();
-    swapSlots(sourceSlotId, slotId);
+  }
+
+  function handlePaneDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
+      return;
+    }
+    const targetSlotId =
+      getSlotIdAtPoint(canvasRef.current, event.clientX, event.clientY) ??
+      paneDragDraft.targetSlotId;
+    releasePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft(null);
+    if (targetSlotId && targetSlotId !== paneDragDraft.sourceSlotId) {
+      swapSlots(paneDragDraft.sourceSlotId, targetSlotId);
+    }
+    event.preventDefault();
+  }
+
+  function handlePaneDragCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
+      return;
+    }
+    releasePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft(null);
   }
 
   function handleGridKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -220,7 +255,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     index: number,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) {
-    if (maximizedPaneId) {
+    if (maximizedPaneId || paneDragDraft) {
       return;
     }
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -266,6 +301,21 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     setResizeDraft(null);
   }
 
+  function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeMove(event);
+    handlePaneDragMove(event);
+  }
+
+  function handleCanvasPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeEnd();
+    handlePaneDragEnd(event);
+  }
+
+  function handleCanvasPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeEnd();
+    handlePaneDragCancel(event);
+  }
+
   return (
     <section
       className="workspace-stage workspace-stage-grid-shell"
@@ -275,27 +325,35 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     >
       <div
         ref={canvasRef}
-        className={`workspace-grid-canvas${resizeDraft ? " is-resizing" : ""}`}
+        className={`workspace-grid-canvas${resizeDraft ? " is-resizing" : ""}${
+          paneDragDraft ? " is-pane-dragging" : ""
+        }`}
         style={gridStyle}
-        onPointerMove={handleResizeMove}
-        onPointerUp={handleResizeEnd}
-        onPointerCancel={handleResizeEnd}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerCancel}
       >
         {renderedSlots.map((slot) => {
           const pane = findPane(slot);
+          const isDragSource = paneDragDraft?.sourceSlotId === slot.id;
+          const isDropTarget = Boolean(
+            paneDragDraft &&
+              paneDragDraft.targetSlotId === slot.id &&
+              paneDragDraft.sourceSlotId !== slot.id,
+          );
           return (
             <div
-              key={slot.id}
-              className="workspace-grid-slot"
+              key={pane ? pane.id : `empty:${slot.id}`}
+              className={`workspace-grid-slot${isDropTarget ? " is-drop-target" : ""}`}
+              data-workspace-grid-slot-id={slot.id}
               style={{ gridArea: slot.area }}
-              onDragOver={(event) => handleSlotDragOver(slot.id, event)}
-              onDrop={(event) => handleSlotDrop(slot.id, event)}
             >
               <PaneFrame
                 pane={pane}
                 slotLabel={slot.id}
                 active={Boolean(pane && pane.id === activePaneId)}
                 maximized={Boolean(pane && pane.id === maximizedPaneId)}
+                dragging={isDragSource}
                 canAddPane={canAddPane}
                 effectiveWorkDir={props.effectiveWorkDir}
                 themeMode={props.themeMode}
@@ -332,23 +390,12 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                     removePane(pane.id);
                   }
                 }}
-                onSuspendPane={() => {
-                  if (pane) {
-                    setPaneMountPolicy(pane.id, "suspended");
-                  }
-                }}
                 onResumePane={() => {
                   if (pane) {
                     setPaneMountPolicy(pane.id, "eager");
                   }
                 }}
-                onPaneThemeChange={(theme) => {
-                  if (pane) {
-                    setPaneTheme(pane.id, theme);
-                  }
-                }}
-                onDragStart={(event) => handleSlotDragStart(slot.id, event)}
-                onDragEnd={() => setDraggedSlotId(null)}
+                onPaneDragStart={(event) => handlePaneDragStart(slot.id, event)}
                 onToggleMaximize={() =>
                   maximizePane(pane?.id === maximizedPaneId ? null : pane?.id ?? null)
                 }
@@ -365,6 +412,50 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       </div>
     </section>
   );
+}
+
+function getSlotIdAtPoint(
+  canvas: HTMLDivElement | null,
+  clientX: number,
+  clientY: number,
+): string | null {
+  if (!canvas) {
+    return null;
+  }
+
+  const slots = Array.from(
+    canvas.querySelectorAll<HTMLElement>("[data-workspace-grid-slot-id]"),
+  );
+  for (const slot of slots) {
+    const rect = slot.getBoundingClientRect();
+    if (
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+    ) {
+      return slot.dataset.workspaceGridSlotId ?? null;
+    }
+  }
+  return null;
+}
+
+function capturePointer(element: HTMLElement | null, pointerId: number) {
+  try {
+    element?.setPointerCapture?.(pointerId);
+  } catch {
+    // Some test and embedded runtimes do not expose capture for synthetic pointers.
+  }
+}
+
+function releasePointer(element: HTMLElement | null, pointerId: number) {
+  try {
+    if (!element?.hasPointerCapture || element.hasPointerCapture(pointerId)) {
+      element?.releasePointerCapture?.(pointerId);
+    }
+  } catch {
+    // Matching capturePointer: release should never break the layout state cleanup.
+  }
 }
 
 function renderResizeHandles(
@@ -408,7 +499,7 @@ function defaultPaneInput(
   effectiveWorkDir?: string,
 ): AddWorkspacePaneInput {
   if (kind === "code") {
-    return { kind, title: "Kimi Code", workDir: effectiveWorkDir };
+    return { kind, title: getKimiAssistantDisplayName(), workDir: effectiveWorkDir };
   }
   if (kind === "chat") {
     return { kind, title: "Kimi Chat" };

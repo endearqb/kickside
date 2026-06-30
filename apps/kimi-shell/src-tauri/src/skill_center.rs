@@ -2379,7 +2379,7 @@ mod tests {
 
     #[test]
     fn bundled_skills_resource_candidates_include_root_and_legacy_up_path() {
-        let resource_dir = Path::new("C:\\Users\\endea\\AppData\\Local\\Kimi Desktop Shell");
+        let resource_dir = Path::new("C:\\Users\\endea\\AppData\\Local\\Kimi Sidekick");
         let candidates = bundled_skills_resource_candidates(resource_dir);
 
         assert_eq!(candidates.len(), 2);
@@ -2412,7 +2412,7 @@ mod tests {
     fn resolve_bundled_skills_dir_allows_workspace_fallback_when_explicitly_enabled() {
         let temp = TempDir::new("bundled-skills-workspace-fallback");
         let development_dir = temp.path.join("skills");
-        let bundled_skill = development_dir.join("bridge-ops");
+        let bundled_skill = development_dir.join("demo-bundled-skill");
         fs::create_dir_all(&bundled_skill).expect("bundled skill dir");
         fs::write(bundled_skill.join("SKILL.md"), "# Bundled Skill\nbody").expect("skill file");
 

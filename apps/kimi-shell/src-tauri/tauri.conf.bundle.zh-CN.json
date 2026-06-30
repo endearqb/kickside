@@ -1,4 +1,5 @@
 {
+  "productName": "kimi小助手",
   "bundle": {
     "windows": {
       "wix": {

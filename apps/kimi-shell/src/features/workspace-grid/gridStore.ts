@@ -9,6 +9,7 @@ import {
   createDefaultWorkspaceGridState,
   migrateLegacyWorkspaceGridState,
 } from "./gridMigration";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { normalizeEmbeddableUrl } from "./urlSafety";
 import type {
   WorkspaceGridPersistedState,
@@ -198,15 +199,24 @@ function createWorkspaceGridSlice(
     ...initialState,
     setPreset(preset) {
       update(set, storage, (state) => {
-        const assignedPaneIds = state.slots
+        const paneIdSet = new Set(state.panes.map((pane) => pane.id));
+        const visiblePaneIds = state.slots
           .map((slot) => slot.paneId)
           .filter((paneId): paneId is string => Boolean(paneId));
-        const assignedPaneIdSet = new Set(assignedPaneIds);
-        for (const pane of state.panes) {
-          if (!assignedPaneIdSet.has(pane.id)) {
-            assignedPaneIds.push(pane.id);
-            assignedPaneIdSet.add(pane.id);
+        const assignedPaneIds: string[] = [];
+        const assignedPaneIdSet = new Set<string>();
+        const pushPaneId = (paneId: string | null | undefined) => {
+          if (paneId && paneIdSet.has(paneId) && !assignedPaneIdSet.has(paneId)) {
+            assignedPaneIds.push(paneId);
+            assignedPaneIdSet.add(paneId);
           }
+        };
+        pushPaneId(state.activePaneId);
+        for (const paneId of visiblePaneIds) {
+          pushPaneId(paneId);
+        }
+        for (const pane of state.panes) {
+          pushPaneId(pane.id);
         }
         return {
           ...state,
@@ -594,6 +604,7 @@ function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
 function sanitizePane(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
+    title: normalizePaneTitle(pane.kind, pane.title),
     url: sanitizeUrl(pane.url),
     workDir: sanitizeWorkDir(pane.workDir),
     theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
@@ -601,6 +612,14 @@ function sanitizePane(pane: WorkspacePane): WorkspacePane {
       sanitizeStorageNamespace(pane.storageNamespace) ??
       createPaneStorageNamespace(pane.id),
   };
+}
+
+function normalizePaneTitle(kind: WorkspacePaneKind, title: string): string {
+  const trimmed = title.trim();
+  if (kind === "code" && (trimmed === "Kimi Code" || trimmed === "Kimi Code Web")) {
+    return defaultPaneTitle(kind);
+  }
+  return trimmed || defaultPaneTitle(kind);
 }
 
 function sanitizeSavedLayout(
@@ -636,7 +655,7 @@ function sanitizeWorkDir(workDir?: string): string | undefined {
 }
 
 function defaultPaneTitle(kind: WorkspacePaneKind): string {
-  if (kind === "code") return "Kimi Code";
+  if (kind === "code") return getKimiAssistantDisplayName();
   if (kind === "chat") return "Kimi Chat";
   return "外部网页";
 }
@@ -670,5 +689,10 @@ function getBrowserStorage(): BrowserStorage | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return window.localStorage;
+  const storage = window.localStorage;
+  return storage &&
+    typeof storage.getItem === "function" &&
+    typeof storage.setItem === "function"
+    ? storage
+    : null;
 }

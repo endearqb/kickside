@@ -69,13 +69,8 @@ import type {
   WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
   WorkspaceSkillTarget,
-  WorkspaceWebMode,
-  WorkspaceWebSettingsView,
 } from "@/app/types";
 import {
-  formatAuthMode,
-  formatKimiLoginHealthSource,
-  formatKimiLoginHealthState,
   formatProviderApiHealthSource,
   formatProviderApiHealthState,
 } from "@/app/types";
@@ -158,7 +153,6 @@ type ControlCenterViewProps = {
   diagnosticsBusy: boolean;
   kimiDoctorBusy: boolean;
   contextMenuBusy: boolean;
-  kimiCodeAuthBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
   installAction:
@@ -211,8 +205,6 @@ type ControlCenterViewProps = {
   kimiPathInput: string;
   workDirInput: string;
   kimiCodeAccessSummary: KimiCodeAccessSummaryView | null;
-  kimiApiKeyInput: string;
-  onKimiApiKeyInputChange: (value: string) => void;
   kimiCodeAccessView: KimiCodeAccessConfigView | null;
   kimiCodeAccessDraft: KimiCodeAccessConfigInput;
   kimiCodeAccessBusy: boolean;
@@ -223,8 +215,6 @@ type ControlCenterViewProps = {
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
-  workspaceWebSettings: WorkspaceWebSettingsView;
-  workspaceWebSettingsBusy: boolean;
   installMirrorHealthReport: InstallMirrorHealthReport | null;
   installMirrorHealthBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
@@ -276,14 +266,10 @@ type ControlCenterViewProps = {
   onOpenLogs: () => Promise<void>;
   onOpenFolder: (path: string) => Promise<void>;
   onOpenKimiConfigDir: () => Promise<void>;
-  onSaveKimiCodeApiKey: () => Promise<void>;
   onPickKimiPath: () => Promise<void>;
   onSavePathAndRetry: () => Promise<void>;
   onEnableContextMenu: () => Promise<void>;
   onDisableContextMenu: () => Promise<void>;
-  onStartKimiCodeAuth: () => Promise<void>;
-  onRefreshKimiCodeAuth: () => Promise<void>;
-  onLogoutKimiCodeAuth: () => Promise<void>;
   onPickWorkDir: () => Promise<void>;
   onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<string | null>;
   onSaveWorkDirAndRestart: () => Promise<void>;
@@ -343,9 +329,6 @@ type ControlCenterViewProps = {
   ) => Promise<MainWindowCloseBehavior>;
   onInstallSourceChange: (source: "official" | "mirror") => void;
   onSaveInstallSettings: (input: InstallSettingsView) => Promise<unknown>;
-  onWorkspaceWebModeChange: (mode: WorkspaceWebMode) => Promise<unknown>;
-  onWorkspaceWebAutoFallbackChange: (enabled: boolean) => Promise<unknown>;
-  onFallbackWorkspaceWebToOfficial: (reason?: string) => Promise<unknown>;
   onRefreshPowerShellPreflight: () => Promise<PowerShellPreflightSummary>;
   onInstallDependencies: () => Promise<void>;
   onInstallKimi: () => Promise<void>;
@@ -466,41 +449,6 @@ function bridgePlatformLabel(platform: BridgePlatform): string {
     return "微信";
   }
   return "飞书";
-}
-
-function formatWorkspaceWebMode(mode: WorkspaceWebMode): string {
-  return mode === "enhanced_local" ? "本地增强版" : "官方 Web";
-}
-
-function formatEnhancedWebHealth(state: WorkspaceWebSettingsView["health"]["state"]): string {
-  switch (state) {
-    case "ready":
-      return "可用";
-    case "fallback_active":
-      return "已回退";
-    case "missing_assets":
-      return "资源缺失";
-    case "error":
-      return "异常";
-    default:
-      return "未配置";
-  }
-}
-
-function formatEnhancedWebHealthTone(
-  state: WorkspaceWebSettingsView["health"]["state"],
-): "neutral" | "success" | "warning" | "danger" {
-  switch (state) {
-    case "ready":
-      return "success";
-    case "fallback_active":
-    case "missing_assets":
-      return "warning";
-    case "error":
-      return "danger";
-    default:
-      return "neutral";
-  }
 }
 
 function defaultBridgeConnectorLabel(platform: BridgePlatform, index: number): string {
@@ -737,7 +685,6 @@ export function ControlCenterView({
   diagnosticsBusy,
   kimiDoctorBusy,
   contextMenuBusy,
-  kimiCodeAuthBusy,
   mainWindowCloseBehavior,
   installBusy,
   installAction,
@@ -784,8 +731,6 @@ export function ControlCenterView({
   kimiPathInput,
   workDirInput,
   kimiCodeAccessSummary,
-  kimiApiKeyInput,
-  onKimiApiKeyInputChange,
   kimiCodeAccessView,
   kimiCodeAccessDraft,
   kimiCodeAccessBusy,
@@ -796,8 +741,6 @@ export function ControlCenterView({
   installSource,
   installSettings,
   installSettingsBusy,
-  workspaceWebSettings,
-  workspaceWebSettingsBusy,
   installMirrorHealthReport,
   installMirrorHealthBusy,
   powershellPreflight,
@@ -837,14 +780,10 @@ export function ControlCenterView({
   onOpenLogs,
   onOpenFolder,
   onOpenKimiConfigDir,
-  onSaveKimiCodeApiKey,
   onPickKimiPath,
   onSavePathAndRetry,
   onEnableContextMenu,
   onDisableContextMenu,
-  onStartKimiCodeAuth,
-  onRefreshKimiCodeAuth,
-  onLogoutKimiCodeAuth,
   onPickWorkDir,
   onPickBridgeConnectorDefaultWorkDir,
   onSaveWorkDirAndRestart,
@@ -893,9 +832,6 @@ export function ControlCenterView({
   onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
   onSaveInstallSettings,
-  onWorkspaceWebModeChange,
-  onWorkspaceWebAutoFallbackChange,
-  onFallbackWorkspaceWebToOfficial,
   onRefreshPowerShellPreflight,
   onInstallDependencies,
   onInstallKimi,
@@ -908,7 +844,6 @@ export function ControlCenterView({
   onOpenExternalUrl,
   installMessage,
 }: ControlCenterViewProps) {
-  const [authCardView, setAuthCardView] = useState<"login" | "api">("login");
   const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
   const [bridgeOverviewPendingConnectorId, setBridgeOverviewPendingConnectorId] =
     useState<string | null>(null);
@@ -1113,7 +1048,6 @@ export function ControlCenterView({
     : runtimeContextMenuEnabled
       ? "success"
       : "warning";
-  const kimiLoginReady = onboarding?.kimiLoginHealth.state === "verified";
   const providerApiHealth = onboarding?.providerApiHealth ?? status?.providerApiHealth;
   const providerApiConfigured =
     onboarding?.providerApiConfigured ??
@@ -1125,8 +1059,16 @@ export function ControlCenterView({
           kimiCodeAccessView.services.fetch.apiKeyConfigured),
     );
   const providerApiReady = providerApiConfigured && !providerApiHealth?.needsAttention;
-  const authStatusLabel = kimiLoginReady || providerApiReady ? "就绪" : providerApiConfigured ? "异常" : "待办";
-  const authStatusTone = kimiLoginReady || providerApiReady ? "success" : providerApiConfigured ? "warning" : "neutral";
+  const optionalApiStatusLabel = providerApiConfigured
+    ? providerApiReady
+      ? "已配置"
+      : "可选配置异常"
+    : "可选";
+  const optionalApiStatusTone = providerApiReady
+    ? "success"
+    : providerApiConfigured
+      ? "warning"
+      : "neutral";
   const workDirStatusLabel = effectiveWorkDir ? "就绪" : "待办";
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
 
@@ -1190,36 +1132,7 @@ export function ControlCenterView({
           : "neutral";
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
   const installReady = onboarding?.kimiInstalled ?? stepCompletion.install_kimi;
-  const authReady = Boolean(kimiLoginReady || providerApiReady);
   const workDirReady = Boolean(effectiveWorkDir);
-  const authMode = onboarding?.authMode ?? status?.authMode ?? "unknown";
-  const canLogoutKimi = (onboarding?.kimiLoginHealth.state ?? status?.kimiLoginHealth.state) === "verified";
-  const authBannerVisible = Boolean(
-    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention,
-  );
-  const authBannerTitle =
-    onboarding?.kimiLoginHealth.state === "error"
-      ? "Kimi Code Auth 检测异常"
-      : "Kimi Code Auth 需要重新验证";
-  const authBannerMeta = [
-    `当前入口：${formatAuthMode(authMode)}`,
-    `来源：${formatKimiLoginHealthSource(onboarding?.kimiLoginHealth.source)}`,
-    `时间：${formatLoginCheckTimestamp(onboarding?.kimiLoginHealth.checkedAtMs)}`,
-    onboarding?.kimiLoginHealth.exitCode != null
-      ? `退出码：${onboarding.kimiLoginHealth.exitCode}`
-      : null,
-  ]
-    .filter((item): item is string => Boolean(item))
-    .join(" · ");
-  const kimiLoginStatusLabel = formatKimiLoginHealthState(onboarding?.kimiLoginHealth.state);
-  const kimiLoginStatusTone =
-    onboarding?.kimiLoginHealth.state === "verified"
-      ? "success"
-      : onboarding?.kimiLoginHealth.state === "auth_required"
-        ? "warning"
-        : onboarding?.kimiLoginHealth.state === "error"
-          ? "danger"
-          : "neutral";
   const providerApiStatusLabel = !providerApiConfigured
     ? "未配置"
     : providerApiHealth?.state === "auth_required"
@@ -1238,9 +1151,7 @@ export function ControlCenterView({
     ? "install"
     : !contextMenuReady
       ? "context_menu"
-      : !authReady
-        ? "auth"
-        : "work_dir";
+      : "work_dir";
   const defaultOnboardingCard: OnboardingCardId =
     installSessionSnapshot.taskId === "upgrade_kimi" && installSessionSnapshot.status !== "idle"
       ? "install"
@@ -1356,59 +1267,17 @@ export function ControlCenterView({
     </Button>
   );
 
-  const authPrimaryAction =
-    authCardView === "login" ? (
-      <Button
-        type="button"
-        icon={<KeyRound size={15} />}
-        className="cc-action-btn"
-        onClick={() => void onStartKimiCodeAuth()}
-        disabled={kimiCodeAuthBusy}
-      >
-        打开登录
-      </Button>
-    ) : (
-      <Button
-        type="button"
-        icon={<Check size={14} />}
-        className="cc-action-btn"
-        onClick={() => void onSaveKimiCodeApiKey()}
-        disabled={
-          actionBusy ||
-          kimiCodeAccessBusy ||
-          kimiCodeAccessDirty ||
-          (!kimiCodeAccessSummary?.hasApiKey && !kimiApiKeyInput.trim())
-        }
-      >
-        保存
-      </Button>
-    );
-
-  const authSecondaryAction =
-    authCardView === "login" ? (
-      <>
-        <Button
-          type="button"
-          variant="ghost"
-          icon={<RefreshCw size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onRefreshKimiCodeAuth()}
-          disabled={kimiCodeAuthBusy}
-        >
-          刷新状态
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          icon={<Minus size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onLogoutKimiCodeAuth()}
-          disabled={kimiCodeAuthBusy || !canLogoutKimi}
-        >
-          退出登录
-        </Button>
-      </>
-    ) : null;
+  const optionalApiPrimaryAction = (
+    <Button
+      type="button"
+      icon={<SlidersHorizontal size={15} />}
+      className="cc-action-btn"
+      onClick={() => void onOpenTask("kimi_code_access")}
+      disabled={kimiCodeAccessBusy}
+    >
+      按需配置
+    </Button>
+  );
 
   const workDirPrimaryAction = (
     <Button
@@ -1985,12 +1854,12 @@ export function ControlCenterView({
     {
       id: "auth",
       index: "03",
-      title: "登录与 Provider API",
-      actionLabel: authReady ? "已就绪" : "完成登录或配置 API",
-      statusLabel: authStatusLabel,
-      statusTone: authStatusTone,
-      complete: authReady,
-      primaryAction: authPrimaryAction,
+      title: "Provider API（可选）",
+      actionLabel: providerApiConfigured ? "查看配置" : "按需配置",
+      statusLabel: optionalApiStatusLabel,
+      statusTone: optionalApiStatusTone,
+      complete: true,
+      primaryAction: optionalApiPrimaryAction,
     },
     {
       id: "work_dir",
@@ -2011,12 +1880,6 @@ export function ControlCenterView({
     diagnostics?.lastError ? `最近错误：${diagnostics.lastError}` : null,
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
     diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
-    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
-      ? `Kimi Code Auth：${onboarding.kimiLoginHealth.message || kimiLoginStatusLabel}`
-      : null,
-    authMode === "provider_api" && onboarding?.providerApiHealth.needsAttention
-      ? `Provider API：${onboarding.providerApiHealth.message || providerApiStatusLabel}`
-      : null,
     bridgeRecentErrors[0] ? `Bridge：${bridgeRecentErrors[0]}` : null,
   ]
     .filter((item): item is string => Boolean(item))
@@ -2034,13 +1897,6 @@ export function ControlCenterView({
   const overviewBriefs = [
     !installReady ? "Kimi Code 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
-    !authReady ? "尚未建立登录或 Provider API 入口。" : null,
-    authMode === "kimi_login" && onboarding?.kimiLoginHealth.needsAttention
-      ? "当前入口依赖 Kimi Code Auth，建议立即刷新状态。"
-      : null,
-    authMode === "provider_api" && onboarding?.providerApiHealth.needsAttention
-      ? "当前入口依赖 Provider API，最近一次请求认证失败。"
-      : null,
     !workDirReady ? "默认工作目录未设置，跨会话上下文还不稳定。" : null,
     bridgeStatus.state === "crashed" ? "Bridge 最近出现崩溃，需要优先检查。" : null,
     kimiCodeAccessDirty ? "控制中心存在未保存修改。" : null,
@@ -2398,157 +2254,56 @@ export function ControlCenterView({
                 {activeOnboardingStep.id === "context_menu" ? renderContextMenuStepContent() : null}
 
                 {activeOnboardingStep.id === "auth" ? (
-                  <>
-                    {authSecondaryAction ? (
-                      <div className="cc-step-secondary-actions">{authSecondaryAction}</div>
-                    ) : null}
-                    <div className="cc-auth-switch" role="group" aria-label="登录与 API 配置切换">
-                      <button
-                        type="button"
-                        className={`cc-auth-switch-btn ${authCardView === "login" ? "active" : ""}`}
-                        onClick={() => setAuthCardView("login")}
-                      >
-                        Kimi Code Auth
-                      </button>
-                      <button
-                        type="button"
-                        className={`cc-auth-switch-btn ${authCardView === "api" ? "active" : ""}`}
-                        onClick={() => setAuthCardView("api")}
-                      >
-                        Provider API
-                      </button>
+                  <div className="cc-auth-panel">
+                    <p className="hint cc-step-summary">
+                      Provider API 是可选配置；未配置也不会阻塞控制中心、工作区或 onboarding。
+                    </p>
+                    <div className="cc-brief-list">
+                      <article className="cc-brief-item">
+                        <strong>Provider API</strong>
+                        <span className={`cc-status-badge tone-${providerApiStatusTone}`}>
+                          {providerApiStatusLabel}
+                        </span>
+                      </article>
+                      <article className="cc-brief-item">
+                        <strong>配置文件</strong>
+                        <span>
+                          {kimiCodeAccessSummary?.configPath ||
+                            kimiCodeAccessView?.configPath ||
+                            "~/.kimi-code/config.toml"}
+                        </span>
+                      </article>
                     </div>
-
-                    {authCardView === "login" ? (
-                      <div className="cc-auth-panel">
-                        <p className="hint cc-step-summary">
-                          当前入口：<strong>{formatAuthMode(authMode)}</strong>
-                        </p>
-                        <div className="cc-brief-list">
-                          <article className="cc-brief-item">
-                            <strong>Kimi Code Auth</strong>
-                            <span className={`cc-status-badge tone-${kimiLoginStatusTone}`}>
-                              {kimiLoginStatusLabel}
-                            </span>
-                          </article>
-                          <article className="cc-brief-item">
-                            <strong>Provider API</strong>
-                            <span className={`cc-status-badge tone-${providerApiStatusTone}`}>
-                              {providerApiStatusLabel}
-                            </span>
-                          </article>
-                        </div>
-                        <p className="hint cc-step-meta">
-                          最近来源：{formatKimiLoginHealthSource(onboarding?.kimiLoginHealth.source)}；
-                          最近时间：{formatLoginCheckTimestamp(onboarding?.kimiLoginHealth.checkedAtMs)}
-                          {onboarding?.kimiLoginHealth.exitCode != null
-                            ? `；退出码：${onboarding.kimiLoginHealth.exitCode}`
-                            : ""}
-                        </p>
-                        {onboarding?.kimiLoginHealth.message ? (
-                          <p className="hint cc-step-meta">
-                            最近摘要：{onboarding.kimiLoginHealth.message}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="cc-auth-panel">
-                        <p className="hint cc-step-summary">
-                          当前入口：<strong>{formatAuthMode(authMode)}</strong>；
-                          Provider API：<strong>{providerApiStatusLabel}</strong>
-                          {kimiCodeAccessSummary?.hasApiKey ? "；Kimi Code 接入已配置" : ""}
-                        </p>
-                        <div className="cc-brief-list">
-                          <article className="cc-brief-item">
-                            <strong>供应商</strong>
-                            <span>Kimi</span>
-                          </article>
-                          <article className="cc-brief-item">
-                            <strong>接口地址</strong>
-                            <span>Kimi Code 接入</span>
-                            <span>https://api.kimi.com/coding/v1</span>
-                          </article>
-                          <article className="cc-brief-item">
-                            <strong>API Key</strong>
-                            <span>{kimiCodeAccessSummary?.hasApiKey ? "已保存" : "待填写"}</span>
-                            <Input
-                              id="kimi-api-key-onboarding"
-                              className="cc-brief-inline-input"
-                              type="password"
-                              value={kimiApiKeyInput}
-                              onChange={(event) =>
-                                onKimiApiKeyInputChange(event.currentTarget.value)
-                              }
-                              placeholder={
-                                kimiCodeAccessSummary?.hasApiKey
-                                  ? "已保存，如需替换请重新输入"
-                                  : "sk-..."
-                              }
-                            />
-                          </article>
-                        </div>
-                        <p className="hint cc-step-meta">
-                          保存时只会写入 Kimi App 管理的 provider、model、Search/Fetch 服务字段。
-                        </p>
-                        <div className="cc-api-inline-actions">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            icon={<SlidersHorizontal size={14} />}
-                            className="cc-action-btn"
-                            onClick={() => void onOpenTask("kimi_code_access")}
-                            disabled={kimiCodeAccessBusy}
-                          >
-                            打开接入配置
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            icon={<FolderOpen size={14} />}
-                            className="cc-action-btn"
-                            onClick={() => void onOpenKimiConfigDir()}
-                          >
-                            打开配置目录
-                          </Button>
-                        </div>
-                        <p className="hint cc-step-meta">
-                          配置文件：
-                          <strong>
-                            {kimiCodeAccessSummary?.configPath ||
-                              kimiCodeAccessView?.configPath ||
-                              "~/.kimi-code/config.toml"}
-                          </strong>
-                        </p>
-                        <p className="hint cc-step-meta">
-                          Provider API 状态：{formatProviderApiHealthState(onboarding?.providerApiHealth.state)}；
-                          最近来源：{formatProviderApiHealthSource(onboarding?.providerApiHealth.source)}；
-                          最近时间：{formatLoginCheckTimestamp(onboarding?.providerApiHealth.checkedAtMs)}
-                          {onboarding?.providerApiHealth.exitCode != null
-                            ? `；退出码：${onboarding.providerApiHealth.exitCode}`
-                            : ""}
-                        </p>
-                        {onboarding?.providerApiHealth.message ? (
-                          <p className="hint cc-step-meta">
-                            最近摘要：{onboarding.providerApiHealth.message}
-                          </p>
-                        ) : null}
-                        {!kimiCodeAccessSummary?.templateConfigured ? (
-                          <p className="hint cc-step-meta">
-                            当前尚未写入完整的 Kimi Code 接入配置，点击“保存”后会自动补齐。
-                          </p>
-                        ) : null}
-                        {kimiCodeAccessDirty ? (
-                          <p className="hint cc-step-meta">
-                            接入配置存在未保存修改，请先处理草稿。
-                          </p>
-                        ) : null}
-                        {kimiCodeAccessView?.warnings?.length ? (
-                          <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
-                        ) : null}
-                        <p className="hint cc-step-meta">保存成功后将自动标记本步骤完成。</p>
-                      </div>
-                    )}
-                  </>
+                    <div className="cc-api-inline-actions">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<SlidersHorizontal size={14} />}
+                        className="cc-action-btn"
+                        onClick={() => void onOpenTask("kimi_code_access")}
+                        disabled={kimiCodeAccessBusy}
+                      >
+                        打开 API 配置
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        icon={<FolderOpen size={14} />}
+                        className="cc-action-btn"
+                        onClick={() => void onOpenKimiConfigDir()}
+                      >
+                        打开配置目录
+                      </Button>
+                    </div>
+                    {kimiCodeAccessDirty ? (
+                      <p className="hint cc-step-meta">
+                        API 配置存在未保存修改；这不会阻塞继续使用控制中心。
+                      </p>
+                    ) : null}
+                    {kimiCodeAccessView?.warnings?.length ? (
+                      <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
+                    ) : null}
+                  </div>
                 ) : null}
 
                 {activeOnboardingStep.id === "work_dir" ? renderWorkDirStepContent() : null}
@@ -2619,105 +2374,6 @@ export function ControlCenterView({
         </section>
 
         <section className="cc-runtime-columns">
-          <section className="cc-card cc-web-experience-card">
-            <ControlCenterCardHeader
-              title="Web 体验"
-              titleMeta="Kimi Web"
-              titleMetaPlacement="below"
-              statusLabel={formatWorkspaceWebMode(workspaceWebSettings.mode)}
-              statusTone={
-                workspaceWebSettings.mode === "enhanced_local" ? "accent" : "neutral"
-              }
-            />
-            <div className="cc-card-body cc-web-experience-body">
-              <ControlCenterSegmentedControl
-                ariaLabel="Kimi Web 体验模式"
-                className="cc-web-mode-switch"
-                value={workspaceWebSettings.mode}
-                onChange={(value) => {
-                  void onWorkspaceWebModeChange(value);
-                }}
-                disabled={workspaceWebSettingsBusy}
-                items={[
-                  {
-                    value: "official",
-                    label: "官方 Web",
-                    description: "稳定兜底",
-                  },
-                  {
-                    value: "enhanced_local",
-                    label: "本地增强版",
-                    description: "i18n 与桌面优化",
-                  },
-                ]}
-              />
-              <div className="cc-web-experience-grid">
-                <ControlCenterMetricCard
-                  label="增强版健康"
-                  value={formatEnhancedWebHealth(workspaceWebSettings.health.state)}
-                  meta={workspaceWebSettings.health.message}
-                />
-                <ControlCenterMetricCard
-                  label="上游来源"
-                  value={
-                    workspaceWebSettings.sourceCommit
-                      ? workspaceWebSettings.sourceCommit.slice(0, 12)
-                      : "-"
-                  }
-                  meta="MoonshotAI/kimi-cli web/"
-                />
-                <ControlCenterMetricCard
-                  label="最近可用版本"
-                  value={
-                    workspaceWebSettings.lastKnownGoodCommit
-                      ? workspaceWebSettings.lastKnownGoodCommit.slice(0, 12)
-                      : "-"
-                  }
-                  meta={workspaceWebSettings.lastFallbackReason ?? "暂无回退记录"}
-                />
-              </div>
-              <ControlCenterToggleField
-                label="增强版失败时自动回退"
-                description="加载失败或入口超时时自动切回官方 Web，避免阻塞工作区。"
-                checked={workspaceWebSettings.autoFallback}
-                onChange={(checked) => {
-                  void onWorkspaceWebAutoFallbackChange(checked);
-                }}
-                disabled={workspaceWebSettingsBusy}
-              />
-              <div className="cc-web-experience-footer">
-                <ControlCenterStatusBadge
-                  tone={formatEnhancedWebHealthTone(workspaceWebSettings.health.state)}
-                >
-                  {formatEnhancedWebHealth(workspaceWebSettings.health.state)}
-                </ControlCenterStatusBadge>
-                <p className="hint">{workspaceWebSettings.disclaimer}</p>
-              </div>
-              <div className="cc-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  icon={<RefreshCcw size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onWorkspaceWebModeChange("enhanced_local")}
-                  disabled={workspaceWebSettingsBusy}
-                >
-                  使用本地增强版
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon={<RefreshCw size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onFallbackWorkspaceWebToOfficial("manual_fallback")}
-                  disabled={workspaceWebSettingsBusy}
-                >
-                  回退官方 Web
-                </Button>
-              </div>
-            </div>
-          </section>
-
           <section className="cc-card">
             <header className="cc-card-header">
               <h3>风险摘要</h3>
@@ -2814,25 +2470,6 @@ export function ControlCenterView({
               <DiagnosticItem label="Loading SLA Met" value={String(diagnostics?.loadingSlaMet ?? "-")} />
               <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
               <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
-              <DiagnosticItem label="Auth Mode" value={formatAuthMode(diagnostics?.authMode)} />
-              <DiagnosticItem
-                label="Workspace Web Mode"
-                value={formatWorkspaceWebMode(diagnostics?.workspaceWebMode ?? "official")}
-              />
-              <DiagnosticItem
-                label="Enhanced Web Health"
-                value={formatEnhancedWebHealth(
-                  diagnostics?.enhancedWebHealth.state ?? "not_configured",
-                )}
-              />
-              <DiagnosticItem
-                label="Enhanced Web Source"
-                value={diagnostics?.enhancedWebSourceCommit ?? "-"}
-              />
-              <DiagnosticItem
-                label="Enhanced Web Fallback"
-                value={diagnostics?.enhancedWebLastFallbackReason ?? "-"}
-              />
               <DiagnosticItem
                 label="Provider API Health"
                 value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)}
@@ -2844,22 +2481,6 @@ export function ControlCenterView({
               <DiagnosticItem
                 label="Last Provider API Source"
                 value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)}
-              />
-              <DiagnosticItem
-                label="Kimi Login Health"
-                value={formatKimiLoginHealthState(diagnostics?.kimiLoginHealth.state)}
-              />
-              <DiagnosticItem
-                label="Last Kimi Login Check"
-                value={formatLoginCheckTimestamp(diagnostics?.kimiLoginHealth.checkedAtMs)}
-              />
-              <DiagnosticItem
-                label="Last Kimi Login Source"
-                value={formatKimiLoginHealthSource(diagnostics?.kimiLoginHealth.source)}
-              />
-              <DiagnosticItem
-                label="Last Kimi Login Exit Code"
-                value={String(diagnostics?.kimiLoginHealth.exitCode ?? "-")}
               />
               <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
               <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
@@ -4520,39 +4141,6 @@ export function ControlCenterView({
             isOnboardingSection ? "cc-main-onboarding" : ""
           }`}
         >
-          {authBannerVisible ? (
-            <div className="shell-login-banner control-center-login-banner" role="status" aria-live="polite">
-              <div className="shell-login-banner-copy">
-                <strong>{authBannerTitle}</strong>
-                <p>
-                  {onboarding?.kimiLoginHealth.message?.trim() ||
-                    "当前入口依赖 Kimi Code Auth，最近一次检测表明需要重新处理。"}
-                </p>
-                <span>{authBannerMeta}</span>
-              </div>
-              <div className="shell-login-banner-actions">
-                <button
-                  type="button"
-                  className="shell-login-banner-btn primary"
-                  onClick={() => void onRefreshKimiCodeAuth()}
-                  disabled={kimiCodeAuthBusy}
-                >
-                  刷新认证状态
-                </button>
-                <button
-                  type="button"
-                  className="shell-login-banner-btn"
-                  onClick={() => {
-                    setAuthCardView("login");
-                    setExpandedOnboardingCard("auth");
-                    setActiveControlSection("onboarding");
-                  }}
-                >
-                  前往认证步骤
-                </button>
-              </div>
-            </div>
-          ) : null}
           {activeTask && !shouldRenderInlineBridgeTask ? (
             renderActiveTask()
           ) : (

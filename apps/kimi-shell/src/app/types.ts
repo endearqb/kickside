@@ -942,6 +942,7 @@ export interface KimiCodeAccessConfigView {
   kimiCodeHome: string;
   configPath: string;
   configExists: boolean;
+  configError?: string;
   provider: KimiCodeAccessConfigProviderView;
   model: KimiCodeAccessConfigModelView;
   services: {
@@ -1289,7 +1290,7 @@ export function formatKimiLoginHealthSource(source?: KimiLoginHealthSource): str
 
 export function formatProviderApiHealthState(state?: ProviderApiHealthState): string {
   if (state === "auth_required") return "认证失败";
-  if (state === "error") return "运行异常";
+  if (state === "error") return "配置或运行异常";
   return "待检查";
 }
 

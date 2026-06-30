@@ -508,8 +508,6 @@ fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
 
 #[tauri::command]
 fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
-    bridge_manager::ensure_bundled_bridge_ops_installed(&app).map_err(|error| error.to_string())?;
-
     let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
     sync_idle_bridge_runtime(&app, &saved)?;
     Ok(saved)

@@ -1442,6 +1442,7 @@ pub struct KimiCodeAccessConfigView {
     pub kimi_code_home: String,
     pub config_path: String,
     pub config_exists: bool,
+    pub config_error: Option<String>,
     pub provider: KimiCodeAccessConfigProviderView,
     pub model: KimiCodeAccessConfigModelView,
     pub services: KimiCodeAccessConfigServicesView,

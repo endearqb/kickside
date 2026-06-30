@@ -3,6 +3,7 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   openExternalWebviewWindow,
@@ -10,6 +11,7 @@ import {
 import { createGridSession } from "@/services/workspaceGridService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
+import { postThemeToFrame } from "./PaneFrame";
 import { WorkspaceGridView } from "./WorkspaceGridView";
 
 vi.mock("@/services/externalWebviewService", () => ({
@@ -38,6 +40,7 @@ const props: WorkspaceViewProps = {
   codeFrameKey: "code",
   chatRemoteUrl: "https://www.kimi.com/",
   effectiveWorkDir: "D:/work",
+  themeMode: "light",
   workspaceIframeRef: createRef<HTMLIFrameElement>(),
   chatIframeRef: createRef<HTMLIFrameElement>(),
   codePaneState: "ready",
@@ -45,6 +48,7 @@ const props: WorkspaceViewProps = {
   actionBusy: false,
   onRetry: vi.fn(),
   onOpenLogs: vi.fn(),
+  onOpenFolder: vi.fn(),
   onOpenExternalUrl: vi.fn(),
   onSplitRatioChange: vi.fn(),
   onSplitDragStateChange: vi.fn(),
@@ -57,12 +61,15 @@ const props: WorkspaceViewProps = {
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.localStorage.clear();
+    if (typeof window.localStorage.clear === "function") {
+      window.localStorage.clear();
+    }
     useWorkspaceGridStore.setState(createDefaultWorkspaceGridState(100));
   });
 
   afterEach(() => {
     cleanup();
+    document.body.replaceChildren();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -75,64 +82,170 @@ describe("WorkspaceGridView", () => {
     expect(useWorkspaceGridStore.getState().activePaneId).toBe("pane-chat");
   });
 
-  it("adds a custom external URL without persisting fragments", () => {
-    vi.spyOn(window, "prompt").mockReturnValue("https://example.com/path#token=secret");
+  it("does not offer Kimi.com as an empty-pane or header action", () => {
     useWorkspaceGridStore.getState().setPreset("1x3");
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
-
-    const pane = useWorkspaceGridStore
-      .getState()
-      .panes.find((item) => item.kind === "external");
-    expect(pane?.title).toBe("example.com");
-    expect(pane?.url).toBe("https://example.com/path");
+    expect(screen.queryByRole("button", { name: "Kimi.com" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "切换为 Kimi.com" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Code" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Chat" })).toBeTruthy();
   });
 
-  it("creates a server session when switching an existing pane to Code", async () => {
+  it("switches an existing pane to Code without creating a server session", async () => {
     render(<WorkspaceGridView {...props} />);
 
     await act(async () => {
-      fireEvent.click(screen.getAllByRole("button", { name: "切换为 Code" })[1]);
+      fireEvent.click(screen.getByRole("button", { name: "当前 Chat，切换为 Code" }));
     });
 
     const pane = useWorkspaceGridStore
       .getState()
       .panes.find((item) => item.id === "pane-chat");
-    expect(createGridSession).toHaveBeenCalledWith("D:/work");
+    expect(createGridSession).not.toHaveBeenCalled();
     expect(pane).toMatchObject({
       kind: "code",
-      sessionId: "server-session-1",
-      title: "Kimi Code server-s",
+      sessionId: undefined,
+      title: getKimiAssistantDisplayName(),
+      workDir: "D:/work",
     });
   });
 
-  it("can suspend and resume a pane", () => {
+  it("adds empty Code panes as root Kimi Code Web iframes without sessions", async () => {
+    useWorkspaceGridStore.getState().setPreset("1x3");
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getAllByRole("button", { name: "挂起窗格" })[0]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Code" }));
+    });
 
+    const pane = useWorkspaceGridStore
+      .getState()
+      .panes.find((item) => item.id !== "pane-code" && item.kind === "code");
+    expect(createGridSession).not.toHaveBeenCalled();
+    expect(pane).toMatchObject({
+      sessionId: undefined,
+      workDir: "D:/work",
+    });
+    expect(
+      document.querySelector(
+        'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("adds panes to the clicked empty fourth slot", async () => {
+    useWorkspaceGridStore.getState().setPreset("2x2");
+    render(<WorkspaceGridView {...props} />);
+
+    const emptyCodeButtons = screen.getAllByRole("button", { name: "Code" });
+    await act(async () => {
+      fireEvent.click(emptyCodeButtons[1]);
+    });
+
+    const state = useWorkspaceGridStore.getState();
+    const bottomLeft = state.slots.find((slot) => slot.id === "bottom-left");
+    const bottomRight = state.slots.find((slot) => slot.id === "bottom-right");
+    const bottomRightPane = state.panes.find(
+      (pane) => pane.id === bottomRight?.paneId,
+    );
+
+    expect(bottomLeft?.paneId).toBeUndefined();
+    expect(bottomRightPane).toMatchObject({
+      kind: "code",
+      sessionId: undefined,
+      workDir: "D:/work",
+    });
+  });
+
+  it("opens the current Code pane work directory from the pane header", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "打开此窗格目录" }));
+
+    expect(props.onOpenFolder).toHaveBeenCalledWith("D:/work");
+  });
+
+  it("does not render pane theme controls in pane headers", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    expect(screen.queryByRole("combobox", { name: "窗格主题" })).toBeNull();
+  });
+
+  it("keeps the active iframe node when changing layout presets", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    const iframeBefore = document.querySelector(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(iframeBefore).toBeTruthy();
+
+    act(() => {
+      useWorkspaceGridStore.getState().setPreset("2x2");
+    });
+
+    const iframeAfter = document.querySelector(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(iframeAfter).toBe(iframeBefore);
+    expect(props.onCodeFrameLoad).not.toHaveBeenCalled();
+  });
+
+  it("posts pane theme sync payloads to iframe origin", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "https://example.com/path";
+    document.body.append(frame);
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, "https://example.com/path", "dark");
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "dark" },
+      "https://example.com",
+    );
+  });
+
+  it("swaps panes by pointer-dragging one pane header onto another slot", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    const headers = document.querySelectorAll(".workspace-grid-pane-header");
+    const slots = document.querySelectorAll(".workspace-grid-slot");
+    const canvas = document.querySelector(".workspace-grid-canvas") as HTMLDivElement;
+    setElementRect(slots[0]!, rect(0, 0, 400, 300));
+    setElementRect(slots[1]!, rect(410, 0, 400, 300));
+
+    fireEvent(headers[0]!, pointerEvent("pointerdown", 40, 12));
+    expect(canvas.classList.contains("is-pane-dragging")).toBe(true);
+
+    fireEvent(canvas, pointerEvent("pointermove", 450, 12));
+    expect(slots[1]!.classList.contains("is-drop-target")).toBe(true);
+
+    fireEvent(canvas, pointerEvent("pointerup", 450, 12));
+
+    expect(useWorkspaceGridStore.getState().slots.map((slot) => slot.paneId)).toEqual([
+      "pane-chat",
+      "pane-code",
+    ]);
+  });
+
+  it("hides the pane header suspend button but can resume a suspended pane", () => {
+    useWorkspaceGridStore.getState().setPaneMountPolicy("pane-code", "suspended");
+    render(<WorkspaceGridView {...props} />);
+
+    expect(screen.queryByRole("button", { name: "挂起窗格" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "恢复挂载" })).toBeNull();
     expect(screen.getByText("窗格已挂起")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "恢复窗格" }));
     expect(useWorkspaceGridStore.getState().panes[0]?.mountPolicy).toBe("eager");
   });
 
-  it("saves and restores a named layout", () => {
-    vi.spyOn(window, "prompt").mockReturnValue("双窗调试");
+  it("does not render the custom layout toolbar", () => {
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "保存布局" }));
-    const select = screen.getByRole("combobox", {
-      name: "保存的工作区布局",
-    }) as HTMLSelectElement;
-    const savedLayoutId = select.value;
-
-    fireEvent.click(screen.getByRole("button", { name: "三列" }));
-    expect(useWorkspaceGridStore.getState().preset).toBe("1x3");
-
-    fireEvent.change(select, { target: { value: "" } });
-    fireEvent.change(select, { target: { value: savedLayoutId } });
-    expect(useWorkspaceGridStore.getState().preset).toBe("1x2");
+    expect(screen.queryByRole("button", { name: "保存布局" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "保存的工作区布局" })).toBeNull();
   });
 
   it("persists column resize from a drag handle", () => {
@@ -162,22 +275,16 @@ describe("WorkspaceGridView", () => {
     fireEvent(canvas, pointerEvent("pointerup", 450));
 
     expect(useWorkspaceGridStore.getState().trackSizes?.columns).toEqual([
-      1.5,
-      0.5,
-      1,
+      1.333,
+      0.667,
     ]);
   });
 
   it("opens blocked external panes in a Tauri webview window", () => {
     vi.useFakeTimers();
-    vi.spyOn(window, "prompt").mockReturnValue("https://example.com/path#secret");
-    useWorkspaceGridStore.getState().setPreset("1x3");
+    const externalPane = addExternalPaneToGrid();
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
-    const externalPane = useWorkspaceGridStore
-      .getState()
-      .panes.find((item) => item.kind === "external");
     act(() => {
       vi.advanceTimersByTime(8_000);
     });
@@ -192,14 +299,9 @@ describe("WorkspaceGridView", () => {
 
   it("embeds blocked external panes in a child Tauri webview", async () => {
     vi.useFakeTimers();
-    vi.spyOn(window, "prompt").mockReturnValue("https://example.com/path#secret");
-    useWorkspaceGridStore.getState().setPreset("1x3");
+    const externalPane = addExternalPaneToGrid();
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Kimi.com" }));
-    const externalPane = useWorkspaceGridStore
-      .getState()
-      .panes.find((item) => item.kind === "external");
     const embedHosts = document.querySelectorAll(".workspace-embed");
     const embedHost = embedHosts[embedHosts.length - 1] as HTMLDivElement;
     Object.defineProperty(embedHost, "getBoundingClientRect", {
@@ -242,10 +344,49 @@ describe("WorkspaceGridView", () => {
   });
 });
 
-function pointerEvent(type: string, clientX: number): Event {
+function pointerEvent(type: string, clientX: number, clientY = 0): Event {
   const event = new Event(type, { bubbles: true });
   Object.defineProperty(event, "clientX", { value: clientX });
-  Object.defineProperty(event, "clientY", { value: 0 });
+  Object.defineProperty(event, "clientY", { value: clientY });
   Object.defineProperty(event, "pointerId", { value: 1 });
+  Object.defineProperty(event, "button", { value: 0 });
   return event;
+}
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    width,
+    height,
+    top,
+    right: left + width,
+    bottom: top + height,
+    left,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function setElementRect(element: Element, value: DOMRect) {
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => value,
+  });
+}
+
+function addExternalPaneToGrid() {
+  const store = useWorkspaceGridStore.getState();
+  store.setPreset("1x3");
+  const paneId = store.addPane({
+    kind: "external",
+    title: "example.com",
+    url: "https://example.com/path",
+  });
+  const pane = useWorkspaceGridStore
+    .getState()
+    .panes.find((item) => item.id === paneId);
+  if (!pane) {
+    throw new Error("external pane was not added");
+  }
+  return pane;
 }

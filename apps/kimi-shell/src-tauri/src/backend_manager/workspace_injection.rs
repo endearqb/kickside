@@ -91,7 +91,7 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
   const READY_SOURCE = "kimi-app-enhanced-web-ready";
   const translationGroups = {
     brand_identity: [
-      ["Kimi Code", "Kimi 小助手"]
+      ["Kimi Code", "kimi小助手"]
     ],
     sessions_sidebar: [
       ["Create a session to begin", "创建会话后开始"],
@@ -420,6 +420,8 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   const SESSION_BRIDGE_SOURCE = "{session_bridge_source}";
   const QUERY = "(prefers-color-scheme: dark)";
   const UPSTREAM_WS_ORIGIN = "{upstream_ws_origin}";
+  const APP_BRAND_ZH = "kimi小助手";
+  const APP_BRAND_EN = "kimi sidekick";
   const UPSTREAM_WS_HOST = (function () {{
     try {{
       return new URL(UPSTREAM_WS_ORIGIN).host;
@@ -429,6 +431,72 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   }})();
   let observedSessionId = "";
   let observedLocationTemplate = "";
+  let brandScheduled = false;
+
+  function getAppBrandName() {{
+    const languages = Array.isArray(navigator.languages) && navigator.languages.length
+      ? navigator.languages
+      : [navigator.language || "zh-CN"];
+    const language = String(languages[0] || "zh-CN").toLowerCase();
+    return language.indexOf("zh") === 0 ? APP_BRAND_ZH : APP_BRAND_EN;
+  }}
+
+  function isBrandText(value) {{
+    const normalized = String(value || "").replace(/\s+/g, " ").trim();
+    return normalized === "Kimi Code" || normalized === "Kimi Code Web";
+  }}
+
+  function applyWorkspaceBrand(root) {{
+    if (!root) {{
+      return;
+    }}
+
+    const brand = getAppBrandName();
+    const replaceTextNode = function (node) {{
+      if (!node || !isBrandText(node.nodeValue)) {{
+        return;
+      }}
+      node.nodeValue = String(node.nodeValue || "").replace(/Kimi Code(?: Web)?/, brand);
+    }};
+
+    if (root.nodeType === Node.TEXT_NODE) {{
+      replaceTextNode(root);
+      return;
+    }}
+    if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE) {{
+      return;
+    }}
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let current = walker.currentNode;
+    while (current) {{
+      replaceTextNode(current);
+      current = walker.nextNode();
+    }}
+
+    const elements = root instanceof Element
+      ? [root].concat(Array.from(root.querySelectorAll("[title], [aria-label]")))
+      : Array.from(document.querySelectorAll("[title], [aria-label]"));
+    elements.forEach(function (element) {{
+      ["title", "aria-label"].forEach(function (attrName) {{
+        const value = element.getAttribute(attrName);
+        if (isBrandText(value)) {{
+          element.setAttribute(attrName, brand);
+        }}
+      }});
+    }});
+  }}
+
+  function scheduleWorkspaceBrand() {{
+    if (brandScheduled) {{
+      return;
+    }}
+    brandScheduled = true;
+    window.setTimeout(function () {{
+      brandScheduled = false;
+      applyWorkspaceBrand(document.body || document.documentElement);
+    }}, 40);
+  }}
 
   function normalizeTheme(value) {{
     return value === "light" || value === "dark" ? value : "system";
@@ -983,13 +1051,30 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     document.addEventListener("DOMContentLoaded", function () {{
       notifyParent();
       applyDomTheme(normalizeTheme(localStorage.getItem(THEME_KEY)));
+      scheduleWorkspaceBrand();
     }}, {{ once: true }});
   }} else {{
     notifyParent();
     applyDomTheme(normalizeTheme(localStorage.getItem(THEME_KEY)));
+    scheduleWorkspaceBrand();
   }}
 
   setTimeout(notifyParent, 0);
+  setTimeout(scheduleWorkspaceBrand, 0);
+  setTimeout(scheduleWorkspaceBrand, 250);
+
+  try {{
+    const brandObserver = new MutationObserver(scheduleWorkspaceBrand);
+    brandObserver.observe(document.documentElement, {{
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["title", "aria-label"]
+    }});
+  }} catch (_) {{
+    // ignore
+  }}
 }})();
 </script>"#,
         theme_bridge_source = THEME_BRIDGE_SOURCE,
@@ -1022,5 +1107,14 @@ mod tests {
                 r#"routeTemplate || observedLocationTemplate || "/?session={session_id}""#
             )
         );
+    }
+
+    #[test]
+    fn theme_bridge_script_rebrands_workspace_code_label() {
+        let script = theme_bridge_script_tag(57999);
+        assert!(script.contains(r#"APP_BRAND_ZH = "kimi小助手""#));
+        assert!(script.contains(r#"APP_BRAND_EN = "kimi sidekick""#));
+        assert!(script.contains(r#"normalized === "Kimi Code""#));
+        assert!(script.contains("applyWorkspaceBrand"));
     }
 }

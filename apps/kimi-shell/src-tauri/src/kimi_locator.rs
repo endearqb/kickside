@@ -20,7 +20,7 @@ pub fn locate(settings: &AppSettings) -> Result<PathBuf, String> {
     }
 
     which::which("kimi").map_err(|_| {
-        "Could not find `kimi` in PATH. Install Kimi CLI or configure the executable path."
+        "Could not find `kimi` in PATH. Install Kimi Code or configure the executable path."
             .to_string()
     })
 }

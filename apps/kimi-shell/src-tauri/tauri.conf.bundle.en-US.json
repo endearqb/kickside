@@ -1,4 +1,5 @@
 {
+  "productName": "kimi sidekick",
   "bundle": {
     "windows": {
       "wix": {

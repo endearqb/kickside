@@ -10,10 +10,11 @@ import type {
   PrefillStatusState,
   StartupMonitorStatus,
 } from "@/app/types";
-import { KimiCliBrand } from "@/components/kimi-cli-brand";
+import { KimiAssistantBrand } from "@/components/kimi-code-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { Button } from "@/components/ui/button";
 import { pickRandomAgentTip } from "@/lib/agentTips";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 
 const PREFILL_STATUS_EVENT = "prefill-status";
 const STARTUP_MONITOR_POLL_MS = 1000;
@@ -122,6 +123,7 @@ function formatStartupFailureKindLabel(
 export function PrefillApp() {
   const themeMode = useMemo(() => getInitialThemeMode(), []);
   const selectedTip = useMemo(() => pickRandomAgentTip(), []);
+  const appDisplayName = useMemo(() => getKimiAssistantDisplayName(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusState, setStatusState] = useState<PrefillStatusState>("idle");
@@ -133,6 +135,10 @@ export function PrefillApp() {
   const [openingMainBaseElapsedMs, setOpeningMainBaseElapsedMs] = useState<number | null>(null);
   const [openingMainElapsedMs, setOpeningMainElapsedMs] = useState<number | null>(null);
   const routedRef = useRef(false);
+
+  useEffect(() => {
+    document.title = appDisplayName;
+  }, [appDisplayName]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -388,7 +394,7 @@ export function PrefillApp() {
       <header className="prefill-titlebar titlebar" onMouseDown={handleTitlebarMouseDown}>
         <div className="prefill-titlebar-left">
           <div className="prefill-titlebar-brand titlebar-drag">
-            <KimiCliBrand compact />
+            <KimiAssistantBrand compact />
           </div>
         </div>
 
@@ -424,7 +430,7 @@ export function PrefillApp() {
             <div className="prefill-status-panel prefill-status-panel-primary" role="status" aria-live="polite">
               <div className="prefill-status-head">
                 <div className="prefill-failure-badge">启动中</div>
-                <p className="prefill-status-title">正在准备 Kimi App 工作区</p>
+                <p className="prefill-status-title">正在准备 {appDisplayName} 工作区</p>
                 <p className="prefill-status-detail">{statusHeadline}</p>
               </div>
               <div className="prefill-status-strip">

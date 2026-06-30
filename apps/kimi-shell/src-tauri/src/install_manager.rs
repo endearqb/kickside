@@ -370,7 +370,7 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::QuickInstallCore,
                 "Quick Core Install",
-                "Install Kimi Code CLI from the official installer.",
+                "Install Kimi Code from the official installer.",
                 InstallTaskGroup::Core,
                 true,
                 false,
@@ -382,7 +382,7 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::InstallUv,
                 "Install uv (legacy)",
-                "Legacy repair task for old Python-based Kimi CLI installs.",
+                "Legacy repair task for old Python-based Kimi Code installs.",
                 InstallTaskGroup::Optional,
                 false,
                 false,
@@ -394,7 +394,7 @@ fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::InstallPython313,
                 "Install Python 3.13 (legacy)",
-                "Legacy repair task for old Python-based Kimi CLI installs.",
+                "Legacy repair task for old Python-based Kimi Code installs.",
                 InstallTaskGroup::Optional,
                 false,
                 false,
@@ -405,8 +405,8 @@ fn build_install_flow_catalog_with_mirror_config(
             ),
             task(
                 InstallTaskId::InstallKimi,
-                "Install Kimi CLI",
-                "Install Kimi Code CLI.",
+                "Install Kimi Code",
+                "Install Kimi Code.",
                 InstallTaskGroup::Core,
                 false,
                 false,
@@ -417,8 +417,8 @@ fn build_install_flow_catalog_with_mirror_config(
             ),
             task(
                 InstallTaskId::UpgradeKimi,
-                "Upgrade Kimi CLI",
-                "Upgrade the installed Kimi CLI to the latest version.",
+                "Upgrade Kimi Code",
+                "Upgrade the installed Kimi Code to the latest version.",
                 InstallTaskGroup::Upgrade,
                 false,
                 false,
@@ -429,8 +429,8 @@ fn build_install_flow_catalog_with_mirror_config(
             ),
             task(
                 InstallTaskId::UninstallKimi,
-                "Uninstall Kimi CLI",
-                "Remove only the installed Kimi CLI.",
+                "Uninstall Kimi Code",
+                "Remove only the installed Kimi Code.",
                 InstallTaskGroup::Core,
                 false,
                 false,
@@ -1032,14 +1032,14 @@ fn prepare_managed_task(
         state.snapshot.current_step_id = None;
         state.snapshot.current_step_title = Some("Stop app backend".to_string());
         state.snapshot.message = Some(format!(
-            "Stopping app backend before {action_label} Kimi CLI."
+            "Stopping app backend before {action_label} Kimi Code."
         ));
     });
     push_system_log(
         manager,
         task.id,
         source,
-        format!("Stopping app backend before {action_label} Kimi CLI."),
+        format!("Stopping app backend before {action_label} Kimi Code."),
     );
 
     backend_manager::stop_backend(app)
@@ -1051,9 +1051,9 @@ fn prepare_managed_task(
         state.snapshot.current_step_id = None;
         state.snapshot.current_step_title = None;
         state.snapshot.message = Some(if task.id == InstallTaskId::UninstallKimi {
-            "App backend stopped. Starting Kimi CLI uninstall.".to_string()
+            "App backend stopped. Starting Kimi Code uninstall.".to_string()
         } else {
-            "App backend stopped. Starting Kimi CLI upgrade.".to_string()
+            "App backend stopped. Starting Kimi Code upgrade.".to_string()
         });
     });
     push_system_log(
@@ -1061,9 +1061,9 @@ fn prepare_managed_task(
         task.id,
         source,
         if task.id == InstallTaskId::UninstallKimi {
-            "App backend stopped. Starting Kimi CLI uninstall.".to_string()
+            "App backend stopped. Starting Kimi Code uninstall.".to_string()
         } else {
-            "App backend stopped. Starting Kimi CLI upgrade.".to_string()
+            "App backend stopped. Starting Kimi Code upgrade.".to_string()
         },
     );
     Ok(())
@@ -1079,7 +1079,7 @@ fn managed_task_requires_backend_stop(task_id: InstallTaskId) -> bool {
 fn managed_task_success_message(task: &InstallTaskDefinition) -> String {
     if task.id == InstallTaskId::UninstallKimi {
         return format!(
-            "Install task completed: {}. Kimi CLI is removed and the app backend remains stopped.",
+            "Install task completed: {}. Kimi Code is removed and the app backend remains stopped.",
             task.title
         );
     }
@@ -1409,8 +1409,8 @@ Invoke-KimiShellPython313Check
 fn step_kimi_official() -> InstallTaskStep {
     step(
         "install_kimi",
-        "Install Kimi CLI",
-        "Install Kimi Code CLI with the official Windows installer.",
+        "Install Kimi Code",
+        "Install Kimi Code with the official Windows installer.",
         &kimi_install_command(None),
     )
 }
@@ -1418,8 +1418,8 @@ fn step_kimi_official() -> InstallTaskStep {
 fn step_kimi_mirror(_config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "install_kimi",
-        "Install Kimi CLI",
-        "Install Kimi Code CLI. Mirror source does not change the official Kimi installer.",
+        "Install Kimi Code",
+        "Install Kimi Code. Mirror source does not change the official Kimi installer.",
         &kimi_install_command(None),
     )
 }
@@ -1427,8 +1427,8 @@ fn step_kimi_mirror(_config: &ResolvedMirrorConfig) -> InstallTaskStep {
 fn step_upgrade_official() -> InstallTaskStep {
     step(
         "upgrade_kimi",
-        "Upgrade Kimi CLI",
-        "Upgrade Kimi CLI from the official source.",
+        "Upgrade Kimi Code",
+        "Upgrade Kimi Code from the official source.",
         &kimi_upgrade_command(None),
     )
 }
@@ -1436,8 +1436,8 @@ fn step_upgrade_official() -> InstallTaskStep {
 fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "upgrade_kimi",
-        "Upgrade Kimi CLI",
-        "Upgrade Kimi CLI. Mirror source does not change the official Kimi upgrade command.",
+        "Upgrade Kimi Code",
+        "Upgrade Kimi Code. Mirror source does not change the official Kimi upgrade command.",
         &kimi_upgrade_command(Some(&ps_array(&config.pypi_index_urls))),
     )
 }
@@ -1445,8 +1445,8 @@ fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
 fn step_uninstall_kimi() -> InstallTaskStep {
     step(
         "uninstall_kimi",
-        "Uninstall Kimi CLI",
-        "Remove only the managed Kimi CLI binary/package.",
+        "Uninstall Kimi Code",
+        "Remove only the managed Kimi Code binary/package.",
         &kimi_uninstall_command(),
     )
 }
@@ -1495,7 +1495,7 @@ if (Test-Path $binary) {
 foreach ($candidate in $managed | Where-Object { $_ }) {
   if (Test-Path $candidate) { throw "managed kimi command is still present after uninstall: $candidate" }
 }
-if (-not $removed) { Write-Host 'No managed Kimi CLI install was found.' }
+if (-not $removed) { Write-Host 'No managed Kimi Code install was found.' }
 "#
     .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
     .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
@@ -2395,7 +2395,7 @@ mod tests {
     }
 
     #[test]
-    fn core_ready_only_tracks_kimi_cli() {
+    fn core_ready_only_tracks_kimi_code() {
         let probe = InstallProbeStatus {
             winget_ready: true,
             git_ready: false,
@@ -2461,7 +2461,7 @@ mod tests {
     fn upgrade_success_message_requests_restart() {
         let upgrade = InstallTaskDefinition {
             id: InstallTaskId::UpgradeKimi,
-            title: "Upgrade Kimi CLI".to_string(),
+            title: "Upgrade Kimi Code".to_string(),
             description: String::new(),
             group: InstallTaskGroup::Upgrade,
             recommended: false,
@@ -2474,7 +2474,7 @@ mod tests {
         };
         let install = InstallTaskDefinition {
             id: InstallTaskId::InstallKimi,
-            title: "Install Kimi CLI".to_string(),
+            title: "Install Kimi Code".to_string(),
             description: String::new(),
             group: InstallTaskGroup::Core,
             recommended: false,
@@ -2494,7 +2494,7 @@ mod tests {
     fn uninstall_success_message_keeps_backend_stopped_without_restart_prompt() {
         let uninstall = InstallTaskDefinition {
             id: InstallTaskId::UninstallKimi,
-            title: "Uninstall Kimi CLI".to_string(),
+            title: "Uninstall Kimi Code".to_string(),
             description: String::new(),
             group: InstallTaskGroup::Core,
             recommended: false,

@@ -4,9 +4,9 @@ use crate::{
     app_state::{unix_time_millis, AppState},
     backend_manager, log_manager, settings_store,
     types::{
-        AuthMode, KimiCliConfigCenterView, KimiLoginHealth, KimiLoginHealthSource,
-        KimiLoginHealthState, LoginProbeState, ProviderApiHealth, ProviderApiHealthSource,
-        ProviderApiHealthState, ProviderEntry,
+        AuthMode, KimiCodeAccessConfigView, KimiCodeAuthState, KimiLoginHealth,
+        KimiLoginHealthSource, KimiLoginHealthState, ProviderApiHealth, ProviderApiHealthSource,
+        ProviderApiHealthState,
     },
 };
 
@@ -21,22 +21,15 @@ pub fn resolve_auth_mode_snapshot(
     app: &AppHandle,
     login_verified_fallback: bool,
 ) -> Result<AuthModeSnapshot, String> {
-    let view = backend_manager::load_kimi_cli_config_center().unwrap_or_default();
     let login_health = read_runtime_login_health(app, login_verified_fallback)?;
-    Ok(evaluate_auth_mode(&view, login_health.state))
+    Ok(evaluate_auth_mode_from_config(app, login_health.state)?)
 }
 
 pub fn evaluate_auth_mode(
-    view: &KimiCliConfigCenterView,
+    view: &KimiCodeAccessConfigView,
     kimi_login_state: KimiLoginHealthState,
 ) -> AuthModeSnapshot {
-    let active_provider = normalize_optional_string(&view.default_provider).or_else(|| {
-        view.providers
-            .iter()
-            .find_map(|entry| normalize_optional_string(&Some(entry.key.clone())))
-    });
-
-    let Some(provider_key) = active_provider else {
+    let Some(provider_key) = normalize_string(&view.provider.id) else {
         return AuthModeSnapshot {
             auth_mode: AuthMode::KimiLogin,
             provider_api_configured: false,
@@ -44,28 +37,13 @@ pub fn evaluate_auth_mode(
         };
     };
 
-    let Some(provider) = view
-        .providers
-        .iter()
-        .find(|entry| entry.key.trim() == provider_key)
-    else {
-        return AuthModeSnapshot {
-            auth_mode: AuthMode::Unknown,
-            provider_api_configured: false,
-            provider_api_active_provider: Some(provider_key),
-        };
-    };
-
-    let provider_api_configured = provider_has_credential(provider);
-    let kimi_api_default_selected = backend_manager::kimi_api_default_selected_in_view(view);
+    let provider_api_configured = view.provider.api_key_configured;
 
     AuthModeSnapshot {
-        auth_mode: if kimi_api_default_selected && provider_api_configured {
+        auth_mode: if provider_api_configured {
             AuthMode::ProviderApi
         } else if kimi_login_state == KimiLoginHealthState::Verified {
             AuthMode::KimiLogin
-        } else if provider_api_configured {
-            AuthMode::ProviderApi
         } else {
             AuthMode::Unknown
         },
@@ -74,11 +52,11 @@ pub fn evaluate_auth_mode(
     }
 }
 
-pub fn login_probe_state_from_health(state: KimiLoginHealthState) -> LoginProbeState {
+pub fn kimi_code_auth_state_from_health(state: KimiLoginHealthState) -> KimiCodeAuthState {
     match state {
-        KimiLoginHealthState::Verified => LoginProbeState::LoggedIn,
-        KimiLoginHealthState::AuthRequired => LoginProbeState::LoginRequired,
-        KimiLoginHealthState::Unknown | KimiLoginHealthState::Error => LoginProbeState::Unknown,
+        KimiLoginHealthState::Verified => KimiCodeAuthState::LoggedIn,
+        KimiLoginHealthState::AuthRequired => KimiCodeAuthState::LoginRequired,
+        KimiLoginHealthState::Unknown | KimiLoginHealthState::Error => KimiCodeAuthState::Unknown,
     }
 }
 
@@ -152,8 +130,7 @@ pub fn update_kimi_login_health(
 ) -> Result<KimiLoginHealth, String> {
     let message = message.into().trim().to_string();
     let checked_at_ms = Some(unix_time_millis());
-    let view = backend_manager::load_kimi_cli_config_center().unwrap_or_default();
-    let next_snapshot = evaluate_auth_mode(&view, next_state);
+    let next_snapshot = evaluate_auth_mode_from_config(app, next_state)?;
     let next = KimiLoginHealth {
         state: next_state,
         source,
@@ -178,8 +155,8 @@ pub fn update_kimi_login_health(
         runtime.provider_api_configured = next_snapshot.provider_api_configured;
         runtime.provider_api_active_provider = next_snapshot.provider_api_active_provider.clone();
         runtime.kimi_login_health = Some(next.clone());
-        runtime.login_probe_state = Some(login_probe_state_from_health(next.state));
-        runtime.login_probe_message = if next.message.is_empty() {
+        runtime.kimi_code_auth_state = Some(kimi_code_auth_state_from_health(next.state));
+        runtime.kimi_code_auth_message = if next.message.is_empty() {
             None
         } else {
             Some(next.message.clone())
@@ -282,60 +259,56 @@ fn sync_legacy_login_verified(app: &AppHandle, next_verified: bool) -> Result<()
     settings_store::save(app, &settings).map_err(|error| error.to_string())
 }
 
-fn provider_has_credential(entry: &ProviderEntry) -> bool {
-    normalize_optional_string(&entry.api_key).is_some()
-        || normalize_optional_string(&entry.auth_token).is_some()
+fn evaluate_auth_mode_from_config(
+    app: &AppHandle,
+    kimi_login_state: KimiLoginHealthState,
+) -> Result<AuthModeSnapshot, String> {
+    let view = backend_manager::load_kimi_code_access_config(app)?;
+    if let Some(error) = view
+        .config_error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let message = format!("Kimi Code Access 配置读取失败：{error}");
+        let _ = update_provider_api_health(
+            app,
+            ProviderApiHealthState::Error,
+            ProviderApiHealthSource::BackendStartup,
+            message,
+            None,
+        );
+        return Ok(AuthModeSnapshot {
+            auth_mode: AuthMode::Unknown,
+            provider_api_configured: false,
+            provider_api_active_provider: None,
+        });
+    }
+    Ok(evaluate_auth_mode(&view, kimi_login_state))
 }
 
-fn normalize_optional_string(value: &Option<String>) -> Option<String> {
-    value
-        .as_ref()
-        .map(|item| item.trim().to_string())
+fn normalize_string(value: &str) -> Option<String> {
+    Some(value)
+        .map(str::trim)
+        .map(ToString::to_string)
         .filter(|item| !item.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ProviderEntry;
 
-    #[test]
-    fn auth_mode_prefers_verified_kimi_login_over_provider_api() {
-        let snapshot = evaluate_auth_mode(
-            &KimiCliConfigCenterView {
-                default_provider: Some("moonshot".to_string()),
-                providers: vec![ProviderEntry {
-                    key: "moonshot".to_string(),
-                    api_key: Some("secret".to_string()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
-            KimiLoginHealthState::Verified,
-        );
-
-        assert_eq!(snapshot.auth_mode, AuthMode::KimiLogin);
-        assert!(snapshot.provider_api_configured);
-        assert_eq!(
-            snapshot.provider_api_active_provider.as_deref(),
-            Some("moonshot")
-        );
+    fn access_view(provider_id: &str, api_key_configured: bool) -> KimiCodeAccessConfigView {
+        let mut view = KimiCodeAccessConfigView::default();
+        view.provider.id = provider_id.to_string();
+        view.provider.api_key_configured = api_key_configured;
+        view
     }
 
     #[test]
-    fn auth_mode_prefers_default_kimi_api_over_verified_login() {
+    fn auth_mode_prefers_configured_kimi_code_access() {
         let snapshot = evaluate_auth_mode(
-            &KimiCliConfigCenterView {
-                default_provider: Some(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID.to_string()),
-                model: Some(backend_manager::KIMI_CODING_PLAN_MODEL_ID.to_string()),
-                default_model: Some(backend_manager::KIMI_CODING_PLAN_MODEL_ID.to_string()),
-                providers: vec![ProviderEntry {
-                    key: backend_manager::KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
-                    api_key: Some("secret".to_string()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
+            &access_view(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID, true),
             KimiLoginHealthState::Verified,
         );
 
@@ -350,7 +323,7 @@ mod tests {
     #[test]
     fn auth_mode_falls_back_to_kimi_login_when_no_provider_exists() {
         let snapshot = evaluate_auth_mode(
-            &KimiCliConfigCenterView::default(),
+            &KimiCodeAccessConfigView::default(),
             KimiLoginHealthState::Unknown,
         );
         assert_eq!(snapshot.auth_mode, AuthMode::KimiLogin);
@@ -361,15 +334,7 @@ mod tests {
     #[test]
     fn auth_mode_falls_back_to_provider_api_when_login_is_not_verified() {
         let snapshot = evaluate_auth_mode(
-            &KimiCliConfigCenterView {
-                default_provider: Some("moonshot".to_string()),
-                providers: vec![ProviderEntry {
-                    key: "moonshot".to_string(),
-                    api_key: Some("secret".to_string()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
+            &access_view(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID, true),
             KimiLoginHealthState::AuthRequired,
         );
 
@@ -377,20 +342,14 @@ mod tests {
         assert!(snapshot.provider_api_configured);
         assert_eq!(
             snapshot.provider_api_active_provider.as_deref(),
-            Some("moonshot")
+            Some(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID)
         );
     }
 
     #[test]
     fn auth_mode_becomes_unknown_when_provider_is_present_without_credentials() {
         let snapshot = evaluate_auth_mode(
-            &KimiCliConfigCenterView {
-                providers: vec![ProviderEntry {
-                    key: "moonshot".to_string(),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
+            &access_view(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID, false),
             KimiLoginHealthState::Unknown,
         );
 
@@ -398,7 +357,7 @@ mod tests {
         assert!(!snapshot.provider_api_configured);
         assert_eq!(
             snapshot.provider_api_active_provider.as_deref(),
-            Some("moonshot")
+            Some(backend_manager::KIMI_CODING_PLAN_PROVIDER_ID)
         );
     }
 }

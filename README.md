@@ -1,8 +1,8 @@
-# Kimi App
+# Kimi Sidekick
 
 [中文说明](README_zh.md)
 
-Kimi App is an MIT-licensed repository for the Windows desktop shell around Kimi Web.
+Kimi Sidekick is an MIT-licensed repository for the Windows desktop shell around Kimi Web.
 The main deliverable is `apps/kimi-shell`, a `Tauri v2 + React` desktop application that
 combines startup handoff, install and upgrade flows, a multi-tab control center, IM Bridge
 operations, diagnostics, and Windows packaging into one workspace-oriented app.
@@ -37,23 +37,23 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 
 Main workspace with the persistent Code/Chat shell and desktop-level navigation:
 
-![Kimi Desktop Shell workspace](apps/kimi-shell/public/home.png)
+![Kimi Sidekick workspace](apps/kimi-shell/public/home.png)
 
 Quick Setup guides first-run tasks and common environment fixes from a focused onboarding flow:
 
-![Kimi Desktop Shell quick setup](apps/kimi-shell/public/quick_setup.png)
+![Kimi Sidekick quick setup](apps/kimi-shell/public/quick_setup.png)
 
 Install and Upgrade keeps PowerShell preflight, dependency readiness, and upgrade entry points in one place:
 
-![Kimi Desktop Shell install and upgrade](apps/kimi-shell/public/install&updata.png)
+![Kimi Sidekick install and upgrade](apps/kimi-shell/public/install&updata.png)
 
 Control Center brings overview, quick setup, diagnostics, and operational entry points into one tabbed workspace:
 
-![Kimi Desktop Shell control center](apps/kimi-shell/public/control_center.png)
+![Kimi Sidekick control center](apps/kimi-shell/public/control_center.png)
 
 IM Bridge provides channel controls, current binding/session switching, and working-directory management for bridge-driven workflows:
 
-![Kimi Desktop Shell IM Bridge](apps/kimi-shell/public/IM_bridge.png)
+![Kimi Sidekick IM Bridge](apps/kimi-shell/public/IM_bridge.png)
 
 ## Local Development
 

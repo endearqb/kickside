@@ -11,6 +11,11 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import {
+  isKnownWorkspaceIframeSource,
+  normalizeExternalOpenUrl,
+} from "@/app/linkBridge";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import {
   CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
@@ -68,15 +73,14 @@ import type {
   InstallSource,
   InstallTaskId,
   InstalledSkill,
-  KimiCliApiConfigInput,
-  KimiCliApiConfigView,
-  KimiCliConfigCenterInput,
-  KimiCliConfigCenterView,
+  KimiCodeAccessConfigInput,
+  KimiCodeAccessSummaryView,
+  KimiCodeAccessConfigTestResult,
+  KimiCodeAccessConfigView,
   KimiDoctorResult,
   MainWindowCloseBehavior,
   MainWindowCloseDecisionInput,
   MainWindowCloseDecisionRequestPayload,
-  LoginProbeResult,
   OnboardingStatus,
   OpenRequestErrorPayload,
   PrefillBridgeAck,
@@ -112,8 +116,6 @@ import type {
   WorkspacePaneState,
   WorkspaceSplitOrder,
   WorkspaceViewKind,
-  WorkspaceWebMode,
-  WorkspaceWebSettingsInput,
   WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
@@ -165,14 +167,11 @@ const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
-const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-for-coding";
-const KIMI_CODING_PLAN_MODEL_ID = "kimi-for-coding";
+const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-app-api-key";
+const KIMI_CODING_PLAN_MODEL_ID = "kimi-app/kimi-for-coding";
 const KIMI_CODING_PLAN_BASE_URL = "https://api.kimi.com/coding/v1";
 const KIMI_CODING_PLAN_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
 const KIMI_CODING_PLAN_FETCH_URL = "https://api.kimi.com/coding/v1/fetch";
-const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE = 262144;
-const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY = "moonshot_search";
-const KIMI_CODING_PLAN_FETCH_SERVICE_KEY = "moonshot_fetch";
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 const ENHANCED_WEB_READY_SOURCE = "kimi-app-enhanced-web-ready";
@@ -224,91 +223,79 @@ function getBridgePlatformConnectors(
   return settings.connectors.filter((connector) => connector.platform === platform);
 }
 
-function createEmptyConfigCenterInput(): KimiCliConfigCenterInput {
+function createEmptyKimiCodeAccessInput(): KimiCodeAccessConfigInput {
   return {
-    providers: [],
-    models: [],
-    services: [],
-    defaultProvider: undefined,
-    model: undefined,
-    defaultModel: undefined,
-    defaultService: undefined,
-    defaultEditor: undefined,
-    defaultYolo: undefined,
-    defaultYoloMode: undefined,
-    defaultThinking: undefined,
-    defaultThinkingMode: undefined,
-    localModelDisableAutoPull: undefined,
-    loopControl: {
-      enabled: undefined,
-      maxSteps: undefined,
-      maxRetries: undefined,
-      timeoutMs: undefined,
-      extraFields: [],
-    },
-    mcpServers: [],
+    providerBaseUrl: KIMI_CODING_PLAN_BASE_URL,
+    providerApiKey: undefined,
+    clearProviderApiKey: false,
+    searchBaseUrl: KIMI_CODING_PLAN_SEARCH_URL,
+    searchApiKeyMode: "reuse_provider",
+    searchApiKey: undefined,
+    fetchBaseUrl: KIMI_CODING_PLAN_FETCH_URL,
+    fetchApiKeyMode: "reuse_provider",
+    fetchApiKey: undefined,
+    agentSwarmMaxConcurrency: undefined,
+    clearAgentSwarmMaxConcurrency: false,
   };
 }
 
-function toConfigCenterInput(view: KimiCliConfigCenterView): KimiCliConfigCenterInput {
+function serviceModeFromView(
+  configured: boolean,
+  usesProviderApiKey: boolean,
+): KimiCodeAccessConfigInput["searchApiKeyMode"] {
+  if (usesProviderApiKey) return "reuse_provider";
+  if (configured) return "keep_existing";
+  return "reuse_provider";
+}
+
+function toKimiCodeAccessInput(view: KimiCodeAccessConfigView): KimiCodeAccessConfigInput {
   return {
-    providers: view.providers,
-    models: view.models,
-    services: view.services,
-    defaultProvider: view.defaultProvider,
-    model: view.model,
-    defaultModel: view.defaultModel,
-    defaultService: view.defaultService,
-    defaultEditor: view.defaultEditor,
-    defaultYolo: view.defaultYolo,
-    defaultYoloMode: view.defaultYoloMode,
-    defaultThinking: view.defaultThinking,
-    defaultThinkingMode: view.defaultThinkingMode,
-    localModelDisableAutoPull: view.localModelDisableAutoPull,
-    loopControl: view.loopControl,
-    mcpServers: view.mcpServers,
+    providerBaseUrl: view.provider.baseUrl ?? KIMI_CODING_PLAN_BASE_URL,
+    providerApiKey: undefined,
+    clearProviderApiKey: false,
+    searchBaseUrl: view.services.search.baseUrl ?? KIMI_CODING_PLAN_SEARCH_URL,
+    searchApiKeyMode: serviceModeFromView(
+      view.services.search.apiKeyConfigured,
+      view.services.search.usesProviderApiKey,
+    ),
+    searchApiKey: undefined,
+    fetchBaseUrl: view.services.fetch.baseUrl ?? KIMI_CODING_PLAN_FETCH_URL,
+    fetchApiKeyMode: serviceModeFromView(
+      view.services.fetch.apiKeyConfigured,
+      view.services.fetch.usesProviderApiKey,
+    ),
+    fetchApiKey: undefined,
+    agentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency,
+    clearAgentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency == null,
   };
 }
 
-function cloneConfigCenterInput(
-  input: KimiCliConfigCenterInput,
-): KimiCliConfigCenterInput {
-  return JSON.parse(JSON.stringify(input)) as KimiCliConfigCenterInput;
+function cloneKimiCodeAccessInput(
+  input: KimiCodeAccessConfigInput,
+): KimiCodeAccessConfigInput {
+  return JSON.parse(JSON.stringify(input)) as KimiCodeAccessConfigInput;
 }
 
-function deriveKimiCliApiConfigView(
-  view: KimiCliConfigCenterView | null,
-): KimiCliApiConfigView | null {
+function deriveKimiCodeAccessSummary(
+  view: KimiCodeAccessConfigView | null,
+): KimiCodeAccessSummaryView | null {
   if (!view) {
     return null;
   }
 
-  const provider = view.providers.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_PROVIDER_ID,
-  );
-  const model = view.models.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_MODEL_ID,
-  );
-  const searchService = view.services.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
-  );
-  const fetchService = view.services.find(
-    (entry) => entry.key.trim() === KIMI_CODING_PLAN_FETCH_SERVICE_KEY,
-  );
-  const hasApiKey = Boolean(
-    provider?.apiKey?.trim() || searchService?.apiKey?.trim() || fetchService?.apiKey?.trim(),
-  );
+  const hasApiKey =
+    view.provider.apiKeyConfigured ||
+    view.services.search.apiKeyConfigured ||
+    view.services.fetch.apiKeyConfigured;
   const templateConfigured =
-    provider?.providerType?.trim() === "kimi" &&
-    provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
+    view.provider.type === "kimi" &&
+    view.provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
     hasApiKey &&
-    model?.provider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
-    model.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
-    model.maxContextSize === KIMI_CODING_PLAN_MAX_CONTEXT_SIZE &&
-    searchService?.endpoint?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
-    Boolean(searchService.apiKey?.trim()) &&
-    fetchService?.endpoint?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
-    Boolean(fetchService.apiKey?.trim());
+    view.model.exists &&
+    view.services.search.baseUrl?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
+    view.services.search.apiKeyConfigured &&
+    view.services.fetch.baseUrl?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
+    view.services.fetch.apiKeyConfigured;
 
   return {
     configPath: view.configPath,
@@ -317,10 +304,6 @@ function deriveKimiCliApiConfigView(
     baseUrl: KIMI_CODING_PLAN_BASE_URL,
     hasApiKey,
     templateConfigured,
-    isDefault:
-      view.defaultProvider?.trim() === KIMI_CODING_PLAN_PROVIDER_ID &&
-      view.model?.trim() === KIMI_CODING_PLAN_MODEL_ID &&
-      view.defaultModel?.trim() === KIMI_CODING_PLAN_MODEL_ID,
   };
 }
 
@@ -520,7 +503,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "这是可选配置；保存并启用 IM Bridge 后，才能从这里直接启动 bridge。",
+        message: "这是可选配置；保存并启用外部 IM 通道后，才能从这里直接启动 bridge。",
     };
   }
 
@@ -528,7 +511,7 @@ function createBridgeOnboardingValidation(
     return {
       canSave: true,
       canStart: false,
-      message: "存在未保存的 IM Bridge 配置，请先点击“保存并启用”再启动 bridge。",
+        message: "存在未保存的外部 IM 通道配置，请先点击“保存并启用”再启动 bridge。",
     };
   }
 
@@ -549,7 +532,6 @@ export function useShellController() {
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [kimiDoctorBusy, setKimiDoctorBusy] = useState(false);
   const [contextMenuBusy, setContextMenuBusy] = useState(false);
-  const [loginProbeBusy, setLoginProbeBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [workspaceImportBusy, setWorkspaceImportBusy] = useState(false);
   const [workspaceImportTargets, setWorkspaceImportTargets] = useState<
@@ -561,28 +543,27 @@ export function useShellController() {
     useState<WorkspaceImportResult | null>(null);
   const [contextMenuStatus, setContextMenuStatus] =
     useState<ContextMenuStatus | null>(null);
-  const [loginProbeResult, setLoginProbeResult] =
-    useState<LoginProbeResult | null>(null);
   const [kimiDoctorResult, setKimiDoctorResult] =
     useState<KimiDoctorResult | null>(null);
   const [kimiPathInput, setKimiPathInput] = useState("");
   const [workDirInput, setWorkDirInput] = useState("");
-  const [configCenterView, setConfigCenterView] =
-    useState<KimiCliConfigCenterView | null>(null);
-  const [configCenterDraft, setConfigCenterDraft] = useState<KimiCliConfigCenterInput>(
-    () => createEmptyConfigCenterInput(),
+  const [kimiCodeAccessView, setKimiCodeAccessView] =
+    useState<KimiCodeAccessConfigView | null>(null);
+  const [kimiCodeAccessDraft, setKimiCodeAccessDraft] = useState<KimiCodeAccessConfigInput>(
+    () => createEmptyKimiCodeAccessInput(),
   );
-  const [configCenterSnapshot, setConfigCenterSnapshot] =
-    useState<KimiCliConfigCenterInput>(() => createEmptyConfigCenterInput());
-  const [configCenterBusy, setConfigCenterBusy] = useState(false);
-  const [kimiApiKeyInput, setKimiApiKeyInput] = useState("");
+  const [kimiCodeAccessSnapshot, setKimiCodeAccessSnapshot] =
+    useState<KimiCodeAccessConfigInput>(() => createEmptyKimiCodeAccessInput());
+  const [kimiCodeAccessBusy, setKimiCodeAccessBusy] = useState(false);
+  const [kimiCodeAccessTesting, setKimiCodeAccessTesting] = useState(false);
+  const [kimiCodeAccessTestResult, setKimiCodeAccessTestResult] =
+    useState<KimiCodeAccessConfigTestResult | null>(null);
   const [installSource, setInstallSource] = useState<InstallSource>("official");
   const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
     () => createDefaultInstallSettingsView(),
   );
   const [workspaceWebSettings, setWorkspaceWebSettings] =
     useState<WorkspaceWebSettingsView>(() => createDefaultWorkspaceWebSettings());
-  const [workspaceWebSettingsBusy, setWorkspaceWebSettingsBusy] = useState(false);
   const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
     () => createDefaultBridgeSettings(),
   );
@@ -726,6 +707,10 @@ export function useShellController() {
   const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
   const setWorkspaceGridActivePane = useWorkspaceGridStore(
     (state) => state.setActivePane,
+  );
+  const addWorkspaceGridPane = useWorkspaceGridStore((state) => state.addPane);
+  const configureWorkspaceGridPane = useWorkspaceGridStore(
+    (state) => state.configurePane,
   );
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
@@ -966,6 +951,44 @@ export function useShellController() {
     }
   }
 
+  const applySessionBridgeToGrid = useCallback(
+    (payload: WorkspaceSessionBridgePayload) => {
+      const sessionId = payload.sessionId?.trim();
+      if (!sessionId) {
+        return false;
+      }
+
+      const targetPane =
+        workspaceGridPanes.find(
+          (pane) => pane.id === workspaceGridActivePaneId && pane.kind === "code",
+        ) ??
+        workspaceGridPanes.find((pane) => pane.id === "pane-code") ??
+        workspaceGridPanes.find((pane) => pane.kind === "code") ??
+        workspaceGridPanes[0];
+      const input = {
+        kind: "code" as const,
+        title: getKimiAssistantDisplayName(),
+        sessionId,
+        workDir: payload.workDir?.trim() || targetPane?.workDir,
+      };
+
+      if (targetPane) {
+        configureWorkspaceGridPane(targetPane.id, input);
+        setWorkspaceGridActivePane(targetPane.id);
+        return true;
+      }
+
+      return addWorkspaceGridPane(input) !== null;
+    },
+    [
+      addWorkspaceGridPane,
+      configureWorkspaceGridPane,
+      setWorkspaceGridActivePane,
+      workspaceGridActivePaneId,
+      workspaceGridPanes,
+    ],
+  );
+
   function clearShutdownElapsedTimer(resetValue: boolean) {
     if (shutdownElapsedTimerRef.current !== null) {
       window.clearInterval(shutdownElapsedTimerRef.current);
@@ -1019,8 +1042,8 @@ export function useShellController() {
   }
 
   function closeActiveControlTask() {
-    if (activeControlTask === "config_center" && configCenterDirty) {
-      const confirmed = window.confirm("配置中心存在未保存更改，确定离开当前任务吗？");
+    if (activeControlTask === "kimi_code_access" && kimiCodeAccessDirty) {
+      const confirmed = window.confirm("控制中心存在未保存更改，确定离开当前任务吗？");
       if (!confirmed) {
         return false;
       }
@@ -1055,8 +1078,8 @@ export function useShellController() {
   }
 
   function dismissControlCenter() {
-    if (activeControlTask === "config_center" && configCenterDirty) {
-      const confirmed = window.confirm("配置中心存在未保存更改，确定关闭控制中心吗？");
+    if (activeControlTask === "kimi_code_access" && kimiCodeAccessDirty) {
+      const confirmed = window.confirm("控制中心存在未保存更改，确定关闭控制中心吗？");
       if (!confirmed) {
         return false;
       }
@@ -1172,6 +1195,12 @@ export function useShellController() {
         pendingSessionBridgeRef.current = null;
         return;
       }
+      if (applySessionBridgeToGrid(payload)) {
+        pendingSessionBridgeRef.current = null;
+        clearSessionNavigateTimer();
+        prefillDispatchRef.current?.("session_navigation_grid");
+        return;
+      }
       if (status?.state !== "running" || workspaceEmbedState !== "ready") {
         return;
       }
@@ -1216,7 +1245,7 @@ export function useShellController() {
 
       void source;
     },
-    [status?.state, workspaceEmbedState, workspaceOrigin],
+    [applySessionBridgeToGrid, status?.state, workspaceEmbedState, workspaceOrigin],
   );
 
   const dispatchPendingPrefillToWorkspace = useCallback(
@@ -2157,21 +2186,28 @@ export function useShellController() {
         if (!chatOrigin || event.origin !== chatOrigin) {
           return;
         }
-        const externalUrl = payload.url?.trim();
+        const externalUrl = normalizeExternalOpenUrl(payload.url ?? "");
         if (!externalUrl) {
+          console.debug("Ignored unsafe chat external URL bridge payload.");
           return;
         }
-        if (tauriRuntime) {
-          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
-            setActionError(String(error));
-          });
-        } else {
-          try {
-            window.open(externalUrl, "_blank", "noopener,noreferrer");
-          } catch (error) {
-            setActionError(String(error));
-          }
+        void handleOpenExternalUrl(externalUrl);
+        return;
+      }
+
+      if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
+        const externalUrl = normalizeExternalOpenUrl(payload.url ?? "");
+        if (!externalUrl) {
+          console.debug("Ignored unsafe workspace external URL bridge payload.");
+          return;
         }
+        if (
+          (!workspaceOrigin || event.origin !== workspaceOrigin) &&
+          !isKnownWorkspaceIframeSource(event.source)
+        ) {
+          return;
+        }
+        void handleOpenExternalUrl(externalUrl);
         return;
       }
 
@@ -2188,25 +2224,6 @@ export function useShellController() {
             .catch(() => {
               // Health persistence is best-effort; the iframe itself is already usable.
             });
-        }
-        return;
-      }
-
-      if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
-        const externalUrl = payload.url?.trim();
-        if (!externalUrl) {
-          return;
-        }
-        if (tauriRuntime) {
-          void invoke("open_external_url", { url: externalUrl }).catch((error) => {
-            setActionError(String(error));
-          });
-        } else {
-          try {
-            window.open(externalUrl, "_blank", "noopener,noreferrer");
-          } catch (error) {
-            setActionError(String(error));
-          }
         }
         return;
       }
@@ -2337,13 +2354,14 @@ export function useShellController() {
     [],
   );
 
-  async function loadKimiCliConfigCenter() {
+  async function loadKimiCodeAccessConfig() {
     try {
-      const data = await invoke<KimiCliConfigCenterView>("load_kimi_cli_config_center");
-      setConfigCenterView(data);
-      const nextInput = toConfigCenterInput(data);
-      setConfigCenterDraft(nextInput);
-      setConfigCenterSnapshot(cloneConfigCenterInput(nextInput));
+      const data = await invoke<KimiCodeAccessConfigView>("load_kimi_code_access_config");
+      setKimiCodeAccessView(data);
+      const nextInput = toKimiCodeAccessInput(data);
+      setKimiCodeAccessDraft(nextInput);
+      setKimiCodeAccessSnapshot(cloneKimiCodeAccessInput(nextInput));
+      setKimiCodeAccessTestResult(null);
       setActionError(null);
       return data;
     } catch (error) {
@@ -2385,46 +2403,21 @@ export function useShellController() {
 
   async function refreshWorkspaceWebSettings() {
     const data = await invoke<WorkspaceWebSettingsView>("get_workspace_web_settings");
+    if (data.mode === "enhanced_local") {
+      const officialData = await invoke<WorkspaceWebSettingsView>(
+        "fallback_workspace_web_to_official",
+        { reason: "official_web_i18n_available" },
+      );
+      setWorkspaceWebSettings(officialData);
+      setWorkspaceFrameReloadToken((current) => current + 1);
+      setWorkspaceEmbedState("loading");
+      return officialData;
+    }
     setWorkspaceWebSettings(data);
     return data;
   }
 
-  async function saveWorkspaceWebSettings(input: WorkspaceWebSettingsInput) {
-    setWorkspaceWebSettingsBusy(true);
-    try {
-      const data = await invoke<WorkspaceWebSettingsView>("save_workspace_web_settings", {
-        input,
-      });
-      setWorkspaceWebSettings(data);
-      setActionError(null);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      throw error;
-    } finally {
-      setWorkspaceWebSettingsBusy(false);
-    }
-  }
-
-  async function handleWorkspaceWebModeChange(mode: WorkspaceWebMode) {
-    const data = await saveWorkspaceWebSettings({
-      mode,
-      autoFallback: workspaceWebSettings.autoFallback,
-    });
-    setWorkspaceFrameReloadToken((current) => current + 1);
-    setWorkspaceEmbedState("loading");
-    return data;
-  }
-
-  async function handleWorkspaceWebAutoFallbackChange(autoFallback: boolean) {
-    return saveWorkspaceWebSettings({
-      mode: workspaceWebSettings.mode,
-      autoFallback,
-    });
-  }
-
   async function handleFallbackWorkspaceWebToOfficial(reason = "manual_fallback") {
-    setWorkspaceWebSettingsBusy(true);
     try {
       const data = await invoke<WorkspaceWebSettingsView>(
         "fallback_workspace_web_to_official",
@@ -2438,8 +2431,6 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       throw error;
-    } finally {
-      setWorkspaceWebSettingsBusy(false);
     }
   }
 
@@ -2566,8 +2557,8 @@ export function useShellController() {
     action: InstallAction;
     invokeCommand:
       | "install_kimi_dependencies"
-      | "install_kimi_cli"
-      | "upgrade_kimi_cli"
+      | "install_kimi_code"
+      | "upgrade_kimi_code"
       | "install_nodejs";
     invokeArgs?: Record<string, unknown>;
     alreadyInstalled: (probe: InstallProbeStatus) => boolean;
@@ -3067,14 +3058,15 @@ export function useShellController() {
   }
 
   async function handleOpenExternalUrl(url: string) {
-    const trimmed = url.trim();
-    if (!trimmed) {
+    const normalized = normalizeExternalOpenUrl(url);
+    if (!normalized) {
+      console.debug("Ignored unsafe external URL open request.");
       return;
     }
 
     if (tauriRuntime) {
       try {
-        await invoke("open_external_url", { url: trimmed });
+        await invoke("open_external_url", { url: normalized });
         return;
       } catch (error) {
         setActionError(String(error));
@@ -3082,7 +3074,7 @@ export function useShellController() {
     }
 
     try {
-      const opened = window.open(trimmed, "_blank", "noopener,noreferrer");
+      const opened = window.open(normalized, "_blank", "noopener,noreferrer");
       if (!opened) {
         setActionError("Could not open external browser window.");
       }
@@ -3111,97 +3103,46 @@ export function useShellController() {
     }
   }
 
-  async function handleOpenConfigCenterModal() {
+  async function handleOpenKimiCodeAccessPanel() {
     setActionError(null);
-    setConfigCenterBusy(true);
+    setKimiCodeAccessBusy(true);
     try {
-      await loadKimiCliConfigCenter();
-      setControlCenterTask("config_center");
+      await loadKimiCodeAccessConfig();
+      setControlCenterTask("kimi_code_access");
     } catch (error) {
       setActionError(String(error));
     } finally {
-      setConfigCenterBusy(false);
+      setKimiCodeAccessBusy(false);
     }
   }
 
-  function handleConfigCenterDraftChange(next: KimiCliConfigCenterInput) {
-    setConfigCenterDraft(next);
+  function handleKimiCodeAccessDraftChange(next: KimiCodeAccessConfigInput) {
+    setKimiCodeAccessDraft(next);
   }
 
-  function handleResetConfigCenterDraft() {
-    setConfigCenterDraft(cloneConfigCenterInput(configCenterSnapshot));
+  function handleResetKimiCodeAccessDraft() {
+    setKimiCodeAccessDraft(cloneKimiCodeAccessInput(kimiCodeAccessSnapshot));
   }
 
-  async function handleSaveKimiCliApiConfig() {
+  async function handleSaveKimiCodeAccessConfig() {
     setActionBusy(true);
-    setConfigCenterBusy(true);
+    setKimiCodeAccessBusy(true);
     setActionError(null);
     try {
-      await invoke("save_kimi_cli_api_config", {
-        input: {
-          apiKey: kimiApiKeyInput.trim() || undefined,
-        } satisfies KimiCliApiConfigInput,
+      const data = await invoke<KimiCodeAccessConfigView>("save_kimi_code_access_config", {
+        input: kimiCodeAccessDraft,
       });
-      await loadKimiCliConfigCenter();
-      await refreshCoreState();
-      setKimiApiKeyInput("");
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
-      setConfigCenterBusy(false);
-    }
-  }
-
-  async function handleSetKimiCliApiAsDefault() {
-    setActionBusy(true);
-    setConfigCenterBusy(true);
-    setActionError(null);
-    try {
-      await invoke("set_kimi_cli_api_as_default");
-      await loadKimiCliConfigCenter();
-      await refreshCoreState();
-      setKimiApiKeyInput("");
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
-      setConfigCenterBusy(false);
-    }
-  }
-
-  async function handleSetKimiLoginAsDefault() {
-    setActionBusy(true);
-    setConfigCenterBusy(true);
-    setActionError(null);
-    try {
-      await invoke("set_kimi_login_as_default");
-      await loadKimiCliConfigCenter();
+      setKimiCodeAccessView(data);
+      const nextInput = toKimiCodeAccessInput(data);
+      setKimiCodeAccessDraft(nextInput);
+      setKimiCodeAccessSnapshot(cloneKimiCodeAccessInput(nextInput));
+      setKimiCodeAccessTestResult(null);
       await refreshCoreState();
     } catch (error) {
       setActionError(String(error));
     } finally {
       setActionBusy(false);
-      setConfigCenterBusy(false);
-    }
-  }
-
-  async function handleSaveKimiCliConfigCenter() {
-    setActionBusy(true);
-    setConfigCenterBusy(true);
-    setActionError(null);
-    try {
-      await invoke("save_kimi_cli_config_center", {
-        input: configCenterDraft,
-      });
-      await loadKimiCliConfigCenter();
-      await refreshCoreState();
-      setControlCenterTask(null);
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setActionBusy(false);
-      setConfigCenterBusy(false);
+      setKimiCodeAccessBusy(false);
     }
   }
 
@@ -3421,7 +3362,7 @@ export function useShellController() {
   async function saveBridgeOnboardingInternal() {
     if (!bridgeOnboardingValidation.canSave) {
       throw new Error(
-        bridgeOnboardingValidation.message ?? "当前 IM Bridge 配置不完整，无法保存。",
+        bridgeOnboardingValidation.message ?? "当前外部 IM 通道配置不完整，无法保存。",
       );
     }
 
@@ -3612,7 +3553,7 @@ export function useShellController() {
       }
 
       if (restartError || refreshError) {
-        setActionError("机器人已删除，但刷新运行状态失败，请查看日志后手动重启 IM Bridge。");
+        setActionError("机器人已删除，但刷新运行状态失败，请查看日志后手动重启外部 IM 通道。");
       }
       return saved;
     } catch (error) {
@@ -3827,36 +3768,6 @@ export function useShellController() {
     }
   }
 
-  async function handleProbeLogin() {
-    setLoginProbeBusy(true);
-    setActionError(null);
-    try {
-      const result = await invoke<LoginProbeResult>("probe_kimi_login");
-      setLoginProbeResult(result);
-      await refreshCoreState();
-    } catch (error) {
-      setActionError(String(error));
-      await refreshCoreState();
-    } finally {
-      setLoginProbeBusy(false);
-    }
-  }
-
-  async function handleLogoutKimiLogin() {
-    setLoginProbeBusy(true);
-    setActionError(null);
-    try {
-      const result = await invoke<LoginProbeResult>("logout_kimi_login");
-      setLoginProbeResult(result);
-      await refreshCoreState();
-    } catch (error) {
-      setActionError(String(error));
-      await refreshCoreState();
-    } finally {
-      setLoginProbeBusy(false);
-    }
-  }
-
   function handleInstallSourceChange(source: InstallSource) {
     setInstallSource(source);
     setInstallMessage("");
@@ -3950,8 +3861,8 @@ export function useShellController() {
     setActionError(null);
     try {
       if (installProbe?.kimiReady) {
-        setInstallMessage("检测到 Kimi CLI 已安装。");
-        window.alert("Kimi CLI 已安装，无需重复安装。");
+        setInstallMessage("检测到 Kimi Code 已安装。");
+        window.alert("Kimi Code 已安装，无需重复安装。");
         return;
       }
 
@@ -3959,7 +3870,7 @@ export function useShellController() {
       const summary = await invoke<string>("install_kimi_dependencies", {
         source: installSource,
       });
-      setInstallMessage(summary.trim() || "Kimi CLI 安装命令执行完成。");
+      setInstallMessage(summary.trim() || "Kimi Code 安装命令执行完成。");
       await refreshOnboarding();
       await refreshInstallProbe();
     } catch (error) {
@@ -3973,16 +3884,16 @@ export function useShellController() {
     setActionError(null);
     try {
       if (installProbe?.kimiReady) {
-        setInstallMessage("检测到 Kimi CLI 已安装。");
-        window.alert("Kimi CLI 已安装，无需重复安装。");
+        setInstallMessage("检测到 Kimi Code 已安装。");
+        window.alert("Kimi Code 已安装，无需重复安装。");
         return;
       }
 
       setInstallBusy(true);
-      const summary = await invoke<string>("install_kimi_cli", {
+      const summary = await invoke<string>("install_kimi_code", {
         source: installSource,
       });
-      setInstallMessage(summary.trim() || "Kimi CLI 安装命令执行完成。");
+      setInstallMessage(summary.trim() || "Kimi Code 安装命令执行完成。");
       await refreshOnboarding();
       await refreshInstallProbe();
     } catch (error) {
@@ -3998,8 +3909,8 @@ export function useShellController() {
       invokeCommand: "install_kimi_dependencies",
       invokeArgs: { source: installSource },
       alreadyInstalled: (probe) => probe.kimiReady,
-      alreadyMessage: "已检测到 Kimi CLI，无需重复安装。",
-      successMessage: "Kimi CLI 安装复检通过。",
+      alreadyMessage: "已检测到 Kimi Code，无需重复安装。",
+      successMessage: "Kimi Code 安装复检通过。",
       predicate: (probe) => probe.kimiReady,
     });
   }
@@ -4007,10 +3918,10 @@ export function useShellController() {
   async function handleInstallKimiExternal() {
     await runInstallAction({
       action: "kimi",
-      invokeCommand: "install_kimi_cli",
+      invokeCommand: "install_kimi_code",
       invokeArgs: { source: installSource },
       alreadyInstalled: (probe) => probe.kimiReady,
-      alreadyMessage: "已检测到 Kimi CLI，无需重复安装。",
+      alreadyMessage: "已检测到 Kimi Code，无需重复安装。",
       successMessage: "Kimi 安装复检通过。",
       predicate: (probe) => probe.kimiReady,
     });
@@ -4019,10 +3930,10 @@ export function useShellController() {
   async function handleUpgradeKimi() {
     await runInstallAction({
       action: "upgrade_kimi",
-      invokeCommand: "upgrade_kimi_cli",
+      invokeCommand: "upgrade_kimi_code",
       invokeArgs: { source: installSource },
       alreadyInstalled: (probe) => !probe.kimiReady,
-      alreadyMessage: "升级前请先安装 Kimi CLI。",
+      alreadyMessage: "升级前请先安装 Kimi Code。",
       successMessage: "Kimi 升级复检通过。",
       predicate: (probe) => probe.kimiReady,
     });
@@ -4188,8 +4099,8 @@ export function useShellController() {
     payload: ControlCenterTaskPayload | null = null,
   ) {
     switch (task) {
-      case "config_center":
-        await handleOpenConfigCenterModal();
+      case "kimi_code_access":
+        await handleOpenKimiCodeAccessPanel();
         return;
       case "skill_git_import":
         await handleInstallSkillFromGit();
@@ -4529,6 +4440,37 @@ export function useShellController() {
     }
   }
 
+  async function handleTestKimiCodeAccessConfig() {
+    setKimiCodeAccessTesting(true);
+    setActionError(null);
+    try {
+      const result = await invoke<KimiCodeAccessConfigTestResult>(
+        "test_kimi_code_access_config",
+        {
+          input: {
+            providerBaseUrl: kimiCodeAccessDraft.providerBaseUrl,
+            providerApiKey: kimiCodeAccessDraft.providerApiKey?.trim() || undefined,
+            searchBaseUrl: kimiCodeAccessDraft.searchBaseUrl,
+            searchApiKey:
+              kimiCodeAccessDraft.searchApiKeyMode === "custom"
+                ? kimiCodeAccessDraft.searchApiKey?.trim() || undefined
+                : undefined,
+            fetchBaseUrl: kimiCodeAccessDraft.fetchBaseUrl,
+            fetchApiKey:
+              kimiCodeAccessDraft.fetchApiKeyMode === "custom"
+                ? kimiCodeAccessDraft.fetchApiKey?.trim() || undefined
+                : undefined,
+          },
+        },
+      );
+      setKimiCodeAccessTestResult(result);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setKimiCodeAccessTesting(false);
+    }
+  }
+
   function handleToggleWorkspaceView() {
     handleSelectWorkspaceView(activeWorkspaceView === "code" ? "chat" : "code");
   }
@@ -4567,14 +4509,7 @@ export function useShellController() {
     setIsWorkspaceSplitDragging(isDragging);
   }
 
-  const { pushThemeToWorkspace } = useWorkspaceThemeBridge({
-    screen,
-    workspaceEmbedState,
-    workspaceOrigin,
-    themeMode,
-    workspaceIframeRef,
-    setThemeMode,
-  });
+  const { pushThemeToWorkspace } = useWorkspaceThemeBridge();
 
   useEffect(() => {
     const timer = startWorkspacePane(
@@ -4628,21 +4563,21 @@ export function useShellController() {
       context_menu: onboarding
         ? !onboarding.contextMenuSupported || onboarding.contextMenuEnabled
         : false,
-      login_kimi: onboarding?.loginState === "logged_in",
+      login_kimi: onboarding?.kimiCodeAuthState === "logged_in",
       work_dir: onboarding?.workDirConfigured ?? false,
       api_config: onboarding?.apiConfigAck ?? false,
     }),
     [onboarding],
   );
 
-  const configCenterDirty = useMemo(
+  const kimiCodeAccessDirty = useMemo(
     () =>
-      JSON.stringify(configCenterDraft) !== JSON.stringify(configCenterSnapshot),
-    [configCenterDraft, configCenterSnapshot],
+      JSON.stringify(kimiCodeAccessDraft) !== JSON.stringify(kimiCodeAccessSnapshot),
+    [kimiCodeAccessDraft, kimiCodeAccessSnapshot],
   );
-  const kimiApiConfigView = useMemo(
-    () => deriveKimiCliApiConfigView(configCenterView),
-    [configCenterView],
+  const kimiCodeAccessSummary = useMemo(
+    () => deriveKimiCodeAccessSummary(kimiCodeAccessView),
+    [kimiCodeAccessView],
   );
 
   const bridgeRecentErrors = useMemo(() => {
@@ -4735,7 +4670,6 @@ export function useShellController() {
     diagnosticsBusy,
     kimiDoctorBusy,
     contextMenuBusy,
-    loginProbeBusy,
     workspaceImportBusy,
     actionError,
     workspaceImportTargets,
@@ -4744,7 +4678,6 @@ export function useShellController() {
     shutdownProgress,
     shutdownElapsedMs,
     contextMenuStatus,
-    loginProbeResult,
     bridgeSettings,
     bridgeStatus,
     bridgeSessions,
@@ -4825,19 +4758,17 @@ export function useShellController() {
     workspaceFrameKey,
     workspaceIframeRef,
     stepCompletion,
-    kimiApiConfigView,
-    kimiApiKeyInput,
-    setKimiApiKeyInput,
-    configCenterView,
-    configCenterDraft,
-    configCenterBusy,
-    configCenterDirty,
+    kimiCodeAccessSummary,
+    kimiCodeAccessView,
+    kimiCodeAccessDraft,
+    kimiCodeAccessBusy,
+    kimiCodeAccessDirty,
+    kimiCodeAccessTesting,
+    kimiCodeAccessTestResult,
     installProbe,
     installSource,
     installSettings,
     installSettingsBusy,
-    workspaceWebSettings,
-    workspaceWebSettingsBusy,
     powershellPreflight,
     installBusy:
       installSessionSnapshot.status === "starting" ||
@@ -4888,12 +4819,10 @@ export function useShellController() {
     handleOpenKimiConfigDir,
     handleOpenControlTask,
     handleCloseControlTask,
-    handleSaveKimiCliApiConfig,
-    handleSetKimiCliApiAsDefault,
-    handleSetKimiLoginAsDefault,
-    handleConfigCenterDraftChange,
-    handleResetConfigCenterDraft,
-    handleSaveKimiCliConfigCenter,
+    handleKimiCodeAccessDraftChange,
+    handleResetKimiCodeAccessDraft,
+    handleSaveKimiCodeAccessConfig,
+    handleTestKimiCodeAccessConfig,
     handlePickKimiPath,
     handleSavePathAndRetry,
     handlePickWorkDir,
@@ -4930,9 +4859,6 @@ export function useShellController() {
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
-    handleWorkspaceWebModeChange,
-    handleWorkspaceWebAutoFallbackChange,
-    handleFallbackWorkspaceWebToOfficial,
     handleInstallDependencies: handleQuickInstallCore,
     handleInstallKimi: handleInstallKimiTask,
     handleUpgradeKimi: handleUpgradeKimiTask,
@@ -4941,8 +4867,6 @@ export function useShellController() {
     handleCancelInstallTask,
     handleEnableContextMenu,
     handleDisableContextMenu,
-    handleProbeLogin,
-    handleLogoutKimiLogin,
     handleSelectSkill,
     handleOpenSkillFromInsights,
     handleSelectDiscoveredSkill,

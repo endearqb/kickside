@@ -7,7 +7,7 @@ import {
 } from "react";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
 import { openExternalWebviewWindow } from "@/services/externalWebviewService";
-import { createGridSession } from "@/services/workspaceGridService";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   GRID_PRESETS,
   createEqualTrackSizes,
@@ -19,13 +19,9 @@ import {
 import {
   WORKSPACE_GRID_MAX_PANES,
   type AddWorkspacePaneInput,
-  loadWorkspaceGridSavedLayouts,
-  saveWorkspaceGridSavedLayouts,
-  upsertWorkspaceGridSavedLayout,
   useWorkspaceGridStore,
 } from "./gridStore";
 import type {
-  WorkspaceGridPresetId,
   WorkspaceGridSlot,
   WorkspaceGridTrackSizes,
   WorkspacePane,
@@ -33,15 +29,6 @@ import type {
 } from "./gridTypes";
 import { PaneFrame } from "./PaneFrame";
 import { normalizeEmbeddableUrl } from "./urlSafety";
-
-const PRESET_ORDER: WorkspaceGridPresetId[] = [
-  "single",
-  "1x2",
-  "1x3",
-  "2x2",
-  "2x3-5",
-  "2x3",
-];
 
 type ResizeAxis = "columns" | "rows";
 
@@ -54,6 +41,12 @@ interface ResizeDraft {
   startTrackSizes: WorkspaceGridTrackSizes;
 }
 
+interface PaneDragDraft {
+  sourceSlotId: string;
+  targetSlotId: string;
+  pointerId: number;
+}
+
 export function WorkspaceGridView(props: WorkspaceViewProps) {
   const preset = useWorkspaceGridStore((state) => state.preset);
   const panes = useWorkspaceGridStore((state) => state.panes);
@@ -61,10 +54,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const activePaneId = useWorkspaceGridStore((state) => state.activePaneId);
   const maximizedPaneId = useWorkspaceGridStore((state) => state.maximizedPaneId);
   const trackSizes = useWorkspaceGridStore((state) => state.trackSizes);
-  const setPreset = useWorkspaceGridStore((state) => state.setPreset);
   const addPane = useWorkspaceGridStore((state) => state.addPane);
-  const movePane = useWorkspaceGridStore((state) => state.movePane);
   const removePane = useWorkspaceGridStore((state) => state.removePane);
+  const swapSlots = useWorkspaceGridStore((state) => state.swapSlots);
   const maximizePane = useWorkspaceGridStore((state) => state.maximizePane);
   const setActivePane = useWorkspaceGridStore((state) => state.setActivePane);
   const setPaneMountPolicy = useWorkspaceGridStore(
@@ -74,15 +66,10 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const setGridTrackSizes = useWorkspaceGridStore(
     (state) => state.setGridTrackSizes,
   );
-  const restoreGridState = useWorkspaceGridStore((state) => state.restoreGridState);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [gridMessage, setGridMessage] = useState("");
-  const [sessionBusySlot, setSessionBusySlot] = useState<string | null>(null);
-  const [savedLayouts, setSavedLayouts] = useState(() =>
-    loadWorkspaceGridSavedLayouts(),
-  );
-  const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [resizeDraft, setResizeDraft] = useState<ResizeDraft | null>(null);
+  const [paneDragDraft, setPaneDragDraft] = useState<PaneDragDraft | null>(null);
 
   const template = GRID_PRESETS[preset];
   const trackCounts = getGridTrackCounts(preset);
@@ -126,7 +113,11 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
 
   async function handleAddPane(slotId: string, kind: WorkspacePaneKind) {
     setGridMessage("");
-    let input = defaultPaneInput(kind, props.chatRemoteUrl);
+    let input = defaultPaneInput(
+      kind,
+      props.chatRemoteUrl,
+      props.effectiveWorkDir,
+    );
 
     if (kind === "external") {
       const externalInput = readExternalPaneInput(props.chatRemoteUrl);
@@ -137,33 +128,13 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       input = externalInput;
     }
 
-    if (kind === "code" && props.effectiveWorkDir && props.codeRemoteUrl) {
-      setSessionBusySlot(slotId);
-      try {
-        const session = await createGridSession(props.effectiveWorkDir);
-        input = {
-          ...input,
-          sessionId: session.sessionId,
-          title: codePaneTitle(session.sessionId),
-        };
-        setGridMessage("已创建新的 Code Session");
-      } catch (error) {
-        setGridMessage(`创建 Code Session 失败：${String(error)}`);
-        return;
-      } finally {
-        setSessionBusySlot(null);
-      }
-    }
-
-    const paneId = addPane(input);
+    const paneId = addPane(input, slotId);
     if (!paneId) {
       if (!gridMessage) {
         setGridMessage("没有可用空窗格，或已达到 6 窗格上限");
       }
       return;
     }
-
-    movePane(paneId, slotId);
   }
 
   async function handleConfigurePane(paneId: string, kind: WorkspacePaneKind) {
@@ -176,31 +147,68 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     let input =
       kind === "external"
         ? readExternalPaneInput(props.chatRemoteUrl)
-        : defaultPaneInput(kind, props.chatRemoteUrl);
+        : defaultPaneInput(kind, props.chatRemoteUrl, props.effectiveWorkDir);
     if (!input) {
       setGridMessage("已取消切换外部网页");
       return;
     }
 
-    if (kind === "code" && props.effectiveWorkDir && props.codeRemoteUrl) {
-      setSessionBusySlot(paneId);
-      try {
-        const session = await createGridSession(props.effectiveWorkDir);
-        input = {
-          ...input,
-          sessionId: session.sessionId,
-          title: codePaneTitle(session.sessionId),
-        };
-        setGridMessage("已创建新的 Code Session");
-      } catch (error) {
-        setGridMessage(`创建 Code Session 失败：${String(error)}`);
-        return;
-      } finally {
-        setSessionBusySlot(null);
-      }
-    }
-
     configurePane(paneId, input);
+  }
+
+  function handlePaneDragStart(
+    slotId: string,
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    if (maximizedPaneId || resizeDraft || event.button !== 0) {
+      return;
+    }
+    capturePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft({
+      sourceSlotId: slotId,
+      targetSlotId: slotId,
+      pointerId: event.pointerId,
+    });
+    event.preventDefault();
+  }
+
+  function handlePaneDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
+      return;
+    }
+    const targetSlotId =
+      getSlotIdAtPoint(canvasRef.current, event.clientX, event.clientY) ??
+      paneDragDraft.targetSlotId;
+    if (targetSlotId !== paneDragDraft.targetSlotId) {
+      setPaneDragDraft({
+        ...paneDragDraft,
+        targetSlotId,
+      });
+    }
+    event.preventDefault();
+  }
+
+  function handlePaneDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
+      return;
+    }
+    const targetSlotId =
+      getSlotIdAtPoint(canvasRef.current, event.clientX, event.clientY) ??
+      paneDragDraft.targetSlotId;
+    releasePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft(null);
+    if (targetSlotId && targetSlotId !== paneDragDraft.sourceSlotId) {
+      swapSlots(paneDragDraft.sourceSlotId, targetSlotId);
+    }
+    event.preventDefault();
+  }
+
+  function handlePaneDragCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!paneDragDraft || event.pointerId !== paneDragDraft.pointerId) {
+      return;
+    }
+    releasePointer(canvasRef.current, event.pointerId);
+    setPaneDragDraft(null);
   }
 
   function handleGridKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -229,37 +237,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     event.preventDefault();
   }
 
-  function handleSaveLayout() {
-    const name = window.prompt("保存当前布局名称", GRID_PRESETS[preset].label);
-    const trimmedName = name?.trim();
-    if (!trimmedName) {
-      setGridMessage("已取消保存布局");
-      return;
-    }
-
-    const nextLayouts = upsertWorkspaceGridSavedLayout(
-      savedLayouts,
-      trimmedName,
-      useWorkspaceGridStore.getState(),
-    );
-    saveWorkspaceGridSavedLayouts(nextLayouts);
-    setSavedLayouts(nextLayouts);
-    setSelectedLayoutId(
-      nextLayouts.find((layout) => layout.name === trimmedName)?.id ?? "",
-    );
-    setGridMessage(`已保存布局：${trimmedName}`);
-  }
-
-  function handleRestoreLayout(layoutId: string) {
-    setSelectedLayoutId(layoutId);
-    const layout = savedLayouts.find((item) => item.id === layoutId);
-    if (!layout) {
-      return;
-    }
-    restoreGridState(layout.state);
-    setGridMessage(`已恢复布局：${layout.name}`);
-  }
-
   async function handleOpenTauriWebviewUrl(
     url: string,
     title: string,
@@ -278,7 +255,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     index: number,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) {
-    if (maximizedPaneId) {
+    if (maximizedPaneId || paneDragDraft) {
       return;
     }
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -296,7 +273,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       startSizes: axis === "columns" ? effectiveColumns : effectiveRows,
       startTrackSizes: customTrackSizes ?? {},
     });
-    setGridMessage("正在调整布局尺寸");
   }
 
   function handleResizeMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -323,7 +299,21 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       return;
     }
     setResizeDraft(null);
-    setGridMessage("已保存自定义布局尺寸");
+  }
+
+  function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeMove(event);
+    handlePaneDragMove(event);
+  }
+
+  function handleCanvasPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeEnd();
+    handlePaneDragEnd(event);
+  }
+
+  function handleCanvasPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
+    handleResizeEnd();
+    handlePaneDragCancel(event);
   }
 
   return (
@@ -333,67 +323,29 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       tabIndex={0}
       onKeyDown={handleGridKeyDown}
     >
-      <div className="workspace-grid-toolbar">
-        <div className="workspace-grid-toolbar-controls">
-          <div className="workspace-grid-preset-group" aria-label="工作区布局">
-            {PRESET_ORDER.map((presetId) => {
-              const presetItem = GRID_PRESETS[presetId];
-              return (
-                <button
-                  type="button"
-                  key={presetId}
-                  className={`workspace-grid-preset-btn${
-                    preset === presetId && !maximizedPaneId ? " is-active" : ""
-                  }`}
-                  title={presetItem.label}
-                  aria-label={presetItem.label}
-                  onClick={() => setPreset(presetId)}
-                >
-                  {presetItem.slots.length}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            className="workspace-grid-save-btn"
-            onClick={handleSaveLayout}
-          >
-            保存布局
-          </button>
-          <select
-            className="workspace-grid-saved-select"
-            aria-label="保存的工作区布局"
-            value={selectedLayoutId}
-            onChange={(event) => handleRestoreLayout(event.currentTarget.value)}
-          >
-            <option value="">选择布局</option>
-            {savedLayouts.map((layout) => (
-              <option key={layout.id} value={layout.id}>
-                {layout.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <span className="workspace-grid-status">
-          {gridMessage ||
-            `${countRunningCodePanes(panes)} 个 Code Session 运行中 · ${panes.length} / ${WORKSPACE_GRID_MAX_PANES} 窗格`}
-        </span>
-      </div>
       <div
         ref={canvasRef}
-        className={`workspace-grid-canvas${resizeDraft ? " is-resizing" : ""}`}
+        className={`workspace-grid-canvas${resizeDraft ? " is-resizing" : ""}${
+          paneDragDraft ? " is-pane-dragging" : ""
+        }`}
         style={gridStyle}
-        onPointerMove={handleResizeMove}
-        onPointerUp={handleResizeEnd}
-        onPointerCancel={handleResizeEnd}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerCancel}
       >
         {renderedSlots.map((slot) => {
           const pane = findPane(slot);
+          const isDragSource = paneDragDraft?.sourceSlotId === slot.id;
+          const isDropTarget = Boolean(
+            paneDragDraft &&
+              paneDragDraft.targetSlotId === slot.id &&
+              paneDragDraft.sourceSlotId !== slot.id,
+          );
           return (
             <div
-              key={slot.id}
-              className="workspace-grid-slot"
+              key={pane ? pane.id : `empty:${slot.id}`}
+              className={`workspace-grid-slot${isDropTarget ? " is-drop-target" : ""}`}
+              data-workspace-grid-slot-id={slot.id}
               style={{ gridArea: slot.area }}
             >
               <PaneFrame
@@ -401,7 +353,10 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 slotLabel={slot.id}
                 active={Boolean(pane && pane.id === activePaneId)}
                 maximized={Boolean(pane && pane.id === maximizedPaneId)}
+                dragging={isDragSource}
                 canAddPane={canAddPane}
+                effectiveWorkDir={props.effectiveWorkDir}
+                themeMode={props.themeMode}
                 codeRemoteUrl={props.codeRemoteUrl}
                 codeFrameKey={props.codeFrameKey}
                 chatRemoteUrl={props.chatRemoteUrl}
@@ -412,6 +367,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 actionBusy={props.actionBusy}
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
+                onOpenFolder={props.onOpenFolder}
                 onOpenExternalUrl={props.onOpenExternalUrl}
                 onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
                   void handleOpenTauriWebviewUrl(url, title, storageNamespace);
@@ -422,9 +378,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onChatFrameError={props.onChatFrameError}
                 onActivate={() => setActivePane(pane?.id ?? null)}
                 onAddPane={(kind) => {
-                  if (sessionBusySlot === null) {
-                    void handleAddPane(slot.id, kind);
-                  }
+                  void handleAddPane(slot.id, kind);
                 }}
                 onConfigurePane={(kind) => {
                   if (pane) {
@@ -436,16 +390,12 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                     removePane(pane.id);
                   }
                 }}
-                onSuspendPane={() => {
-                  if (pane) {
-                    setPaneMountPolicy(pane.id, "suspended");
-                  }
-                }}
                 onResumePane={() => {
                   if (pane) {
                     setPaneMountPolicy(pane.id, "eager");
                   }
                 }}
+                onPaneDragStart={(event) => handlePaneDragStart(slot.id, event)}
                 onToggleMaximize={() =>
                   maximizePane(pane?.id === maximizedPaneId ? null : pane?.id ?? null)
                 }
@@ -462,6 +412,50 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       </div>
     </section>
   );
+}
+
+function getSlotIdAtPoint(
+  canvas: HTMLDivElement | null,
+  clientX: number,
+  clientY: number,
+): string | null {
+  if (!canvas) {
+    return null;
+  }
+
+  const slots = Array.from(
+    canvas.querySelectorAll<HTMLElement>("[data-workspace-grid-slot-id]"),
+  );
+  for (const slot of slots) {
+    const rect = slot.getBoundingClientRect();
+    if (
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom
+    ) {
+      return slot.dataset.workspaceGridSlotId ?? null;
+    }
+  }
+  return null;
+}
+
+function capturePointer(element: HTMLElement | null, pointerId: number) {
+  try {
+    element?.setPointerCapture?.(pointerId);
+  } catch {
+    // Some test and embedded runtimes do not expose capture for synthetic pointers.
+  }
+}
+
+function releasePointer(element: HTMLElement | null, pointerId: number) {
+  try {
+    if (!element?.hasPointerCapture || element.hasPointerCapture(pointerId)) {
+      element?.releasePointerCapture?.(pointerId);
+    }
+  } catch {
+    // Matching capturePointer: release should never break the layout state cleanup.
+  }
 }
 
 function renderResizeHandles(
@@ -502,14 +496,15 @@ function renderResizeHandles(
 function defaultPaneInput(
   kind: WorkspacePaneKind,
   chatRemoteUrl: string,
+  effectiveWorkDir?: string,
 ): AddWorkspacePaneInput {
   if (kind === "code") {
-    return { kind, title: "Kimi Code" };
+    return { kind, title: getKimiAssistantDisplayName(), workDir: effectiveWorkDir };
   }
   if (kind === "chat") {
     return { kind, title: "Kimi Chat" };
   }
-  return { kind, title: "Kimi.com", url: chatRemoteUrl };
+  return { kind, title: "外部网页", url: chatRemoteUrl };
 }
 
 function readExternalPaneInput(chatRemoteUrl: string): AddWorkspacePaneInput | null {
@@ -524,13 +519,4 @@ function readExternalPaneInput(chatRemoteUrl: string): AddWorkspacePaneInput | n
   }
   const title = new URL(normalized.url).hostname || "外部网页";
   return { kind: "external", title, url: normalized.url };
-}
-
-function countRunningCodePanes(panes: WorkspacePane[]): number {
-  return panes.filter((pane) => pane.kind === "code").length;
-}
-
-function codePaneTitle(sessionId: string): string {
-  const suffix = sessionId.trim().slice(0, 8);
-  return suffix ? `Kimi Code ${suffix}` : "Kimi Code";
 }

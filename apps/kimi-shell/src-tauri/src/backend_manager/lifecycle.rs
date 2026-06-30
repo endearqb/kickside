@@ -34,8 +34,6 @@ pub fn start_backend(app: AppHandle) {
         runtime.loading_reported_at_ms = None;
         runtime.loading_reported_cycle_id = None;
         runtime.backend_ready_at_ms = None;
-        runtime.cli_contract_ok = None;
-        runtime.cli_contract_error = None;
         runtime.last_exit_reason = None;
         (runtime.generation, stale_child)
     };
@@ -175,6 +173,7 @@ pub fn stop_backend(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
+    let startup_started = Instant::now();
     let settings = settings_store::load_or_default(app).context("failed to load settings")?;
     let session_work_dir = {
         let state = app.state::<AppState>();
@@ -184,45 +183,59 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
         runtime.session_work_dir.clone()
     };
+    let locate_started = Instant::now();
     let kimi_path = match kimi_locator::locate(&settings) {
         Ok(path) => path,
         Err(message) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "startup_timing locate_kimi_ms={} total_ms={}",
+                    locate_started.elapsed().as_millis(),
+                    startup_started.elapsed().as_millis()
+                ),
+            );
             set_missing_kimi(app, generation, message);
             return Ok(());
         }
     };
+    log_manager::append_line(
+        app,
+        format!(
+            "startup_timing locate_kimi_ms={}",
+            locate_started.elapsed().as_millis()
+        ),
+    );
+    log_manager::append_line(app, "startup_timing contract_check_ms=0 skipped=true");
 
-    if let Err(error) = cli_contract::verify_kimi_server_contract(&kimi_path) {
-        {
-            let state = app.state::<AppState>();
-            let mut runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
-            if runtime.generation == generation {
-                runtime.cli_contract_ok = Some(false);
-                runtime.cli_contract_error = Some(error.clone());
-            }
-        }
-        set_crashed(
-            app,
-            generation,
-            format!("`kimi server run` CLI contract check failed: {error}"),
-        );
-        return Ok(());
-    }
-
+    let workdir_started = Instant::now();
     let work_dir = resolve_working_directory(&settings, session_work_dir.as_ref())
         .context("failed to resolve working directory")?;
+    log_manager::append_line(
+        app,
+        format!(
+            "startup_timing resolve_workdir_ms={}",
+            workdir_started.elapsed().as_millis()
+        ),
+    );
 
+    let rotate_started = Instant::now();
     log_manager::rotate_backend_log_if_needed(app)
         .context("failed to rotate backend log before startup")?;
+    log_manager::append_line(
+        app,
+        format!(
+            "startup_timing rotate_backend_log_ms={}",
+            rotate_started.elapsed().as_millis()
+        ),
+    );
 
     let base_port = port_manager::choose_start_port();
     let log_path = log_manager::backend_log_path(app)?;
     let command_args = build_kimi_server_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
     let kimi_shell_path = kimi_locator::locate_shell_path();
+    let agent_swarm_max_concurrency = settings.kimi_runtime_launch.agent_swarm_max_concurrency;
 
     let command_description = format!(
         "launch command: {} (cwd: {})",
@@ -233,15 +246,31 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     if let Some(shell_path) = &kimi_shell_path {
         log_manager::append_line(app, format!("KIMI_SHELL_PATH={}", shell_path.display()));
     }
+    if let Some(value) = agent_swarm_max_concurrency {
+        log_manager::append_line(
+            app,
+            format!("KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY={value}"),
+        );
+    }
+    log_manager::append_line(app, "KIMI_CODE_NO_AUTO_UPDATE=1");
 
+    let spawn_started = Instant::now();
     let child = spawn_backend_process(
         &kimi_path,
         &work_dir,
         &command_args,
         &log_path,
         kimi_shell_path.as_ref(),
+        agent_swarm_max_concurrency,
     )
     .with_context(|| format!("failed to spawn kimi process from {}", kimi_path.display()))?;
+    log_manager::append_line(
+        app,
+        format!(
+            "startup_timing spawn_ms={}",
+            spawn_started.elapsed().as_millis()
+        ),
+    );
 
     {
         let state = app.state::<AppState>();
@@ -264,29 +293,49 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         runtime.detected_kimi_path = Some(kimi_path.clone());
         runtime.effective_work_dir = Some(work_dir.clone());
         runtime.launch_command = Some(launch_command);
-        runtime.cli_contract_ok = Some(true);
-        runtime.cli_contract_error = None;
     }
     let _ = skill_center::track_workspace_root(app, &work_dir);
 
+    let health_started = Instant::now();
     let Some(active_port) = port_manager::wait_for_ready_port(base_port) else {
+        log_manager::append_line(
+            app,
+            format!(
+                "startup_timing health_wait_ms={} total_ms={}",
+                health_started.elapsed().as_millis(),
+                startup_started.elapsed().as_millis()
+            ),
+        );
         stop_child_for_generation(app, generation);
         set_crashed(
             app,
             generation,
             format!(
-                "Startup timed out. No kimi-code health response on ports {}-{} within {} seconds.",
+                "Startup timed out. No kimi-code health response on port {} within {} seconds.",
                 base_port,
-                base_port + (port_manager::PORT_SCAN_COUNT - 1),
                 port_manager::STARTUP_TIMEOUT_SECS
             ),
         );
         return Ok(());
     };
+    let health_wait_ms = health_started.elapsed().as_millis();
+    log_manager::append_line(
+        app,
+        format!("startup_timing health_wait_ms={health_wait_ms}"),
+    );
 
+    let token_started = Instant::now();
     let token = match token_resolver::resolve_server_token_with_retry() {
         Ok(token) => token,
         Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "startup_timing token_wait_ms={} total_ms={}",
+                    token_started.elapsed().as_millis(),
+                    startup_started.elapsed().as_millis()
+                ),
+            );
             stop_child_for_generation(app, generation);
             set_crashed(
                 app,
@@ -296,6 +345,8 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             return Ok(());
         }
     };
+    let token_wait_ms = token_started.elapsed().as_millis();
+    log_manager::append_line(app, format!("startup_timing token_wait_ms={token_wait_ms}"));
     let origin = format!("http://127.0.0.1:{active_port}");
     let workspace_url = token_resolver::build_workspace_url(&origin, Some(&token.value));
     let workspace_port = active_port;
@@ -329,6 +380,13 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             "kimi-code DirectServer ready on {origin}; token_path={}; token={}",
             token.path.display(),
             token.redacted
+        ),
+    );
+    log_manager::append_line(
+        app,
+        format!(
+            "startup_timing total_ms={} health_wait_ms={health_wait_ms} token_wait_ms={token_wait_ms}",
+            startup_started.elapsed().as_millis()
         ),
     );
     window_manager::mark_backend_ready(app, "backend_ready");
@@ -421,6 +479,7 @@ fn spawn_backend_process(
     args: &[String],
     log_path: &PathBuf,
     kimi_shell_path: Option<&PathBuf>,
+    agent_swarm_max_concurrency: Option<u32>,
 ) -> anyhow::Result<Child> {
     let stdout_file = OpenOptions::new()
         .create(true)
@@ -438,12 +497,16 @@ fn spawn_backend_process(
         // Force UTF-8 stdio so Python banner output does not crash on GBK consoles.
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONUTF8", "1")
+        .env("KIMI_CODE_NO_AUTO_UPDATE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
 
     if let Some(shell_path) = kimi_shell_path {
         command.env("KIMI_SHELL_PATH", shell_path);
+    }
+    if let Some(value) = agent_swarm_max_concurrency {
+        command.env("KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY", value.to_string());
     }
 
     command.current_dir(work_dir);

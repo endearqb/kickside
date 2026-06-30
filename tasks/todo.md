@@ -1,3 +1,97 @@
+# Windows browser open bugfix
+
+## Checklist
+- [x] 确认 Windows URL 打开错误地复用了 `explorer`
+- [x] 文件夹打开继续用资源管理器
+- [x] URL 打开改用系统默认浏览器关联
+- [x] 运行 Rust check 与 diff gate
+
+## Review
+- `open_external_url` 现在在 Windows 下走 `rundll32 url.dll,FileProtocolHandler <url>`。
+- 只修共享后端函数，覆盖挂起窗格“在浏览器打开”和其他外链入口。
+
+# Workspace Grid pane external link opening
+
+## Checklist
+- [x] 确认现有 Chat/旧 proxy 有 link bridge，但 DirectServer Code pane 不走旧 proxy 注入
+- [x] 将 Tauri main window all-frames 初始化脚本从 chat-only 泛化到所有子 iframe
+- [x] iframe 内跨站 `http/https` 链接和 `window.open` 通过 bridge 交给父窗口
+- [x] 父窗口只接受 workspace origin 或当前 DOM 中 `.workspace-iframe` 的消息
+- [x] 复用现有 `open_external_url`，不新增打开浏览器实现
+- [x] 增加最小 jsdom 测试覆盖已知 iframe source 校验
+- [x] 运行前端、Rust 与 diff gate
+
+## Review
+- 当前窗格内链接按“跨站链接外部打开、同源链接留在窗格内”处理。
+- 这覆盖 Code / Chat / external iframe；native child Webview 内的页面仍由 Webview 自身承载，不在本轮加 hook。
+
+# Workspace Grid pane interaction fixes
+
+## Checklist
+- [x] Code 空窗格和 header 切换 Code 不再自动创建 server session
+- [x] 无 `sessionId` 的 Code pane 打开 Kimi Code Web 根页面，历史 session pane 继续支持 `/sessions/{id}`
+- [x] Code pane 持久化当前 `workDir`，header 增加“打开此窗格目录”
+- [x] pane header 增加每窗独立明暗主题切换，全局主题仍影响未单独设置主题的 pane
+- [x] `addPane(input, targetSlotId)` 支持直接添加到指定空 slot，修复第四格按钮灰掉/不可用的根因
+- [x] 支持拖动 pane header 到另一个 slot 交换或移动窗格
+- [x] 更新 store/component 单测与 current-state 事实
+- [x] 运行前端 test/tsc/build 与 diff gate
+
+## Review
+- 新建/切换 Code pane 现在只打开 Kimi Code Web 根页面，不再调用 `grid_create_session`；旧布局中已经有 `sessionId` 的 pane 仍按历史 session URL 渲染。
+- per-pane 主题通过 iframe `postMessage` 即时同步；同源 Kimi Code Web 仍可能在页面重载后受共享 localStorage 影响，完全隔离需要后续 native Webview 或 Web 侧 storage carrier。
+- 第四格问题由 store 层指定 slot 添加修复，不依赖添加后再 move。
+- 拖拽交换只改变 slot 的 `paneId`，不改变当前 preset、track size 或 pane 内容。
+
+# Workspace Grid toolbar and resize-shadow cleanup
+
+## Checklist
+- [x] 移除 Grid 内自定义布局工具栏
+- [x] 不再渲染“保存布局 / 选择布局 / 已保存自定义布局尺寸”
+- [x] Grid 根布局不再预留工具栏高度
+- [x] resize handle 保留拖拽命中区但不再显示 hover/focus 阴影条
+- [x] active pane 不再额外绘制布局阴影
+- [x] 更新组件测试和 current-state 事实
+- [x] 运行前端 test/tsc/build 与 diff gate
+
+## Review
+- 本轮只删可见 UI 和阴影视觉，不改 Grid store、preset 或 session 创建逻辑。
+- 底层 saved layout helper 仍留给旧状态兼容；没有用户可见入口。
+
+# Workspace Grid session API path payload fix
+
+## Checklist
+- [x] 确认仍失败的 root cause 是 API payload 边界可能继续携带 Windows verbatim/url-ish 前缀
+- [x] 新增 `api_workspace_root`，把 `/?/D:/...` / `\\?\D:\...` 转成 `D:/...`
+- [x] `POST /api/v1/workspaces` 的 `root` 使用同一 helper
+- [x] `POST /api/v1/sessions` fallback 的 `metadata.cwd` 使用同一 helper
+- [x] 补 Rust 单测覆盖坏输入和普通 `D:/repo`
+- [x] 运行 Rust、前端与 diff gate
+
+## Review
+- 本轮只修后端 API payload 字符串，不改前端和 Grid UI。
+- 外层路径归一化保留，但不再作为唯一防线。
+- 验证结果：Rust fmt/check/test no-run、前端 test/tsc、`git diff --check` 均通过。
+
+# Workspace Grid layout entry and path cleanup
+
+## Checklist
+- [x] 读取目标 objective，继续采用 `zustand` Grid slice 与 v1 fallback 决策
+- [x] 修复 `/?/D:/...` workspace root 归一化为 `D:/...`
+- [x] 三窗 preset 改为左侧一格、右侧上下两格
+- [x] Grid 内 preset 数字按钮移到标题栏布局 popover
+- [x] 移除空 pane 的 Kimi.com 添加入口
+- [x] 移除 pane header 的 Kimi.com 切换入口
+- [x] Grid resize/active 视觉改为中性色，不再显示黄色长线
+- [x] 补前端与 Rust 单测覆盖本轮行为
+- [x] 运行完整前端、Rust 与 diff gate
+
+## Review
+- 本轮只调整 Workspace Grid 的入口与修复坏路径，不拆旧 `WorkspaceView` 兼容层。
+- 标题栏 popover 使用现有 6 个 preset，3 列展示；不新增真实 9 窗布局。
+- external pane carrier 代码仍保留，用于已保存布局、fallback 和后续兼容，但 UI 不再提供 Kimi.com 新建/切换按钮。
+- 验证结果：前端 test、tsc、build 通过；Rust fmt/check/test no-run 通过；`git diff --check` 通过。直接执行 Rust test binary 仍受本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 限制。
+
 # Workspace Grid hardening review fixes
 
 ## Checklist
@@ -343,3 +437,75 @@
 - Git 提交：已创建 `261a3e6 release: ship v0.0.43`，并已推送到 `origin/main`。
 - 标签：`v0.0.43` 已创建并推送到 GitHub。
 - Releases：已创建 `Kimi Desktop Shell v0.0.43`，地址为 `https://github.com/endearqb/kimi-app/releases/tag/v0.0.43`；已上传 `0.0.43` 的 NSIS 与 MSI 安装包，且已设置为 latest。
+
+## SPEC-08 Phase 0：Kimi Code 接入后端收敛
+
+### Checklist
+- [x] 复用 `KIMI_CODE_HOME` 解析，默认配置路径切到 `~/.kimi-code/config.toml`
+- [x] 新增 Kimi Code 接入配置读取、保存和连接测试命令
+- [x] 保存时只 patch `kimi-app-api-key` provider、`kimi-app/kimi-for-coding` model、`moonshot_search` / `moonshot_fetch` 的白名单字段
+- [x] 保存前创建并轮转 `config.toml.kimi-app-backup-*`
+- [x] API key 只返回掩码状态，不在新命令中返回明文
+- [x] 禁用旧全量 `save_kimi_cli_config_center`
+- [x] 子 Agent 并发上限进入 App settings，并在启动 Kimi Code 时注入 `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY`
+- [x] 运行 Rust fmt/check/test-no-run 并记录 Windows test binary 执行限制
+
+### Review
+- Phase 0 后端地基已完成；旧全量读取暂保留给 auth/status 兼容，旧全量保存已被拒绝。
+- 验证结果：`cargo fmt --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 通过；执行 `cargo test ... config -- --nocapture` 仍受本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 限制。
+
+## SPEC-08 Phase 1：Kimi Code 接入配置面板
+
+### Checklist
+- [x] 新增“Kimi Code 接入配置”面板
+- [x] 新增 API Base URL / API Key 表单
+- [x] 新增 Search / Fetch service 表单
+- [x] 新增子 Agent 并发上限表单
+- [x] 移除 providers/models/services/defaults/loop/MCP 全量编辑区
+- [x] 保留官方配置状态只读诊断
+- [x] 更新控制中心文案
+- [x] 运行 `tsc --noEmit`、前端测试、前端 build 和 `cargo check`
+
+### Review
+- 控制中心已不再暴露全量 Kimi Code `config.toml` 编辑器；当前只允许编辑 SPEC-08 白名单字段，并通过新 Tauri command 保存。
+- 快速 Kimi API 设置入口已复用新的 `save_kimi_code_access_config`，不再调用旧 `save_kimi_cli_api_config` 写入旧路径。
+- 连接测试按钮已接入 `test_kimi_code_access_config`，UI 不展示明文 API key，仅显示配置状态和脱敏结果。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit` 通过；`pnpm --dir apps/kimi-shell test -- --run` 通过（4 files / 36 tests）；`pnpm --dir apps/kimi-shell build` 通过；`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml` 通过。
+- 未完成项：旧 provider 的显式迁移按钮尚未实现，留待后续小步补齐。
+
+## SPEC-08 Phase 2：Skill 投影与工作区管理
+
+### Checklist
+- [x] 将控制中心 Skill 分区命名为“Skill 投影与工作区管理”
+- [x] 用户全局默认投影目录改为 `~/.agents/skills`
+- [x] 新增显式投影到 `$KIMI_CODE_HOME/skills`
+- [x] 当前工作区投影容器收敛为 `.agents/skills` 与 `.kimi-code/skills`
+- [x] `~/.config/agents/skills` 只保留为 legacy discovery
+- [x] 未信任 Skill 不可通过普通 apply 或 workspace target copy 投影
+- [x] 运行 `tsc --noEmit`、前端测试、前端 build、Rust check 和 Rust test no-run
+
+### Review
+- Phase 2 已完成目录边界收敛；`.codex/.claude` 保留类型兼容但不再作为新 workspace target 主入口。
+- 后端新增 `kimi_code_home` scope，复用全局投影记录但移除动作按 scope 精确删除。
+- 前端按钮、chips、容器 tab 和标题栏入口已改为 Skill 投影语义，并隐藏未信任 Skill 的 workspace target 投影候选。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml --no-run` 均通过。
+- 未完成项：真实桌面点击投影到 `$KIMI_CODE_HOME/skills` 和 `.kimi-code/skills` 仍需人工验证。
+
+## SPEC-08 Phase 3：外部 IM 通道配置
+
+### Checklist
+- [x] Bridge 文案明确为“外部 IM 通道配置”
+- [x] 新建机器人菜单补齐 Telegram / Feishu / Weixin
+- [x] Telegram / Feishu / Weixin 配置 UI 与高级运行面板均保留
+- [x] Telegram bot token、Feishu appSecret / verificationToken / encryptKey、Weixin bot token 不明文展示为已保存值
+- [x] Feishu verificationToken / encryptKey 加入已保存凭据掩码状态
+- [x] Bridge controls 不写官方 `config.toml`，继续通过 runtime metadata/controls
+- [x] approval / binding / session / runtime diagnostics 保留
+- [x] 运行前端、Rust 与 Go bridge 验证
+
+### Review
+- Phase 3 已完成；`apps/kimi-im-bridge` sidecar 名称保持不变，控制中心用户入口改为“外部 IM 通道配置”。
+- 新建机器人入口现在覆盖 Telegram、微信、飞书；高级运行面板可正确显示 Weixin 平台与凭据掩码。
+- secrets 继续只展示 masked/configured 状态，未把完整 token/appSecret/encryptKey 暴露到 UI。
+- 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`go test ./...`（`apps/kimi-im-bridge`）均通过。
+- 未完成项：真实桌面三平台创建/保存/高级面板点击仍需人工验证。

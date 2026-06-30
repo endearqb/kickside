@@ -1,10 +1,10 @@
-# Kimi Desktop Shell（中文说明）
+# Kimi 小助手（中文说明）
 
-Kimi Desktop Shell 是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于托管 `Kimi Code Web`，把启动监控、workspace 壳层、控制中心、日志诊断和安装包输出整合进同一个桌面应用。
+Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于托管 `Kimi Code Web`，把启动监控、workspace 壳层、控制中心、日志诊断和安装包输出整合进同一个桌面应用。
 
 ## 项目简介
 
-- 应用名称：`Kimi Desktop Shell`
+- 应用名称：`kimi小助手` / `kimi sidekick`
 - 当前版本：`0.0.43`
 - 目标平台：Windows（当前发布产物为 MSI / NSIS）
 - 核心目标：把 `kimi server run` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
@@ -18,18 +18,18 @@ Kimi Desktop Shell 是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，�
 - 控制中心：集中提供运行状态、重启后端、工作目录、安装引导与诊断入口
 - Chat 集成收口：跨站链接跳系统浏览器，Windows 安装版下载使用原生“另存为”
 - 右键菜单集成：支持目录空白处、文件、文件夹入口
-- 诊断与日志：应用日志、后端日志、`kimi doctor`、错误提示与恢复操作
+- 诊断与日志：应用日志、后端日志、Kimi Code Doctor、错误提示与恢复操作
 - 安全退出流程：退出读秒窗 + 状态反馈
 
 ## 界面预览
 
 主 workspace：
 
-![Kimi Desktop Shell 主界面](public/home.png)
+![Kimi 小助手主界面](public/home.png)
 
 控制中心：
 
-![Kimi Desktop Shell 控制中心](public/control_center.png)
+![Kimi 小助手控制中心](public/control_center.png)
 
 ## 运行环境
 
@@ -64,14 +64,23 @@ pnpm check:nfr:reliability
 pnpm tauri build
 ```
 
+语言定制安装包：
+
+```bash
+pnpm tauri build --config src-tauri/tauri.conf.bundle.zh-CN.json
+pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
+```
+
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
 ## 安装包位置
 
 构建完成后可在以下目录找到安装包：
 
-- `src-tauri/target/release/bundle/nsis/Kimi Desktop Shell_<version>_x64-setup.exe`
-- `src-tauri/target/release/bundle/msi/Kimi Desktop Shell_<version>_x64_en-US.msi`
+- `src-tauri/target/release/bundle/nsis/kimi小助手_<version>_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/kimi sidekick_<version>_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/kimi小助手_<version>_x64_zh-CN.msi`
+- `src-tauri/target/release/bundle/msi/kimi sidekick_<version>_x64_en-US.msi`
 
 ## 发布资料
 

@@ -8,6 +8,7 @@ import {
   parseWorkspaceSplitRatio,
   parseWorkspaceViewKind,
 } from "@/app/theme";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { materializeGridSlots } from "./gridPresets";
 import type { WorkspaceGridStateV1, WorkspacePane } from "./gridTypes";
 
@@ -81,7 +82,7 @@ function createLegacyPanes(now: number): WorkspacePane[] {
       id: "pane-code",
       kind: "code",
       carrier: "iframe",
-      title: "Kimi Code",
+      title: getKimiAssistantDisplayName(),
       storageNamespace: "workspace-grid-pane-code",
       mountPolicy: "eager",
       loadState: "idle",

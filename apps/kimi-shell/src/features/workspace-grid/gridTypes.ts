@@ -1,4 +1,5 @@
 export type WorkspacePaneKind = "code" | "chat" | "external";
+export type WorkspacePaneTheme = "light" | "dark";
 
 export type WorkspacePaneCarrier = "iframe";
 
@@ -31,6 +32,8 @@ export interface WorkspacePane {
   title: string;
   sessionId?: string;
   url?: string;
+  workDir?: string;
+  theme?: WorkspacePaneTheme;
   storageNamespace: string;
   mountPolicy: WorkspacePaneMountPolicy;
   loadState: WorkspacePaneLoadState;

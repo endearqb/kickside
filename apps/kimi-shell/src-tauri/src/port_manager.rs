@@ -7,19 +7,19 @@ use rand::Rng;
 
 pub const PORT_MIN: u16 = 55_000;
 pub const PORT_MAX: u16 = 59_999;
-pub const PORT_SCAN_COUNT: u16 = 10;
+pub const PORT_SCAN_COUNT: u16 = 1;
 pub const HEALTH_CHECK_INTERVAL_MS: u64 = 200;
 pub const HEALTH_REQUEST_TIMEOUT_MS: u64 = 500;
 pub const STARTUP_TIMEOUT_SECS: u64 = 20;
 const OVERRIDE_BASE_PORT_ENV: &str = "KIMI_SHELL_BASE_PORT";
-const HEALTH_PATHS: [&str; 3] = ["/api/v1/healthz", "/healthz", "/openapi.json"];
+const HEALTH_PATHS: [&str; 2] = ["/api/v1/healthz", "/openapi.json"];
 
 pub fn choose_start_port() -> u16 {
     if let Some(port) = read_override_start_port() {
         return port;
     }
 
-    let upper = PORT_MAX - PORT_SCAN_COUNT;
+    let upper = PORT_MAX - (PORT_SCAN_COUNT - 1);
     rand::thread_rng().gen_range(PORT_MIN..=upper)
 }
 
@@ -31,11 +31,8 @@ pub fn wait_for_ready_port(base_port: u16) -> Option<u16> {
 
     let deadline = Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
     while Instant::now() < deadline {
-        for offset in 0..PORT_SCAN_COUNT {
-            let port = base_port + offset;
-            if is_healthy(&client, port) {
-                return Some(port);
-            }
+        if is_healthy(&client, base_port) {
+            return Some(base_port);
         }
         thread::sleep(Duration::from_millis(HEALTH_CHECK_INTERVAL_MS));
     }
@@ -57,7 +54,7 @@ fn is_healthy(client: &reqwest::blocking::Client, port: u16) -> bool {
 fn read_override_start_port() -> Option<u16> {
     let raw = std::env::var(OVERRIDE_BASE_PORT_ENV).ok()?;
     let port = raw.parse::<u16>().ok()?;
-    if port < PORT_MIN || port > PORT_MAX - PORT_SCAN_COUNT {
+    if port < PORT_MIN || port > PORT_MAX - (PORT_SCAN_COUNT - 1) {
         return None;
     }
     Some(port)
@@ -82,7 +79,7 @@ mod tests {
         for _ in 0..1_000 {
             let port = choose_start_port();
             assert!(port >= PORT_MIN);
-            assert!(port <= PORT_MAX - PORT_SCAN_COUNT);
+            assert!(port <= PORT_MAX - (PORT_SCAN_COUNT - 1));
         }
     }
 
@@ -106,6 +103,6 @@ mod tests {
         let port = choose_start_port();
         std::env::remove_var(OVERRIDE_BASE_PORT_ENV);
         assert!(port >= PORT_MIN);
-        assert!(port <= PORT_MAX - PORT_SCAN_COUNT);
+        assert!(port <= PORT_MAX - (PORT_SCAN_COUNT - 1));
     }
 }

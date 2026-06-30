@@ -5,7 +5,8 @@ import {
   WORKSPACE_SPLIT_ORDER_STORAGE_KEY,
   WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
 } from "@/app/theme";
-import { GRID_PRESETS, resizeGridTrackSizes } from "./gridPresets";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
+import { GRID_PRESETS, getGridTrackCounts, resizeGridTrackSizes } from "./gridPresets";
 import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
@@ -46,6 +47,19 @@ describe("workspace grid presets", () => {
     expect(preset.slots).toHaveLength(5);
     expect(preset.areas).toContain("primary");
     expect(preset.areas).toContain("tail");
+  });
+
+  it("uses a left-plus-stacked-right layout for the three-pane preset", () => {
+    const preset = GRID_PRESETS["1x3"];
+
+    expect(preset.label).toBe("三窗布局");
+    expect(preset.areas).toBe('"left top" "left bottom"');
+    expect(preset.slots.map((slot) => slot.id)).toEqual([
+      "left",
+      "top",
+      "bottom",
+    ]);
+    expect(getGridTrackCounts("1x3")).toEqual({ columns: 2, rows: 2 });
   });
 });
 
@@ -101,6 +115,106 @@ describe("workspace grid store", () => {
     expect(store.getState().activePaneId).toBe("pane-code");
   });
 
+  it("adds a pane directly to the requested empty slot", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("2x2");
+    const paneId = store.getState().addPane({ kind: "chat" }, "bottom-right");
+    const state = store.getState();
+
+    expect(paneId).toEqual(expect.stringContaining("pane-chat-"));
+    expect(state.slots.map((slot) => [slot.id, slot.paneId])).toEqual([
+      ["top-left", "pane-code"],
+      ["top-right", "pane-chat"],
+      ["bottom-left", undefined],
+      ["bottom-right", paneId],
+    ]);
+  });
+
+  it("restores hidden panes when expanding the grid preset", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPreset("2x3");
+    while (store.getState().panes.length < WORKSPACE_GRID_MAX_PANES) {
+      store.getState().addPane({ kind: "chat" });
+    }
+    const paneIds = store.getState().panes.map((pane) => pane.id);
+
+    store.getState().setPreset("single");
+    expect(store.getState().slots.map((slot) => slot.paneId)).toEqual([
+      paneIds[paneIds.length - 1],
+    ]);
+
+    store.getState().setPreset("2x3");
+    expect(store.getState().slots.map((slot) => slot.paneId)).toEqual([
+      paneIds[paneIds.length - 1],
+      ...paneIds.slice(0, -1),
+    ]);
+  });
+
+  it("keeps the active pane visible when shrinking the grid preset", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setActivePane("pane-chat");
+    store.getState().setPreset("single");
+
+    expect(store.getState().slots).toEqual([
+      { id: "main", area: "main", paneId: "pane-chat" },
+    ]);
+  });
+
+  it("swaps occupied slots and moves panes into empty slots", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().swapSlots("left", "right");
+    expect(store.getState().slots.map((slot) => slot.paneId)).toEqual([
+      "pane-chat",
+      "pane-code",
+    ]);
+
+    store.getState().setPreset("1x3");
+    store.getState().swapSlots("top", "bottom");
+    expect(store.getState().slots.map((slot) => slot.paneId)).toEqual([
+      "pane-code",
+      undefined,
+      "pane-chat",
+    ]);
+  });
+
+  it("reconfigures a pane to Code without adding a session id", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().configurePane("pane-chat", {
+      kind: "code",
+      workDir: "D:/work",
+    });
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-chat");
+    expect(pane).toMatchObject({
+      kind: "code",
+      title: getKimiAssistantDisplayName(),
+      sessionId: undefined,
+      workDir: "D:/work",
+    });
+  });
+
+  it("reconfigures a pane to a server session", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "ses_123",
+      workDir: "D:/work",
+    });
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-code");
+    expect(pane).toMatchObject({
+      kind: "code",
+      sessionId: "ses_123",
+      workDir: "D:/work",
+    });
+  });
+
   it("does not persist URL fragments", () => {
     const store = createWorkspaceGridStore(undefined, null);
     const paneId = store.getState().addPane({
@@ -125,7 +239,7 @@ describe("workspace grid store", () => {
     );
   });
 
-  it("adds stable storage namespaces to legacy persisted panes", () => {
+  it("keeps pane workDir/theme optional while loading persisted panes", () => {
     const state = loadWorkspaceGridState(
       writableStorage({
         [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
@@ -137,6 +251,8 @@ describe("workspace grid store", () => {
               kind: "code",
               carrier: "iframe",
               title: "Kimi Code",
+              workDir: " D:/work ",
+              theme: "dark",
               mountPolicy: "eager",
               loadState: "idle",
               createdAt: 100,
@@ -154,6 +270,9 @@ describe("workspace grid store", () => {
     const persisted = toPersistedWorkspaceGridState(state);
 
     expect(persisted.panes[0]?.storageNamespace).toBe("workspace-grid-pane-code");
+    expect(persisted.panes[0]?.title).toBe(getKimiAssistantDisplayName());
+    expect(persisted.panes[0]?.workDir).toBe("D:/work");
+    expect(persisted.panes[0]?.theme).toBe("dark");
   });
 
   it("caps panes at the v1 resource limit", () => {
@@ -190,6 +309,15 @@ describe("workspace grid store", () => {
 
     const pane = store.getState().panes.find((item) => item.id === "pane-chat");
     expect(pane?.mountPolicy).toBe("suspended");
+  });
+
+  it("clears explicit pane theme when following global theme", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().setPaneTheme("pane-code", "dark");
+    store.getState().setPaneTheme("pane-code", undefined);
+
+    expect(store.getState().panes.find((item) => item.id === "pane-code")?.theme).toBeUndefined();
   });
 
   it("reconfigures external panes through URL safety", () => {
@@ -276,12 +404,11 @@ describe("workspace grid store", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
     store.getState().setPreset("1x3");
-    store.getState().setGridTrackSizes({ columns: [1.8, 0.8, 1] });
+    store.getState().setGridTrackSizes({ columns: [1.8, 0.8] });
 
     expect(toPersistedWorkspaceGridState(store.getState()).trackSizes?.columns).toEqual([
       1.8,
       0.8,
-      1,
     ]);
 
     store.getState().setPreset("2x2");

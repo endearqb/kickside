@@ -96,14 +96,36 @@ function statusForSkill(
   globalSkillProjections: SkillProjectionRecord[],
   activeSessionSkillState: SessionSkillState,
 ) {
+  const userGlobalApplied = globalSkillProjections.some(
+    (item) => item.skillId === skillId && item.scope === "user_global_kimi",
+  );
+  const kimiCodeHomeApplied = globalSkillProjections.some(
+    (item) => item.skillId === skillId && item.scope === "kimi_code_home",
+  );
   return {
-    globalApplied: globalSkillProjections.some((item) => item.skillId === skillId),
+    globalApplied: userGlobalApplied || kimiCodeHomeApplied,
+    userGlobalApplied,
+    kimiCodeHomeApplied,
     sessionApplied: activeSessionSkillState.appliedSkillIds.includes(skillId),
   };
 }
 
-function projectionForSkill(skillId: string, projections: SkillProjectionRecord[]) {
-  return projections.find((item) => item.skillId === skillId) ?? null;
+function projectionForSkill(
+  skillId: string,
+  projections: SkillProjectionRecord[],
+  scope?: SkillApplyScope,
+) {
+  return (
+    projections.find(
+      (item) => item.skillId === skillId && (scope ? item.scope === scope : true),
+    ) ?? null
+  );
+}
+
+function formatProjectionScope(scope: SkillApplyScope) {
+  if (scope === "user_global_kimi") return "用户全局 ~/.agents";
+  if (scope === "kimi_code_home") return "KIMI_CODE_HOME";
+  return "当前工作区";
 }
 
 function renderStatusChip(label: string, tone: "ready" | "muted" | "warning") {
@@ -137,9 +159,11 @@ function formatDiscoveryScope(scope: SkillDiscoveryLocation["scope"]) {
 }
 
 function formatDiscoveryContainer(kind: SkillDiscoveryContainerKind) {
-  if (kind === "agents") return ".agents";
-  if (kind === "codex") return ".codex";
-  return ".claude";
+  if (kind === "agents") return ".agents/skills";
+  if (kind === "kimi_code") return ".kimi-code/skills";
+  if (kind === "legacy_agents") return "~/.config/agents/skills legacy";
+  if (kind === "codex") return ".codex/skills inventory";
+  return ".claude/skills inventory";
 }
 
 function formatDiscoveryLocationLabel(location: SkillDiscoveryLocation) {
@@ -470,9 +494,17 @@ export function SkillCenterPanel({
 
   const selectedInstalledState = selectedInstalledSkill
     ? statusForSkill(selectedInstalledSkill.id, globalSkillProjections, activeSessionSkillState)
-    : { globalApplied: false, sessionApplied: false };
-  const selectedInstalledGlobalProjection = selectedInstalledSkill
-    ? projectionForSkill(selectedInstalledSkill.id, globalSkillProjections)
+    : {
+        globalApplied: false,
+        userGlobalApplied: false,
+        kimiCodeHomeApplied: false,
+        sessionApplied: false,
+      };
+  const selectedInstalledUserGlobalProjection = selectedInstalledSkill
+    ? projectionForSkill(selectedInstalledSkill.id, globalSkillProjections, "user_global_kimi")
+    : null;
+  const selectedInstalledKimiCodeHomeProjection = selectedInstalledSkill
+    ? projectionForSkill(selectedInstalledSkill.id, globalSkillProjections, "kimi_code_home")
     : null;
   const selectedInstalledSessionProjection = selectedInstalledSkill
     ? projectionForSkill(selectedInstalledSkill.id, activeSessionSkillState.projections)
@@ -520,6 +552,7 @@ export function SkillCenterPanel({
       (selectedWorkspaceContainer?.skills ?? []).map((skill) => skill.projectionName.toLowerCase()),
     );
     return installedSkills.filter((skill) => {
+      if (!skill.trusted) return false;
       if (!matchesKeyword(keyword, skill.name, skill.description, skill.projectionName)) {
         return false;
       }
@@ -531,7 +564,7 @@ export function SkillCenterPanel({
 
   const filterOptions: Array<{ value: SkillCenterFilter; label: string }> = [
     { value: "all", label: "全部" },
-    { value: "global", label: "全局" },
+    { value: "global", label: "已投影" },
     { value: "session", label: "当前工作区" },
     { value: "pinned", label: "已固定" },
     { value: "untrusted", label: "未信任" },
@@ -556,7 +589,7 @@ export function SkillCenterPanel({
                     onChange={(event) => onSearchChange(event.target.value)}
                     placeholder={
                       isSkillCenterManageContext
-                        ? "搜索技能中心技能"
+                        ? "搜索受管 Skill"
                         : "搜索技能、外部发现或来源位置"
                     }
                   />
@@ -567,7 +600,7 @@ export function SkillCenterPanel({
                     disabled={busy}
                     aria-label="技能管理范围"
                   >
-                    <option value="skill_center">技能中心</option>
+                    <option value="skill_center">受管 Skill</option>
                     <option value="current_workspace" disabled={!currentWorkspaceTarget}>
                       {currentWorkspaceTarget ? "当前工作区" : "当前工作区（未识别）"}
                     </option>
@@ -659,7 +692,12 @@ export function SkillCenterPanel({
                                   "muted",
                                 )
                               : null}
-                            {state.globalApplied ? renderStatusChip("全局", "muted") : null}
+                            {state.userGlobalApplied
+                              ? renderStatusChip("~/.agents", "muted")
+                              : null}
+                            {state.kimiCodeHomeApplied
+                              ? renderStatusChip("KIMI_CODE_HOME", "muted")
+                              : null}
                             {state.sessionApplied
                               ? renderStatusChip("当前工作区", "muted")
                               : null}
@@ -731,8 +769,11 @@ export function SkillCenterPanel({
                             "muted",
                           )
                         : null}
-                      {selectedInstalledState.globalApplied
-                        ? renderStatusChip("全局", "muted")
+                      {selectedInstalledState.userGlobalApplied
+                        ? renderStatusChip("~/.agents", "muted")
+                        : null}
+                      {selectedInstalledState.kimiCodeHomeApplied
+                        ? renderStatusChip("KIMI_CODE_HOME", "muted")
                         : null}
                       {selectedInstalledState.sessionApplied
                         ? renderStatusChip("当前工作区", "muted")
@@ -747,17 +788,37 @@ export function SkillCenterPanel({
                     <Button
                       type="button"
                       onClick={() => onApplySkill(selectedInstalledSkill.id, "session_kimi")}
-                      disabled={busy || selectedInstalledState.sessionApplied}
+                      disabled={
+                        busy ||
+                        !selectedInstalledSkill.trusted ||
+                        selectedInstalledState.sessionApplied
+                      }
                     >
-                      应用到当前工作区
+                      投影到当前工作区 .agents
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => onApplySkill(selectedInstalledSkill.id, "user_global_kimi")}
-                      disabled={busy || selectedInstalledState.globalApplied}
+                      disabled={
+                        busy ||
+                        !selectedInstalledSkill.trusted ||
+                        selectedInstalledState.userGlobalApplied
+                      }
                     >
-                      应用到用户全局
+                      投影到用户全局 ~/.agents
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => onApplySkill(selectedInstalledSkill.id, "kimi_code_home")}
+                      disabled={
+                        busy ||
+                        !selectedInstalledSkill.trusted ||
+                        selectedInstalledState.kimiCodeHomeApplied
+                      }
+                    >
+                      投影到 KIMI_CODE_HOME
                     </Button>
                   </div>
 
@@ -807,9 +868,17 @@ export function SkillCenterPanel({
                       type="button"
                       variant="ghost"
                       onClick={() => onRemoveSkill(selectedInstalledSkill.id, "user_global_kimi")}
-                      disabled={busy || !selectedInstalledState.globalApplied}
+                      disabled={busy || !selectedInstalledState.userGlobalApplied}
                     >
-                      从用户全局移除
+                      从 ~/.agents 移除
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => onRemoveSkill(selectedInstalledSkill.id, "kimi_code_home")}
+                      disabled={busy || !selectedInstalledState.kimiCodeHomeApplied}
+                    >
+                      从 KIMI_CODE_HOME 移除
                     </Button>
                     <Button
                       type="button"
@@ -897,9 +966,9 @@ export function SkillCenterPanel({
                               type="button"
                               variant="outline"
                               onClick={() => onRecoverWorkspaceSkill(skill.id)}
-                              disabled={busy}
+                              disabled={busy || !skill.trusted}
                             >
-                              应用到当前工作区
+                              投影到当前工作区
                             </Button>
                           </div>
                         ))}
@@ -911,19 +980,33 @@ export function SkillCenterPanel({
                     <div className="skill-center-section-header">
                       <h4>已应用目录</h4>
                     </div>
-                    {!selectedInstalledGlobalProjection && !selectedInstalledSessionProjection ? (
+                    {!selectedInstalledUserGlobalProjection &&
+                    !selectedInstalledKimiCodeHomeProjection &&
+                    !selectedInstalledSessionProjection ? (
                       <p className="skill-center-muted">这个技能当前还没有应用到任何目录。</p>
                     ) : (
                       <div className="skill-center-path-list">
-                        {selectedInstalledGlobalProjection ? (
+                        {selectedInstalledUserGlobalProjection ? (
                           <div className="skill-center-path-item">
-                            <strong>全局</strong>
-                            <code>{selectedInstalledGlobalProjection.targetPath}</code>
+                            <strong>
+                              {formatProjectionScope(selectedInstalledUserGlobalProjection.scope)}
+                            </strong>
+                            <code>{selectedInstalledUserGlobalProjection.targetPath}</code>
+                          </div>
+                        ) : null}
+                        {selectedInstalledKimiCodeHomeProjection ? (
+                          <div className="skill-center-path-item">
+                            <strong>
+                              {formatProjectionScope(
+                                selectedInstalledKimiCodeHomeProjection.scope,
+                              )}
+                            </strong>
+                            <code>{selectedInstalledKimiCodeHomeProjection.targetPath}</code>
                           </div>
                         ) : null}
                         {selectedInstalledSessionProjection ? (
                           <div className="skill-center-path-item">
-                            <strong>当前工作区</strong>
+                            <strong>{formatProjectionScope(selectedInstalledSessionProjection.scope)}</strong>
                             <code>{selectedInstalledSessionProjection.targetPath}</code>
                           </div>
                         ) : null}
@@ -980,7 +1063,7 @@ export function SkillCenterPanel({
                       onClick={() => onImportDiscoveredSkill(selectedDiscoveredRecord.discoveryId)}
                       disabled={busy}
                     >
-                      导入到技能中心
+                      导入到受管 Skill
                     </Button>
                   </div>
 
@@ -1060,7 +1143,7 @@ export function SkillCenterPanel({
                   className="skill-center-header-search"
                   value={search}
                   onChange={(event) => onSearchChange(event.target.value)}
-                  placeholder="搜索工作区技能或技能中心已安装技能"
+                  placeholder="搜索工作区 Skill 或受管 Skill"
                 />
               </div>
             }
@@ -1128,19 +1211,20 @@ export function SkillCenterPanel({
                     value={selectedWorkspaceSkillContainerKind}
                     onChange={(containerKind) => onSelectWorkspaceSkillContainer(containerKind)}
                     disabled={busy}
-                    items={(["agents", "codex", "claude"] as SkillDiscoveryContainerKind[]).map(
-                      (containerKind) => {
-                        const count =
-                          workspaceSkillInventory?.containers.find(
-                            (container) => container.containerKind === containerKind,
-                          )?.skills.length ?? 0;
-                        return {
-                          value: containerKind,
-                          label: formatDiscoveryContainer(containerKind),
-                          description: `${count}`,
-                        };
-                      },
-                    )}
+                    items={(
+                      workspaceSkillInventory?.containers.map((container) => ({
+                        containerKind: container.containerKind,
+                        count: container.skills.length,
+                      })) ??
+                      selectedWorkspaceTarget.containerRoots.map((root) => ({
+                        containerKind: root.containerKind,
+                        count: 0,
+                      }))
+                    ).map(({ containerKind, count }) => ({
+                      value: containerKind,
+                      label: formatDiscoveryContainer(containerKind),
+                      description: `${count}`,
+                    }))}
                   />
 
                   <div className="skill-center-workspace-grid">
@@ -1181,7 +1265,7 @@ export function SkillCenterPanel({
 
                     <section className="skill-center-workspace-section">
                       <div className="skill-center-section-header">
-                        <h4>从技能中心导入</h4>
+                        <h4>从受管 Skill 投影</h4>
                         <span>{workspaceImportCandidates.length}</span>
                       </div>
                       {selectedWorkspaceTarget.readOnly ? (

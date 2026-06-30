@@ -88,10 +88,10 @@ fn open_with_system_file_manager(path: &Path) -> anyhow::Result<()> {
 fn open_with_system_browser(url: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer")
-            .arg(url)
+        Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
             .spawn()
-            .context("failed to open url with explorer")?;
+            .context("failed to open url with default browser")?;
         return Ok(());
     }
 

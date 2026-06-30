@@ -1,8 +1,8 @@
-# Kimi App
+# Kimi 小助手
 
 [English README](README.md)
 
-Kimi App 是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Web 的 Windows 桌面壳。
+Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Web 的 Windows 桌面壳。
 当前主应用位于 `apps/kimi-shell`，技术栈为 `Tauri v2 + React`，把启动接管、安装与升级、
 多标签控制中心、IM Bridge 运维、诊断日志和 Windows 安装包输出整合进同一个面向工作区的桌面应用。
 
@@ -36,23 +36,23 @@ Kimi App 是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi 
 
 主工作区：提供常驻的 Code / Chat 桌面壳，以及稳定的导航与切换体验。
 
-![Kimi Desktop Shell 主界面](apps/kimi-shell/public/home.png)
+![Kimi 小助手主界面](apps/kimi-shell/public/home.png)
 
 快速设置：将首次安装、环境修复和关键引导步骤集中到更聚焦的 onboarding 流程中。
 
-![Kimi Desktop Shell 快速设置](apps/kimi-shell/public/quick_setup.png)
+![Kimi 小助手快速设置](apps/kimi-shell/public/quick_setup.png)
 
 安装与升级：把 PowerShell 预检、依赖就绪状态和升级入口放到同一个面板里。
 
-![Kimi Desktop Shell 安装与升级](apps/kimi-shell/public/install&updata.png)
+![Kimi 小助手安装与升级](apps/kimi-shell/public/install&updata.png)
 
 控制中心：以统一多标签工作台承载概览、快速设置、运行诊断和日常操作入口。
 
-![Kimi Desktop Shell 控制中心](apps/kimi-shell/public/control_center.png)
+![Kimi 小助手控制中心](apps/kimi-shell/public/control_center.png)
 
 IM Bridge：集中处理通道状态、当前绑定/会话切换，以及默认工作目录等桥接工作流配置。
 
-![Kimi Desktop Shell IM Bridge](apps/kimi-shell/public/IM_bridge.png)
+![Kimi 小助手 IM Bridge](apps/kimi-shell/public/IM_bridge.png)
 
 ## 本地开发
 

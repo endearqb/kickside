@@ -261,11 +261,11 @@ function getTaskAvailability(
     case "upgrade_kimi":
       return probe.kimiReady
         ? { disabled: false }
-        : { disabled: true, reason: "需先安装 Kimi CLI" };
+        : { disabled: true, reason: "需先安装 Kimi Code" };
     case "uninstall_kimi":
       return probe.kimiReady
         ? { disabled: false }
-        : { disabled: true, reason: "当前未安装 Kimi CLI" };
+        : { disabled: true, reason: "当前未安装 Kimi Code" };
     case "install_git":
       return probe.gitReady ? { disabled: true, reason: "已安装" } : { disabled: false };
     case "install_nodejs":
@@ -463,7 +463,7 @@ export function InstallFlowTaskContent({
         <div className="cc-install-overview-head">
           <div className="cc-install-overview-copy">
             <ControlCenterStatusBadge tone={sessionTone}>{sessionStatusLabel}</ControlCenterStatusBadge>
-            <h4>安装 / 管理 Kimi CLI</h4>
+            <h4>安装 / 管理 Kimi Code</h4>
             <p>{session.message?.trim() || "先看状态，再执行安装、升级或卸载。"}</p>
           </div>
         </div>
@@ -485,7 +485,7 @@ export function InstallFlowTaskContent({
             <small>{formatSourceSummary(installSource, mirrorHealthSummary, installMirrorHealthBusy)}</small>
           </article>
           <article className="cc-install-overview-card">
-            <span>Kimi CLI</span>
+            <span>Kimi Code</span>
             <strong>{statusLabel(probe?.kimiReady)}</strong>
             <small>{detectedKimiPath || "尚未探测到可用路径"}</small>
           </article>
@@ -521,7 +521,7 @@ export function InstallFlowTaskContent({
                   disabled={quickInstallAvailability.disabled}
                   title={quickInstallAvailability.reason}
                 >
-                  一键安装 Kimi CLI
+                  一键安装 Kimi Code
                 </Button>
                 <Button
                   type="button"
@@ -566,7 +566,7 @@ export function InstallFlowTaskContent({
                 disabled={uninstallAvailability.disabled}
                 title={uninstallAvailability.reason}
               >
-                卸载 Kimi CLI
+                卸载 Kimi Code
               </Button>
               <Button
                 type="button"
@@ -918,10 +918,10 @@ export function InstallFlowTaskContent({
             className="main-close-decision-card"
             role="dialog"
             aria-modal="true"
-            aria-label="卸载 Kimi CLI"
+            aria-label="卸载 Kimi Code"
           >
-            <h3>卸载 Kimi CLI</h3>
-            <p>仅卸载托管的 Kimi CLI。卸载前会先停止后端，完成后后端保持停止。</p>
+            <h3>卸载 Kimi Code</h3>
+            <p>仅卸载托管的 Kimi Code。卸载前会先停止后端，完成后后端保持停止。</p>
             <div className="main-close-decision-actions">
               <button
                 type="button"

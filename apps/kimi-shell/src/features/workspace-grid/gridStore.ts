@@ -9,6 +9,7 @@ import {
   createDefaultWorkspaceGridState,
   migrateLegacyWorkspaceGridState,
 } from "./gridMigration";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { normalizeEmbeddableUrl } from "./urlSafety";
 import type {
   WorkspaceGridPersistedState,
@@ -18,6 +19,7 @@ import type {
   WorkspaceGridTrackSizes,
   WorkspacePane,
   WorkspacePaneKind,
+  WorkspacePaneTheme,
 } from "./gridTypes";
 
 export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v1";
@@ -29,15 +31,17 @@ type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
 
 export interface WorkspaceGridActions {
   setPreset: (preset: WorkspaceGridPresetId) => void;
-  addPane: (pane: AddWorkspacePaneInput) => string | null;
+  addPane: (pane: AddWorkspacePaneInput, targetSlotId?: string) => string | null;
   removePane: (paneId: string) => void;
   movePane: (paneId: string, slotId: string) => void;
+  swapSlots: (sourceSlotId: string, targetSlotId: string) => void;
   maximizePane: (paneId: string | null) => void;
   setActivePane: (paneId: string | null) => void;
   setPaneMountPolicy: (
     paneId: string,
     mountPolicy: WorkspacePane["mountPolicy"],
   ) => void;
+  setPaneTheme: (paneId: string, theme: WorkspacePaneTheme | undefined) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
   setGridTrackSizes: (trackSizes: WorkspaceGridTrackSizes) => void;
@@ -51,6 +55,8 @@ export interface AddWorkspacePaneInput {
   title?: string;
   sessionId?: string;
   url?: string;
+  workDir?: string;
+  theme?: WorkspacePaneTheme;
   storageNamespace?: string;
 }
 
@@ -193,9 +199,25 @@ function createWorkspaceGridSlice(
     ...initialState,
     setPreset(preset) {
       update(set, storage, (state) => {
-        const assignedPaneIds = state.slots
+        const paneIdSet = new Set(state.panes.map((pane) => pane.id));
+        const visiblePaneIds = state.slots
           .map((slot) => slot.paneId)
           .filter((paneId): paneId is string => Boolean(paneId));
+        const assignedPaneIds: string[] = [];
+        const assignedPaneIdSet = new Set<string>();
+        const pushPaneId = (paneId: string | null | undefined) => {
+          if (paneId && paneIdSet.has(paneId) && !assignedPaneIdSet.has(paneId)) {
+            assignedPaneIds.push(paneId);
+            assignedPaneIdSet.add(paneId);
+          }
+        };
+        pushPaneId(state.activePaneId);
+        for (const paneId of visiblePaneIds) {
+          pushPaneId(paneId);
+        }
+        for (const pane of state.panes) {
+          pushPaneId(pane.id);
+        }
         return {
           ...state,
           preset,
@@ -206,13 +228,15 @@ function createWorkspaceGridSlice(
         };
       });
     },
-    addPane(input) {
+    addPane(input, targetSlotId) {
       const state = get();
       if (state.panes.length >= WORKSPACE_GRID_MAX_PANES) {
         return null;
       }
-      const firstEmptySlot = state.slots.find((slot) => !slot.paneId);
-      if (!firstEmptySlot) {
+      const targetSlot = targetSlotId
+        ? state.slots.find((slot) => slot.id === targetSlotId && !slot.paneId)
+        : state.slots.find((slot) => !slot.paneId);
+      if (!targetSlot) {
         return null;
       }
 
@@ -225,6 +249,8 @@ function createWorkspaceGridSlice(
         title: input.title ?? defaultPaneTitle(input.kind),
         sessionId: input.sessionId,
         url: sanitizeUrl(input.url),
+        workDir: sanitizeWorkDir(input.workDir),
+        theme: isPaneTheme(input.theme) ? input.theme : undefined,
         storageNamespace:
           sanitizeStorageNamespace(input.storageNamespace) ??
           createPaneStorageNamespace(paneId),
@@ -238,7 +264,7 @@ function createWorkspaceGridSlice(
         ...current,
         panes: [...current.panes, pane],
         slots: current.slots.map((slot) =>
-          slot.id === firstEmptySlot.id ? { ...slot, paneId } : slot,
+          slot.id === targetSlot.id ? { ...slot, paneId } : slot,
         ),
         activePaneId: paneId,
         updatedAt: now,
@@ -286,6 +312,32 @@ function createWorkspaceGridSlice(
         };
       });
     },
+    swapSlots(sourceSlotId, targetSlotId) {
+      if (sourceSlotId === targetSlotId) {
+        return;
+      }
+      update(set, storage, (state) => {
+        const source = state.slots.find((slot) => slot.id === sourceSlotId);
+        const target = state.slots.find((slot) => slot.id === targetSlotId);
+        if (!source || !target) {
+          return state;
+        }
+        return {
+          ...state,
+          slots: state.slots.map((slot) => {
+            if (slot.id === sourceSlotId) {
+              return { ...slot, paneId: target.paneId };
+            }
+            if (slot.id === targetSlotId) {
+              return { ...slot, paneId: source.paneId };
+            }
+            return slot;
+          }),
+          activePaneId: source.paneId ?? state.activePaneId,
+          updatedAt: Date.now(),
+        };
+      });
+    },
     maximizePane(paneId) {
       update(set, storage, (state) => ({
         ...state,
@@ -317,6 +369,21 @@ function createWorkspaceGridSlice(
         updatedAt: Date.now(),
       }));
     },
+    setPaneTheme(paneId, theme) {
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                theme: isPaneTheme(theme) ? theme : undefined,
+                updatedAt: Date.now(),
+              }
+            : pane,
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
     changePaneKind(paneId, kind) {
       update(set, storage, (state) => ({
         ...state,
@@ -328,6 +395,7 @@ function createWorkspaceGridSlice(
                 title: defaultPaneTitle(kind),
                 sessionId: undefined,
                 url: undefined,
+                workDir: undefined,
                 storageNamespace:
                   sanitizeStorageNamespace(pane.storageNamespace) ??
                   createPaneStorageNamespace(pane.id),
@@ -349,6 +417,8 @@ function createWorkspaceGridSlice(
                 title: input.title ?? defaultPaneTitle(input.kind),
                 sessionId: input.sessionId,
                 url: sanitizeUrl(input.url),
+                workDir: sanitizeWorkDir(input.workDir),
+                theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
                 storageNamespace:
                   sanitizeStorageNamespace(pane.storageNamespace) ??
                   createPaneStorageNamespace(pane.id),
@@ -492,6 +562,8 @@ function sanitizePaneCandidate(value: unknown): WorkspacePane | null {
         : defaultPaneTitle(kind),
     sessionId: typeof pane.sessionId === "string" ? pane.sessionId : undefined,
     url: typeof pane.url === "string" ? pane.url : undefined,
+    workDir: typeof pane.workDir === "string" ? pane.workDir : undefined,
+    theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
     storageNamespace:
       typeof pane.storageNamespace === "string" ? pane.storageNamespace : "",
     mountPolicy: isMountPolicy(pane.mountPolicy) ? pane.mountPolicy : "eager",
@@ -503,6 +575,10 @@ function sanitizePaneCandidate(value: unknown): WorkspacePane | null {
 
 function isPaneKind(value: unknown): value is WorkspacePaneKind {
   return value === "code" || value === "chat" || value === "external";
+}
+
+function isPaneTheme(value: unknown): value is WorkspacePaneTheme {
+  return value === "light" || value === "dark";
 }
 
 function isMountPolicy(value: unknown): value is WorkspacePane["mountPolicy"] {
@@ -528,11 +604,22 @@ function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
 function sanitizePane(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
+    title: normalizePaneTitle(pane.kind, pane.title),
     url: sanitizeUrl(pane.url),
+    workDir: sanitizeWorkDir(pane.workDir),
+    theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
     storageNamespace:
       sanitizeStorageNamespace(pane.storageNamespace) ??
       createPaneStorageNamespace(pane.id),
   };
+}
+
+function normalizePaneTitle(kind: WorkspacePaneKind, title: string): string {
+  const trimmed = title.trim();
+  if (kind === "code" && (trimmed === "Kimi Code" || trimmed === "Kimi Code Web")) {
+    return defaultPaneTitle(kind);
+  }
+  return trimmed || defaultPaneTitle(kind);
 }
 
 function sanitizeSavedLayout(
@@ -562,8 +649,13 @@ function sanitizeUrl(url?: string): string | undefined {
   return result.ok ? result.url : undefined;
 }
 
+function sanitizeWorkDir(workDir?: string): string | undefined {
+  const trimmed = workDir?.trim();
+  return trimmed || undefined;
+}
+
 function defaultPaneTitle(kind: WorkspacePaneKind): string {
-  if (kind === "code") return "Kimi Code";
+  if (kind === "code") return getKimiAssistantDisplayName();
   if (kind === "chat") return "Kimi Chat";
   return "外部网页";
 }
@@ -597,5 +689,10 @@ function getBrowserStorage(): BrowserStorage | null {
   if (typeof window === "undefined") {
     return null;
   }
-  return window.localStorage;
+  const storage = window.localStorage;
+  return storage &&
+    typeof storage.getItem === "function" &&
+    typeof storage.setItem === "function"
+    ? storage
+    : null;
 }

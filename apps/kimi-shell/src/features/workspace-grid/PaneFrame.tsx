@@ -3,23 +3,25 @@ import {
   useRef,
   useState,
   type MutableRefObject,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import {
   Code2,
   ExternalLink,
   FileText,
+  FolderOpen,
   Globe2,
   Maximize2,
   MessageCircle,
   Minimize2,
-  Plus,
   RefreshCcw,
-  RefreshCwOff,
   Trash2,
 } from "lucide-react";
-import type { WorkspacePaneState } from "@/app/types";
+import { THEME_SYNC_SOURCE } from "@/app/theme";
+import type { Theme, WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   type EmbeddedExternalWebviewBounds,
@@ -35,7 +37,10 @@ interface PaneFrameProps {
   slotLabel: string;
   active: boolean;
   maximized: boolean;
+  dragging: boolean;
   canAddPane: boolean;
+  effectiveWorkDir?: string;
+  themeMode: Theme;
   codeRemoteUrl: string | null;
   codeFrameKey: string;
   chatRemoteUrl: string;
@@ -46,6 +51,7 @@ interface PaneFrameProps {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => void;
   onOpenExternalUrl: (url: string) => void;
   onOpenTauriWebviewUrl: (
     url: string,
@@ -60,8 +66,8 @@ interface PaneFrameProps {
   onAddPane: (kind: WorkspacePaneKind) => void;
   onConfigurePane: (kind: WorkspacePaneKind) => void;
   onRemovePane: () => void;
-  onSuspendPane: () => void;
   onResumePane: () => void;
+  onPaneDragStart: (event: ReactPointerEvent<HTMLElement>) => void;
   onToggleMaximize: () => void;
 }
 
@@ -70,7 +76,10 @@ export function PaneFrame({
   slotLabel,
   active,
   maximized,
+  dragging,
   canAddPane,
+  effectiveWorkDir,
+  themeMode,
   codeRemoteUrl,
   codeFrameKey,
   chatRemoteUrl,
@@ -81,6 +90,7 @@ export function PaneFrame({
   actionBusy,
   onRetry,
   onOpenLogs,
+  onOpenFolder,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
   onCodeFrameLoad,
@@ -91,8 +101,8 @@ export function PaneFrame({
   onAddPane,
   onConfigurePane,
   onRemovePane,
-  onSuspendPane,
   onResumePane,
+  onPaneDragStart,
   onToggleMaximize,
 }: PaneFrameProps) {
   if (!pane) {
@@ -121,15 +131,6 @@ export function PaneFrame({
             <MessageCircle size={14} aria-hidden />
             Chat
           </button>
-          <button
-            type="button"
-            className="workspace-grid-empty-btn"
-            onClick={() => onAddPane("external")}
-            disabled={!canAddPane}
-          >
-            <Plus size={14} aria-hidden />
-            Kimi.com
-          </button>
         </div>
       </div>
     );
@@ -149,14 +150,48 @@ export function PaneFrame({
     onChatFrameLoad,
     onChatFrameError,
   });
+  const paneTheme = pane.theme ?? themeMode;
+  const paneWorkDir =
+    pane.kind === "code" ? pane.workDir?.trim() || effectiveWorkDir?.trim() || "" : "";
+  const viewToggle =
+    pane.kind === "code"
+      ? {
+          target: "chat" as const,
+          label: "当前 Code，切换为 Chat",
+          icon: <Code2 size={14} aria-hidden />,
+          active: true,
+        }
+      : pane.kind === "chat"
+        ? {
+            target: "code" as const,
+            label: "当前 Chat，切换为 Code",
+            icon: <MessageCircle size={14} aria-hidden />,
+            active: true,
+          }
+        : {
+            target: "code" as const,
+            label: "切换为 Code",
+            icon: <Code2 size={14} aria-hidden />,
+            active: false,
+          };
 
   return (
     <article
-      className={`workspace-grid-pane${active ? " is-active" : ""}`}
+      className={`workspace-grid-pane${active ? " is-active" : ""}${
+        dragging ? " is-dragging-source" : ""
+      }`}
       onFocus={onActivate}
       onPointerDown={onActivate}
     >
-      <header className="workspace-grid-pane-header">
+      <header
+        className="workspace-grid-pane-header"
+        onPointerDown={(event) => {
+          if (event.target instanceof Element && event.target.closest("button")) {
+            return;
+          }
+          onPaneDragStart(event);
+        }}
+      >
         <div className="workspace-grid-pane-title">
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
           {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
@@ -164,26 +199,21 @@ export function PaneFrame({
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
+          {pane.kind === "code" ? (
+            <IconButton
+              label="打开此窗格目录"
+              onClick={() => onOpenFolder(paneWorkDir)}
+              disabled={!paneWorkDir}
+            >
+              <FolderOpen size={14} aria-hidden />
+            </IconButton>
+          ) : null}
           <IconButton
-            label="切换为 Code"
-            onClick={() => onConfigurePane("code")}
-            active={pane.kind === "code"}
+            label={viewToggle.label}
+            onClick={() => onConfigurePane(viewToggle.target)}
+            active={viewToggle.active}
           >
-            <Code2 size={14} aria-hidden />
-          </IconButton>
-          <IconButton
-            label="切换为 Chat"
-            onClick={() => onConfigurePane("chat")}
-            active={pane.kind === "chat"}
-          >
-            <MessageCircle size={14} aria-hidden />
-          </IconButton>
-          <IconButton
-            label="切换为 Kimi.com"
-            onClick={() => onConfigurePane("external")}
-            active={pane.kind === "external"}
-          >
-            <Globe2 size={14} aria-hidden />
+            {viewToggle.icon}
           </IconButton>
           <IconButton
             label={maximized ? "还原窗格" : "最大化窗格"}
@@ -195,15 +225,6 @@ export function PaneFrame({
               <Maximize2 size={14} aria-hidden />
             )}
           </IconButton>
-          {pane.mountPolicy === "suspended" ? (
-            <IconButton label="恢复挂载" onClick={onResumePane}>
-              <RefreshCcw size={14} aria-hidden />
-            </IconButton>
-          ) : (
-            <IconButton label="挂起窗格" onClick={onSuspendPane}>
-              <RefreshCwOff size={14} aria-hidden />
-            </IconButton>
-          )}
           <IconButton label="关闭窗格" onClick={onRemovePane}>
             <Trash2 size={14} aria-hidden />
           </IconButton>
@@ -217,6 +238,8 @@ export function PaneFrame({
         onOpenLogs={onOpenLogs}
         onOpenExternalUrl={onOpenExternalUrl}
         onOpenTauriWebviewUrl={onOpenTauriWebviewUrl}
+        paneTheme={paneTheme}
+        themeSignal={themeMode}
         active={active}
         onResumePane={onResumePane}
       />
@@ -227,19 +250,30 @@ export function PaneFrame({
 interface IconButtonProps {
   label: string;
   active?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
   onClick: () => void;
 }
 
-function IconButton({ label, active = false, children, onClick }: IconButtonProps) {
+function IconButton({
+  label,
+  active = false,
+  disabled = false,
+  children,
+  onClick,
+}: IconButtonProps) {
   return (
     <button
       type="button"
       className={`workspace-grid-icon-btn${active ? " is-active" : ""}`}
       title={label}
       aria-label={label}
+      disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
+        if (disabled) {
+          return;
+        }
         onClick();
       }}
     >
@@ -261,6 +295,8 @@ interface PaneContentProps {
     title: string,
     storageNamespace?: string,
   ) => void;
+  paneTheme: Theme;
+  themeSignal: Theme;
   onResumePane: () => void;
 }
 
@@ -273,9 +309,12 @@ function PaneContent({
   onOpenLogs,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
+  paneTheme,
+  themeSignal,
   onResumePane,
 }: PaneContentProps) {
   const embedHostRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const embeddedControllerRef =
     useRef<EmbeddedExternalWebviewController | null>(null);
   const [externalState, setExternalState] =
@@ -285,6 +324,10 @@ function PaneContent({
   >("idle");
   const [embeddedError, setEmbeddedError] = useState("");
   const sourceUrl = source.url ?? "";
+
+  useEffect(() => {
+    postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
+  }, [paneTheme, sourceUrl, themeSignal]);
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -487,11 +530,18 @@ function PaneContent({
         <>
           <iframe
             key={source.frameKey}
-            ref={source.iframeRef}
+            ref={(node) => {
+              iframeRef.current = node;
+              if (source.iframeRef) {
+                (source.iframeRef as MutableRefObject<HTMLIFrameElement | null>).current =
+                  node;
+              }
+            }}
             src={source.url}
             title={source.title}
             className="workspace-iframe"
             onLoad={() => {
+              postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
               if (pane.kind === "external") {
                 setExternalState("ready");
                 return;
@@ -610,6 +660,25 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function postThemeToFrame(
+  frame: HTMLIFrameElement | null,
+  sourceUrl: string,
+  theme: Theme,
+): void {
+  if (!frame?.contentWindow || !sourceUrl) {
+    return;
+  }
+
+  try {
+    frame.contentWindow.postMessage(
+      { source: THEME_SYNC_SOURCE, theme },
+      new URL(sourceUrl).origin,
+    );
+  } catch {
+    // The iframe may still be navigating or temporarily at about:blank.
+  }
+}
+
 interface PaneSourceInput {
   pane: WorkspacePane;
   codeRemoteUrl: string | null;
@@ -656,7 +725,7 @@ function resolvePaneSource({
         : null;
     return {
       url: sessionUrl ?? codeRemoteUrl,
-      title: "Kimi Code Web",
+      title: getKimiAssistantDisplayName(),
       frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
       iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
       loadState: codePaneState,

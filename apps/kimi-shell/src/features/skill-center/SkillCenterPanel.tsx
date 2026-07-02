@@ -92,6 +92,8 @@ type SkillCenterPanelProps = {
   onSearchChange: (value: string) => void;
   onSectionChange: (value: SkillCenterSectionId) => void;
   railActions?: ReactNode;
+  detailOnly?: boolean;
+  activeFocusId?: string | null;
 };
 
 function statusForSkill(
@@ -330,6 +332,7 @@ export function SkillCenterPanel({
   onSearchChange,
   onSectionChange,
   railActions,
+  detailOnly = false,
 }: SkillCenterPanelProps) {
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
@@ -709,7 +712,7 @@ export function SkillCenterPanel({
   }
 
   return (
-    <div className={`skill-center skill-center-${surface}`}>
+    <div className={`skill-center skill-center-${surface} ${detailOnly ? "skill-center-detail-only" : ""}`}>
       <div className="skill-center-content">
         {section === "manage" ? (
           <ControlCenterWorkbenchLayout

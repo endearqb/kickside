@@ -6,6 +6,7 @@ import { ControlCenterStatusBadge } from "@/components/control-center/ControlCen
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { UnifiedRailGroup } from "@/features/control-center/ControlCenterUnifiedRail";
 import {
   createHarnessWorkspace,
   dryRunHarness,
@@ -19,6 +20,9 @@ import {
 
 type WorkspaceHubPanelProps = {
   onOpenWorkspace: (path: string) => Promise<void>;
+  detailOnly?: boolean;
+  activeFocusId?: string | null;
+  onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
 };
 
 function formatRuntime(value: string) {
@@ -44,7 +48,16 @@ function makeWorkspaceItemId(id: string) {
   return `workspace:${id}`;
 }
 
-export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
+function focusDomId(id: string) {
+  return `cc-focus-${id}`;
+}
+
+export function WorkspaceHubPanel({
+  onOpenWorkspace,
+  detailOnly = false,
+  activeFocusId,
+  onRailGroupsChange,
+}: WorkspaceHubPanelProps) {
   const [harnesses, setHarnesses] = useState<HarnessManifest[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [selectedItemId, setSelectedItemId] = useState("");
@@ -173,7 +186,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
 
   const rail = (
     <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
-      <div className="cc-primary-nav-group-label">Harness 模板</div>
+      <div className="cc-control-group-label">Harness 模板</div>
       {harnesses.map((harness) => {
         const itemId = makeHarnessItemId(harness.id);
         const selected = itemId === selectedItemId;
@@ -202,7 +215,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         />
       ) : null}
 
-      <div className="cc-primary-nav-group-label">已注册工作区</div>
+      <div className="cc-control-group-label">已注册工作区</div>
       {workspaces.map((workspace) => {
         const itemId = makeWorkspaceItemId(workspace.id);
         const selected = itemId === selectedItemId;
@@ -407,6 +420,151 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
     </div>
   ) : null;
 
+  const railGroups = useMemo<UnifiedRailGroup[]>(
+    () => [
+      {
+        id: "workspace_hub:harnesses",
+        label: "Harness 模板",
+        count: harnesses.length,
+        collapsible: true,
+        items: harnesses.map((harness) => {
+          const itemId = makeHarnessItemId(harness.id);
+          return {
+            id: itemId,
+            label: harness.name,
+            meta: `v${harness.version}`,
+            active: itemId === selectedItemId,
+            onSelect: () => setSelectedItemId(itemId),
+          };
+        }),
+      },
+      {
+        id: "workspace_hub:workspaces",
+        label: "已注册工作区",
+        count: workspaces.length,
+        collapsible: true,
+        items: workspaces.map((workspace) => {
+          const itemId = makeWorkspaceItemId(workspace.id);
+          return {
+            id: itemId,
+            label: workspace.name,
+            statusLabel: "ready",
+            statusTone: "success" as const,
+            active: itemId === selectedItemId,
+            onSelect: () => setSelectedItemId(itemId),
+          };
+        }),
+      },
+    ],
+    [harnesses, selectedItemId, workspaces],
+  );
+
+  useEffect(() => {
+    onRailGroupsChange?.(railGroups);
+  }, [onRailGroupsChange, railGroups]);
+
+  const detailContent = selectedKind === "workspace" ? workspaceDetail : harnessDetail;
+
+  if (detailOnly) {
+    return (
+      <section className="cc-image-detail-page workspace-hub-panel workspace-hub-panel-detail-only">
+        <div
+          id={focusDomId("workspace_hub")}
+          className={`cc-image-detail-top ${activeFocusId === "workspace_hub" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>WorkspaceHub</h1>
+            <p>Harness 模板、变量、dry run 文件树和已注册工作区集中管理。</p>
+          </div>
+          <div className="cc-image-top-controls">
+            <Button variant="outline" icon={<RefreshCw size={15} />} onClick={refresh} disabled={busy}>
+              刷新
+            </Button>
+          </div>
+        </div>
+
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Harness templates", value: String(harnesses.length) },
+            { label: "Registered workspaces", value: String(workspaces.length) },
+            { label: "Selected type", value: selectedKind },
+            { label: "Dry run", value: dryRun ? `${dryRun.files.length} files` : "not previewed" },
+          ]}
+        />
+
+        <div className="cc-image-description">
+          <div className="cc-image-meta-label">Description</div>
+          <p>选择 harness 后可填写变量并预览文件树；选择工作区后可直接打开目录。</p>
+        </div>
+        <div className="cc-image-tags">
+          <span>Harness</span>
+          <span>Workspace</span>
+          <span>Kimi Code</span>
+        </div>
+
+        <section className="cc-image-card">
+          <h2>Harness 与工作区</h2>
+          <ul className="cc-image-row-list">
+            {harnesses.map((harness) => {
+              const itemId = makeHarnessItemId(harness.id);
+              return (
+                <li
+                  key={itemId}
+                  id={focusDomId(itemId)}
+                  className={`cc-image-row ${activeFocusId === itemId ? "is-focus" : ""}`}
+                >
+                  <div>
+                    <div className="cc-image-row-title"><span className="cc-dot neutral" />{harness.name}</div>
+                    <div className="cc-image-row-desc">{harness.summary}</div>
+                  </div>
+                  <Button type="button" variant="outline" className="cc-action-btn" onClick={() => setSelectedItemId(itemId)}>
+                    查看模板
+                  </Button>
+                </li>
+              );
+            })}
+            {workspaces.map((workspace) => {
+              const itemId = makeWorkspaceItemId(workspace.id);
+              return (
+                <li
+                  key={itemId}
+                  id={focusDomId(itemId)}
+                  className={`cc-image-row ${activeFocusId === itemId ? "is-focus" : ""}`}
+                >
+                  <div>
+                    <div className="cc-image-row-title"><span className="cc-dot success" />{workspace.name}</div>
+                    <div className="cc-image-row-desc">{workspace.cwd}</div>
+                  </div>
+                  <Button type="button" variant="outline" className="cc-action-btn" onClick={() => setSelectedItemId(itemId)}>
+                    查看工作区
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="cc-image-card">
+          <h2>{selectedKind === "workspace" ? "工作区详情" : "Harness 详情"}</h2>
+          {detailContent ?? (
+            <ControlCenterEmptyState
+              title="选择对象"
+              description="从左侧选择一个 harness 模板或已注册工作区。"
+              icon={<Boxes size={18} />}
+            />
+          )}
+        </section>
+        {message ? (
+          <div className="cc-control-detail-item" role="alert">
+            {message}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <div className="cc-control-stack workspace-hub-panel">
       <ControlCenterWorkbenchLayout
@@ -428,7 +586,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
           </div>
         }
         rail={rail}
-        detail={selectedKind === "workspace" ? workspaceDetail : harnessDetail}
+        detail={detailContent}
         emptyDetail={
           <ControlCenterEmptyState
             title="选择对象"

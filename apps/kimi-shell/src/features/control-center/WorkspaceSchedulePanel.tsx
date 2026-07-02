@@ -9,6 +9,7 @@ import {
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { UnifiedRailGroup } from "@/features/control-center/ControlCenterUnifiedRail";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -26,6 +27,12 @@ import {
   type ScheduledTask,
   type WorkspaceRecord,
 } from "./controlCenterRebuildApi";
+
+type WorkspaceSchedulePanelProps = {
+  detailOnly?: boolean;
+  activeFocusId?: string | null;
+  onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
+};
 
 function formatDate(value?: string | null) {
   if (!value) return "未计划";
@@ -70,7 +77,15 @@ function taskCadence(kind: "daily" | "weekday" | "cron", at: string, expression:
   return { kind, at };
 }
 
-export function WorkspaceSchedulePanel() {
+function focusDomId(id: string) {
+  return `cc-focus-${id}`;
+}
+
+export function WorkspaceSchedulePanel({
+  detailOnly = false,
+  activeFocusId,
+  onRailGroupsChange,
+}: WorkspaceSchedulePanelProps) {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [schedule, setSchedule] = useState<ScheduleStore>({ heartbeats: [], tasks: [] });
   const [runs, setRuns] = useState<RunRecord[]>([]);
@@ -210,9 +225,50 @@ export function WorkspaceSchedulePanel() {
     }
   }
 
+  const railGroups = useMemo<UnifiedRailGroup[]>(
+    () => [
+      {
+        id: "schedule:workspaces",
+        label: "调度工作区",
+        count: workspaces.length,
+        collapsible: true,
+        items: workspaces.map((workspace) => {
+          const itemHeartbeat =
+            schedule.heartbeats.find((item) => item.workspaceId === workspace.id) ?? null;
+          const itemTasks = schedule.tasks.filter((task) => task.workspaceId === workspace.id);
+          return {
+            id: `schedule:${workspace.id}`,
+            label: workspace.name,
+            meta: `${itemTasks.length} 任务`,
+            statusLabel: itemHeartbeat?.enabled ? "ready" : "idle",
+            statusTone: itemHeartbeat?.enabled ? ("success" as const) : ("neutral" as const),
+            active: workspace.id === selectedWorkspaceId,
+            onSelect: () => void handleWorkspaceChange(workspace.id),
+          };
+        }),
+      },
+    ],
+    [schedule.heartbeats, schedule.tasks, selectedWorkspaceId, workspaces],
+  );
+
+  useEffect(() => {
+    onRailGroupsChange?.(railGroups);
+  }, [onRailGroupsChange, railGroups]);
+
   if (workspaces.length === 0) {
     return (
-      <div className="cc-control-stack workspace-schedule-panel">
+      <section className={`workspace-schedule-panel ${detailOnly ? "cc-image-detail-page workspace-schedule-panel-detail-only" : "cc-control-stack"}`}>
+        {detailOnly ? (
+          <div
+            id={focusDomId("schedule")}
+            className={`cc-image-detail-top ${activeFocusId === "schedule" ? "is-focus" : ""}`}
+          >
+            <div>
+              <h1>调度</h1>
+              <p>以 workspace 为对象管理心跳、plan-then-run 任务和运行记录。</p>
+            </div>
+          </div>
+        ) : null}
         <ControlCenterEmptyState
           title="还没有可调度的工作区"
           description="先到 WorkspaceHub 创建或注册工作区。"
@@ -233,13 +289,13 @@ export function WorkspaceSchedulePanel() {
             {message}
           </div>
         ) : null}
-      </div>
+      </section>
     );
   }
 
   const rail = (
     <div className="cc-control-list" aria-label="调度工作区列表">
-      <div className="cc-primary-nav-group-label">工作区</div>
+      <div className="cc-control-group-label">工作区</div>
       {workspaces.map((workspace) => {
         const itemHeartbeat =
           schedule.heartbeats.find((item) => item.workspaceId === workspace.id) ?? null;
@@ -525,6 +581,90 @@ export function WorkspaceSchedulePanel() {
       </section>
     </div>
   ) : null;
+
+  if (detailOnly) {
+    return (
+      <section className="cc-image-detail-page workspace-schedule-panel workspace-schedule-panel-detail-only">
+        <div
+          id={focusDomId("schedule")}
+          className={`cc-image-detail-top ${activeFocusId === "schedule" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>调度</h1>
+            <p>以 workspace 为对象管理心跳、plan-then-run 任务和运行记录。</p>
+          </div>
+          <div className="cc-image-top-controls">
+            <Button variant="outline" icon={<RefreshCw size={15} />} onClick={() => void refresh()} disabled={busy}>
+              刷新
+            </Button>
+          </div>
+        </div>
+
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Workspaces", value: String(workspaces.length) },
+            { label: "Heartbeat", value: heartbeat?.enabled ? "enabled" : "disabled" },
+            { label: "Tasks", value: String(tasks.length) },
+            { label: "Last outcome", value: formatOutcome(heartbeat?.lastOutcome) },
+          ]}
+        />
+
+        <section className="cc-image-card">
+          <h2>调度工作区</h2>
+          <ul className="cc-image-row-list">
+            {workspaces.map((workspace) => {
+              const itemHeartbeat =
+                schedule.heartbeats.find((item) => item.workspaceId === workspace.id) ?? null;
+              const itemTasks = schedule.tasks.filter((task) => task.workspaceId === workspace.id);
+              const itemId = `schedule:${workspace.id}`;
+              return (
+                <li
+                  key={workspace.id}
+                  id={focusDomId(itemId)}
+                  className={`cc-image-row ${activeFocusId === itemId ? "is-focus" : ""}`}
+                >
+                  <div>
+                    <div className="cc-image-row-title">
+                      <span className={`cc-dot ${itemHeartbeat?.enabled ? "success" : "neutral"}`} />
+                      {workspace.name}
+                    </div>
+                    <div className="cc-image-row-desc">{workspace.cwd}</div>
+                  </div>
+                  <div className="cc-image-row-actions">
+                    <ControlCenterStatusBadge tone={itemHeartbeat?.enabled ? "success" : "neutral"}>
+                      {itemHeartbeat?.enabled ? "运行中" : "已停止"}
+                    </ControlCenterStatusBadge>
+                    <span className="cc-image-muted">{itemTasks.length} 任务</span>
+                    <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void handleWorkspaceChange(workspace.id)}>
+                      查看调度
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="cc-image-card">
+          <h2>{selectedWorkspace?.name ?? "调度详情"}</h2>
+          {detail ?? (
+            <ControlCenterEmptyState
+              title="选择工作区"
+              description="从左侧选择工作区以查看调度详情。"
+              icon={<CalendarClock size={18} />}
+            />
+          )}
+        </section>
+        {message ? (
+          <div className="cc-control-detail-item" role="alert">
+            {message}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
 
   return (
     <div className="cc-control-stack workspace-schedule-panel">

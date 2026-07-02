@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: Kimi Control Center Image Style
-description: "A quiet three-pane desktop control center for Kimi App, based on the provided Settings/Skills reference image: neutral rails, dense object lists, clear detail pages, compact metadata, and carded markdown/code content."
+description: "A quiet two-pane desktop control center for Kimi App, based on the provided Settings/Skills reference image: a merged navigation/object rail, dense object lists, clear detail pages, compact metadata, and carded markdown/code content."
 colors:
   background: "#f4f4f2"
   background-subtle: "#f8f8f6"
@@ -76,7 +76,7 @@ spacing:
   lg: 16px
   xl: 24px
   2xl: 32px
-  nav-width: 208px
+  nav-width: 384px
   object-rail-width: 280px
   detail-max-width: 1120px
 components:
@@ -140,13 +140,13 @@ components:
 
 ## Overview
 
-Kimi App 的控制中心采用“桌面设置面板 + Skill 文件浏览器”的视觉模型。界面不是展示页，也不是营销页，而是一个长期打开的本地工作台：左侧是稳定导航，中间是对象列表，右侧是当前对象的详情、配置和可执行操作。
+Kimi App 的控制中心采用“桌面设置面板 + Skill 文件浏览器”的视觉模型。界面不是展示页，也不是营销页，而是一个长期打开的本地工作台：左侧是合并后的导航与对象列表，右侧是当前对象的详情、配置和可执行操作。
 
-参考图的核心是三栏密集信息架构：`Settings` 一级导航、`Skills` 对象列表、`Notion` 详情页。Kimi App 应保留这种明确的空间分工，并把原来的控制中心整理为：
+参考图的原型核心是密集信息架构：一级导航、对象列表、详情页。Kimi App 的当前控制中心不保留最左侧独立 sidebar，而是把一级视图与对象列表合并成一个左侧 rail：
 
 ```txt
-Primary Nav        Object Rail             Detail Panel
-设置 / 工作台       Skills / Workspaces      当前 skill / workspace / schedule 的详情
+Unified Rail                         Detail Panel
+一级视图 + 折叠子菜单 / 对象列表        当前 step / connector / skill / workspace / schedule 的详情
 ```
 
 界面气质是安静、精确、可扫描。不要使用玻璃态、重阴影、夸张渐变、大标题 hero、营销文案和装饰性图形。控制中心的好坏取决于用户能否快速判断：当前在哪个模块、选中了什么对象、对象是什么状态、下一步能执行什么。
@@ -159,7 +159,7 @@ Primary Nav        Object Rail             Detail Panel
 4. Schedule / 调度
 5. Diagnostics / 诊断
 
-在视觉上，`Skills` 视图最贴近参考图：中间栏展示 skill 分组和文件树，右侧展示 `SKILL.md` 元数据、描述、标签和代码/Markdown 预览。`WorkspaceHub` 和 `Schedule` 也沿用同一骨架，只替换对象类型。
+在视觉上，`Skills` 视图最贴近参考图：左侧合并栏展示 skill 分组和文件树，右侧展示 `SKILL.md` 元数据、描述、标签和代码/Markdown 预览。`WorkspaceHub` 和 `Schedule` 也沿用同一骨架，只替换对象类型。
 
 ## 层级与容器规则
 
@@ -250,20 +250,21 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 
 ## Layout
 
-默认布局是三栏：
+默认布局是两栏：
 
 ```txt
-┌────────────────┬────────────────────┬────────────────────────────────────┐
-│ Primary Nav    │ Object Rail         │ Detail Panel                        │
-│ 208px          │ 280px               │ fluid, max content 1120px           │
-└────────────────┴────────────────────┴────────────────────────────────────┘
+┌────────────────────────────────────┬────────────────────────────────────┐
+│ Unified Rail                        │ Detail Panel                        │
+│ 384px                               │ fluid, max content 1120px           │
+└────────────────────────────────────┴────────────────────────────────────┘
 ```
 
-- **Primary Nav**：一级导航，包含工作台、WorkspaceHub、Skills、Schedule、Diagnostics。宽度固定，背景为 `rail`。
-- **Object Rail**：当前一级视图下的对象列表。例如 Skills 视图列出 skill 分组；WorkspaceHub 视图列出 harness；Schedule 视图列出 workspace。宽度固定，背景为 `background-subtle`。
+- **Unified Rail**：合并一级导航和对象列表。一级视图始终可见；快速设置步骤、运行诊断、外部 IM Connector、Skill 来源、WorkspaceHub 对象和调度工作区作为二级分组默认折叠。宽度约 384px，背景为 `background-subtle`。
 - **Detail Panel**：当前对象的详情和配置。滚动只发生在该列内部；详情内容最大宽度约 1120px，左对齐。
 
-窄屏下布局变成：Primary Nav 收窄为 icon rail 或抽屉；Object Rail 与 Detail Panel 上下堆叠。不要在窄屏保留三列挤压。
+Unified Rail 头部只保留“控制中心”和文字按钮“退出”；保存、Doctor、刷新等操作必须放在右侧详情页内。Detail Panel 不再有额外的全局 header 或 icon close button。
+
+窄屏下布局变成：Unified Rail 与 Detail Panel 上下堆叠。不要把左栏收窄为仅图标 sidebar，也不要在窄屏保留多列挤压。
 
 内容区布局应像参考图一样“元信息在上、正文卡片在下”：
 
@@ -276,7 +277,7 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 
 层级靠底色、边框和留白，不靠阴影。
 
-- 一级导航与对象列表之间用 `1px border`。
+- Unified Rail 与详情区之间用 `1px border`。
 - 详情主卡片用 `1px border + 16px radius`，不加普通阴影。
 - 浮层（Dialog、Popover、Dropdown）可以使用非常轻的 shadow，但普通 Card、ListItem、StatCard 不允许有阴影。
 - 背景可以保留极轻的径向雾化光斑，透明度低于 0.45，只作为窗口质感，不作为内容装饰。
@@ -296,21 +297,21 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 
 ### App Shell
 
-应用壳是全高三栏容器。`PrimaryNav` 与 `ObjectRail` 固定，`DetailPanel` 独立滚动。禁止让整个 window 同时滚动，以免切换视图时上下文丢失。
+应用壳是全高两栏容器。`UnifiedRail` 固定，`DetailPanel` 独立滚动。禁止让整个 window 同时滚动，以免切换视图时上下文丢失。
 
-### Primary Navigation
+### Unified Rail
 
-一级导航文案保持短词：`Workbench`、`WorkspaceHub`、`Skills`、`Schedule`、`Diagnostics`。中文界面可用：`工作台`、`WorkspaceHub`、`Skills`、`调度`、`诊断`。
+一级视图文案保持短词：`工作台`、`快速设置`、`运行诊断`、`外部 IM 通道`、`Skill 投影`、`WorkspaceHub`、`调度`。
 
-选中态使用浅灰背景 `rail-selected`，图标与文字不需要品牌色。只有在线状态、启用状态用绿色。
+一级项始终可见；二级分组默认折叠，用户展开后在本次控制中心打开期间保持。选中态使用浅灰背景 `rail-selected`，图标与文字不需要品牌色。只有在线状态、启用状态用绿色。
 
-### Object Rail
+### Secondary Groups
 
-对象列表支持分组标题、折叠、搜索与新建。每一行包含 icon、名称、可选状态点和二级信息。选中对象使用浅灰背景，不使用描边框或彩色左边线。
+对象列表现在承载在 Unified Rail 的二级分组中，支持分组标题、折叠、搜索与新建入口。每一行包含 icon、名称、可选状态点和二级信息。选中对象使用浅灰背景，不使用描边框或彩色左边线。
 
-### Detail Header
+### Detail Page Header
 
-详情页顶部必须包含标题、元信息、描述、标签和启用开关。右上角最多一个 Switch 和一个更多菜单。不要在标题区堆多个按钮。
+每个内容页自己渲染 `detail-top + meta-grid + description/tags + card/row/table/code`，不要在 Detail Panel 外再包一层全局 head。右上角最多一个 Switch、一个主按钮和一个更多菜单。不要在标题区堆多个按钮。
 
 ### Cards
 
@@ -334,7 +335,7 @@ Switch 表示启用状态。开启为绿色，关闭为灰色。切换必须立�
 
 ### WorkspaceHub
 
-WorkspaceHub 使用同样的三栏结构：对象列表是 harness 模板，详情页展示模板用途、变量、将生成的文件树和创建按钮。openclaw 与 Hermes 模板不应做成营销卡片，而应做成可审阅的工作区骨架。
+WorkspaceHub 使用同样的两栏结构：Unified Rail 中的对象列表是 harness 模板和已注册工作区，详情页展示模板用途、变量、将生成的文件树和创建按钮。openclaw 与 Hermes 模板不应做成营销卡片，而应做成可审阅的工作区骨架。
 
 ### Skills
 
@@ -348,7 +349,7 @@ Skills 视图最接近参考图：左侧对象列表列出内置技能、工作�
 
 **Do**
 
-- 使用三栏布局保留上下文。
+- 使用两栏布局保留上下文。
 - 使用灰白层级、细边框、紧凑列表。
 - 把绿色限制为启用、正常、运行中状态。
 - 让每个详情页只有一个主操作。

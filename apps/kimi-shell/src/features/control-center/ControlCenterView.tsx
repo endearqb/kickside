@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   Boxes,
@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Eraser,
   FolderOpen,
-  KeyRound,
   LayoutDashboard,
   Minus,
   Plus,
@@ -73,20 +72,15 @@ import type {
   WorkspaceSkillTarget,
 } from "@/app/types";
 import {
-  formatProviderApiHealthSource,
   formatProviderApiHealthState,
 } from "@/app/types";
-import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
-import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
-import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
-import { ControlCenterCardHeader } from "@/features/control-center/ControlCenterCardHeader";
 import {
   buildBlockingErrors,
   buildWarnings,
@@ -98,8 +92,12 @@ import {
 } from "@/features/control-center/InstallFlowModal";
 import { WorkspaceHubPanel } from "@/features/control-center/WorkspaceHubPanel";
 import { WorkspaceSchedulePanel } from "@/features/control-center/WorkspaceSchedulePanel";
+import {
+  ControlCenterUnifiedRail,
+  type UnifiedRailGroup,
+  type UnifiedRailItem,
+} from "@/features/control-center/ControlCenterUnifiedRail";
 import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
-import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
 const FEISHU_REPLY_RENDERER_OPTIONS = [
   {
@@ -118,6 +116,10 @@ const FEISHU_REPLY_RENDERER_OPTIONS = [
     description: "生成完成后发送普通富文本消息。",
   },
 ] as const;
+
+function focusDomId(id: string) {
+  return `cc-focus-${id}`;
+}
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
@@ -358,39 +360,18 @@ const controlSections: Array<{
     icon: <LayoutDashboard size={15} />,
   },
   {
-    id: "workspace_hub",
-    label: "WorkspaceHub",
-    description: "Harness 模板、已注册工作区和创建预览。",
-    group: "core",
-    icon: <Boxes size={15} />,
-  },
-  {
-    id: "skill_center",
-    label: "Skill 中心",
-    description: "已安装 Skill、投影状态和工作区 target。",
-    group: "core",
-    icon: <Sparkles size={15} />,
-  },
-  {
-    id: "schedule",
-    label: "调度",
-    description: "工作区心跳、计划任务和运行记录。",
-    group: "core",
-    icon: <CalendarClock size={15} />,
-  },
-  {
-    id: "runtime_center",
-    label: "诊断",
-    description: "启动链路、Doctor、WebView 和日志。",
-    group: "core",
-    icon: <Activity size={15} />,
-  },
-  {
     id: "onboarding",
     label: "快速设置",
     description: "安装、认证、右键菜单和默认工作目录。",
     group: "setup",
     icon: <SlidersHorizontal size={15} />,
+  },
+  {
+    id: "runtime_center",
+    label: "运行诊断",
+    description: "启动链路、Doctor、WebView 和日志。",
+    group: "core",
+    icon: <Activity size={15} />,
   },
   {
     id: "bridge_center",
@@ -399,11 +380,28 @@ const controlSections: Array<{
     group: "setup",
     icon: <Play size={15} />,
   },
+  {
+    id: "skill_center",
+    label: "Skill 投影",
+    description: "已安装 Skill、投影状态和工作区 target。",
+    group: "core",
+    icon: <Sparkles size={15} />,
+  },
+  {
+    id: "workspace_hub",
+    label: "WorkspaceHub",
+    description: "Harness 模板、已注册工作区和创建预览。",
+    group: "core",
+    icon: <Boxes size={15} />,
+  },
+  {
+    id: "schedule",
+    label: "调度",
+    description: "工作区心跳、计划任务和运行记录。",
+    group: "core",
+    icon: <CalendarClock size={15} />,
+  },
 ];
-
-function hasLatinLetters(value: string): boolean {
-  return /[A-Za-z]/.test(value);
-}
 
 function getBridgeDisplayName(settings: BridgeSettings): string {
   const weixinEnabled = settings.connectors.some(
@@ -425,10 +423,6 @@ function getBridgeDisplayName(settings: BridgeSettings): string {
     return "Telegram";
   }
   return "外部 IM 通道";
-}
-
-function formatOpenBridgeDisplayName(displayName: string): string {
-  return hasLatinLetters(displayName) ? `打开 ${displayName}` : `打开${displayName}`;
 }
 
 function createEmptyBridgeConnectorSecretDraft(): BridgeConnectorSecretDraft {
@@ -563,19 +557,6 @@ function formatBridgeTimestamp(value?: string): string {
     : new Date(value).toLocaleString("zh-CN", { hour12: false });
 }
 
-function formatLoginCheckTimestamp(value?: number): string {
-  if (!value) {
-    return "未记录";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    hour12: false,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function formatKimiDoctorOutput(result: KimiDoctorResult): string {
   const chunks = [
     result.stdout ? `stdout\n${result.stdout}` : "",
@@ -688,7 +669,6 @@ export function ControlCenterView({
   diagnosticsBusy,
   kimiDoctorBusy,
   contextMenuBusy,
-  mainWindowCloseBehavior,
   installBusy,
   installAction,
   bridgeSettings,
@@ -788,7 +768,6 @@ export function ControlCenterView({
   onEnableContextMenu,
   onDisableContextMenu,
   onPickWorkDir,
-  onPickBridgeConnectorDefaultWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
   onBridgeSettingsChange,
@@ -829,7 +808,6 @@ export function ControlCenterView({
   onResetKimiCodeAccessDraft,
   onSaveKimiCodeAccessConfig,
   onTestKimiCodeAccessConfig,
-  onSaveMainWindowCloseBehavior,
   onInstallSourceChange,
   onSaveInstallSettings,
   onRefreshPowerShellPreflight,
@@ -839,7 +817,6 @@ export function ControlCenterView({
   onInstallNodejs,
   onStartInstallTask,
   onCancelInstallTask,
-  onCompleteOnboarding,
   onSkipOnboarding,
   onOpenExternalUrl,
   installMessage,
@@ -859,9 +836,14 @@ export function ControlCenterView({
     useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
-  const [mainCloseBehaviorSaving, setMainCloseBehaviorSaving] = useState(false);
-  const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
+  const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
+    () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
+  );
+  const [workspaceHubRailGroups, setWorkspaceHubRailGroups] = useState<UnifiedRailGroup[]>([]);
+  const [scheduleRailGroups, setScheduleRailGroups] = useState<UnifiedRailGroup[]>([]);
+  const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
+  const focusClearTimerRef = useRef<number | null>(null);
   void installAction;
   void bridgeOnboardingDraft;
   void bridgeOnboardingValidation;
@@ -895,7 +877,6 @@ export function ControlCenterView({
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
   const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
-  const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
       ? activeTaskPayload?.connectorId ?? null
@@ -943,52 +924,6 @@ export function ControlCenterView({
     selectedBridgeConnector &&
       bridgePersistedConnectorIds.includes(selectedBridgeConnector.id),
   );
-  const selectedBridgeConnectorBindings = useMemo(
-    () =>
-      selectedBridgeConnector
-        ? bridgeBindings.filter((item) => item.connectorId === selectedBridgeConnector.id)
-        : [],
-    [bridgeBindings, selectedBridgeConnector],
-  );
-  const selectedBridgeConnectorApprovals = useMemo(
-    () =>
-      selectedBridgeConnector
-        ? bridgeApprovals.filter((item) => item.connectorId === selectedBridgeConnector.id)
-        : [],
-    [bridgeApprovals, selectedBridgeConnector],
-  );
-  const selectedBridgeConnectorRecentError = selectedBridgeConnector
-    ? findBridgeConnectorRecentError(
-        selectedBridgeConnector,
-        selectedBridgeConnectorStatus,
-        bridgeRecentErrors,
-      )
-    : "";
-  const selectedBridgeConnectorSecretsConfigured = selectedBridgeConnector
-    ? hasBridgeConnectorSecretsConfigured(
-        selectedBridgeConnector,
-        selectedBridgeConnectorSecrets,
-      )
-    : false;
-  const selectedBridgeConnectorEffectiveWorkDir = selectedBridgeConnector
-    ? selectedBridgeConnector.defaultWorkDir?.trim() ||
-      bridgeSettings.defaultWorkDir?.trim() ||
-      status?.effectiveWorkDir?.trim() ||
-      ""
-    : bridgeSettings.defaultWorkDir?.trim() || status?.effectiveWorkDir?.trim() || "";
-  const selectedBridgeConnectorUsesCustomWorkDir = Boolean(
-    selectedBridgeConnector?.defaultWorkDir?.trim(),
-  );
-  const selectedBridgeConnectorPendingToggle = Boolean(
-    selectedBridgeConnector &&
-      bridgeOverviewPendingConnectorId === selectedBridgeConnector.id,
-  );
-  const selectedBridgeConnectorEnabledValue = selectedBridgeConnector
-    ? selectedBridgeConnectorPendingToggle
-      ? (bridgeOverviewPendingEnabled[selectedBridgeConnector.id] ??
-        selectedBridgeConnector.enabled)
-      : selectedBridgeConnector.enabled
-    : false;
   const sortedBridgeConnectors = useMemo(() => {
     const platformPriority: Record<BridgePlatform, number> = {
       weixin: 0,
@@ -1026,14 +961,6 @@ export function ControlCenterView({
     () => sortedBridgeConnectors,
     [sortedBridgeConnectors],
   );
-  const mainWindowCloseBehaviorOptions: Array<{
-    value: MainWindowCloseBehavior;
-    label: string;
-  }> = [
-    { value: "ask", label: "首次询问（可记住）" },
-    { value: "exit", label: "直接退出应用" },
-    { value: "minimize_to_tray", label: "最小化到系统托盘" },
-  ];
   const installStatusLabel = onboarding?.kimiInstalled ? "就绪" : "待办";
   const installStatusTone = onboarding?.kimiInstalled ? "success" : "warning";
   const contextMenuStatusLabel = !runtimeContextMenuSupported
@@ -1154,10 +1081,6 @@ export function ControlCenterView({
     installSessionSnapshot.taskId === "upgrade_kimi" && installSessionSnapshot.status !== "idle"
       ? "install"
       : recommendedOnboardingCard;
-
-  function toggleOnboardingCard(cardId: OnboardingCardId) {
-    setExpandedOnboardingCard(cardId);
-  }
 
   useEffect(() => {
     if (activeControlSection !== "onboarding") {
@@ -1324,22 +1247,6 @@ export function ControlCenterView({
     }
   }
 
-  async function handleOpenRuntimeEntry(panel: RuntimePanelId) {
-    await handleSelectRuntimePanel(panel);
-  }
-
-  async function handleSelectMainWindowCloseBehavior(behavior: MainWindowCloseBehavior) {
-    if (mainCloseBehaviorSaving || behavior === mainWindowCloseBehavior) {
-      return;
-    }
-    setMainCloseBehaviorSaving(true);
-    try {
-      await onSaveMainWindowCloseBehavior(behavior);
-    } finally {
-      setMainCloseBehaviorSaving(false);
-    }
-  }
-
   async function handleSelectBridgeSection() {
     try {
       await Promise.all([onRefreshBridgeSettings(), onRefreshBridgeStatus()]);
@@ -1392,6 +1299,57 @@ export function ControlCenterView({
     }
     await handleSelectRuntimePanel("core");
   }
+
+  const handleToggleUnifiedRailGroup = useCallback((groupId: string) => {
+    setExpandedUnifiedRailGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleWorkspaceHubRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setWorkspaceHubRailGroups(groups);
+  }, []);
+
+  const handleScheduleRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setScheduleRailGroups(groups);
+  }, []);
+
+  const handleRailItemActivate = useCallback((itemId: string) => {
+    setActiveFocusId(itemId);
+    if (focusClearTimerRef.current !== null) {
+      window.clearTimeout(focusClearTimerRef.current);
+    }
+    focusClearTimerRef.current = window.setTimeout(() => {
+      setActiveFocusId(null);
+      focusClearTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  useEffect(() => {
+    if (!activeFocusId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(focusDomId(activeFocusId))?.scrollIntoView({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeControlSection, activeFocusId]);
+
+  useEffect(
+    () => () => {
+      if (focusClearTimerRef.current !== null) {
+        window.clearTimeout(focusClearTimerRef.current);
+      }
+    },
+    [],
+  );
 
   async function handleStartInstallFlowTask(taskId: InstallTaskId) {
     if (taskId === "upgrade_kimi") {
@@ -1460,23 +1418,6 @@ export function ControlCenterView({
     addBridgeConnector(platform);
   }
 
-  async function handleApplyBridgeRobotSettings(nextSelectedConnectorId?: string | null) {
-    setBridgeConnectorTaskError(null);
-    await onPersistBridgeSettings({ showRestartNotice: false });
-    if (isBridgeRunning) {
-      await onRestartBridge();
-      await Promise.all([
-        onRefreshBridgeStatus(),
-        onRefreshBridgeBindings(),
-        onRefreshBridgeApprovals(),
-        onRefreshBridgeSessions({ silent: true }),
-      ]);
-    }
-    if (nextSelectedConnectorId !== undefined) {
-      setSelectedBridgeConnectorId(nextSelectedConnectorId);
-    }
-  }
-
   async function handleDeleteBridgeRobot(connectorId: string) {
     const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
     if (!connector) {
@@ -1513,47 +1454,6 @@ export function ControlCenterView({
     } catch {
       setBridgeConnectorTaskError("删除机器人失败，请稍后重试或查看日志。");
     }
-  }
-
-  async function handleBridgeConnectorWorkDirChange(
-    connectorId: string,
-    nextWorkDir: string | undefined,
-  ) {
-    const connector = bridgeSettings.connectors.find((item) => item.id === connectorId);
-    if (!connector) {
-      return;
-    }
-    const normalizedWorkDir = nextWorkDir?.trim() || undefined;
-    const currentWorkDir = connector.defaultWorkDir?.trim() || undefined;
-    if (normalizedWorkDir === currentWorkDir) {
-      return;
-    }
-
-    const previousSettings = bridgeSettings;
-    setSelectedBridgeConnectorId(connectorId);
-    setBridgeOverviewPendingConnectorId(connectorId);
-    setBridgeConnectorTaskError(null);
-    updateBridgeConnector(connectorId, { defaultWorkDir: normalizedWorkDir });
-
-    try {
-      await handleApplyBridgeRobotSettings(connectorId);
-    } catch (error) {
-      onBridgeSettingsChange(previousSettings);
-      setSelectedBridgeConnectorId(selectedBridgeConnectorId);
-      setBridgeConnectorTaskError(`保存机器人工作区失败：${String(error)}`);
-    } finally {
-      setBridgeOverviewPendingConnectorId((current) =>
-        current === connectorId ? null : current,
-      );
-    }
-  }
-
-  async function handlePickBridgeConnectorWorkDir(connectorId: string) {
-    const selected = await onPickBridgeConnectorDefaultWorkDir(connectorId);
-    if (typeof selected !== "string") {
-      return;
-    }
-    await handleBridgeConnectorWorkDirChange(connectorId, selected);
   }
 
   function openBridgeConnectorSecretsModal(connectorId: string) {
@@ -1876,7 +1776,6 @@ export function ControlCenterView({
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
   const skillDiscoveryRecords = skillDiscoverySnapshot?.records ?? [];
-  const externalDiscoveryCount = skillDiscoveryRecords.length;
   const overviewBriefs = [
     !installReady ? "Kimi Code 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
@@ -1886,6 +1785,235 @@ export function ControlCenterView({
     bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
   ].filter((item): item is string => Boolean(item));
   const pendingOverviewCount = overviewBriefs.length;
+  const runtimeUnifiedItems = useMemo(
+    () => [
+      {
+        id: "core" as RuntimePanelId,
+        title: "启动链路 / Doctor",
+        status: runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : (diagnostics?.state ?? "-"),
+        tone: runtimeIssues.length > 0 ? ("warning" as const) : ("success" as const),
+      },
+      {
+        id: "paths" as RuntimePanelId,
+        title: "路径与菜单",
+        status: contextMenuStatusLabel,
+        tone: contextMenuStatusTone,
+      },
+      {
+        id: "logs" as RuntimePanelId,
+        title: "日志尾部",
+        status: `${(diagnostics?.backendLogTail?.length ?? 0) + (diagnostics?.appLogTail?.length ?? 0)} 行`,
+        tone: diagnostics?.lastError || diagnostics?.startupFailureDetail
+          ? ("warning" as const)
+          : ("neutral" as const),
+      },
+    ],
+    [
+      contextMenuStatusLabel,
+      contextMenuStatusTone,
+      diagnostics?.appLogTail?.length,
+      diagnostics?.backendLogTail?.length,
+      diagnostics?.lastError,
+      diagnostics?.startupFailureDetail,
+      diagnostics?.state,
+      runtimeIssues.length,
+    ],
+  );
+  const unifiedRailGroups = useMemo<UnifiedRailGroup[]>(() => {
+    const topLevelItems: UnifiedRailItem[] = controlSections.map((section) => ({
+      id: section.id,
+      label: section.id === "bridge_center" ? bridgeDisplayName : section.label,
+      icon: section.icon,
+      active: activeControlSection === section.id,
+      statusLabel:
+        section.id === "overview"
+          ? pendingOverviewCount > 0
+            ? `${pendingOverviewCount}`
+            : "ready"
+          : section.id === "onboarding"
+            ? `${completedOnboardingCards}`
+            : section.id === "runtime_center"
+              ? runtimeIssues.length > 0
+                ? "risk"
+                : "doctor"
+              : section.id === "bridge_center"
+                ? String(visibleBridgeConnectors.length)
+                : section.id === "skill_center"
+                  ? "scan"
+                  : undefined,
+      statusTone:
+        section.id === "overview"
+          ? pendingOverviewCount > 0
+            ? ("warning" as const)
+            : ("success" as const)
+          : section.id === "runtime_center" && runtimeIssues.length > 0
+            ? ("warning" as const)
+            : section.id === "bridge_center"
+              ? bridgeRuntimeTone
+              : ("neutral" as const),
+      onSelect: () => {
+        void handleSelectControlSection(section.id);
+      },
+    }));
+
+    const skillSourceConfigs: Array<{
+      sourceType: InstalledSkill["sourceType"];
+      label: string;
+      meta: string;
+    }> = [
+      { sourceType: "bundled", label: "Bundled", meta: "内置" },
+      { sourceType: "git", label: "Git", meta: "repo" },
+      { sourceType: "local_import", label: "Local import", meta: "path" },
+      { sourceType: "discovered_import", label: "Discovered import", meta: "scan" },
+    ];
+
+    const groups: UnifiedRailGroup[] = [
+      {
+        id: "sections",
+        label: "当前源码里的一级视图",
+        items: topLevelItems,
+      },
+      {
+        id: "onboarding",
+        label: "快速设置步骤",
+        count: onboardingSteps.length,
+        collapsible: true,
+        items: onboardingSteps.map((step) => ({
+          id: `onboarding:${step.id}`,
+          label: step.title.replace(" / 升级", ""),
+          statusLabel: step.statusLabel,
+          statusTone: step.statusTone as UnifiedRailItem["statusTone"],
+          active: activeControlSection === "onboarding" && activeOnboardingStep.id === step.id,
+          depth: 1,
+          onSelect: () => {
+            setExpandedOnboardingCard(step.id);
+            void handleOpenOnboardingEntry();
+          },
+        })),
+      },
+      {
+        id: "runtime_center",
+        label: "运行诊断",
+        count: runtimeUnifiedItems.length,
+        collapsible: true,
+        items: runtimeUnifiedItems.map((item) => ({
+          id: `runtime:${item.id}`,
+          label: item.title,
+          statusLabel: item.status,
+          statusTone: item.tone as UnifiedRailItem["statusTone"],
+          active: activeControlSection === "runtime_center" && activeRuntimePanel === item.id,
+          depth: 1,
+          onSelect: () => {
+            void handleSelectRuntimePanel(item.id);
+          },
+        })),
+      },
+      {
+        id: "bridge_center",
+        label: "外部 IM Connector",
+        count: visibleBridgeConnectors.length,
+        collapsible: true,
+        items: visibleBridgeConnectors.map((connector) => {
+          const connectorStatus =
+            bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ?? null;
+          return {
+            id: `bridge:${connector.id}`,
+            label: connector.label,
+            meta: bridgePlatformLabel(connector.platform),
+            statusLabel: formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle"),
+            statusTone: formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle"),
+            active:
+              activeControlSection === "bridge_center" &&
+              effectiveSelectedBridgeConnectorId === connector.id,
+            depth: 1,
+            onSelect: () => {
+              setSelectedBridgeConnectorId(connector.id);
+              void handleSelectBridgeSection();
+            },
+          };
+        }),
+      },
+      {
+        id: "skill_center",
+        label: "Skill 来源",
+        count: installedSkills.length,
+        collapsible: true,
+        items: skillSourceConfigs.map((source) => {
+          const firstSkill = installedSkills.find((skill) => skill.sourceType === source.sourceType);
+          const count = installedSkills.filter((skill) => skill.sourceType === source.sourceType).length;
+          return {
+            id: `skill-source:${source.sourceType}`,
+            label: source.label,
+            meta: source.meta,
+            statusLabel: count > 0 ? String(count) : undefined,
+            statusTone: "neutral" as const,
+            active:
+              activeControlSection === "skill_center" &&
+              Boolean(firstSkill && selectedSkillId === firstSkill.id),
+            depth: 1,
+            onSelect: () => {
+              void handleSelectSkillCenterSection();
+              onSkillCenterSectionChange("manage");
+              if (firstSkill) {
+                void onSelectSkill(firstSkill.id);
+              }
+            },
+          };
+        }),
+      },
+      {
+        id: "skill_targets",
+        label: "Skill 工作区目标",
+        count: workspaceSkillTargets.length,
+        collapsible: true,
+        items: workspaceSkillTargets.map((target) => ({
+          id: `skill-target:${target.id}`,
+          label: target.label,
+          meta: target.readOnly ? "只读" : "可编辑",
+          active:
+            activeControlSection === "skill_center" &&
+            selectedWorkspaceSkillTargetId === target.id,
+          depth: 1,
+          onSelect: () => {
+            void handleSelectSkillCenterSection();
+            onSkillCenterSectionChange("workspace_insights");
+            onSelectWorkspaceSkillTarget(target.id);
+          },
+        })),
+      },
+      ...workspaceHubRailGroups,
+      ...scheduleRailGroups,
+    ];
+    return groups;
+  }, [
+    activeControlSection,
+    activeOnboardingStep.id,
+    activeRuntimePanel,
+    bridgeDisplayName,
+    bridgeRuntimeTone,
+    bridgeStatus.connectors,
+    completedOnboardingCards,
+    effectiveSelectedBridgeConnectorId,
+    handleSelectBridgeSection,
+    handleSelectControlSection,
+    handleSelectRuntimePanel,
+    handleSelectSkillCenterSection,
+    handleOpenOnboardingEntry,
+    installedSkills,
+    onSelectSkill,
+    onSelectWorkspaceSkillTarget,
+    onSkillCenterSectionChange,
+    onboardingSteps,
+    pendingOverviewCount,
+    runtimeIssues.length,
+    runtimeUnifiedItems,
+    scheduleRailGroups,
+    selectedSkillId,
+    selectedWorkspaceSkillTargetId,
+    visibleBridgeConnectors,
+    workspaceHubRailGroups,
+    workspaceSkillTargets,
+  ]);
 
   function renderOverviewSection() {
     const attentionItems = overviewBriefs.slice(0, 3);
@@ -1893,414 +2021,321 @@ export function ControlCenterView({
       status?.activeSessionWorkDir?.trim() || effectiveWorkDir.trim();
     const backendState = diagnostics?.state ?? status?.state ?? "-";
     const sessionLabel = status?.activeSessionId ? `会话 ${status.activeSessionId}` : "无活动会话";
-    const statusSummary = `${backendState} · ${activeWorkspacePath || "未设置工作区"}`;
 
     return (
-      <div className="cc-overview-shell cc-overview-shell-image">
-        <section className="cc-card cc-overview-status-card">
-          <ControlCenterCardHeader
-            eyebrow="运行状态"
-            title={statusSummary}
-            statusLabel={pendingOverviewCount === 0 ? "运行中" : `${pendingOverviewCount} 项关注`}
-            statusTone={pendingOverviewCount === 0 ? "success" : "warning"}
-            primaryAction={
-              <div className="cc-actions">
-                <Button
-                  type="button"
-                  icon={<FolderOpen size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onOpenFolder(activeWorkspacePath)}
-                  disabled={!activeWorkspacePath}
-                >
-                  打开当前工作区
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  icon={<RefreshCw size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => {
-                    void onRefreshCoreState();
-                    void onRefreshDiagnostics();
-                    void onRefreshContextMenuStatus();
-                  }}
-                  disabled={diagnosticsBusy || contextMenuBusy}
-                >
-                  刷新全部状态
-                </Button>
-              </div>
-            }
-          />
-          <div className="cc-card-body">
-            <ControlCenterDescList
-              columns={4}
-              items={[
-                {
-                  label: "后端",
-                  value: backendState,
-                  meta: `活动端口 ${String(status?.activePort ?? diagnostics?.activePort ?? "-")}`,
-                },
-                {
-                  label: "工作区",
-                  value: activeWorkspacePath || "-",
-                  meta: sessionLabel,
-                },
-                {
-                  label: "认证",
-                  value: status?.authMode ?? "-",
-                  meta: formatProviderApiHealthState(status?.providerApiHealth.state),
-                },
-                {
-                  label: "快捷键",
-                  value: status?.hotkey || "-",
-                  meta: status?.enhancedWebHealth.state ?? "-",
-                },
-              ]}
-            />
+      <section className="cc-image-detail-page">
+        <div
+          id={focusDomId("overview")}
+          className={`cc-image-detail-top ${activeFocusId === "overview" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>概览</h1>
+            <p>控制中心默认页，集中查看 Kimi Code 运行态、工作目录、认证模式和下一步操作。</p>
           </div>
-        </section>
+          <div className="cc-image-top-controls">
+            <span className={`cc-image-switch ${pendingOverviewCount === 0 ? "" : "off"}`} />
+            <Button
+              type="button"
+              variant="outline"
+              icon={<RefreshCw size={15} />}
+              className="cc-action-btn"
+              onClick={() => {
+                void onRefreshCoreState();
+                void onRefreshDiagnostics();
+                void onRefreshContextMenuStatus();
+              }}
+              disabled={diagnosticsBusy || contextMenuBusy}
+            >
+              刷新状态
+            </Button>
+          </div>
+        </div>
 
-        <section className="cc-overview-workbench-grid">
-          <section className="cc-card cc-overview-focus-card">
-            <header className="cc-card-header">
-              <h3>需要处理</h3>
-              <ControlCenterStatusBadge tone={attentionItems.length > 0 ? "warning" : "success"}>
-                {attentionItems.length > 0 ? `${attentionItems.length} 项` : "无"}
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            {
+              label: "Backend state",
+              value: backendState,
+              meta: `active port ${String(status?.activePort ?? diagnostics?.activePort ?? "-")}`,
+            },
+            {
+              label: "Workspace",
+              value: activeWorkspacePath || "-",
+              meta: sessionLabel,
+            },
+            {
+              label: "Auth mode",
+              value: status?.authMode ?? "-",
+              meta: formatProviderApiHealthState(status?.providerApiHealth.state),
+            },
+            {
+              label: "Web mode",
+              value: status?.enhancedWebHealth.state ?? "-",
+              meta: status?.hotkey || "-",
+            },
+          ]}
+        />
+
+        <div className="cc-image-description">
+          <div className="cc-image-meta-label">Description</div>
+          <p>当前窗口汇总启动、工作区、认证与运行风险；需要执行的动作保留在右侧详情区。</p>
+        </div>
+        <div className="cc-image-tags">
+          <span>Runtime {backendState}</span>
+          <span>{providerApiConfigured ? "Provider API configured" : "Provider API optional"}</span>
+          <span>{bridgeStatusLabel}</span>
+        </div>
+
+        <section
+          id={focusDomId("overview:runtime")}
+          className={`cc-image-card ${activeFocusId === "overview:runtime" ? "is-focus" : ""}`}
+        >
+          <h2>运行与工作区</h2>
+          <ul className="cc-image-row-list">
+            <li className="cc-image-row">
+              <div>
+                <div className="cc-image-row-title"><span className="cc-dot success" />后端运行态</div>
+                <div className="cc-image-row-desc">{diagnostics?.startupPhase ?? "startup phase 未上报"}</div>
+              </div>
+              <ControlCenterStatusBadge tone={pendingOverviewCount === 0 ? "success" : "warning"}>
+                {pendingOverviewCount === 0 ? "运行中" : `${pendingOverviewCount} 项关注`}
               </ControlCenterStatusBadge>
-            </header>
-            <div className="cc-card-body">
-              {attentionItems.length > 0 ? (
-                <>
-                  <div className="cc-brief-list">
-                    {attentionItems.map((item) => (
-                      <article key={item} className="cc-brief-item">
-                        <strong>{item}</strong>
-                      </article>
-                    ))}
-                  </div>
-                  <div className="cc-actions">
-                    <Button
-                      type="button"
-                      className="cc-action-btn"
-                      onClick={() => {
-                        void handleOpenOnboardingEntry();
-                      }}
-                    >
-                      处理待办
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <p className="cc-control-muted">暂无待处理</p>
-              )}
-            </div>
-          </section>
-
-          <section className="cc-card cc-overview-actions-card">
-            <header className="cc-card-header">
-              <h3>快捷操作</h3>
-            </header>
-            <div className="cc-card-body">
-              <div className="cc-overview-action-list">
-                <button type="button" className="cc-control-list-item" onClick={() => void handleOpenRuntimeEntry("core")}>
-                  <span className="cc-task-card-icon"><Activity size={16} /></span>
-                  <span className="cc-task-card-copy">
-                    <strong>查看运行诊断</strong>
-                    <small>{runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : "稳定"}</small>
-                  </span>
-                </button>
-                <button type="button" className="cc-control-list-item" onClick={() => void handleSelectBridgeSection()}>
-                  <span className="cc-task-card-icon"><Play size={16} /></span>
-                  <span className="cc-task-card-copy">
-                    <strong>{openBridgeTitle}</strong>
-                    <small>{bridgeStatusLabel}</small>
-                  </span>
-                </button>
-                <button type="button" className="cc-control-list-item" onClick={() => void handleSelectSkillCenterSection()}>
-                  <span className="cc-task-card-icon"><Sparkles size={16} /></span>
-                  <span className="cc-task-card-copy">
-                    <strong>Skill 投影与工作区管理</strong>
-                    <small>{externalDiscoveryCount} 个发现技能</small>
-                  </span>
-                </button>
-                <button type="button" className="cc-control-list-item" onClick={() => void onOpenLogs()}>
-                  <span className="cc-task-card-icon"><FolderOpen size={16} /></span>
-                  <span className="cc-task-card-copy">
-                    <strong>打开日志目录</strong>
-                    <small>{status?.logsDir || diagnostics?.logsDir || "-"}</small>
-                  </span>
-                </button>
+            </li>
+            <li className="cc-image-row">
+              <div>
+                <div className="cc-image-row-title"><span className="cc-dot neutral" />当前工作区</div>
+                <div className="cc-image-row-desc">{activeWorkspacePath || "未设置默认工作目录"}</div>
               </div>
-            </div>
-          </section>
+              <Button
+                type="button"
+                variant="outline"
+                className="cc-action-btn"
+                onClick={() => void onOpenFolder(activeWorkspacePath)}
+                disabled={!activeWorkspacePath}
+              >
+                打开工作区
+              </Button>
+            </li>
+          </ul>
         </section>
 
-        <section className="cc-card cc-overview-attention-card">
-          <header className="cc-card-header">
-            <h3>Agent 提示</h3>
-          </header>
-          <div className="cc-card-body">
-            <article className="cc-brief-tip-card">
-              <div className="cc-brief-tip-head">
-                <div className="cc-brief-tip-meta">
-                  <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  icon={<RefreshCw size={13} />}
-                  className="cc-brief-tip-refresh"
-                  onClick={() => setBriefTip(pickRandomAgentTip())}
-                  aria-label="刷新 Agent 使用提示"
-                />
-              </div>
-              <div className="cc-brief-tip-article">
-                <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
-                <p className="cc-brief-tip-body">{briefTip.body}</p>
-              </div>
-            </article>
-          </div>
+        <section
+          id={focusDomId("overview:attention")}
+          className={`cc-image-card ${activeFocusId === "overview:attention" ? "is-focus" : ""}`}
+        >
+          <h2>需要关注</h2>
+          {attentionItems.length > 0 ? (
+            <ul className="cc-image-row-list">
+              {attentionItems.map((item) => (
+                <li key={item} className="cc-image-row">
+                  <div>
+                    <div className="cc-image-row-title"><span className="cc-dot warning" />{item}</div>
+                  </div>
+                  <Button type="button" className="cc-action-btn" onClick={() => void handleOpenOnboardingEntry()}>
+                    处理待办
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="cc-image-muted">暂无需要处理的事项。</p>
+          )}
         </section>
-      </div>
+      </section>
     );
   }
 
   function renderOnboardingSection() {
-    const selectedStepTone = activeOnboardingStep.statusTone;
-
     return (
-      <div className="cc-onboarding-editorial cc-onboarding-workbench-shell">
-        <ControlCenterWorkbenchLayout
-          mode="stack-on-mobile"
-          className="cc-onboarding-workbench"
-          railBodyClassName="cc-onboarding-rail-body"
-          detailBodyClassName="cc-onboarding-detail-body"
-          railHeader={
-            <div className="cc-onboarding-rail-head">
-              <span className="cc-kicker">设置流程</span>
-              <h3>快速设置</h3>
-              <div className="cc-onboarding-progress-block">
-                <div className="cc-onboarding-progress-label">
-                  <span>完成进度</span>
-                  <strong>
-                    {completedOnboardingCards}/{onboardingSteps.length}
-                  </strong>
-                </div>
-                <div className="cc-onboarding-progress-track">
-                  <div
-                    className="cc-onboarding-progress-fill"
-                    style={{
-                      width: `${Math.round((completedOnboardingCards / onboardingSteps.length) * 100)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          }
-          rail={
-            <>
-              <div className="cc-onboarding-step-list" role="tablist" aria-label="快速设置步骤">
-                {onboardingSteps.map((step) => {
-                  const isActive = step.id === activeOnboardingStep.id;
-                  return (
-                    <button
-                      key={step.id}
-                      type="button"
-                      className={`cc-control-list-item cc-onboarding-step-card ${
-                        isActive ? "is-active" : ""
-                      } ${step.complete ? "is-complete" : ""}`}
-                      onClick={() => toggleOnboardingCard(step.id)}
-                      aria-current={isActive ? "step" : undefined}
-                    >
-                      <span className="cc-onboarding-step-index">{step.index}</span>
-                      <span className="cc-onboarding-step-copy">
-                        <strong>{step.title}</strong>
-                        <small>{step.actionLabel}</small>
-                      </span>
-                      <ControlCenterStatusBadge tone={step.statusTone}>
-                        {step.statusLabel}
-                      </ControlCenterStatusBadge>
-                    </button>
-                  );
-                })}
-              </div>
+      <section className="cc-image-detail-page">
+        <div
+          id={focusDomId("onboarding")}
+          className={`cc-image-detail-top ${activeFocusId === "onboarding" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>快速设置</h1>
+            <p>把 onboarding、安装、登录、右键菜单、工作目录与 Provider API 配置收敛到一个详情页。</p>
+          </div>
+          <div className="cc-image-top-controls">
+            <Button type="button" className="cc-action-btn" onClick={() => void onSavePathAndRetry()} disabled={actionBusy}>
+              保存并重试
+            </Button>
+            <ControlCenterActionMenu
+              items={[
+                {
+                  label: "刷新状态",
+                  icon: <RefreshCw size={15} />,
+                  onSelect: () => {
+                    void onRefreshOnboarding();
+                    void onRefreshDiagnostics();
+                    void onRefreshContextMenuStatus();
+                    void onRefreshBridgeSettings();
+                    void onRefreshBridgeStatus();
+                    void onRefreshBridgeSecretsMask();
+                  },
+                },
+                {
+                  label: "重启后端",
+                  icon: <RefreshCcw size={15} />,
+                  onSelect: () => void onRetry(),
+                },
+                {
+                  label: "暂时跳过",
+                  icon: <ChevronRight size={15} />,
+                  onSelect: () => void onSkipOnboarding(),
+                },
+              ]}
+            />
+          </div>
+        </div>
 
-              <section className="cc-onboarding-flow-actions">
-                <div className="cc-actions">
-                  <Button
-                    type="button"
-                    icon={<Check size={15} />}
-                    className="cc-action-btn"
-                    onClick={() => void onCompleteOnboarding()}
-                    disabled={actionBusy}
-                  >
-                    完成引导
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    icon={<RefreshCw size={15} />}
-                    className="cc-action-btn"
-                    onClick={() => {
-                      void onRefreshOnboarding();
-                      void onRefreshDiagnostics();
-                      void onRefreshContextMenuStatus();
-                      void onRefreshBridgeSettings();
-                      void onRefreshBridgeStatus();
-                      void onRefreshBridgeSecretsMask();
-                    }}
-                    disabled={diagnosticsBusy || contextMenuBusy}
-                  >
-                    刷新状态
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    icon={<RefreshCcw size={15} />}
-                    className="cc-action-btn"
-                    onClick={() => void onRetry()}
-                    disabled={actionBusy}
-                  >
-                    重启后端
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    icon={<ChevronRight size={15} />}
-                    className="cc-action-btn"
-                    onClick={() => void onSkipOnboarding()}
-                    disabled={actionBusy}
-                  >
-                    暂时跳过
-                  </Button>
-                </div>
-              </section>
-            </>
-          }
-          detailHeader={
-            <div className="cc-onboarding-detail-head">
-              <div>
-                <span className="cc-kicker">步骤 {activeOnboardingStep.index}</span>
-                <h3>{activeOnboardingStep.title}</h3>
-              </div>
-              <div className="cc-actions">
-                <ControlCenterStatusBadge tone={selectedStepTone}>
-                  {activeOnboardingStep.statusLabel}
-                </ControlCenterStatusBadge>
-                {activeOnboardingStep.primaryAction}
-              </div>
-            </div>
-          }
-          detail={
-            <div className="cc-step-body cc-step-body-single cc-step-detail-scroll">
-              <div className="cc-step-main">
-                {activeOnboardingStep.id === "install" ? (
-                  <div className="cc-onboarding-install-stack">
-                    <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-                    <InstallFlowTaskContent
-                      catalog={installFlowCatalog}
-                      session={installSessionSnapshot}
-                      probe={installProbe}
-                      backendState={status?.state ?? null}
-                      installSource={installSource}
-                      installSettings={installSettings}
-                      installSettingsBusy={installSettingsBusy}
-                      installMirrorHealthReport={installMirrorHealthReport}
-                      installMirrorHealthBusy={installMirrorHealthBusy}
-                      powershellPreflight={powershellPreflight}
-                      kimiPathInput={kimiPathInput}
-                      detectedKimiPath={installPathDisplay}
-                      onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
-                      onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
-                      onSourceChange={onInstallSourceChange}
-                      onSaveInstallSettings={onSaveInstallSettings}
-                      onStartTask={handleStartInstallFlowTask}
-                      onRestartBackend={onRetry}
-                      onPickKimiPath={onPickKimiPath}
-                      onSavePathAndRetry={onSavePathAndRetry}
-                      restartBusy={actionBusy}
-                    />
-                    {recentInstallSummary || installMessage ? (
-                      <div className="cc-onboarding-install-meta">
-                        {recentInstallSummary ? (
-                          <p className="hint cc-step-meta">{recentInstallSummary}</p>
-                        ) : null}
-                        {installMessage ? (
-                          <p className="hint cc-step-meta">{installMessage}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {activeOnboardingStep.id === "context_menu" ? renderContextMenuStepContent() : null}
-
-                {activeOnboardingStep.id === "auth" ? (
-                  <div className="cc-auth-panel">
-                    <p className="hint cc-step-summary">
-                      Provider API 是可选配置；未配置也不会阻塞控制中心、工作区或 onboarding。
-                    </p>
-                    <div className="cc-brief-list">
-                      <article className="cc-brief-item">
-                        <strong>Provider API</strong>
-                        <ControlCenterStatusBadge tone={providerApiStatusTone}>
-                          {providerApiStatusLabel}
-                        </ControlCenterStatusBadge>
-                      </article>
-                      <article className="cc-brief-item">
-                        <strong>配置文件</strong>
-                        <span>
-                          {kimiCodeAccessSummary?.configPath ||
-                            kimiCodeAccessView?.configPath ||
-                            "~/.kimi-code/config.toml"}
-                        </span>
-                      </article>
-                    </div>
-                    <div className="cc-api-inline-actions">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<SlidersHorizontal size={14} />}
-                        className="cc-action-btn"
-                        onClick={() => void onOpenTask("kimi_code_access")}
-                        disabled={kimiCodeAccessBusy}
-                      >
-                        打开 API 配置
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        icon={<FolderOpen size={14} />}
-                        className="cc-action-btn"
-                        onClick={() => void onOpenKimiConfigDir()}
-                      >
-                        打开配置目录
-                      </Button>
-                    </div>
-                    {kimiCodeAccessDirty ? (
-                      <p className="hint cc-step-meta">
-                        API 配置存在未保存修改；这不会阻塞继续使用控制中心。
-                      </p>
-                    ) : null}
-                    {kimiCodeAccessView?.warnings?.length ? (
-                      <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {activeOnboardingStep.id === "work_dir" ? renderWorkDirStepContent() : null}
-              </div>
-            </div>
-          }
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Recommended step", value: activeOnboardingStep.id },
+            { label: "Kimi installed", value: onboarding?.kimiInstalled ? "detected" : "missing" },
+            { label: "Context menu", value: runtimeContextMenuEnabled ? "supported" : contextMenuStatusLabel },
+            { label: "Auth mode", value: status?.authMode ?? "provider_api" },
+          ]}
         />
-      </div>
+
+        <section className="cc-image-card">
+          <h2>引导步骤</h2>
+          <ul className="cc-image-row-list">
+            {onboardingSteps.map((step) => (
+              <li
+                key={step.id}
+                id={focusDomId(`onboarding:${step.id}`)}
+                className={`cc-image-row ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
+              >
+                <div>
+                  <div className="cc-image-row-title">
+                    <span className={`cc-dot ${step.statusTone}`} />
+                    {step.title}
+                  </div>
+                  <div className="cc-image-row-desc">{step.actionLabel}</div>
+                </div>
+                <div className="cc-image-row-actions">
+                  <ControlCenterStatusBadge tone={step.statusTone}>{step.statusLabel}</ControlCenterStatusBadge>
+                  {step.primaryAction}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="cc-image-card">
+          <h2>{activeOnboardingStep.title}</h2>
+          <div className="cc-step-body cc-step-body-single cc-step-detail-scroll">
+            <div className="cc-step-main">
+              {activeOnboardingStep.id === "install" ? (
+                <div className="cc-onboarding-install-stack">
+                  <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
+                  <InstallFlowTaskContent
+                    catalog={installFlowCatalog}
+                    session={installSessionSnapshot}
+                    probe={installProbe}
+                    backendState={status?.state ?? null}
+                    installSource={installSource}
+                    installSettings={installSettings}
+                    installSettingsBusy={installSettingsBusy}
+                    installMirrorHealthReport={installMirrorHealthReport}
+                    installMirrorHealthBusy={installMirrorHealthBusy}
+                    powershellPreflight={powershellPreflight}
+                    kimiPathInput={kimiPathInput}
+                    detectedKimiPath={installPathDisplay}
+                    onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+                    onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
+                    onSourceChange={onInstallSourceChange}
+                    onSaveInstallSettings={onSaveInstallSettings}
+                    onStartTask={handleStartInstallFlowTask}
+                    onRestartBackend={onRetry}
+                    onPickKimiPath={onPickKimiPath}
+                    onSavePathAndRetry={onSavePathAndRetry}
+                    restartBusy={actionBusy}
+                  />
+                  {recentInstallSummary || installMessage ? (
+                    <div className="cc-onboarding-install-meta">
+                      {recentInstallSummary ? <p className="hint cc-step-meta">{recentInstallSummary}</p> : null}
+                      {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeOnboardingStep.id === "context_menu" ? renderContextMenuStepContent() : null}
+
+              {activeOnboardingStep.id === "auth" ? (
+                <div className="cc-auth-panel">
+                  <p className="hint cc-step-summary">
+                    Provider API 是可选配置；未配置也不会阻塞控制中心、工作区或 onboarding。
+                  </p>
+                  <div className="cc-brief-list">
+                    <article className="cc-brief-item">
+                      <strong>Provider API</strong>
+                      <ControlCenterStatusBadge tone={providerApiStatusTone}>
+                        {providerApiStatusLabel}
+                      </ControlCenterStatusBadge>
+                    </article>
+                    <article className="cc-brief-item">
+                      <strong>配置文件</strong>
+                      <span>
+                        {kimiCodeAccessSummary?.configPath ||
+                          kimiCodeAccessView?.configPath ||
+                          "~/.kimi-code/config.toml"}
+                      </span>
+                    </article>
+                  </div>
+                  <div className="cc-api-inline-actions">
+                    <Button type="button" variant="outline" icon={<SlidersHorizontal size={14} />} className="cc-action-btn" onClick={() => void onOpenTask("kimi_code_access")} disabled={kimiCodeAccessBusy}>
+                      打开 API 配置
+                    </Button>
+                    <Button type="button" variant="outline" icon={<FolderOpen size={14} />} className="cc-action-btn" onClick={() => void onOpenKimiConfigDir()}>
+                      打开配置目录
+                    </Button>
+                  </div>
+                  {kimiCodeAccessDirty ? (
+                    <p className="hint cc-step-meta">
+                      API 配置存在未保存修改；这不会阻塞继续使用控制中心。
+                    </p>
+                  ) : null}
+                  {kimiCodeAccessView?.warnings?.length ? (
+                    <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeOnboardingStep.id === "work_dir" ? renderWorkDirStepContent() : null}
+            </div>
+          </div>
+        </section>
+
+        <section className="cc-image-card">
+          <h2>安装源与镜像健康</h2>
+          <ControlCenterDescList
+            columns={3}
+            className="cc-image-meta-grid compact"
+            items={[
+              { label: "Install source", value: installSource, meta: "可切换官方源或自定义镜像" },
+              { label: "PowerShell preflight", value: powershellPreflight?.kind ?? "unchecked", meta: "Windows 安装前置检查" },
+              {
+                label: "Mirror health",
+                value: installMirrorHealthReport
+                  ? `${installMirrorHealthReport.entries.filter((entry) => entry.healthy).length}/${installMirrorHealthReport.entries.length} ready`
+                  : "unchecked",
+                meta: "可刷新镜像可用性",
+              },
+            ]}
+          />
+        </section>
+      </section>
     );
   }
 
   function renderRuntimeSection() {
-    const selectedRuntimePanel: RuntimePanelId =
-      activeRuntimePanel === "paths" || activeRuntimePanel === "logs" ? activeRuntimePanel : "core";
     const appLogText =
       diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.join("\n")
@@ -2310,694 +2345,324 @@ export function ControlCenterView({
         ? diagnostics.backendLogTail.join("\n")
         : "暂无后端日志。";
     const startupTraceRows = diagnostics?.startupTrace ?? [];
-    const runtimeRailItems: Array<{
-      id: RuntimePanelId;
-      title: string;
-      description: string;
-      status: string;
-      tone: "neutral" | "success" | "warning" | "danger" | "accent";
-    }> = [
-      {
-        id: "core",
-        title: "启动链路 / Doctor",
-        description: "PID、启动阶段、Doctor 与 WebView",
-        status: runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : (diagnostics?.state ?? "-"),
-        tone: runtimeIssues.length > 0 ? "warning" : "success",
-      },
-      {
-        id: "paths",
-        title: "路径与菜单",
-        description: "Kimi 路径、工作目录和右键菜单",
-        status: contextMenuStatusLabel,
-        tone: contextMenuStatusTone,
-      },
-      {
-        id: "logs",
-        title: "日志尾部",
-        description: "应用日志、后端日志和最近摘录",
-        status: `${(diagnostics?.backendLogTail?.length ?? 0) + (diagnostics?.appLogTail?.length ?? 0)} 行`,
-        tone: diagnostics?.lastError || diagnostics?.startupFailureDetail ? "warning" : "neutral",
-      },
-    ];
-    const selectedRuntimeRailItem =
-      runtimeRailItems.find((item) => item.id === selectedRuntimePanel) ?? runtimeRailItems[0];
     const copyText = (value: string) => {
       void navigator.clipboard?.writeText(value);
     };
 
     return (
-      <div className="cc-runtime-shell cc-runtime-shell-image">
-        <ControlCenterWorkbenchLayout
-          mode="stack-on-mobile"
-          className="cc-runtime-workbench"
-          railBodyClassName="cc-runtime-rail-list"
-          detailBodyClassName="cc-runtime-detail-body"
-          railHeader={
-            <div className="cc-runtime-rail-head">
-              <h4>诊断</h4>
-              <div className="cc-actions">
-                <Button
-                  type="button"
-                  icon={<RefreshCw size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onRefreshDiagnostics()}
-                  disabled={diagnosticsBusy}
-                >
-                  刷新诊断
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon={<Activity size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onRunKimiDoctor()}
-                  disabled={kimiDoctorBusy}
-                >
-                  运行 Doctor
-                </Button>
-              </div>
-            </div>
-          }
-          rail={
-            <>
-              <div className="cc-runtime-rail-group">
-                <div className="cc-runtime-rail-group-head">
-                  <span>运行时</span>
-                  <small>{runtimeRailItems.length}</small>
-                </div>
-                {runtimeRailItems.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`cc-control-list-item cc-runtime-rail-item ${
-                      selectedRuntimePanel === item.id ? "is-active" : ""
-                    }`}
-                    onClick={() => {
-                      void handleSelectRuntimePanel(item.id);
-                    }}
-                  >
-                    <div className="cc-control-list-item-main">
-                      <strong>{item.title}</strong>
-                      <span>{item.description}</span>
-                    </div>
-                    <ControlCenterStatusBadge tone={item.tone}>{item.status}</ControlCenterStatusBadge>
-                  </button>
-                ))}
-              </div>
-              <div className="cc-runtime-rail-group">
-                <div className="cc-runtime-rail-group-head">
-                  <span>风险</span>
-                  <small>{runtimeIssues.length}</small>
-                </div>
-              <div className="cc-runtime-issue-list">
-                  {runtimeIssues.length > 0 ? (
-                    runtimeIssues.map((issue) => (
-                      <article key={issue} className="cc-runtime-issue-item">
-                        <strong>{issue}</strong>
-                      </article>
-                    ))
-                  ) : (
-                    <p className="cc-control-muted">当前无异常</p>
-                  )}
-                </div>
-              </div>
-            </>
-          }
-          detailHeader={
-            <div className="cc-runtime-detail-head">
-              <div>
-                <h3>{selectedRuntimeRailItem.title}</h3>
-              </div>
-              <ControlCenterStatusBadge tone={selectedRuntimeRailItem.tone}>
-                {selectedRuntimeRailItem.status}
-              </ControlCenterStatusBadge>
-            </div>
-          }
-          detail={
-            selectedRuntimePanel === "core" ? (
-              <>
-                {kimiDoctorResult ? (
-                  <section className="cc-runtime-detail-card">
-                    <div className="cc-runtime-section-head">
-                      <h4>Kimi Code Doctor</h4>
-                      <ControlCenterStatusBadge tone={kimiDoctorResult.succeeded ? "success" : "warning"}>
-                        {kimiDoctorResult.succeeded ? "通过" : "未通过"}
-                      </ControlCenterStatusBadge>
-                    </div>
-                    <div className="diagnostics-grid">
-                      <DiagnosticItem label="退出码" value={String(kimiDoctorResult.exitCode ?? "-")} />
-                      <DiagnosticItem label="命令" value={kimiDoctorResult.command} />
-                      <DiagnosticItem label="Kimi 路径" value={kimiDoctorResult.kimiPath} />
-                      <DiagnosticItem label="Shell 路径" value={kimiDoctorResult.shellPath ?? "-"} />
-                    </div>
-                    <div className="cc-log-block-head">
-                      <h4 className="log-tail-title">Doctor 输出</h4>
-                      <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(formatKimiDoctorOutput(kimiDoctorResult))}>复制</Button>
-                    </div>
-                    <pre className="log-tail">{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
-                  </section>
-                ) : null}
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-runtime-section-head">
-                    <h4>运行摘要</h4>
-                  </div>
-                  <div className="diagnostics-grid">
-                    <DiagnosticItem label="状态" value={diagnostics?.state ?? "-"} />
-                    <DiagnosticItem label="活动端口" value={String(diagnostics?.activePort ?? "-")} />
-                    <DiagnosticItem label="工作区端口" value={String(diagnostics?.workspacePort ?? "-")} />
-                    <DiagnosticItem label="基础端口" value={String(diagnostics?.basePort ?? "-")} />
-                    <DiagnosticItem label="实例 ID" value={diagnostics?.instanceId ?? "-"} />
-                    <DiagnosticItem label="PID" value={String(diagnostics?.pid ?? "-")} />
-                    <DiagnosticItem label="启动周期 ID" value={String(diagnostics?.startCycleId ?? "-")} />
-                    <DiagnosticItem label="快捷键归属" value={String(diagnostics?.isHotkeyOwner ?? false)} />
-                    <DiagnosticItem label="Shell 到加载耗时" value={String(diagnostics?.loadingStartupMs ?? "-")} />
-                    <DiagnosticItem label="后端就绪耗时" value={String(diagnostics?.backendReadyMs ?? "-")} />
-                    <DiagnosticItem label="加载 SLA" value={String(diagnostics?.loadingSlaMet ?? "-")} />
-                    <DiagnosticItem label="Kimi 版本" value={diagnostics?.kimiVersion ?? "-"} />
-                    <DiagnosticItem label="版本检查错误" value={diagnostics?.versionError ?? "-"} />
-                    <DiagnosticItem label="Provider API 健康" value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)} />
-                    <DiagnosticItem label="Provider API 检查时间" value={formatLoginCheckTimestamp(diagnostics?.providerApiHealth.checkedAtMs)} />
-                    <DiagnosticItem label="Provider API 来源" value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)} />
-                    <DiagnosticItem label="最近错误" value={diagnostics?.lastError ?? "-"} />
-                    <DiagnosticItem label="最近退出原因" value={diagnostics?.lastExitReason ?? "-"} />
-                    <DiagnosticItem label="WebView 运行时" value={diagnostics?.webviewRuntimeKind ?? "-"} />
-                    <DiagnosticItem label="WebView 版本" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
-                    <DiagnosticItem label="启动等待中" value={String(diagnostics?.startupPending ?? false)} />
-                    <DiagnosticItem label="启动退出原因" value={diagnostics?.startupExitCause ?? "-"} />
-                    <DiagnosticItem label="主窗口创建模式" value={diagnostics?.mainCreateMode ?? "-"} />
-                    <DiagnosticItem label="启动尝试 ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
-                    <DiagnosticItem label="启动阶段" value={diagnostics?.startupPhase ?? "-"} />
-                    <DiagnosticItem label="启动失败类型" value={diagnostics?.startupFailureKind ?? "-"} />
-                    <DiagnosticItem label="启动失败详情" value={diagnostics?.startupFailureDetail ?? "-"} />
-                    <DiagnosticItem label="启动监控状态" value={diagnostics?.startupMonitorState ?? "-"} />
-                    <DiagnosticItem label="启动监控原因" value={diagnostics?.startupMonitorReason ?? "-"} />
-                    <DiagnosticItem label="启动监控目标" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
-                    <DiagnosticItem label="启动监控详情" value={diagnostics?.startupMonitorDetail ?? "-"} />
-                  </div>
-                </section>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-runtime-section-head">
-                    <h4>启动链路</h4>
-                    <span>{startupTraceRows.length} 步</span>
-                  </div>
-                  {startupTraceRows.length > 0 ? (
-                    <div className="cc-startup-trace-list">
-                      {startupTraceRows.map((line, index) => (
-                        <div key={`${index}-${line}`} className="cc-startup-trace-row">
-                          <span>{String(index + 1).padStart(2, "0")}</span>
-                          <code>{line}</code>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="hint">暂无启动轨迹。</p>
-                  )}
-                </section>
-              </>
-            ) : selectedRuntimePanel === "paths" ? (
-              <>
-                <div className="cc-actions">
-                  <Button type="button" icon={<Plus size={15} />} className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用右键菜单</Button>
-                  <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用右键菜单</Button>
-                  <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
-                </div>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-runtime-section-head">
-                    <h4>上下文菜单</h4>
-                    <ControlCenterStatusBadge tone={contextMenuStatusTone}>{contextMenuStatusLabel}</ControlCenterStatusBadge>
-                  </div>
-                  {contextMenuStatus?.message ? <p className="hint">{contextMenuStatus.message}</p> : null}
-                </section>
-                <section className="cc-runtime-detail-card cc-runtime-close-behavior">
-                  <div className="cc-runtime-section-head">
-                    <h4>关闭窗口行为</h4>
-                    <span>仅主窗口生效</span>
-                  </div>
-                  <div className="cc-auth-switch" role="group" aria-label="关闭窗口行为">
-                    {mainWindowCloseBehaviorOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`cc-auth-switch-btn ${
-                          mainWindowCloseBehavior === option.value ? "active" : ""
-                        }`}
-                        onClick={() => {
-                          void handleSelectMainWindowCloseBehavior(option.value);
-                        }}
-                        disabled={mainCloseBehaviorSaving || actionBusy}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-runtime-section-head">
-                    <h4>路径</h4>
-                  </div>
-                  <div className="diagnostics-grid">
-                    <DiagnosticItem label="启动时间" value={diagnostics?.startedAt ?? "-"} />
-                    <DiagnosticItem label="配置的 Kimi 路径" value={diagnostics?.configuredKimiPath ?? "-"} />
-                    <DiagnosticItem label="检测到的 Kimi 路径" value={diagnostics?.detectedKimiPath ?? "-"} />
-                    <DiagnosticItem label="配置的工作目录" value={diagnostics?.configuredWorkDir ?? "-"} />
-                    <DiagnosticItem label="实际工作目录" value={diagnostics?.effectiveWorkDir ?? "-"} />
-                    <DiagnosticItem label="启动命令" value={diagnostics?.launchCommand ?? "-"} />
-                    <DiagnosticItem label="应用日志路径" value={diagnostics?.appLogPath ?? "-"} />
-                    <DiagnosticItem label="后端日志路径" value={diagnostics?.backendLogPath ?? "-"} />
-                    <DiagnosticItem label="日志目录" value={diagnostics?.logsDir ?? "-"} />
-                  </div>
-                </section>
-              </>
-            ) : (
-              <>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-log-block-head">
-                    <div>
-                      <h4 className="log-tail-title">最近输出</h4>
-                      <p className="hint">后端优先，否则显示应用日志尾部。</p>
-                    </div>
-                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(condensedLogPreview)}>复制</Button>
-                  </div>
-                  <pre className="log-tail cc-log-snippet">{condensedLogPreview}</pre>
-                </section>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-log-block-head">
-                    <h4 className="log-tail-title">最近应用日志</h4>
-                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(appLogText)}>复制</Button>
-                  </div>
-                  <pre className="log-tail">{appLogText}</pre>
-                </section>
-                <section className="cc-runtime-detail-card">
-                  <div className="cc-log-block-head">
-                    <h4 className="log-tail-title">最近后端日志</h4>
-                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(backendLogText)}>复制</Button>
-                  </div>
-                  <pre className="log-tail">{backendLogText}</pre>
-                </section>
-              </>
-            )
-          }
+      <section className="cc-image-detail-page">
+        <div
+          id={focusDomId("runtime_center")}
+          className={`cc-image-detail-top ${activeFocusId === "runtime_center" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>运行诊断</h1>
+            <p>PID、startup trace、Kimi Doctor、WebView runtime 和日志尾部集中查看。</p>
+          </div>
+          <div className="cc-image-top-controls">
+            <Button
+              type="button"
+              className="cc-action-btn"
+              onClick={() => void onRunKimiDoctor()}
+              disabled={kimiDoctorBusy}
+            >
+              运行 Kimi Doctor
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="cc-action-btn"
+              onClick={() => void onRefreshDiagnostics()}
+              disabled={diagnosticsBusy}
+            >
+              刷新诊断
+            </Button>
+          </div>
+        </div>
+
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Backend state", value: diagnostics?.state ?? "-" },
+            { label: "PID", value: String(diagnostics?.pid ?? "-") },
+            { label: "Startup phase", value: diagnostics?.startupPhase ?? "-" },
+            { label: "WebView", value: diagnostics?.webviewRuntimeVersion ?? diagnostics?.webviewRuntimeKind ?? "-" },
+          ]}
         />
-      </div>
+
+        <section
+          id={focusDomId("runtime:core")}
+          className={`cc-image-card ${activeFocusId === "runtime:core" ? "is-focus" : ""}`}
+        >
+          <h2>启动链路</h2>
+          <table className="cc-image-table">
+            <thead>
+              <tr><th>#</th><th>阶段</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+              {(startupTraceRows.length > 0 ? startupTraceRows : ["暂无启动轨迹"]).map((line, index) => (
+                <tr key={`${index}-${line}`}>
+                  <td>{String(index + 1).padStart(2, "0")}</td>
+                  <td>{line}</td>
+                  <td>{index === startupTraceRows.length - 1 && runtimeIssues.length > 0 ? "需要关注" : "ok"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {kimiDoctorResult ? (
+            <div className="cc-image-code-card">
+              <div className="cc-image-code-toolbar">
+                <span>Kimi Doctor</span>
+                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(formatKimiDoctorOutput(kimiDoctorResult))}>复制</Button>
+              </div>
+              <pre>{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
+            </div>
+          ) : null}
+        </section>
+
+        <section
+          id={focusDomId("runtime:paths")}
+          className={`cc-image-card ${activeFocusId === "runtime:paths" ? "is-focus" : ""}`}
+        >
+          <h2>路径与菜单</h2>
+          <div className="cc-image-row-list">
+            <div className="cc-image-row">
+              <div>
+                <div className="cc-image-row-title"><span className={`cc-dot ${contextMenuStatusTone}`} />右键菜单</div>
+                <div className="cc-image-row-desc">{contextMenuStatus?.message ?? contextMenuStatusLabel}</div>
+              </div>
+              <div className="cc-image-row-actions">
+                <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用</Button>
+                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用</Button>
+              </div>
+            </div>
+          </div>
+          <ControlCenterDescList
+            columns={3}
+            className="cc-image-meta-grid compact"
+            items={[
+              { label: "Kimi path", value: diagnostics?.detectedKimiPath ?? diagnostics?.configuredKimiPath ?? "-" },
+              { label: "Work dir", value: diagnostics?.effectiveWorkDir ?? diagnostics?.configuredWorkDir ?? "-" },
+              { label: "Logs dir", value: diagnostics?.logsDir ?? "-" },
+            ]}
+          />
+        </section>
+
+        <section
+          id={focusDomId("runtime:logs")}
+          className={`cc-image-card ${activeFocusId === "runtime:logs" ? "is-focus" : ""}`}
+        >
+          <h2>日志与 Doctor</h2>
+          <div className="cc-image-code-card">
+            <div className="cc-image-code-toolbar">
+              <span>recent.log</span>
+              <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(condensedLogPreview)}>复制</Button>
+            </div>
+            <pre>{condensedLogPreview}</pre>
+          </div>
+          <div className="cc-image-code-grid">
+            <div className="cc-image-code-card">
+              <div className="cc-image-code-toolbar">
+                <span>app.log</span>
+                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(appLogText)}>复制</Button>
+              </div>
+              <pre>{appLogText}</pre>
+            </div>
+            <div className="cc-image-code-card">
+              <div className="cc-image-code-toolbar">
+                <span>backend.log</span>
+                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(backendLogText)}>复制</Button>
+              </div>
+              <pre>{backendLogText}</pre>
+            </div>
+          </div>
+        </section>
+      </section>
     );
   }
 
   function renderBridgeSection() {
-    const bridgeHeaderControls = (
-      <ControlCenterActionMenu
-        disabled={bridgeBusy}
-        items={[
-          {
-            label: "刷新状态",
-            icon: <RefreshCw size={15} />,
-            onSelect: () => {
-              void Promise.all([
-                onRefreshBridgeSettings(),
-                onRefreshBridgeStatus(),
-                onRefreshBridgeBindings(),
-                onRefreshBridgeApprovals(),
-                onRefreshBridgeSecretsMask(),
-              ]);
-            },
-          },
-          {
-            label: "打开日志目录",
-            icon: <FolderOpen size={15} />,
-            onSelect: () => void onOpenLogs(),
-          },
-          {
-            label: "重启 Bridge",
-            icon: <RefreshCcw size={15} />,
-            onSelect: () => void onRestartBridge(),
-          },
-          {
-            label: "停止 Bridge",
-            icon: <X size={15} />,
-            tone: "danger",
-            onSelect: () => void onStopBridge(),
-          },
-        ]}
-      />
-    );
-
     return (
-      <div className="cc-bridge-shell">
-        <section className="cc-card">
-          <ControlCenterCardHeader
-            title="外部 IM 通道配置"
-            titleControls={bridgeHeaderControls}
-            statusLabel={bridgeStatusLabel}
-            statusTone={bridgeRuntimeTone}
-            primaryAction={
-              <div className="cc-bridge-create-menu" ref={bridgeCreateMenuRef}>
-                <Button
-                  type="button"
-                  icon={<Plus size={14} />}
-                  className="cc-action-btn cc-bridge-create-menu-trigger"
-                  onClick={() => setBridgeCreateMenuOpen((current) => !current)}
-                  disabled={bridgeBusy}
-                  aria-haspopup="menu"
-                  aria-expanded={bridgeCreateMenuOpen}
-                >
-                  新建机器人
-                </Button>
-                {bridgeCreateMenuOpen ? (
-                  <div
-                    className="cc-bridge-create-menu-popover"
-                    role="menu"
-                    aria-label="选择机器人平台"
-                  >
-                    <button
-                      type="button"
-                      className="cc-bridge-create-menu-item"
-                      onClick={() => handleCreateBridgeConnector("telegram")}
-                      disabled={bridgeBusy}
-                      role="menuitem"
-                    >
-                      <strong>Telegram</strong>
-                      <small>配置 bot token 后接入 Telegram 私聊或群聊</small>
-                    </button>
-                    <button
-                      type="button"
-                      className="cc-bridge-create-menu-item"
-                      onClick={() => handleCreateBridgeConnector("weixin")}
-                      disabled={bridgeBusy}
-                      role="menuitem"
-                    >
-                      <strong>微信</strong>
-                      <small>扫码绑定 owner 私聊机器人</small>
-                    </button>
-                    <button
-                      type="button"
-                      className="cc-bridge-create-menu-item"
-                      onClick={() => handleCreateBridgeConnector("feishu")}
-                      disabled={bridgeBusy}
-                      role="menuitem"
-                    >
-                      <strong>飞书</strong>
-                      <small>通过官方流程创建并保存凭据</small>
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            }
-          />
-          <div className="cc-card-body cc-step-body cc-step-body-single">
-            <ControlCenterWorkbenchLayout
-              mode="stack-on-mobile"
-              railClassName="bridge-workbench-rail"
-              railBodyClassName="bridge-workbench-rail-list"
-              detailClassName="bridge-workbench-detail"
-              detailBodyClassName="bridge-workbench-detail-body"
-              railHeader={
-                <div className="bridge-workbench-rail-head">
-                  <div>
-                    <h4>机器人列表</h4>
-                  </div>
-                  <ControlCenterStatusBadge tone="neutral">
-                    {visibleBridgeConnectors.length} 个机器人
-                  </ControlCenterStatusBadge>
-                </div>
-              }
-              rail={
-                visibleBridgeConnectors.length > 0 ? (
-                  <>
-                    {visibleBridgeConnectors.map((connector) => {
-                      const connectorStatus =
-                        bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ??
-                        null;
-                      const connectorSecrets =
-                        bridgeSecretsMask.connectors.find(
-                          (item) => item.connectorId === connector.id,
-                        ) ?? null;
-                      const connectorRecentError = findBridgeConnectorRecentError(
-                        connector,
-                        connectorStatus,
-                        bridgeRecentErrors,
-                      );
-                      const connectorSecretsConfigured = hasBridgeConnectorSecretsConfigured(
-                        connector,
-                        connectorSecrets,
-                      );
-                      const isSelected = connector.id === effectiveSelectedBridgeConnectorId;
-                      return (
-                        <button
-                          key={connector.id}
-                          type="button"
-                          className={`bridge-workbench-list-item ${isSelected ? "active" : ""}`}
-                          onClick={() => {
-                            if (isBridgeConnectorSecretsTask) {
-                              openBridgeConnectorSecretsModal(connector.id);
-                              return;
-                            }
-                            if (isBridgeRuntimeTask) {
-                              openBridgeConnectorRuntimeModal(connector.id);
-                              return;
-                            }
-                            setSelectedBridgeConnectorId(connector.id);
-                          }}
-                        >
-                          <div className="bridge-workbench-list-item-header">
-                            <div className="bridge-workbench-list-item-copy">
-                              <strong>{connector.label}</strong>
-                              <small>{bridgePlatformLabel(connector.platform)}</small>
-                            </div>
-                            <ControlCenterStatusBadge
-                              tone={formatBridgeConnectorStateTone(
-                                connectorStatus?.state ?? "idle",
-                              )}
-                            >
-                              {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
-                            </ControlCenterStatusBadge>
-                          </div>
-                          <div className="bridge-workbench-list-item-meta">
-                            <span>{connector.enabled ? "已启用" : "未启用"}</span>
-                            <span>{connectorSecretsConfigured ? "凭据已配置" : "待配置凭据"}</span>
-                          </div>
-                          {connectorRecentError ? (
-                            <p className="bridge-workbench-list-item-error">
-                              {connectorRecentError}
-                            </p>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </>
-                ) : (
-                  <ControlCenterEmptyState
-                  className="bridge-workbench-empty"
-                  title="还没有机器人"
-                  description="使用右上角“新建机器人”开始添加 Telegram、微信或飞书机器人。"
-                  icon={<Sparkles size={18} />}
-                />
-                )
-              }
-              detail={
-                shouldRenderInlineBridgeTask ? (
-                  renderActiveTask()
-                ) : selectedBridgeConnector ? (
-                  <div className="cc-control-detail-stack">
-                    <div className="bridge-workbench-card">
-                      <div className="bridge-workbench-card-head">
-                        <div className="bridge-workbench-card-copy">
-                        <div className="bridge-workbench-card-title-row">
-                          <strong>{selectedBridgeConnector.label}</strong>
-                          <div className="bridge-robot-chip-row">
-                              <ControlCenterStatusBadge
-                                tone={
-                                  !selectedBridgeConnectorSecretsConfigured
-                                    ? "warning"
-                                    : selectedBridgeConnectorEnabledValue
-                                      ? formatBridgeConnectorStateTone(
-                                          selectedBridgeConnectorStatus?.state ?? "idle",
-                                        )
-                                      : "neutral"
-                                }
-                              >
-                                {!selectedBridgeConnectorSecretsConfigured
-                                  ? "待配置"
-                                  : selectedBridgeConnectorEnabledValue
-                                    ? formatBridgeConnectorStateLabel(
-                                        selectedBridgeConnectorStatus?.state ?? "idle",
-                                      )
-                                    : "已停止"}
-                              </ControlCenterStatusBadge>
-                            </div>
-                          </div>
-                          <div className="bridge-workbench-card-meta">
-                            <span>平台：{bridgePlatformLabel(selectedBridgeConnector.platform)}</span>
-                            <span>Connector ID：{selectedBridgeConnector.id}</span>
-                            <span>绑定：{selectedBridgeConnectorBindings.length}</span>
-                            <span>审批：{selectedBridgeConnectorApprovals.length}</span>
-                            <span>
-                              最近就绪：
-                              {formatBridgeTimestamp(selectedBridgeConnectorStatus?.lastReadyAt)}
-                            </span>
-                          </div>
-                        </div>
-                        <ControlCenterToggleField
-                          className="bridge-workbench-card-toggle"
-                          label="机器人启用"
-                          description={
-                            selectedBridgeConnectorPendingToggle
-                              ? "正在应用配置..."
-                              : undefined
-                          }
-                          checked={selectedBridgeConnectorEnabledValue}
-                          onChange={(checked) => {
-                            void handleImmediateBridgeConnectorToggle(
-                              selectedBridgeConnector.id,
-                              checked,
-                            );
-                          }}
-                          disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
-                          busy={selectedBridgeConnectorPendingToggle}
-                        />
-                      </div>
-
-                      <ControlCenterDescList
-                        columns={3}
-                        items={[
-                          {
-                            label: "绑定",
-                            value: `${selectedBridgeConnectorBindings.length}`,
-                            meta: selectedBridgeConnectorBindings.length > 0 ? "会话" : "暂无绑定",
-                          },
-                          {
-                            label: "待审批",
-                            value: `${selectedBridgeConnectorApprovals.length}`,
-                            meta:
-                              selectedBridgeConnectorApprovals.length > 0
-                                ? "需要处理"
-                                : "无待处理审批",
-                          },
-                          {
-                            label: "凭据",
-                            value: selectedBridgeConnectorSecretsConfigured ? "已配置" : "待配置",
-                          },
-                        ]}
-                      />
-
-                      {selectedBridgeConnectorRecentError ? (
-                        <p className="bridge-workbench-card-error">
-                          {selectedBridgeConnectorRecentError}
-                        </p>
-                      ) : null}
-
-                      <div className="bridge-port-card bridge-robot-workdir-card">
-                        <span>工作区目录</span>
-                        <strong>
-                          {selectedBridgeConnectorEffectiveWorkDir || "跟随应用默认目录"}
-                        </strong>
-                        <div className="bridge-inline-path-actions">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            icon={<FolderOpen size={14} />}
-                            className="cc-action-btn"
-                            onClick={() =>
-                              void handlePickBridgeConnectorWorkDir(selectedBridgeConnector.id)
-                            }
-                            disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
-                          >
-                            {selectedBridgeConnectorPendingToggle
-                              ? "正在保存目录..."
-                              : "选择工作区"}
-                          </Button>
-                          {selectedBridgeConnectorUsesCustomWorkDir ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="cc-action-btn"
-                              onClick={() =>
-                                void handleBridgeConnectorWorkDirChange(
-                                  selectedBridgeConnector.id,
-                                  undefined,
-                                )
-                              }
-                              disabled={bridgeBusy || selectedBridgeConnectorPendingToggle}
-                            >
-                              跟随应用默认目录
-                            </Button>
-                          ) : null}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            icon={<FolderOpen size={14} />}
-                            className="cc-action-btn"
-                            onClick={() =>
-                              void onOpenFolder(selectedBridgeConnectorEffectiveWorkDir)
-                            }
-                            disabled={
-                              !selectedBridgeConnectorEffectiveWorkDir ||
-                              selectedBridgeConnectorPendingToggle
-                            }
-                          >
-                            打开目录
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="bridge-workbench-card-actions">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          icon={<KeyRound size={15} />}
-                          className="cc-action-btn"
-                          onClick={() => openBridgeConnectorSecretsModal(selectedBridgeConnector.id)}
-                          disabled={bridgeBusy}
-                        >
-                          {selectedBridgeConnectorSecretsConfigured ? "连接与凭据" : "创建机器人"}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          icon={<LayoutDashboard size={15} />}
-                          className="cc-action-btn"
-                          onClick={() => openBridgeConnectorRuntimeModal(selectedBridgeConnector.id)}
-                          disabled={bridgeBusy}
-                        >
-                          高级运行面板
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="bridge-danger-group">
-                      <div className="bridge-panel-group-label is-danger">
-                        <span>危险操作</span>
-                      </div>
-                      <div className="cc-actions">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          icon={<X size={14} />}
-                          className="cc-action-btn"
-                          onClick={() => void handleDeleteBridgeRobot(selectedBridgeConnector.id)}
-                          disabled={bridgeBusy}
-                        >
-                          删除机器人
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null
-              }
-              emptyDetail={
-                <ControlCenterEmptyState
-                  className="bridge-workbench-empty bridge-workbench-empty-detail"
-                  title={visibleBridgeConnectors.length > 0 ? "选择一个机器人" : "先创建一个机器人"}
-                  description={
-                    visibleBridgeConnectors.length > 0
-                      ? "从左侧列表选择机器人。"
-                      : "创建后会出现在左侧列表。"
-                  }
-                  icon={<Sparkles size={18} />}
-                />
-              }
+      <section className="cc-image-detail-page">
+        <div
+          id={focusDomId("bridge_center")}
+          className={`cc-image-detail-top ${activeFocusId === "bridge_center" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>外部 IM 通道</h1>
+            <p>Telegram、飞书、微信 connector，运行态、密钥、sessions、bindings、approvals 与日志。</p>
+          </div>
+          <div className="cc-image-top-controls">
+            <span className={`cc-image-switch ${bridgeSettings.enabled ? "" : "off"}`} aria-label="Bridge enabled" />
+            <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onRestartBridge()} disabled={bridgeBusy}>
+              重启 Bridge
+            </Button>
+            <ControlCenterActionMenu
+              disabled={bridgeBusy}
+              items={[
+                {
+                  label: "刷新状态",
+                  icon: <RefreshCw size={15} />,
+                  onSelect: () => {
+                    void Promise.all([
+                      onRefreshBridgeSettings(),
+                      onRefreshBridgeStatus(),
+                      onRefreshBridgeBindings(),
+                      onRefreshBridgeApprovals(),
+                      onRefreshBridgeSecretsMask(),
+                    ]);
+                  },
+                },
+                { label: "打开日志目录", icon: <FolderOpen size={15} />, onSelect: () => void onOpenLogs() },
+                { label: "停止 Bridge", icon: <X size={15} />, tone: "danger", onSelect: () => void onStopBridge() },
+              ]}
             />
           </div>
+        </div>
+
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Bridge state", value: bridgeStatus.state },
+            { label: "Admin port", value: String(bridgeStatus.adminPort ?? "-") },
+            { label: "Auto start", value: bridgeSettings.autoStart ? "enabled" : "disabled" },
+            { label: "Pending approvals", value: String(bridgeApprovals.length) },
+          ]}
+        />
+
+        {shouldRenderInlineBridgeTask ? renderActiveTask() : null}
+
+        <section className="cc-image-card">
+          <div className="cc-image-card-title-row">
+            <h2>Connectors</h2>
+            <div className="cc-bridge-create-menu" ref={bridgeCreateMenuRef}>
+              <Button
+                type="button"
+                icon={<Plus size={14} />}
+                className="cc-action-btn cc-bridge-create-menu-trigger"
+                onClick={() => setBridgeCreateMenuOpen((current) => !current)}
+                disabled={bridgeBusy}
+                aria-haspopup="menu"
+                aria-expanded={bridgeCreateMenuOpen}
+              >
+                新建机器人
+              </Button>
+              {bridgeCreateMenuOpen ? (
+                <div className="cc-bridge-create-menu-popover" role="menu" aria-label="选择机器人平台">
+                  {(["telegram", "weixin", "feishu"] as BridgePlatform[]).map((platform) => (
+                    <button
+                      key={platform}
+                      type="button"
+                      className="cc-bridge-create-menu-item"
+                      onClick={() => handleCreateBridgeConnector(platform)}
+                      disabled={bridgeBusy}
+                      role="menuitem"
+                    >
+                      <strong>{bridgePlatformLabel(platform)}</strong>
+                      <small>创建并配置 {bridgePlatformLabel(platform)} connector</small>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          {visibleBridgeConnectors.length > 0 ? (
+            <ul className="cc-image-row-list">
+              {visibleBridgeConnectors.map((connector) => {
+                const connectorStatus =
+                  bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ?? null;
+                const connectorSecrets =
+                  bridgeSecretsMask.connectors.find((item) => item.connectorId === connector.id) ?? null;
+                const connectorSecretsConfigured = hasBridgeConnectorSecretsConfigured(connector, connectorSecrets);
+                const connectorRecentError = findBridgeConnectorRecentError(connector, connectorStatus, bridgeRecentErrors);
+                const connectorPending = bridgeOverviewPendingConnectorId === connector.id;
+                const enabledValue = connectorPending
+                  ? (bridgeOverviewPendingEnabled[connector.id] ?? connector.enabled)
+                  : connector.enabled;
+                return (
+                  <li
+                    key={connector.id}
+                    id={focusDomId(`bridge:${connector.id}`)}
+                    className={`cc-image-row ${activeFocusId === `bridge:${connector.id}` ? "is-focus" : ""}`}
+                  >
+                    <div>
+                      <div className="cc-image-row-title">
+                        <span className={`cc-dot ${formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle")}`} />
+                        {connector.label}
+                      </div>
+                      <div className="cc-image-row-desc">
+                        {bridgePlatformLabel(connector.platform)} · {connectorSecretsConfigured ? "凭据已配置" : "待配置凭据"}
+                        {connectorRecentError ? ` · ${connectorRecentError}` : ""}
+                      </div>
+                    </div>
+                    <div className="cc-image-row-actions">
+                      <ControlCenterStatusBadge tone={formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle")}>
+                        {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
+                      </ControlCenterStatusBadge>
+                      <ControlCenterToggleField
+                        label="启用"
+                        checked={enabledValue}
+                        onChange={(checked) => void handleImmediateBridgeConnectorToggle(connector.id, checked)}
+                        disabled={bridgeBusy || connectorPending}
+                        busy={connectorPending}
+                      />
+                      <Button type="button" variant="outline" className="cc-action-btn" onClick={() => openBridgeConnectorSecretsModal(connector.id)} disabled={bridgeBusy}>
+                        连接与凭据
+                      </Button>
+                      <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => openBridgeConnectorRuntimeModal(connector.id)} disabled={bridgeBusy}>
+                        运行面板
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="cc-image-muted">还没有机器人。使用“新建机器人”添加 Telegram、微信或飞书 connector。</p>
+          )}
         </section>
-      </div>
+
+        <section className="cc-image-card">
+          <h2>Sessions / Bindings / Approvals</h2>
+          <table className="cc-image-table">
+            <thead>
+              <tr><th>类型</th><th>内容</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Session</td>
+                <td>{bridgeSessions.length} 个外部会话，最近导入后绑定到工作区默认目录。</td>
+                <td>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="cc-action-btn"
+                    onClick={() => {
+                      const connectorId = effectiveSelectedBridgeConnectorId ?? visibleBridgeConnectors[0]?.id;
+                      if (connectorId) openBridgeConnectorRuntimeModal(connectorId);
+                    }}
+                    disabled={visibleBridgeConnectors.length === 0}
+                  >
+                    管理 Session
+                  </Button>
+                </td>
+              </tr>
+              <tr>
+                <td>Binding</td>
+                <td>{bridgeBindings.length} 条绑定，可在 connector 运行面板中清除、重置或切换工作目录。</td>
+                <td><Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onRefreshBridgeBindings()}>刷新绑定</Button></td>
+              </tr>
+              <tr>
+                <td>Approval</td>
+                <td>{bridgeApprovals.length} 个待审批动作。</td>
+                <td><Button type="button" className="cc-action-btn" onClick={() => void onRefreshBridgeApprovals()}>打开审批</Button></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </section>
     );
   }
 
@@ -3045,13 +2710,49 @@ export function ControlCenterView({
       );
 
     return (
-      <div className="cc-skill-center-body">
-        <SkillCenterPanel
-          surface="page"
-          busy={skillCenterBusy}
-          section={skillCenterSection}
-          railActions={skillCenterActions}
-          onSectionChange={onSkillCenterSectionChange}
+      <section className="cc-image-detail-page">
+        <div
+          id={focusDomId("skill_center")}
+          className={`cc-image-detail-top ${activeFocusId === "skill_center" ? "is-focus" : ""}`}
+        >
+          <div>
+            <h1>Skill 投影</h1>
+            <p>安装、导入、扫描、信任、更新、卸载，并投影到用户全局、KIMI_CODE_HOME 或当前 Session。</p>
+          </div>
+          <div className="cc-image-top-controls">{skillCenterActions}</div>
+        </div>
+        <ControlCenterDescList
+          columns={4}
+          className="cc-image-meta-grid"
+          items={[
+            { label: "Installed skills", value: String(installedSkills.length) },
+            { label: "Discovered", value: String(skillDiscoveryRecords.length) },
+            { label: "Workspace target", value: workspaceSkillTargets.find((target) => target.isCurrent)?.label ?? "当前工作区" },
+            { label: "Container", value: selectedWorkspaceSkillContainerKind },
+          ]}
+        />
+        <div className="cc-image-description">
+          <div className="cc-image-meta-label">Description</div>
+          <p>当前 Skill 中心管理已安装 skill、发现外部 skill，并把已安装 skill 加入某个工作区目标容器。</p>
+        </div>
+        <div className="cc-image-tags">
+          <span>Scope user_global_kimi</span>
+          <span>Scope kimi_code_home</span>
+          <span>Scope session_kimi</span>
+          <span>Container .agents / .kimi-code / .codex / .claude</span>
+        </div>
+        <section
+          id={focusDomId(activeFocusId?.startsWith("skill-") ? activeFocusId : "skill_center:list")}
+          className={`cc-image-card ${activeFocusId?.startsWith("skill-") ? "is-focus" : ""}`}
+        >
+          <h2>Manage skills</h2>
+          <div className="cc-skill-center-body">
+            <SkillCenterPanel
+              surface="page"
+              busy={skillCenterBusy}
+              section={skillCenterSection}
+              railActions={null}
+              onSectionChange={onSkillCenterSectionChange}
             installedSkills={installedSkills}
             selectedSkillId={selectedSkillId}
             selectedSkillDetail={selectedSkillDetail}
@@ -3112,8 +2813,12 @@ export function ControlCenterView({
             search={skillCenterSearch}
             filter={skillCenterFilter}
             onSearchChange={onSkillCenterSearchChange}
-        />
-      </div>
+            detailOnly
+            activeFocusId={activeFocusId}
+          />
+          </div>
+        </section>
+      </section>
     );
   }
 
@@ -4090,94 +3795,20 @@ export function ControlCenterView({
     return null;
   }
 
-  const activeControlSectionConfig =
-    controlSections.find((section) => section.id === activeControlSection) ?? controlSections[0];
-  const activeControlSectionLabel =
-    activeControlSection === "bridge_center"
-      ? bridgeDisplayName
-      : activeControlSectionConfig.label;
-  const twoPaneSection =
-    activeControlSection === "workspace_hub" ||
-    activeControlSection === "skill_center" ||
-    activeControlSection === "runtime_center" ||
-    activeControlSection === "bridge_center";
-  const controlSectionGroups = [
-    {
-      id: "core",
-      label: "核心",
-      items: controlSections.filter((section) => section.group === "core"),
-    },
-    {
-      id: "setup",
-      label: "设置",
-      items: controlSections.filter((section) => section.group === "setup"),
-    },
-  ];
-
   return (
     <section
       className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""}`}
     >
-      <aside className="cc-primary-nav" aria-label="控制中心导航">
-        <div className="cc-primary-nav-header">
-          <strong>控制中心</strong>
-          <span>Control Center</span>
-        </div>
-        <nav className="cc-primary-nav-list" aria-label="控制中心主导航">
-          {controlSectionGroups.map((group) => (
-            <div key={group.id} className="cc-primary-nav-group">
-              <span className="cc-primary-nav-group-label">{group.label}</span>
-              {group.items.map((section) => {
-                const active = activeControlSection === section.id;
-                return (
-                  <Button
-                    key={section.id}
-                    type="button"
-                    variant="ghost"
-                    className={`cc-primary-nav-item ${active ? "active" : ""}`}
-                    icon={section.icon}
-                    onClick={() => {
-                      void handleSelectControlSection(section.id);
-                    }}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <span className="cc-primary-nav-copy">
-                      <span className="cc-primary-nav-label">
-                        {section.id === "bridge_center" ? bridgeDisplayName : section.label}
-                      </span>
-                    </span>
-                  </Button>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-      </aside>
+      <ControlCenterUnifiedRail
+        title="控制中心"
+        groups={unifiedRailGroups}
+        expandedGroups={expandedUnifiedRailGroups}
+        onToggleGroup={handleToggleUnifiedRailGroup}
+        onExit={onClose}
+        onItemActivate={handleRailItemActivate}
+      />
 
-      <div
-        className={`cc-control-stage ${
-          twoPaneSection && surface !== "modal" ? "cc-control-stage-no-topbar" : ""
-        }`}
-      >
-        {twoPaneSection && surface !== "modal" ? null : (
-          <header className="cc-modal-header cc-detail-topbar">
-            <div className="cc-modal-title">
-              {twoPaneSection ? null : <h3>{activeControlSectionLabel}</h3>}
-            </div>
-            {surface === "modal" ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                icon={<X size={16} />}
-                className="cc-modal-close-btn"
-                onClick={onClose}
-                aria-label="关闭控制中心"
-              />
-            ) : null}
-          </header>
-        )}
-
+      <div className="cc-control-stage cc-control-stage-no-topbar">
         <div className="cc-layout cc-layout-dashboard">
           <div
             className={`cc-main ${
@@ -4190,9 +3821,20 @@ export function ControlCenterView({
               <>
                 {activeControlSection === "overview" ? renderOverviewSection() : null}
                 {activeControlSection === "workspace_hub" ? (
-                  <WorkspaceHubPanel onOpenWorkspace={onOpenFolder} />
+                  <WorkspaceHubPanel
+                    onOpenWorkspace={onOpenFolder}
+                    detailOnly
+                    activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleWorkspaceHubRailGroupsChange}
+                  />
                 ) : null}
-                {activeControlSection === "schedule" ? <WorkspaceSchedulePanel /> : null}
+                {activeControlSection === "schedule" ? (
+                  <WorkspaceSchedulePanel
+                    detailOnly
+                    activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleScheduleRailGroupsChange}
+                  />
+                ) : null}
                 {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
                 {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
                 {activeControlSection === "bridge_center" ? renderBridgeSection() : null}

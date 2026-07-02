@@ -59,17 +59,6 @@
   font-size: 12px;
 }
 
-.prefill-open-logs.ui-btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-secondary);
-}
-
-.prefill-open-logs.ui-btn-ghost:hover {
-  background: var(--hover-soft);
-  color: var(--text-primary);
-}
-
 .prefill-stage {
   flex: 1;
   min-height: 0;
@@ -365,10 +354,6 @@
   .prefill-status-actions {
     width: 100%;
     flex-direction: column;
-  }
-
-  .prefill-status-actions .ui-btn {
-    width: 100%;
   }
 
   .prefill-failure-card {

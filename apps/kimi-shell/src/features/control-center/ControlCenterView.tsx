@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
+  Boxes,
+  CalendarClock,
   Check,
   ChevronRight,
   Eraser,
@@ -94,6 +96,8 @@ import { ControlCenterTaskSurface } from "@/features/control-center/ControlCente
 import {
   InstallFlowTaskContent,
 } from "@/features/control-center/InstallFlowModal";
+import { WorkspaceHubPanel } from "@/features/control-center/WorkspaceHubPanel";
+import { WorkspaceSchedulePanel } from "@/features/control-center/WorkspaceSchedulePanel";
 import { SkillCenterPanel } from "@/features/skill-center/SkillCenterPanel";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 
@@ -349,8 +353,28 @@ const controlSections: Array<{
 }> = [
   {
     id: "overview",
-    label: "概览",
+    label: "工作台",
     icon: <LayoutDashboard size={15} />,
+  },
+  {
+    id: "workspace_hub",
+    label: "WorkspaceHub",
+    icon: <Boxes size={15} />,
+  },
+  {
+    id: "skill_center",
+    label: "Skill 中心",
+    icon: <Sparkles size={15} />,
+  },
+  {
+    id: "schedule",
+    label: "调度",
+    icon: <CalendarClock size={15} />,
+  },
+  {
+    id: "runtime_center",
+    label: "诊断",
+    icon: <Activity size={15} />,
   },
   {
     id: "onboarding",
@@ -358,19 +382,9 @@ const controlSections: Array<{
     icon: <SlidersHorizontal size={15} />,
   },
   {
-    id: "runtime_center",
-    label: "运行诊断",
-    icon: <Activity size={15} />,
-  },
-  {
     id: "bridge_center",
     label: "外部 IM 通道",
     icon: <Play size={15} />,
-  },
-  {
-    id: "skill_center",
-    label: "Skill 投影",
-    icon: <Sparkles size={15} />,
   },
 ];
 
@@ -4146,6 +4160,10 @@ export function ControlCenterView({
           ) : (
             <>
               {activeControlSection === "overview" ? renderOverviewSection() : null}
+              {activeControlSection === "workspace_hub" ? (
+                <WorkspaceHubPanel onOpenWorkspace={onOpenFolder} />
+              ) : null}
+              {activeControlSection === "schedule" ? <WorkspaceSchedulePanel /> : null}
               {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
               {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
               {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
@@ -4169,24 +4187,24 @@ export function ControlCenterView({
               }。`}
             </p>
             <div className="main-close-decision-actions">
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-default ui-btn-size-default"
+                variant="outline"
                 onClick={closeBridgeDeleteConfirm}
                 disabled={bridgeBusy}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                variant="destructive"
                 onClick={() => {
                   void handleConfirmDeleteBridgeRobot();
                 }}
                 disabled={bridgeBusy}
               >
                 删除机器人
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -581,11 +581,6 @@
   text-align: left;
 }
 
-.cc-nav-btn .ui-btn-icon {
-  margin-top: 1px;
-  justify-self: start;
-}
-
 .cc-nav-btn.active {
   border-color: var(--chrome-border);
   background: color-mix(in srgb, var(--text-primary) 8%, var(--surface));
@@ -855,11 +850,6 @@
   background: var(--surface);
   color: var(--text-primary);
   white-space: nowrap;
-}
-
-.cc-step-head .cc-action-btn.ui-btn-ghost {
-  border-color: var(--chrome-border);
-  background: var(--surface);
 }
 
 .cc-step-head .cc-action-btn:hover {
@@ -2399,12 +2389,6 @@
   justify-content: center;
 }
 
-.cc-action-btn .ui-btn-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
 .spinner {
   width: 16px;
   height: 16px;
@@ -2452,147 +2436,6 @@
 
 .inline-link-btn:hover {
   color: var(--link-hover);
-}
-
-.ui-btn {
-  appearance: none;
-  border: 1px solid var(--chrome-border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  white-space: nowrap;
-  cursor: pointer;
-  box-shadow: none;
-  transition:
-    background 120ms ease,
-    color 120ms ease,
-    border-color 120ms ease,
-    transform 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.ui-btn:hover {
-  background: var(--hover-soft);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--chrome-border));
-  color: var(--text-primary);
-}
-
-.ui-btn:active {
-  transform: translateY(1px);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-}
-
-.ui-btn:disabled {
-  cursor: not-allowed;
-  opacity: 1;
-  box-shadow: none;
-  transform: none;
-}
-
-.ui-btn-default {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.ui-btn-default:hover {
-  background: color-mix(in srgb, var(--primary) 90%, #000);
-  border-color: color-mix(in srgb, var(--primary) 90%, #000);
-  color: var(--primary-foreground);
-  box-shadow: 0 8px 16px color-mix(in srgb, var(--primary) 12%, transparent);
-}
-
-.ui-btn-default:disabled {
-  background: color-mix(in srgb, var(--primary) 42%, var(--surface));
-  border-color: color-mix(in srgb, var(--primary) 36%, var(--chrome-border));
-  color: color-mix(in srgb, var(--primary-foreground) 72%, var(--text-secondary));
-}
-
-.ui-btn-outline {
-  background: color-mix(in srgb, var(--surface) 84%, transparent);
-  border-color: var(--input);
-  color: var(--text-primary);
-}
-
-.ui-btn-outline:disabled {
-  background: color-mix(in srgb, var(--surface) 76%, transparent);
-  border-color: color-mix(in srgb, var(--input) 72%, transparent);
-  color: color-mix(in srgb, var(--text-secondary) 84%, transparent);
-}
-
-.ui-btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--text-secondary);
-}
-
-.ui-btn-ghost:hover {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-  border-color: transparent;
-  color: var(--text-primary);
-}
-
-.ui-btn-ghost:disabled {
-  background: transparent;
-  border-color: transparent;
-  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
-}
-
-.ui-btn-destructive {
-  background: var(--error);
-  border-color: var(--error);
-  color: var(--destructive-foreground);
-}
-
-.ui-btn-destructive:hover {
-  background: color-mix(in srgb, var(--error) 88%, #000);
-  border-color: color-mix(in srgb, var(--error) 88%, #000);
-  color: var(--destructive-foreground);
-}
-
-.ui-btn-destructive:disabled {
-  background: color-mix(in srgb, var(--error) 34%, var(--surface));
-  border-color: color-mix(in srgb, var(--error) 30%, var(--chrome-border));
-  color: color-mix(in srgb, var(--destructive-foreground) 74%, var(--text-secondary));
-}
-
-.ui-btn-size-default {
-  min-height: 36px;
-  padding: 0 14px;
-}
-
-.ui-btn-size-sm {
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 12px;
-}
-
-.ui-btn-size-icon {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  padding: 0;
-}
-
-.ui-btn-size-icon-sm {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-}
-
-.ui-btn-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 100%;
-  height: 100%;
-  line-height: 0;
 }
 
 .icon-btn {
@@ -5223,36 +5066,6 @@ input:focus {
 .control-center-shell .cc-card-body {
   padding-top: 18px;
   padding-bottom: 20px;
-}
-
-.control-center-shell .ui-btn {
-  min-height: 34px;
-  border-radius: 10px;
-  font-family: var(--cc-body-font);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0;
-  box-shadow: none;
-}
-
-.control-center-shell .ui-btn-default {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.control-center-shell .ui-btn-outline {
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  border-color: var(--cc-line);
-}
-
-.control-center-shell .ui-btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-}
-
-.control-center-shell .ui-btn:hover {
-  transform: translateY(-1px);
 }
 
 .control-center-shell .cc-header-tabs .cc-header-tab:hover,

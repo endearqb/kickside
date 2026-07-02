@@ -1107,6 +1107,15 @@ pub fn import_discovered_skill(
     install_skill_from_source(app, &canonical_path, metadata, ExistingSkillAction::Error)
 }
 
+fn metadata_from_manifest(
+    manifest: &skill_center_store::ParsedSkillManifest,
+) -> SkillManifestMetadata {
+    SkillManifestMetadata {
+        triggers: manifest.triggers.clone(),
+        ..SkillManifestMetadata::default()
+    }
+}
+
 fn install_skill_from_source(
     app: &AppHandle,
     source_dir: &Path,
@@ -1135,6 +1144,8 @@ fn install_skill_from_source(
         .ok_or_else(|| {
             anyhow::anyhow!("invalid skill name; expected lowercase letters, digits or hyphens")
         })?;
+    let description = manifest.description.clone().unwrap_or_default();
+    let manifest_metadata = metadata_from_manifest(&manifest);
 
     let mut registry = skill_center_store::load_registry(app)?;
     if let Some(existing_index) = registry
@@ -1149,8 +1160,9 @@ fn install_skill_from_source(
                 existing_index,
                 source_dir,
                 &raw_name,
-                &manifest.description.unwrap_or_default(),
+                &description,
                 &normalized_projection_name,
+                manifest_metadata,
                 &metadata,
             ),
         };
@@ -1163,7 +1175,7 @@ fn install_skill_from_source(
     let installed = InstalledSkill {
         id: install_id,
         name: raw_name,
-        description: manifest.description.unwrap_or_default(),
+        description,
         source_type: metadata.source_type,
         source_label: metadata.source_label,
         source_key: metadata.source_key,
@@ -1177,7 +1189,7 @@ fn install_skill_from_source(
         installed_at: timestamp.clone(),
         updated_at: timestamp,
         has_scripts: skill_center_store::has_scripts_dir(&target_dir),
-        metadata: SkillManifestMetadata::default(),
+        metadata: manifest_metadata,
         update_status: SkillUpdateStatusView::default(),
         discovery_locations: metadata.discovery_locations.clone(),
     };
@@ -1194,6 +1206,7 @@ fn refresh_existing_bundled_skill(
     raw_name: &str,
     description: &str,
     normalized_projection_name: &str,
+    manifest_metadata: SkillManifestMetadata,
     metadata: &InstallSourceMetadata,
 ) -> anyhow::Result<InstalledSkill> {
     let existing = registry
@@ -1216,7 +1229,7 @@ fn refresh_existing_bundled_skill(
     }
     existing.updated_at = skill_center_store::now_timestamp();
     existing.has_scripts = skill_center_store::has_scripts_dir(&target_dir);
-    existing.metadata = SkillManifestMetadata::default();
+    existing.metadata = manifest_metadata;
     existing.update_status = build_update_status(SkillUpdateStatusKind::UpToDate, None);
     existing.discovery_locations = metadata.discovery_locations.clone();
 
@@ -1254,6 +1267,8 @@ fn refresh_installed_skill_from_source(
         .ok_or_else(|| {
             anyhow::anyhow!("invalid skill name; expected lowercase letters, digits or hyphens")
         })?;
+    let description = manifest.description.clone().unwrap_or_default();
+    let manifest_metadata = metadata_from_manifest(&manifest);
 
     let mut registry = skill_center_store::load_registry(app)?;
     let existing = skill_center_store::find_skill_mut(&mut registry, skill_id)
@@ -1262,7 +1277,7 @@ fn refresh_installed_skill_from_source(
     skill_center_store::replace_skill_source(source_dir, &target_dir)?;
 
     existing.name = raw_name;
-    existing.description = manifest.description.unwrap_or_default();
+    existing.description = description;
     existing.source_type = metadata.source_type;
     existing.source_label = metadata.source_label.clone();
     existing.source_key = metadata.source_key.clone();
@@ -1275,7 +1290,7 @@ fn refresh_installed_skill_from_source(
     }
     existing.updated_at = skill_center_store::now_timestamp();
     existing.has_scripts = skill_center_store::has_scripts_dir(&target_dir);
-    existing.metadata = SkillManifestMetadata::default();
+    existing.metadata = manifest_metadata;
     existing.update_status = build_update_status(
         SkillUpdateStatusKind::UpToDate,
         Some("技能已从来源重新同步".to_string()),

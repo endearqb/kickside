@@ -64,12 +64,36 @@ struct DiscoveryCacheFile {
 pub struct ParsedSkillManifest {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub triggers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct SkillFrontmatter {
     name: Option<String>,
     description: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_list")]
+    triggers: Vec<String>,
+}
+
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_yaml::Value::deserialize(deserializer)?;
+    let values = match value {
+        serde_yaml::Value::Sequence(items) => items
+            .into_iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        serde_yaml::Value::String(value) => value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    };
+    Ok(values)
 }
 
 pub fn ensure_layout(app: &AppHandle) -> anyhow::Result<()> {
@@ -403,6 +427,12 @@ pub fn parse_skill_manifest(skill_md_path: &Path) -> anyhow::Result<ParsedSkillM
             .description
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        manifest.triggers = parsed
+            .triggers
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
         remaining = &stripped[(frontmatter_end + "\n---\n".len())..];
     }
 
@@ -941,13 +971,14 @@ mod tests {
         let path = temp.path.join("SKILL.md");
         fs::write(
             &path,
-            "---\nname: Demo Skill\ndescription: Short desc\n---\n# ignored\nbody",
+            "---\nname: Demo Skill\ndescription: Short desc\ntriggers:\n  - demo\n  - review\n---\n# ignored\nbody",
         )
         .expect("write");
 
         let parsed = parse_skill_manifest(&path).expect("parse");
         assert_eq!(parsed.name.as_deref(), Some("Demo Skill"));
         assert_eq!(parsed.description.as_deref(), Some("Short desc"));
+        assert_eq!(parsed.triggers, vec!["demo", "review"]);
     }
 
     #[test]

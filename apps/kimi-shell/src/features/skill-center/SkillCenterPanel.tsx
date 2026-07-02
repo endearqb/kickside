@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 type ManageContextId = "skill_center" | "current_workspace" | "user_home" | `workspace:${string}`;
+type SkillDisplaySource = "bundled" | "user" | "harness" | "hub";
 
 type ManageListEntry =
   | {
@@ -152,6 +153,20 @@ function formatSkillSource(skill: InstalledSkill) {
     return skill.sourcePath || skill.sourceLabel || "外部发现导入";
   }
   return skill.sourcePath || skill.sourceLabel || "本地导入";
+}
+
+function getSkillDisplaySource(skill: InstalledSkill): SkillDisplaySource {
+  const sourceText = `${skill.sourceLabel ?? ""} ${skill.sourcePath ?? ""}`.toLowerCase();
+  if (skill.sourceType === "bundled") return "bundled";
+  if (sourceText.includes("harness")) return "harness";
+  return "user";
+}
+
+function formatSkillDisplaySource(source: SkillDisplaySource) {
+  if (source === "bundled") return "bundled";
+  if (source === "harness") return "harness";
+  if (source === "hub") return "hub";
+  return "user";
 }
 
 function formatDiscoveryScope(scope: SkillDiscoveryLocation["scope"]) {
@@ -902,6 +917,18 @@ export function SkillCenterPanel({
                       <div>
                         <dt>来源</dt>
                         <dd>{formatSkillSource(selectedInstalledSkill)}</dd>
+                      </div>
+                      <div>
+                        <dt>展示来源</dt>
+                        <dd>{formatSkillDisplaySource(getSkillDisplaySource(selectedInstalledSkill))}</dd>
+                      </div>
+                      <div>
+                        <dt>Triggers</dt>
+                        <dd>
+                          {selectedInstalledSkill.metadata?.triggers?.length
+                            ? selectedInstalledSkill.metadata.triggers.join(" / ")
+                            : "未声明"}
+                        </dd>
                       </div>
                       <div>
                         <dt>本地路径</dt>

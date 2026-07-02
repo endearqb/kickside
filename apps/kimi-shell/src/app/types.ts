@@ -367,6 +367,7 @@ export interface SkillUpdateStatusView {
 }
 
 export interface SkillManifestMetadata {
+  triggers: string[];
   tags: string[];
   filePatterns: string[];
   workspacePatterns: string[];
@@ -1216,6 +1217,8 @@ export type Theme = "light" | "dark";
 
 export type ControlSectionId =
   | "overview"
+  | "workspace_hub"
+  | "schedule"
   | "onboarding"
   | "runtime_center"
   | "bridge_center"

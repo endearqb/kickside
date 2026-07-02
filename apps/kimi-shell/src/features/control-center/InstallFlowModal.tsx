@@ -399,9 +399,6 @@ export function InstallFlowTaskContent({
     activePreflight && !activePreflight.smokeTestOk
       ? "PowerShell 预检未通过，建议先处理执行策略。"
       : "",
-    probe && !probe.gitBashReady
-      ? "未检测到 Git Bash，Kimi Code 执行 shell 工具可能不可用。请安装 Git for Windows。"
-      : "",
     !probe?.kimiReady && kimiPathInput.trim()
       ? "已填写本地 Kimi 路径，点击“保存路径并重试”后重新探测。"
       : "",
@@ -490,9 +487,9 @@ export function InstallFlowTaskContent({
             <small>{detectedKimiPath || "尚未探测到可用路径"}</small>
           </article>
           <article className="cc-install-overview-card">
-            <span>Git Bash</span>
-            <strong>{statusLabel(probe?.gitBashReady)}</strong>
-            <small>{probe?.kimiShellPath || "未配置 KIMI_SHELL_PATH"}</small>
+            <span>KIMI_SHELL_PATH</span>
+            <strong>{probe?.gitBashReady ? "已配置" : "未配置"}</strong>
+            <small>{probe?.kimiShellPath || "使用 Kimi Code 默认定位"}</small>
           </article>
         </div>
 
@@ -923,17 +920,17 @@ export function InstallFlowTaskContent({
             <h3>卸载 Kimi Code</h3>
             <p>仅卸载托管的 Kimi Code。卸载前会先停止后端，完成后后端保持停止。</p>
             <div className="main-close-decision-actions">
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-default ui-btn-size-default"
+                variant="outline"
                 onClick={() => setUninstallConfirmOpen(false)}
                 disabled={isBusy}
               >
                 取消
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                variant="destructive"
                 onClick={() => {
                   void onStartTask("uninstall_kimi");
                 }}
@@ -941,7 +938,7 @@ export function InstallFlowTaskContent({
                 title={uninstallAvailability.reason}
               >
                 确认卸载
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "hermes-agent",
+  "name": "Hermes Agent",
+  "summary": "Personal agent workspace with soul, memories, local skills, and cron notes.",
+  "agentRuntime": "hermes",
+  "version": "0.1.0",
+  "tags": ["hermes", "personal-agent"],
+  "skills": [],
+  "variables": [
+    {
+      "key": "workspaceName",
+      "label": "工作区名称",
+      "type": "string",
+      "required": true,
+      "placeholder": "Hermes"
+    },
+    {
+      "key": "workDir",
+      "label": "目标目录",
+      "type": "path",
+      "required": true
+    }
+  ],
+  "template": "./template",
+  "postCreate": {
+    "openWith": "hermes",
+    "notes": "首版只生成本地结构；Hermes runtime 集成由后续版本接入。"
+  }
+}

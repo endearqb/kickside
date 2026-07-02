@@ -1,3 +1,4 @@
+mod acp;
 #[allow(dead_code)]
 mod api_v1_client;
 mod app_state;
@@ -11,6 +12,7 @@ mod command_utils;
 mod context_menu;
 mod enhanced_web;
 mod feishu_onboarding;
+mod harness;
 mod install_manager;
 mod kimi_locator;
 mod log_manager;
@@ -18,6 +20,7 @@ mod onboarding_http;
 mod open_request;
 mod port_manager;
 mod runtime_locator;
+mod scheduler;
 mod settings_store;
 mod shortcut_manager;
 mod skill_center;
@@ -31,6 +34,7 @@ mod window_manager;
 mod workspace_import;
 #[allow(dead_code)]
 mod workspace_session;
+mod workspaces;
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -1650,6 +1654,7 @@ pub fn run() {
                     format!("failed to initialize skill center: {error:#}"),
                 );
             }
+            scheduler::start(app.handle().clone());
 
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
@@ -1778,6 +1783,22 @@ pub fn run() {
             update_skill,
             uninstall_skill,
             cleanup_session_skill_projections,
+            workspaces::workspace_list,
+            workspaces::workspace_register,
+            workspaces::workspace_register_many,
+            workspaces::workspace_mark_opened,
+            workspaces::workspace_remove,
+            harness::harness_list,
+            harness::harness_get,
+            harness::harness_dry_run,
+            harness::harness_create,
+            scheduler::schedule_list,
+            scheduler::schedule_set_heartbeat,
+            scheduler::schedule_create_task,
+            scheduler::schedule_update_task,
+            scheduler::schedule_delete_task,
+            scheduler::schedule_run_now,
+            scheduler::schedule_list_runs,
             get_diagnostics,
             open_logs_folder,
             open_external_url,

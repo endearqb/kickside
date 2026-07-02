@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "openclaw-feishu-ops",
+  "name": "OpenClaw Feishu Ops",
+  "summary": "Feishu IM bridge operations workspace with inbox, outbox, config, and local skills.",
+  "agentRuntime": "kimi-code",
+  "version": "0.1.0",
+  "tags": ["feishu", "ops", "bridge"],
+  "skills": [
+    {
+      "id": "bridge-ops",
+      "source": "harness"
+    }
+  ],
+  "variables": [
+    {
+      "key": "workspaceName",
+      "label": "工作区名称",
+      "type": "string",
+      "required": true,
+      "placeholder": "OpenClaw 运维"
+    },
+    {
+      "key": "workDir",
+      "label": "目标目录",
+      "type": "path",
+      "required": true
+    }
+  ],
+  "template": "./template",
+  "postCreate": {
+    "openWith": "kimi-code",
+    "notes": "创建后在 config/workspace.json 中补充 IM bridge 的非敏感配置。"
+  }
+}

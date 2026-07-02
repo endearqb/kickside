@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::{env, ffi::OsString, path::PathBuf};
 
 use crate::types::AppSettings;
 
@@ -26,31 +26,47 @@ pub fn locate(settings: &AppSettings) -> Result<PathBuf, String> {
 }
 
 pub fn locate_shell_path() -> Option<PathBuf> {
-    if let Some(configured) = env::var_os("KIMI_SHELL_PATH")
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
-    {
-        return Some(configured);
-    }
-
-    for candidate in git_bash_candidates() {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    which::which("bash").ok()
+    configured_shell_path(env::var_os("KIMI_SHELL_PATH"))
 }
 
-fn git_bash_candidates() -> Vec<PathBuf> {
-    ["ProgramFiles", "ProgramFiles(x86)"]
-        .iter()
-        .filter_map(|key| env::var_os(key).map(PathBuf::from))
-        .flat_map(|base| {
-            [
-                base.join("Git").join("bin").join("bash.exe"),
-                base.join("Git").join("usr").join("bin").join("bash.exe"),
-            ]
-        })
-        .collect()
+fn configured_shell_path(value: Option<OsString>) -> Option<PathBuf> {
+    value.map(PathBuf::from).filter(|path| path.exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn configured_shell_path_returns_existing_explicit_path() {
+        let path = env::temp_dir().join(format!(
+            "kimi-shell-explicit-bash-{}.exe",
+            std::process::id()
+        ));
+        fs::write(&path, b"bash").expect("test shell path should be written");
+
+        assert_eq!(
+            configured_shell_path(Some(path.clone().into_os_string())),
+            Some(path.clone())
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn configured_shell_path_ignores_missing_explicit_path() {
+        let path = env::temp_dir().join(format!(
+            "kimi-shell-missing-bash-{}.exe",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(configured_shell_path(Some(path.into_os_string())), None);
+    }
+
+    #[test]
+    fn configured_shell_path_ignores_unset_env() {
+        assert_eq!(configured_shell_path(None), None);
+    }
 }

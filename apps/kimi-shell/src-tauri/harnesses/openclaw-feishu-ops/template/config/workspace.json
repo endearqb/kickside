@@ -1,0 +1,8 @@
+{
+  "name": "{{workspaceName}}",
+  "runtime": "kimi-code",
+  "bridge": {
+    "kind": "feishu",
+    "session": ""
+  }
+}

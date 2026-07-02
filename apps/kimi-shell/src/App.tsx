@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
+import { Button } from "@/components/ui/button";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import {
@@ -423,9 +424,9 @@ function App() {
               </span>
             </div>
             <div className="main-close-decision-actions">
-              <button
+              <Button
                 type="button"
-                className="ui-btn ui-btn-destructive ui-btn-size-default"
+                variant="destructive"
                 onClick={() => {
                   void shell.handleSubmitMainWindowCloseDecision({
                     decision: "exit",
@@ -434,10 +435,9 @@ function App() {
                 }}
               >
                 {shell.mainWindowCloseDecisionRequest.exitLabel || "退出应用"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="ui-btn ui-btn-default ui-btn-size-default"
                 autoFocus
                 onClick={() => {
                   void shell.handleSubmitMainWindowCloseDecision({
@@ -447,7 +447,7 @@ function App() {
                 }}
               >
                 {shell.mainWindowCloseDecisionRequest.minimizeLabel || "最小化到系统托盘"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>

@@ -1,6 +1,6 @@
 [package]
 name = "appskimi-shell"
-version = "0.1.3"
+version = "0.1.4"
 description = "Kimi Sidekick"
 authors = ["kimi-shell"]
 edition = "2021"
@@ -22,6 +22,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 anyhow = "1"
 chrono = "0.4"
+cron = "0.12"
 encoding_rs = "0.8"
 fs2 = "0.4"
 rand = "0.8"

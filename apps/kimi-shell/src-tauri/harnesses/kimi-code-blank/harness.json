@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "kimi-code-blank",
+  "name": "Kimi Code Blank",
+  "summary": "Minimal Kimi Code workspace with README First-friendly starter docs.",
+  "agentRuntime": "kimi-code",
+  "version": "0.1.0",
+  "tags": ["kimi-code", "blank"],
+  "skills": [],
+  "variables": [
+    {
+      "key": "workspaceName",
+      "label": "工作区名称",
+      "type": "string",
+      "required": true,
+      "placeholder": "新工作区"
+    },
+    {
+      "key": "workDir",
+      "label": "目标目录",
+      "type": "path",
+      "required": true
+    }
+  ],
+  "template": "./template",
+  "postCreate": {
+    "openWith": "kimi-code",
+    "notes": "创建后可按项目需要补充 README、测试和目录约定。"
+  }
+}

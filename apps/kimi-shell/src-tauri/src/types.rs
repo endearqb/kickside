@@ -888,6 +888,8 @@ pub struct SkillUpdateStatusView {
 #[serde(rename_all = "camelCase")]
 pub struct SkillManifestMetadata {
     #[serde(default)]
+    pub triggers: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub file_patterns: Vec<String>,

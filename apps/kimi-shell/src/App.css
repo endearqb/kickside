@@ -7438,6 +7438,8 @@ input:focus {
 
 /* Control Center image-style baseline: quiet three-pane desktop settings surface. */
 .control-center-shell {
+  --radius-container: 12px;
+  --radius-control: 6px;
   --cc-background: #f4f4f2;
   --cc-background-subtle: #f8f8f6;
   --cc-surface: #ffffff;
@@ -7669,7 +7671,7 @@ input:focus {
 .control-center-shell .bridge-port-card,
 .control-center-shell .bridge-workbench-summary-card {
   border: 1px solid var(--cc-border);
-  border-radius: 16px;
+  border-radius: var(--radius-container);
   background: var(--cc-surface);
   box-shadow: none;
 }
@@ -7704,10 +7706,164 @@ input:focus {
 }
 
 .control-center-shell .cc-metric-card-ui {
-  border: 1px solid var(--cc-border);
-  border-radius: 8px;
-  background: var(--cc-background-subtle);
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--cc-border) 68%, transparent);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
+}
+
+.control-center-shell .cc-desc-list,
+.control-center-shell .diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  margin: 0;
+}
+
+.control-center-shell .cc-desc-list.columns-1 {
+  grid-template-columns: 1fr;
+}
+
+.control-center-shell .cc-desc-list.columns-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.control-center-shell .cc-desc-list.columns-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.control-center-shell .cc-desc-list-item,
+.control-center-shell .diag-item,
+.control-center-shell .cc-config-summary-card {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--cc-border) 68%, transparent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.control-center-shell .cc-desc-list-item dt,
+.control-center-shell .diag-item dt,
+.control-center-shell .cc-metric-card-ui span,
+.control-center-shell .cc-config-summary-card span {
+  margin: 0;
+  color: var(--cc-muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.control-center-shell .cc-desc-list-item dd,
+.control-center-shell .diag-item dd,
+.control-center-shell .cc-metric-card-ui strong,
+.control-center-shell .cc-config-summary-card strong {
+  min-width: 0;
+  margin: 0;
+  color: var(--cc-foreground);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.control-center-shell .cc-desc-list-item small,
+.control-center-shell .cc-metric-card-ui small,
+.control-center-shell .cc-config-summary-card small {
+  min-width: 0;
+  color: var(--cc-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.control-center-shell .cc-surface-section {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center-shell .cc-empty-state {
+  min-height: 132px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center-shell .cc-action-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.control-center-shell .cc-action-menu-trigger {
+  border-radius: var(--radius-control);
+}
+
+.control-center-shell .cc-action-menu-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 220px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid var(--cc-border);
+  border-radius: var(--radius-container);
+  background: var(--cc-surface);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 12%, transparent);
+}
+
+.control-center-shell .cc-action-menu-item {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--cc-foreground);
+  text-align: left;
+}
+
+.control-center-shell .cc-action-menu-item:hover,
+.control-center-shell .cc-action-menu-item:focus-visible {
+  background: var(--cc-rail-selected);
+}
+
+.control-center-shell .cc-action-menu-item:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.control-center-shell .cc-action-menu-item.tone-danger {
+  color: var(--cc-danger);
+}
+
+.control-center-shell .cc-action-menu-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.control-center-shell .cc-action-menu-item-copy strong {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.control-center-shell .cc-action-menu-item-copy small {
+  color: var(--cc-muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .control-center-shell .cc-overview-shell-image {
@@ -7969,10 +8125,11 @@ input:focus {
   display: grid;
   align-content: start;
   gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--cc-border);
-  border-radius: 8px;
-  background: var(--cc-background-subtle);
+  padding: 8px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--cc-border) 68%, transparent);
+  border-radius: 0;
+  background: transparent;
 }
 
 .control-center-shell .skill-center-manifest-card > span {
@@ -8096,13 +8253,21 @@ input:focus {
 }
 
 .control-center-shell .cc-onboarding-flow-actions .cc-actions {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .control-center-shell .cc-onboarding-flow-actions .cc-action-btn {
-  width: 100%;
+  width: auto;
   justify-content: center;
+}
+
+.control-center-shell .cc-onboarding-flow-actions .cc-action-btn:not(:first-child) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cc-muted);
+  padding-inline: 4px;
 }
 
 .control-center-shell .cc-onboarding-detail-head {
@@ -8326,6 +8491,38 @@ input:focus {
   text-transform: uppercase;
 }
 
+.control-center-shell .cc-config-access-layout .cc-config-panel,
+.control-center-shell .cc-config-access-layout .cc-config-summary-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center-shell .cc-config-radio {
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center-shell .bridge-robot-workdir-card,
+.control-center-shell .bridge-danger-group {
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--cc-border) 68%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center-shell .bridge-danger-group {
+  color: var(--cc-danger);
+}
+
+.control-center-shell .bridge-danger-group .bridge-panel-group-label {
+  display: none;
+}
+
 @keyframes cc-view-in {
   from {
     opacity: 0;
@@ -8380,7 +8577,8 @@ input:focus {
   }
 
   .control-center-shell .cc-overview-meta-grid,
-  .control-center-shell .cc-overview-workbench-grid {
+  .control-center-shell .cc-overview-workbench-grid,
+  .control-center-shell .cc-desc-list.columns-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -8440,7 +8638,11 @@ input:focus {
   }
 
   .control-center-shell .cc-overview-meta-grid,
-  .control-center-shell .cc-overview-workbench-grid {
+  .control-center-shell .cc-overview-workbench-grid,
+  .control-center-shell .cc-desc-list,
+  .control-center-shell .cc-desc-list.columns-3,
+  .control-center-shell .cc-desc-list.columns-4,
+  .control-center-shell .diagnostics-grid {
     grid-template-columns: 1fr;
   }
 

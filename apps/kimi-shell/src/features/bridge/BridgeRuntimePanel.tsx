@@ -20,7 +20,7 @@ import type {
   BridgeSessionRecord,
   BridgeStatus,
 } from "@/app/types";
-import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
+import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterSurfaceSection } from "@/components/control-center/ControlCenterSurfaceSection";
 import { Button } from "@/components/ui/button";
@@ -266,23 +266,17 @@ export function BridgeRuntimePanel({
         }
         className="bridge-panel-section is-expanded"
       >
-        <div className="diagnostics-grid">
-          <ControlCenterMetricCard label="机器人" value={connector.label} />
-          <ControlCenterMetricCard label="Connector ID" value={connector.id} />
-          <ControlCenterMetricCard label="平台" value={formatPlatform(connector.platform)} />
-          <ControlCenterMetricCard
-            label="实时状态"
-            value={formatConnectorState(connectorStatus?.state)}
-          />
-          <ControlCenterMetricCard
-            label="最近就绪"
-            value={formatTs(connectorStatus?.lastReadyAt)}
-          />
-          <ControlCenterMetricCard
-            label="最近失败"
-            value={formatTs(connectorStatus?.lastFailureAt)}
-          />
-        </div>
+        <ControlCenterDescList
+          columns={3}
+          items={[
+            { label: "机器人", value: connector.label },
+            { label: "Connector ID", value: connector.id },
+            { label: "平台", value: formatPlatform(connector.platform) },
+            { label: "实时状态", value: formatConnectorState(connectorStatus?.state) },
+            { label: "最近就绪", value: formatTs(connectorStatus?.lastReadyAt) },
+            { label: "最近失败", value: formatTs(connectorStatus?.lastFailureAt) },
+          ]}
+        />
         {connectorRecentErrors.length > 0 ? (
           <div className="bridge-error-list">
             {connectorRecentErrors.map((entry) => (

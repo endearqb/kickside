@@ -79,8 +79,9 @@ import {
 import { DiagnosticItem } from "@/components/common/DiagnosticItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
+import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
 import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
@@ -1892,22 +1893,22 @@ export function ControlCenterView({
     bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
   ].filter((item): item is string => Boolean(item));
   const pendingOverviewCount = overviewBriefs.length;
-  const overviewPrimaryMessage =
-    overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、外部 IM 通道和 Skill 投影。";
 
   function renderOverviewSection() {
     const attentionItems = overviewBriefs.slice(0, 3);
     const activeWorkspacePath =
       status?.activeSessionWorkDir?.trim() || effectiveWorkDir.trim();
+    const backendState = diagnostics?.state ?? status?.state ?? "-";
+    const sessionLabel = status?.activeSessionId ? `会话 ${status.activeSessionId}` : "无活动会话";
+    const statusSummary = `${backendState} · ${sessionLabel} · ${activeWorkspacePath || "未设置工作区"}`;
 
     return (
       <div className="cc-overview-shell cc-overview-shell-image">
         <section className="cc-card cc-overview-status-card">
           <ControlCenterCardHeader
-            eyebrow="状态总览"
-            title="工作台"
-            description={overviewPrimaryMessage}
-            statusLabel={pendingOverviewCount === 0 ? "稳定" : `${pendingOverviewCount} 项关注`}
+            eyebrow="运行状态"
+            title={statusSummary}
+            statusLabel={pendingOverviewCount === 0 ? "运行中" : `${pendingOverviewCount} 项关注`}
             statusTone={pendingOverviewCount === 0 ? "success" : "warning"}
             primaryAction={
               <div className="cc-actions">
@@ -1938,59 +1939,69 @@ export function ControlCenterView({
             }
           />
           <div className="cc-card-body">
-            <div className="cc-overview-meta-grid">
-              <article className="cc-overview-meta-item">
-                <span>Backend state</span>
-                <strong>{diagnostics?.state ?? status?.state ?? "-"}</strong>
-                <small>
-                  active {String(status?.activePort ?? diagnostics?.activePort ?? "-")} / workspace{" "}
-                  {String(status?.workspacePort ?? diagnostics?.workspacePort ?? "-")}
-                </small>
-              </article>
-              <article className="cc-overview-meta-item">
-                <span>Workspace</span>
-                <strong>{activeWorkspacePath || "-"}</strong>
-                <small>{status?.activeSessionId || "no active session"}</small>
-              </article>
-              <article className="cc-overview-meta-item">
-                <span>Auth</span>
-                <strong>{status?.authMode ?? "-"}</strong>
-                <small>Provider {formatProviderApiHealthState(status?.providerApiHealth.state)}</small>
-              </article>
-              <article className="cc-overview-meta-item">
-                <span>Enhanced Web / Hotkey</span>
-                <strong>{status?.enhancedWebHealth.state ?? "-"}</strong>
-                <small>{status?.hotkey || "-"}</small>
-              </article>
-            </div>
+            <ControlCenterDescList
+              columns={4}
+              items={[
+                {
+                  label: "后端",
+                  value: backendState,
+                  meta: `活动端口 ${String(status?.activePort ?? diagnostics?.activePort ?? "-")}`,
+                },
+                {
+                  label: "工作区",
+                  value: activeWorkspacePath || "-",
+                  meta: sessionLabel,
+                },
+                {
+                  label: "认证",
+                  value: status?.authMode ?? "-",
+                  meta: formatProviderApiHealthState(status?.providerApiHealth.state),
+                },
+                {
+                  label: "快捷键",
+                  value: status?.hotkey || "-",
+                  meta: status?.enhancedWebHealth.state ?? "-",
+                },
+              ]}
+            />
           </div>
         </section>
 
         <section className="cc-overview-workbench-grid">
           <section className="cc-card cc-overview-focus-card">
             <header className="cc-card-header">
-              <h3>当前重点</h3>
-              <ControlCenterStatusBadge tone={activeOnboardingStep.statusTone}>
-                {activeOnboardingStep.statusLabel}
+              <h3>需要处理</h3>
+              <ControlCenterStatusBadge tone={attentionItems.length > 0 ? "warning" : "success"}>
+                {attentionItems.length > 0 ? `${attentionItems.length} 项` : "无"}
               </ControlCenterStatusBadge>
             </header>
             <div className="cc-card-body">
-              <div className="cc-overview-focus-copy">
-                <span>推荐步骤 {activeOnboardingStep.index}</span>
-                <strong>{activeOnboardingStep.title}</strong>
-                <p>{overviewPrimaryMessage}</p>
-              </div>
-              <div className="cc-actions">
-                <Button
-                  type="button"
-                  className="cc-action-btn"
-                  onClick={() => {
-                    void handleOpenOnboardingEntry();
-                  }}
-                >
-                  处理当前重点
-                </Button>
-              </div>
+              {attentionItems.length > 0 ? (
+                <>
+                  <div className="cc-brief-list">
+                    {attentionItems.map((item) => (
+                      <article key={item} className="cc-brief-item">
+                        <strong>{item}</strong>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="cc-actions">
+                    <Button
+                      type="button"
+                      className="cc-action-btn"
+                      onClick={() => {
+                        void handleOpenOnboardingEntry();
+                      }}
+                    >
+                      处理待办
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <article className="cc-brief-item">
+                  <strong>暂无待处理</strong>
+                </article>
+              )}
             </div>
           </section>
 
@@ -2035,43 +2046,29 @@ export function ControlCenterView({
 
         <section className="cc-card cc-overview-attention-card">
           <header className="cc-card-header">
-            <h3>待处理与提醒</h3>
-            <ControlCenterStatusBadge tone={attentionItems.length > 0 ? "warning" : "success"}>
-              {attentionItems.length > 0 ? `${attentionItems.length} 项` : "无"}
-            </ControlCenterStatusBadge>
+            <h3>Agent 提示</h3>
           </header>
           <div className="cc-card-body">
-            {attentionItems.length > 0 ? (
-              <div className="cc-brief-list">
-                {attentionItems.map((item) => (
-                  <article key={item} className="cc-brief-item">
-                    <strong>{item}</strong>
-                  </article>
-                ))}
+            <article className="cc-brief-tip-card">
+              <div className="cc-brief-tip-head">
+                <div className="cc-brief-tip-meta">
+                  <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  icon={<RefreshCw size={13} />}
+                  className="cc-brief-tip-refresh"
+                  onClick={() => setBriefTip(pickRandomAgentTip())}
+                  aria-label="刷新 Agent 使用提示"
+                />
               </div>
-            ) : (
-              <article className="cc-brief-tip-card">
-                <div className="cc-brief-tip-head">
-                  <div className="cc-brief-tip-meta">
-                    <span className="cc-brief-tip-badge">Agent 提示</span>
-                    <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    icon={<RefreshCw size={13} />}
-                    className="cc-brief-tip-refresh"
-                    onClick={() => setBriefTip(pickRandomAgentTip())}
-                    aria-label="刷新 Agent 使用提示"
-                  />
-                </div>
-                <div className="cc-brief-tip-article">
-                  <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
-                  <p className="cc-brief-tip-body">{briefTip.body}</p>
-                </div>
-              </article>
-            )}
+              <div className="cc-brief-tip-article">
+                <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
+                <p className="cc-brief-tip-body">{briefTip.body}</p>
+              </div>
+            </article>
           </div>
         </section>
       </div>
@@ -2366,8 +2363,7 @@ export function ControlCenterView({
           detailBodyClassName="cc-runtime-detail-body"
           railHeader={
             <div className="cc-runtime-rail-head">
-              <h4>Diagnostics</h4>
-              <p>启动链路、路径、WebView 和日志。</p>
+              <h4>诊断</h4>
               <div className="cc-actions">
                 <Button
                   type="button"
@@ -2395,7 +2391,7 @@ export function ControlCenterView({
             <>
               <div className="cc-runtime-rail-group">
                 <div className="cc-runtime-rail-group-head">
-                  <span>Runtime</span>
+                  <span>运行时</span>
                   <small>{runtimeRailItems.length}</small>
                 </div>
                 {runtimeRailItems.map((item) => (
@@ -2419,7 +2415,7 @@ export function ControlCenterView({
               </div>
               <div className="cc-runtime-rail-group">
                 <div className="cc-runtime-rail-group-head">
-                  <span>Risks</span>
+                  <span>风险</span>
                   <small>{runtimeIssues.length}</small>
                 </div>
                 <div className="cc-runtime-issue-list">
@@ -2446,11 +2442,6 @@ export function ControlCenterView({
           detail={
             selectedRuntimePanel === "core" ? (
               <>
-                <div className="cc-actions">
-                  <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
-                  <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 Kimi Code Doctor</Button>
-                  <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
-                </div>
                 {kimiDoctorResult ? (
                   <section className="cc-runtime-detail-card">
                     <div className="cc-runtime-section-head">
@@ -2460,10 +2451,10 @@ export function ControlCenterView({
                       </ControlCenterStatusBadge>
                     </div>
                     <div className="diagnostics-grid">
-                      <DiagnosticItem label="Exit Code" value={String(kimiDoctorResult.exitCode ?? "-")} />
-                      <DiagnosticItem label="Command" value={kimiDoctorResult.command} />
-                      <DiagnosticItem label="Kimi Path" value={kimiDoctorResult.kimiPath} />
-                      <DiagnosticItem label="Shell Path" value={kimiDoctorResult.shellPath ?? "-"} />
+                      <DiagnosticItem label="退出码" value={String(kimiDoctorResult.exitCode ?? "-")} />
+                      <DiagnosticItem label="命令" value={kimiDoctorResult.command} />
+                      <DiagnosticItem label="Kimi 路径" value={kimiDoctorResult.kimiPath} />
+                      <DiagnosticItem label="Shell 路径" value={kimiDoctorResult.shellPath ?? "-"} />
                     </div>
                     <div className="cc-log-block-head">
                       <h4 className="log-tail-title">Doctor 输出</h4>
@@ -2477,43 +2468,43 @@ export function ControlCenterView({
                     <h4>运行摘要</h4>
                   </div>
                   <div className="diagnostics-grid">
-                    <DiagnosticItem label="State" value={diagnostics?.state ?? "-"} />
-                    <DiagnosticItem label="Active Port" value={String(diagnostics?.activePort ?? "-")} />
-                    <DiagnosticItem label="Workspace Port" value={String(diagnostics?.workspacePort ?? "-")} />
-                    <DiagnosticItem label="Base Port" value={String(diagnostics?.basePort ?? "-")} />
-                    <DiagnosticItem label="Instance ID" value={diagnostics?.instanceId ?? "-"} />
+                    <DiagnosticItem label="状态" value={diagnostics?.state ?? "-"} />
+                    <DiagnosticItem label="活动端口" value={String(diagnostics?.activePort ?? "-")} />
+                    <DiagnosticItem label="工作区端口" value={String(diagnostics?.workspacePort ?? "-")} />
+                    <DiagnosticItem label="基础端口" value={String(diagnostics?.basePort ?? "-")} />
+                    <DiagnosticItem label="实例 ID" value={diagnostics?.instanceId ?? "-"} />
                     <DiagnosticItem label="PID" value={String(diagnostics?.pid ?? "-")} />
-                    <DiagnosticItem label="Start Cycle ID" value={String(diagnostics?.startCycleId ?? "-")} />
-                    <DiagnosticItem label="Hotkey Owner" value={String(diagnostics?.isHotkeyOwner ?? false)} />
-                    <DiagnosticItem label="Shell to Loading (ms)" value={String(diagnostics?.loadingStartupMs ?? "-")} />
-                    <DiagnosticItem label="Backend Ready (ms)" value={String(diagnostics?.backendReadyMs ?? "-")} />
-                    <DiagnosticItem label="Loading SLA Met" value={String(diagnostics?.loadingSlaMet ?? "-")} />
-                    <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
-                    <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
-                    <DiagnosticItem label="Provider API Health" value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)} />
-                    <DiagnosticItem label="Last Provider API Check" value={formatLoginCheckTimestamp(diagnostics?.providerApiHealth.checkedAtMs)} />
-                    <DiagnosticItem label="Last Provider API Source" value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)} />
-                    <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
-                    <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
-                    <DiagnosticItem label="WebView Runtime" value={diagnostics?.webviewRuntimeKind ?? "-"} />
-                    <DiagnosticItem label="WebView Version" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
-                    <DiagnosticItem label="Startup Pending" value={String(diagnostics?.startupPending ?? false)} />
-                    <DiagnosticItem label="Startup Exit Cause" value={diagnostics?.startupExitCause ?? "-"} />
-                    <DiagnosticItem label="Main Create Mode" value={diagnostics?.mainCreateMode ?? "-"} />
-                    <DiagnosticItem label="Startup Attempt ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
-                    <DiagnosticItem label="Startup Phase" value={diagnostics?.startupPhase ?? "-"} />
-                    <DiagnosticItem label="Startup Failure Kind" value={diagnostics?.startupFailureKind ?? "-"} />
-                    <DiagnosticItem label="Startup Failure Detail" value={diagnostics?.startupFailureDetail ?? "-"} />
-                    <DiagnosticItem label="Startup Monitor State" value={diagnostics?.startupMonitorState ?? "-"} />
-                    <DiagnosticItem label="Startup Monitor Reason" value={diagnostics?.startupMonitorReason ?? "-"} />
-                    <DiagnosticItem label="Startup Monitor Target" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
-                    <DiagnosticItem label="Startup Monitor Detail" value={diagnostics?.startupMonitorDetail ?? "-"} />
+                    <DiagnosticItem label="启动周期 ID" value={String(diagnostics?.startCycleId ?? "-")} />
+                    <DiagnosticItem label="快捷键归属" value={String(diagnostics?.isHotkeyOwner ?? false)} />
+                    <DiagnosticItem label="Shell 到加载耗时" value={String(diagnostics?.loadingStartupMs ?? "-")} />
+                    <DiagnosticItem label="后端就绪耗时" value={String(diagnostics?.backendReadyMs ?? "-")} />
+                    <DiagnosticItem label="加载 SLA" value={String(diagnostics?.loadingSlaMet ?? "-")} />
+                    <DiagnosticItem label="Kimi 版本" value={diagnostics?.kimiVersion ?? "-"} />
+                    <DiagnosticItem label="版本检查错误" value={diagnostics?.versionError ?? "-"} />
+                    <DiagnosticItem label="Provider API 健康" value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)} />
+                    <DiagnosticItem label="Provider API 检查时间" value={formatLoginCheckTimestamp(diagnostics?.providerApiHealth.checkedAtMs)} />
+                    <DiagnosticItem label="Provider API 来源" value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)} />
+                    <DiagnosticItem label="最近错误" value={diagnostics?.lastError ?? "-"} />
+                    <DiagnosticItem label="最近退出原因" value={diagnostics?.lastExitReason ?? "-"} />
+                    <DiagnosticItem label="WebView 运行时" value={diagnostics?.webviewRuntimeKind ?? "-"} />
+                    <DiagnosticItem label="WebView 版本" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
+                    <DiagnosticItem label="启动等待中" value={String(diagnostics?.startupPending ?? false)} />
+                    <DiagnosticItem label="启动退出原因" value={diagnostics?.startupExitCause ?? "-"} />
+                    <DiagnosticItem label="主窗口创建模式" value={diagnostics?.mainCreateMode ?? "-"} />
+                    <DiagnosticItem label="启动尝试 ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
+                    <DiagnosticItem label="启动阶段" value={diagnostics?.startupPhase ?? "-"} />
+                    <DiagnosticItem label="启动失败类型" value={diagnostics?.startupFailureKind ?? "-"} />
+                    <DiagnosticItem label="启动失败详情" value={diagnostics?.startupFailureDetail ?? "-"} />
+                    <DiagnosticItem label="启动监控状态" value={diagnostics?.startupMonitorState ?? "-"} />
+                    <DiagnosticItem label="启动监控原因" value={diagnostics?.startupMonitorReason ?? "-"} />
+                    <DiagnosticItem label="启动监控目标" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
+                    <DiagnosticItem label="启动监控详情" value={diagnostics?.startupMonitorDetail ?? "-"} />
                   </div>
                 </section>
                 <section className="cc-runtime-detail-card">
                   <div className="cc-runtime-section-head">
                     <h4>启动链路</h4>
-                    <span>{startupTraceRows.length} steps</span>
+                    <span>{startupTraceRows.length} 步</span>
                   </div>
                   {startupTraceRows.length > 0 ? (
                     <div className="cc-startup-trace-list">
@@ -2571,15 +2562,15 @@ export function ControlCenterView({
                     <h4>路径</h4>
                   </div>
                   <div className="diagnostics-grid">
-                    <DiagnosticItem label="Started At (Epoch UTC)" value={diagnostics?.startedAt ?? "-"} />
-                    <DiagnosticItem label="Configured Kimi Path" value={diagnostics?.configuredKimiPath ?? "-"} />
-                    <DiagnosticItem label="Detected Kimi Path" value={diagnostics?.detectedKimiPath ?? "-"} />
-                    <DiagnosticItem label="Configured Work Dir" value={diagnostics?.configuredWorkDir ?? "-"} />
-                    <DiagnosticItem label="Effective Work Dir" value={diagnostics?.effectiveWorkDir ?? "-"} />
-                    <DiagnosticItem label="Launch Command" value={diagnostics?.launchCommand ?? "-"} />
-                    <DiagnosticItem label="App Log Path" value={diagnostics?.appLogPath ?? "-"} />
-                    <DiagnosticItem label="Backend Log Path" value={diagnostics?.backendLogPath ?? "-"} />
-                    <DiagnosticItem label="Logs Directory" value={diagnostics?.logsDir ?? "-"} />
+                    <DiagnosticItem label="启动时间" value={diagnostics?.startedAt ?? "-"} />
+                    <DiagnosticItem label="配置的 Kimi 路径" value={diagnostics?.configuredKimiPath ?? "-"} />
+                    <DiagnosticItem label="检测到的 Kimi 路径" value={diagnostics?.detectedKimiPath ?? "-"} />
+                    <DiagnosticItem label="配置的工作目录" value={diagnostics?.configuredWorkDir ?? "-"} />
+                    <DiagnosticItem label="实际工作目录" value={diagnostics?.effectiveWorkDir ?? "-"} />
+                    <DiagnosticItem label="启动命令" value={diagnostics?.launchCommand ?? "-"} />
+                    <DiagnosticItem label="应用日志路径" value={diagnostics?.appLogPath ?? "-"} />
+                    <DiagnosticItem label="后端日志路径" value={diagnostics?.backendLogPath ?? "-"} />
+                    <DiagnosticItem label="日志目录" value={diagnostics?.logsDir ?? "-"} />
                   </div>
                 </section>
               </>
@@ -2619,55 +2610,40 @@ export function ControlCenterView({
 
   function renderBridgeSection() {
     const bridgeHeaderControls = (
-      <div className="cc-bridge-title-controls">
-        <Button
-          type="button"
-          variant="outline"
-          icon={<RefreshCw size={15} />}
-          className="cc-action-btn"
-          onClick={() => {
-            void Promise.all([
-              onRefreshBridgeSettings(),
-              onRefreshBridgeStatus(),
-              onRefreshBridgeBindings(),
-              onRefreshBridgeApprovals(),
-              onRefreshBridgeSecretsMask(),
-            ]);
-          }}
-          disabled={bridgeBusy}
-        >
-          刷新状态
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          icon={<FolderOpen size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onOpenLogs()}
-        >
-          打开日志目录
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          icon={<RefreshCcw size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onRestartBridge()}
-          disabled={bridgeBusy}
-        >
-          一键重启
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          icon={<X size={15} />}
-          className="cc-action-btn"
-          onClick={() => void onStopBridge()}
-          disabled={bridgeBusy}
-        >
-          一键停止
-        </Button>
-      </div>
+      <ControlCenterActionMenu
+        disabled={bridgeBusy}
+        items={[
+          {
+            label: "刷新状态",
+            icon: <RefreshCw size={15} />,
+            onSelect: () => {
+              void Promise.all([
+                onRefreshBridgeSettings(),
+                onRefreshBridgeStatus(),
+                onRefreshBridgeBindings(),
+                onRefreshBridgeApprovals(),
+                onRefreshBridgeSecretsMask(),
+              ]);
+            },
+          },
+          {
+            label: "打开日志目录",
+            icon: <FolderOpen size={15} />,
+            onSelect: () => void onOpenLogs(),
+          },
+          {
+            label: "重启 Bridge",
+            icon: <RefreshCcw size={15} />,
+            onSelect: () => void onRestartBridge(),
+          },
+          {
+            label: "停止 Bridge",
+            icon: <X size={15} />,
+            tone: "danger",
+            onSelect: () => void onStopBridge(),
+          },
+        ]}
+      />
     );
 
     return (
@@ -2830,31 +2806,27 @@ export function ControlCenterView({
                     <div className="bridge-workbench-card">
                       <div className="bridge-workbench-card-head">
                         <div className="bridge-workbench-card-copy">
-                          <div className="bridge-workbench-card-title-row">
-                            <strong>{selectedBridgeConnector.label}</strong>
-                            <div className="bridge-robot-chip-row">
-                              <ControlCenterStatusBadge
-                                tone={selectedBridgeConnectorEnabledValue ? "success" : "neutral"}
-                              >
-                                {selectedBridgeConnectorEnabledValue ? "已启用" : "未启用"}
-                              </ControlCenterStatusBadge>
-                              <ControlCenterStatusBadge
-                                tone={formatBridgeConnectorStateTone(
-                                  selectedBridgeConnectorStatus?.state ?? "idle",
-                                )}
-                              >
-                                {formatBridgeConnectorStateLabel(
-                                  selectedBridgeConnectorStatus?.state ?? "idle",
-                                )}
-                              </ControlCenterStatusBadge>
+                        <div className="bridge-workbench-card-title-row">
+                          <strong>{selectedBridgeConnector.label}</strong>
+                          <div className="bridge-robot-chip-row">
                               <ControlCenterStatusBadge
                                 tone={
-                                  selectedBridgeConnectorSecretsConfigured ? "success" : "warning"
+                                  !selectedBridgeConnectorSecretsConfigured
+                                    ? "warning"
+                                    : selectedBridgeConnectorEnabledValue
+                                      ? formatBridgeConnectorStateTone(
+                                          selectedBridgeConnectorStatus?.state ?? "idle",
+                                        )
+                                      : "neutral"
                                 }
                               >
-                                {selectedBridgeConnectorSecretsConfigured
-                                  ? "凭据已配置"
-                                  : "待配置凭据"}
+                                {!selectedBridgeConnectorSecretsConfigured
+                                  ? "待配置"
+                                  : selectedBridgeConnectorEnabledValue
+                                    ? formatBridgeConnectorStateLabel(
+                                        selectedBridgeConnectorStatus?.state ?? "idle",
+                                      )
+                                    : "已停止"}
                               </ControlCenterStatusBadge>
                             </div>
                           </div>
@@ -2889,28 +2861,28 @@ export function ControlCenterView({
                         />
                       </div>
 
-                      <div className="bridge-workbench-card-summary">
-                        <ControlCenterMetricCard
-                          label="绑定摘要"
-                          value={
-                            selectedBridgeConnectorBindings.length > 0
-                              ? `${selectedBridgeConnectorBindings.length} 个会话`
-                              : "暂无绑定"
-                          }
-                        />
-                        <ControlCenterMetricCard
-                          label="审批摘要"
-                          value={
-                            selectedBridgeConnectorApprovals.length > 0
-                              ? `${selectedBridgeConnectorApprovals.length} 条待处理`
-                              : "无待处理审批"
-                          }
-                        />
-                        <ControlCenterMetricCard
-                          label="凭据状态"
-                          value={selectedBridgeConnectorSecretsConfigured ? "已配置" : "待配置"}
-                        />
-                      </div>
+                      <ControlCenterDescList
+                        columns={3}
+                        items={[
+                          {
+                            label: "绑定",
+                            value: `${selectedBridgeConnectorBindings.length}`,
+                            meta: selectedBridgeConnectorBindings.length > 0 ? "会话" : "暂无绑定",
+                          },
+                          {
+                            label: "待审批",
+                            value: `${selectedBridgeConnectorApprovals.length}`,
+                            meta:
+                              selectedBridgeConnectorApprovals.length > 0
+                                ? "需要处理"
+                                : "无待处理审批",
+                          },
+                          {
+                            label: "凭据",
+                            value: selectedBridgeConnectorSecretsConfigured ? "已配置" : "待配置",
+                          },
+                        ]}
+                      />
 
                       {selectedBridgeConnectorRecentError ? (
                         <p className="bridge-workbench-card-error">
@@ -4213,7 +4185,6 @@ export function ControlCenterView({
                       <span className="cc-primary-nav-label">
                         {section.id === "bridge_center" ? bridgeDisplayName : section.label}
                       </span>
-                      <span className="cc-primary-nav-desc">{section.description}</span>
                     </span>
                   </Button>
                 );
@@ -4227,7 +4198,6 @@ export function ControlCenterView({
         <header className="cc-modal-header cc-detail-topbar">
           <div className="cc-modal-title">
             <h3>{activeControlSectionLabel}</h3>
-            <p>{activeControlSectionConfig.description}</p>
           </div>
           {surface === "modal" ? (
             <Button

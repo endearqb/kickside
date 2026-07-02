@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, FolderOpen, Play, RefreshCw, Search, Sparkles } from "lucide-react";
+import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
@@ -173,7 +173,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
 
   const rail = (
     <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
-      <div className="cc-primary-nav-group-label">Harness templates</div>
+      <div className="cc-primary-nav-group-label">Harness 模板</div>
       {harnesses.map((harness) => {
         const itemId = makeHarnessItemId(harness.id);
         const selected = itemId === selectedItemId;
@@ -203,7 +203,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         />
       ) : null}
 
-      <div className="cc-primary-nav-group-label">Registered workspaces</div>
+      <div className="cc-primary-nav-group-label">已注册工作区</div>
       {workspaces.map((workspace) => {
         const itemId = makeWorkspaceItemId(workspace.id);
         const selected = itemId === selectedItemId;
@@ -220,7 +220,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
                 <strong>{workspace.name}</strong>
                 <small>{formatRuntime(workspace.agentRuntime)}</small>
               </span>
-              <ControlCenterStatusBadge tone="success">ready</ControlCenterStatusBadge>
+              <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
             </span>
             <span className="cc-control-list-item-meta">
               <span>{workspace.harnessId ?? "manual"}</span>
@@ -265,18 +265,15 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         </div>
       </div>
 
-      <div className="cc-control-summary-grid">
-        <ControlCenterMetricCard
-          label="Variables"
-          value={`${selectedHarness.variables.length} 个`}
-        />
-        <ControlCenterMetricCard label="Skills" value={`${selectedHarness.skills.length} 个`} />
-        <ControlCenterMetricCard label="Template" value={selectedHarness.template} />
-        <ControlCenterMetricCard
-          label="Post create"
-          value={selectedHarness.postCreate.openWith ?? "无自动打开"}
-        />
-      </div>
+      <ControlCenterDescList
+        columns={4}
+        items={[
+          { label: "变量", value: `${selectedHarness.variables.length} 个` },
+          { label: "技能", value: `${selectedHarness.skills.length} 个` },
+          { label: "模板", value: selectedHarness.template },
+          { label: "创建后动作", value: selectedHarness.postCreate.openWith ?? "无自动打开" },
+        ]}
+      />
 
       {selectedHarness.tags.length > 0 ? (
         <div className="cc-control-chip-row">
@@ -291,8 +288,8 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
-            <h4>Variables</h4>
-            <p>预览和创建工作区前先确认变量。secret 字段不会在预览中插值。</p>
+            <h4>变量</h4>
+            <p>Secret 字段不会在预览中插值。</p>
           </div>
         </header>
         <div className="cc-surface-section-body">
@@ -324,7 +321,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         <section className="cc-surface-section">
           <header className="cc-surface-section-header">
             <div className="cc-surface-section-copy">
-              <h4>Dry run 文件树</h4>
+              <h4>预览文件树</h4>
               <p>{dryRun.files.length} 个文件或目录将被写入目标工作区。</p>
             </div>
             {dryRun.warnings.length > 0 ? (
@@ -342,7 +339,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
             <div className="cc-control-path-list">
               {dryRun.files.map((file) => (
                 <div key={file.relPath} className="cc-control-path-item">
-                  <strong>{file.isDir ? "Directory" : "File"}</strong>
+                  <strong>{file.isDir ? "目录" : "文件"}</strong>
                   <code>{file.relPath}</code>
                   {file.preview ? (
                     <pre className="cc-code-preview">{file.preview}</pre>
@@ -382,7 +379,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
           <h3>{selectedWorkspace.name}</h3>
           <p>{selectedWorkspace.cwd}</p>
           <div className="cc-control-chip-row">
-            <ControlCenterStatusBadge tone="success">registered</ControlCenterStatusBadge>
+          <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
             <ControlCenterStatusBadge tone="neutral">
               {formatRuntime(selectedWorkspace.agentRuntime)}
             </ControlCenterStatusBadge>
@@ -401,7 +398,7 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
 
       <dl className="cc-control-detail-grid">
         <div>
-          <dt>Workspace path</dt>
+          <dt>工作区路径</dt>
           <dd>
             <code>{selectedWorkspace.cwd}</code>
           </dd>
@@ -411,11 +408,11 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
           <dd>{selectedWorkspace.harnessId ?? "manual"}</dd>
         </div>
         <div>
-          <dt>Created</dt>
+          <dt>创建时间</dt>
           <dd>{formatDate(selectedWorkspace.createdAt)}</dd>
         </div>
         <div>
-          <dt>Last opened</dt>
+          <dt>上次打开</dt>
           <dd>{formatDate(selectedWorkspace.lastOpenedAt)}</dd>
         </div>
       </dl>
@@ -442,7 +439,6 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
             <div className="cc-control-detail-head">
               <div className="cc-control-detail-copy">
                 <h3>WorkspaceHub</h3>
-                <p>选择 harness 或已注册工作区，右侧审阅详情并执行下一步。</p>
               </div>
               <Button
                 variant="outline"

@@ -6,6 +6,7 @@ import type {
   KimiCodeAccessConfigView,
   KimiCodeAccessServiceApiKeyMode,
 } from "@/app/types";
+import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -242,25 +243,19 @@ export function KimiCodeAccessTaskContent({
         <section className="cc-config-panel cc-config-summary-panel">
           <div className="cc-config-panel-head">
             <div>
-              <h4>Kimi Code 接入配置</h4>
-              <p className="hint">
-                Kimi 小助手只维护 API Base URL、API Key、Search/Fetch 服务和 App 启动时的子 Agent 并发上限。
-              </p>
+              <h4>配置文件</h4>
             </div>
             <span className={`status-pill ${dirty ? "warning" : "success"}`}>
-              {dirty ? "存在修改" : "已同步"}
+              {dirty ? "待保存" : "已同步"}
             </span>
           </div>
-          <div className="cc-config-meta">
-            <p>
-              <span>Kimi Code Home</span>
-              <strong>{view?.kimiCodeHome ?? "~/.kimi-code"}</strong>
-            </p>
-            <p>
-              <span>配置文件</span>
-              <strong>{view?.configPath ?? "~/.kimi-code/config.toml"}</strong>
-            </p>
-          </div>
+          <ControlCenterDescList
+            columns={2}
+            items={[
+              { label: "Kimi Code Home", value: view?.kimiCodeHome ?? "~/.kimi-code" },
+              { label: "配置文件", value: view?.configPath ?? "~/.kimi-code/config.toml" },
+            ]}
+          />
           {view?.warnings.length ? (
             <ul className="cc-config-warning-list">
               {view.warnings.map((warning) => (
@@ -316,7 +311,7 @@ export function KimiCodeAccessTaskContent({
 
         <div className="cc-config-grid two">
           {renderService(
-            "Search Service",
+            "Search 服务",
             "search",
             "moonshot_search",
             "searchBaseUrl",
@@ -324,7 +319,7 @@ export function KimiCodeAccessTaskContent({
             "searchApiKey",
           )}
           {renderService(
-            "Fetch Service",
+            "Fetch 服务",
             "fetch",
             "moonshot_fetch",
             "fetchBaseUrl",
@@ -390,7 +385,6 @@ export function KimiCodeAccessTaskContent({
           <div className="cc-config-panel-head">
             <div>
               <h4>操作</h4>
-              <p className="hint">模型默认值、权限、Thinking、Plan、MCP、Plugins 和主题仍由 Kimi Code 官方设置管理。</p>
             </div>
           </div>
           <div className="cc-actions wrap">
@@ -426,7 +420,7 @@ export function KimiCodeAccessTaskContent({
           {testResult ? (
             <div className="cc-config-summary-grid">
               {[
-                ["Provider", testResult.provider],
+                ["Kimi API", testResult.provider],
                 ["Search", testResult.search],
                 ["Fetch", testResult.fetch],
               ].map(([label, result]) => {

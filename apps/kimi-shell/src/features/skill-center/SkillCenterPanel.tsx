@@ -20,6 +20,7 @@ import type {
   WorkspaceSkillTarget,
 } from "@/app/types";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
+import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterSurfaceSection } from "@/components/control-center/ControlCenterSurfaceSection";
@@ -210,6 +211,31 @@ function renderManifestValues(values: string[], emptyLabel = "未声明") {
           +{values.length - 12}
         </span>
       ) : null}
+    </div>
+  );
+}
+
+function renderInstalledManifestGrid(skill: InstalledSkill) {
+  const rows = [
+    { label: "标签", values: skill.metadata.tags },
+    { label: "触发器", values: skill.metadata.triggers },
+    { label: "文件匹配", values: skill.metadata.filePatterns },
+    {
+      label: "推荐范围",
+      values: skill.metadata.recommendedScopes.map(formatProjectionScope),
+    },
+  ].filter((row) => row.values.length > 0);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="skill-center-manifest-grid">
+      {rows.map((row) => (
+        <div key={row.label} className="skill-center-manifest-card">
+          <span>{row.label}</span>
+          {renderManifestValues(row.values)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -914,50 +940,13 @@ export function SkillCenterPanel({
                       {selectedInstalledSkill.trusted
                         ? renderStatusChip("已信任", "ready")
                         : renderStatusChip("未信任", "warning")}
-                      {selectedInstalledLocations.length > 0
-                        ? renderStatusChip(
-                            selectedManageEntry?.kind === "installed" &&
-                              selectedManageEntry.matchedDiscovery?.importedSkillId
-                              ? "已导入发现"
-                              : "外部来源",
-                            "muted",
-                          )
-                        : null}
-                      {selectedInstalledState.userGlobalApplied
-                        ? renderStatusChip("~/.agents", "muted")
-                        : null}
-                      {selectedInstalledState.kimiCodeHomeApplied
-                        ? renderStatusChip("KIMI_CODE_HOME", "muted")
-                        : null}
-                      {selectedInstalledState.sessionApplied
-                        ? renderStatusChip("当前工作区", "muted")
-                        : null}
                     </div>
                   </div>
                   <p className="skill-center-detail-description">
                     {selectedInstalledSkill.description || "这个技能没有提供描述。"}
                   </p>
 
-                  <div className="skill-center-manifest-grid">
-                    <div className="skill-center-manifest-card">
-                      <span>Tags</span>
-                      {renderManifestValues(selectedInstalledSkill.metadata.tags)}
-                    </div>
-                    <div className="skill-center-manifest-card">
-                      <span>Triggers</span>
-                      {renderManifestValues(selectedInstalledSkill.metadata.triggers)}
-                    </div>
-                    <div className="skill-center-manifest-card">
-                      <span>File patterns</span>
-                      {renderManifestValues(selectedInstalledSkill.metadata.filePatterns)}
-                    </div>
-                    <div className="skill-center-manifest-card">
-                      <span>Recommended scopes</span>
-                      {renderManifestValues(
-                        selectedInstalledSkill.metadata.recommendedScopes.map(formatProjectionScope),
-                      )}
-                    </div>
-                  </div>
+                  {renderInstalledManifestGrid(selectedInstalledSkill)}
 
                   <div className="skill-center-actions skill-center-actions-primary">
                     <Button
@@ -971,98 +960,84 @@ export function SkillCenterPanel({
                     >
                       投影到当前工作区 .agents
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => onApplySkill(selectedInstalledSkill.id, "user_global_kimi")}
-                      disabled={
-                        busy ||
-                        !selectedInstalledSkill.trusted ||
-                        selectedInstalledState.userGlobalApplied
-                      }
-                    >
-                      投影到用户全局 ~/.agents
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => onApplySkill(selectedInstalledSkill.id, "kimi_code_home")}
-                      disabled={
-                        busy ||
-                        !selectedInstalledSkill.trusted ||
-                        selectedInstalledState.kimiCodeHomeApplied
-                      }
-                    >
-                      投影到 KIMI_CODE_HOME
-                    </Button>
-                  </div>
-
-                  <div className="skill-center-actions skill-center-actions-secondary">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => onSetPin(selectedInstalledSkill.id, !selectedInstalledPinned)}
+                    <ControlCenterActionMenu
                       disabled={busy}
-                    >
-                      {selectedInstalledPinned ? "取消固定" : "固定到工作区"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => onUpdateSkill(selectedInstalledSkill.id)}
-                      disabled={busy}
-                    >
-                      更新技能
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      icon={
-                        selectedInstalledSkill.trusted ? (
-                          <ShieldOff size={14} />
-                        ) : (
-                          <Shield size={14} />
-                        )
-                      }
-                      onClick={() =>
-                        onSetTrust(selectedInstalledSkill.id, !selectedInstalledSkill.trusted)
-                      }
-                      disabled={busy}
-                    >
-                      {selectedInstalledSkill.trusted ? "取消信任" : "信任技能"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => onUninstallSkill(selectedInstalledSkill.id)}
-                      disabled={busy}
-                    >
-                      卸载技能
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => onRemoveSkill(selectedInstalledSkill.id, "user_global_kimi")}
-                      disabled={busy || !selectedInstalledState.userGlobalApplied}
-                    >
-                      从 ~/.agents 移除
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => onRemoveSkill(selectedInstalledSkill.id, "kimi_code_home")}
-                      disabled={busy || !selectedInstalledState.kimiCodeHomeApplied}
-                    >
-                      从 KIMI_CODE_HOME 移除
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => onRemoveSkill(selectedInstalledSkill.id, "session_kimi")}
-                      disabled={busy || !selectedInstalledState.sessionApplied}
-                    >
-                      从当前工作区移除
-                    </Button>
+                      items={[
+                        {
+                          label: "投影到用户全局 ~/.agents",
+                          disabled:
+                            !selectedInstalledSkill.trusted ||
+                            selectedInstalledState.userGlobalApplied,
+                          onSelect: () =>
+                            onApplySkill(selectedInstalledSkill.id, "user_global_kimi"),
+                        },
+                        {
+                          label: "投影到 KIMI_CODE_HOME",
+                          disabled:
+                            !selectedInstalledSkill.trusted ||
+                            selectedInstalledState.kimiCodeHomeApplied,
+                          onSelect: () =>
+                            onApplySkill(selectedInstalledSkill.id, "kimi_code_home"),
+                        },
+                        {
+                          label: selectedInstalledPinned ? "取消固定" : "固定到工作区",
+                          onSelect: () =>
+                            onSetPin(selectedInstalledSkill.id, !selectedInstalledPinned),
+                        },
+                        {
+                          label: "更新技能",
+                          onSelect: () => onUpdateSkill(selectedInstalledSkill.id),
+                        },
+                        {
+                          label: selectedInstalledSkill.trusted ? "取消信任" : "信任技能",
+                          icon: selectedInstalledSkill.trusted ? (
+                            <ShieldOff size={14} />
+                          ) : (
+                            <Shield size={14} />
+                          ),
+                          onSelect: () =>
+                            onSetTrust(selectedInstalledSkill.id, !selectedInstalledSkill.trusted),
+                        },
+                        ...(selectedInstalledState.userGlobalApplied
+                          ? [
+                              {
+                                label: "从 ~/.agents 移除",
+                                onSelect: () =>
+                                  onRemoveSkill(
+                                    selectedInstalledSkill.id,
+                                    "user_global_kimi",
+                                  ),
+                              },
+                            ]
+                          : []),
+                        ...(selectedInstalledState.kimiCodeHomeApplied
+                          ? [
+                              {
+                                label: "从 KIMI_CODE_HOME 移除",
+                                onSelect: () =>
+                                  onRemoveSkill(
+                                    selectedInstalledSkill.id,
+                                    "kimi_code_home",
+                                  ),
+                              },
+                            ]
+                          : []),
+                        ...(selectedInstalledState.sessionApplied
+                          ? [
+                              {
+                                label: "从当前工作区移除",
+                                onSelect: () =>
+                                  onRemoveSkill(selectedInstalledSkill.id, "session_kimi"),
+                              },
+                            ]
+                          : []),
+                        {
+                          label: "卸载技能",
+                          tone: "danger",
+                          onSelect: () => onUninstallSkill(selectedInstalledSkill.id),
+                        },
+                      ]}
+                    />
                   </div>
 
                   {renderCollapsibleSection(

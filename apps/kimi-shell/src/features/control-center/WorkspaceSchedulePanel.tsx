@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Play, RefreshCw, Trash2 } from "lucide-react";
+import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
 import {
   ControlCenterStatusBadge,
   type ControlCenterStatusTone,
@@ -210,9 +210,36 @@ export function WorkspaceSchedulePanel() {
     }
   }
 
+  if (workspaces.length === 0) {
+    return (
+      <div className="cc-control-stack workspace-schedule-panel">
+        <ControlCenterEmptyState
+          title="还没有可调度的工作区"
+          description="先到 WorkspaceHub 创建或注册工作区。"
+          icon={<CalendarClock size={18} />}
+          action={
+            <Button
+              variant="outline"
+              icon={<RefreshCw size={15} />}
+              onClick={() => void refresh()}
+              disabled={busy}
+            >
+              刷新
+            </Button>
+          }
+        />
+        {message ? (
+          <div className="cc-control-detail-item" role="alert">
+            {message}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   const rail = (
     <div className="cc-control-list" aria-label="调度工作区列表">
-      <div className="cc-primary-nav-group-label">Workspaces</div>
+      <div className="cc-primary-nav-group-label">工作区</div>
       {workspaces.map((workspace) => {
         const itemHeartbeat =
           schedule.heartbeats.find((item) => item.workspaceId === workspace.id) ?? null;
@@ -234,11 +261,11 @@ export function WorkspaceSchedulePanel() {
               <ControlCenterStatusBadge
                 tone={itemHeartbeat?.enabled ? "success" : "neutral"}
               >
-                {itemHeartbeat?.enabled ? "heartbeat" : "off"}
+                {itemHeartbeat?.enabled ? "运行中" : "已停止"}
               </ControlCenterStatusBadge>
             </span>
             <span className="cc-control-list-item-meta">
-              <span>{itemTasks.length} tasks</span>
+              <span>{itemTasks.length} 个任务</span>
               <span>{formatOutcome(itemHeartbeat?.lastOutcome)}</span>
             </span>
           </button>
@@ -264,10 +291,6 @@ export function WorkspaceSchedulePanel() {
             <ControlCenterStatusBadge tone={heartbeat?.enabled ? "success" : "neutral"}>
               {heartbeat?.enabled ? "心跳已启用" : "心跳未启用"}
             </ControlCenterStatusBadge>
-            <ControlCenterStatusBadge tone="neutral">{tasks.length} tasks</ControlCenterStatusBadge>
-            <ControlCenterStatusBadge tone={outcomeTone(heartbeat?.lastOutcome)}>
-              {formatOutcome(heartbeat?.lastOutcome)}
-            </ControlCenterStatusBadge>
           </div>
         </div>
         <div className="cc-control-action-row">
@@ -289,16 +312,19 @@ export function WorkspaceSchedulePanel() {
         </div>
       </div>
 
-      <div className="cc-control-summary-grid">
-        <ControlCenterMetricCard
-          label="Heartbeat interval"
-          value={`${heartbeat?.intervalMinutes ?? heartbeatInterval} min`}
-          meta={heartbeat?.enabled ? "enabled" : "disabled"}
-        />
-        <ControlCenterMetricCard label="Last run" value={formatDate(heartbeat?.lastRunAt)} />
-        <ControlCenterMetricCard label="Next run" value={formatDate(heartbeat?.nextRunAt)} />
-        <ControlCenterMetricCard label="Last outcome" value={formatOutcome(heartbeat?.lastOutcome)} />
-      </div>
+      <ControlCenterDescList
+        columns={4}
+        items={[
+          {
+            label: "心跳间隔",
+            value: `${heartbeat?.intervalMinutes ?? heartbeatInterval} 分钟`,
+            meta: heartbeat?.enabled ? "已启用" : "已停用",
+          },
+          { label: "上次运行", value: formatDate(heartbeat?.lastRunAt) },
+          { label: "下次运行", value: formatDate(heartbeat?.nextRunAt) },
+          { label: "最近结果", value: formatOutcome(heartbeat?.lastOutcome) },
+        ]}
+      />
 
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
@@ -307,7 +333,7 @@ export function WorkspaceSchedulePanel() {
             <p>定时检查工作区状态。修改间隔后，启用或停用心跳会保存配置。</p>
           </div>
           <ControlCenterStatusBadge tone={heartbeat?.enabled ? "success" : "neutral"}>
-            {heartbeat?.enabled ? "enabled" : "disabled"}
+            {heartbeat?.enabled ? "运行中" : "已停止"}
           </ControlCenterStatusBadge>
         </header>
         <div className="cc-surface-section-body">
@@ -327,7 +353,7 @@ export function WorkspaceSchedulePanel() {
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
-            <h4>新增 plan-then-run</h4>
+            <h4>新增计划任务</h4>
             <p>任务会先生成计划，再按权限执行。</p>
           </div>
           <Button icon={<CalendarClock size={15} />} onClick={handleCreateTask} disabled={busy}>
@@ -429,7 +455,7 @@ export function WorkspaceSchedulePanel() {
                       onClick={() => void handleRunTask(task)}
                       disabled={busy}
                     >
-                      Run now
+                      立即运行
                     </Button>
                     <Button
                       variant="ghost"
@@ -458,8 +484,8 @@ export function WorkspaceSchedulePanel() {
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
-            <h4>Run history</h4>
-            <p>{runs.length} 条最近运行记录。plan/result 默认折叠。</p>
+            <h4>运行记录</h4>
+            <p>{runs.length} 条最近运行记录，计划和结果默认折叠。</p>
           </div>
         </header>
         <div className="cc-surface-section-body">
@@ -477,11 +503,11 @@ export function WorkspaceSchedulePanel() {
                 </summary>
                 <div className="cc-run-detail-grid">
                   <div>
-                    <h4>Plan</h4>
+                    <h4>计划</h4>
                     <pre className="cc-code-preview">{run.plan ?? "无"}</pre>
                   </div>
                   <div>
-                    <h4>Result</h4>
+                    <h4>结果</h4>
                     <pre className="cc-code-preview">{run.result ?? run.error ?? "无"}</pre>
                   </div>
                 </div>
@@ -510,7 +536,6 @@ export function WorkspaceSchedulePanel() {
             <div className="cc-control-detail-head">
               <div className="cc-control-detail-copy">
                 <h3>调度</h3>
-                <p>以工作区为对象查看心跳、任务和运行记录。</p>
               </div>
               <Button
                 variant="outline"

@@ -1,99 +1,302 @@
-# Kimi App 设计系统
-
-## 产品背景
-- **产品定位：** 一款 Windows 桌面 Shell，将 Kimi Code Web、Kimi Chat、引导流程、安装与升级流、运行时诊断、IM Bridge 操作及 Skill 管理整合进统一的工作区桌面应用。
-- **目标用户：** 中文母语的高级用户、开发者和运营人员，需要一个稳定的桌面环境用于日常 Kimi 使用、配置恢复和 Bridge 驱动的工作流。
-- **所属领域：** AI 桌面 Shell、开发者工具、运营控制台。
-- **项目类型：** 桌面 Web 应用，内嵌工作区、控制中心、安装引导流、诊断工作区与运营仪表盘。
-
+---
+version: alpha
+name: Kimi Control Center Image Style
+description: "A quiet three-pane desktop control center for Kimi App, based on the provided Settings/Skills reference image: neutral rails, dense object lists, clear detail pages, compact metadata, and carded markdown/code content."
+colors:
+  background: "#f4f4f2"
+  background-subtle: "#f8f8f6"
+  surface: "#ffffff"
+  surface-muted: "#efefed"
+  surface-hover: "#e9e9e6"
+  rail: "#f2f2f0"
+  rail-selected: "#e7e7e4"
+  border: "#dededb"
+  border-strong: "#c9c9c5"
+  foreground: "#1f1f1f"
+  foreground-muted: "#6f6f6a"
+  foreground-soft: "#92928d"
+  primary: "#1f1f1f"
+  primary-foreground: "#ffffff"
+  accent: "#34c284"
+  accent-foreground: "#ffffff"
+  info: "#4b76c8"
+  warning: "#b7791f"
+  destructive: "#d2483d"
+  code-background: "#fbfbfa"
+  code-border: "#e7e7e4"
+typography:
+  title-lg:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 20px
+    fontWeight: 650
+    lineHeight: 1.2
+    letterSpacing: "-0.01em"
+  title-md:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 16px
+    fontWeight: 650
+    lineHeight: 1.25
+  body-md:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.45
+  body-sm:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 13px
+    fontWeight: 400
+    lineHeight: 1.4
+  label-sm:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 12px
+    fontWeight: 500
+    lineHeight: 1.2
+  meta-xs:
+    fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: 11px
+    fontWeight: 600
+    lineHeight: 1
+  code-sm:
+    fontFamily: "JetBrains Mono, SFMono-Regular, Consolas, Liberation Mono, monospace"
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 1.65
+rounded:
+  xs: 4px
+  sm: 6px
+  md: 8px
+  lg: 12px
+  xl: 16px
+  full: 9999px
+spacing:
+  xxs: 2px
+  xs: 4px
+  sm: 8px
+  md: 12px
+  lg: 16px
+  xl: 24px
+  2xl: 32px
+  nav-width: 208px
+  object-rail-width: 248px
+  detail-max-width: 1120px
+components:
+  app-shell:
+    backgroundColor: "{colors.background}"
+    textColor: "{colors.foreground}"
+  primary-nav:
+    backgroundColor: "{colors.rail}"
+    textColor: "{colors.foreground-muted}"
+    width: "{spacing.nav-width}"
+  object-rail:
+    backgroundColor: "{colors.background-subtle}"
+    textColor: "{colors.foreground}"
+    width: "{spacing.object-rail-width}"
+  nav-item-selected:
+    backgroundColor: "{colors.rail-selected}"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.md}"
+    padding: "8px 10px"
+  list-item:
+    backgroundColor: "transparent"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.md}"
+    padding: "7px 10px"
+  list-item-selected:
+    backgroundColor: "{colors.rail-selected}"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.md}"
+    padding: "7px 10px"
+  detail-card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.xl}"
+    padding: "32px"
+  button-primary:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.primary-foreground}"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
+  button-secondary:
+    backgroundColor: "{colors.surface-muted}"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
+  switch-on:
+    backgroundColor: "{colors.accent}"
+    rounded: "{rounded.full}"
+  tag:
+    backgroundColor: "{colors.surface-muted}"
+    textColor: "{colors.foreground-muted}"
+    rounded: "{rounded.sm}"
+    padding: "3px 8px"
+  code-block:
+    backgroundColor: "{colors.code-background}"
+    textColor: "{colors.foreground}"
+    rounded: "{rounded.lg}"
+    padding: "16px"
 ---
 
-## 审计重点
-- **统一产品面貌：** 当前工作区 Shell 风格极简、偏工具化，而控制中心转向衬线字体的编辑排版风格，未来的 UI 应像同一款产品，而非两种美学的拼接。
-- **稳定语言策略：** 界面文案以中文为主，英文仅用于品牌名、代码术语、CLI 名词及不可避免的技术字符串。避免"中文标签搭配临时英文标题"的混搭，除非该英文即为产品名称。
-- **明确操作层级：** 每个页面应有一个明显的主操作，次要操作归为一组，危险操作在视觉上独立隔离，不允许五个等权重按钮并排竞争。
-- **适配高密度工作场景：** 本产品不是营销落地页，允许信息密集，但层级必须更清晰：状态优先，下一步操作其次，细节最后。
+# Kimi Control Center Image Style
 
----
+## Overview
 
-## 视觉方向
-- **风格：** 工业 / 功能主义
-- **装饰程度：** 克制有意
-- **氛围：** 沉稳、专业、桌面原生感。界面应像一个可靠的运营控制台，有足够的个性令人印象深刻，但绝不过度装饰以至于干扰工作本身。
-- **参考来源：** 本版本未引用外部竞品调研，方向来源于现有代码库、已上线截图及成熟桌面生产力设计规范。
+Kimi App 的控制中心采用“桌面设置面板 + Skill 文件浏览器”的视觉模型。界面不是展示页，也不是营销页，而是一个长期打开的本地工作台：左侧是稳定导航，中间是对象列表，右侧是当前对象的详情、配置和可执行操作。
 
----
+参考图的核心是三栏密集信息架构：`Settings` 一级导航、`Skills` 对象列表、`Notion` 详情页。Kimi App 应保留这种明确的空间分工，并把原来的控制中心整理为：
 
-## 字体排版
-- **展示 / 标题：** `Cabinet Grotesk`，中文备选 `Noto Sans SC`，用于区块标题和简短引导语。克制使用，仅在产品需要强调时出现。
-- **正文：** `Source Sans 3`，备选 `Noto Sans SC`、`Microsoft YaHei UI`、`Segoe UI Variable Text`、无衬线通用备选。用于段落、卡片、表单和导航的默认字体。
-- **界面 / 标签：** 与正文相同，通过字重变化而非换字体来区分层级。高密度界面应依赖字重和间距变化，不应频繁切换字族。
-- **数据 / 表格：** `Geist`，启用等宽数字；中英混排行降级为 `Segoe UI Variable Text`。指标、端口、路径、日志需对齐整洁。
-- **代码：** `JetBrains Mono`
-- **字体加载：** 生产环境打包本地 WOFF2 文件。原型与预览阶段可通过 Google Fonts 加载 `Cabinet Grotesk`、`Source Sans 3`、`Geist`、`JetBrains Mono`。
-- **字号比例：** 12px 辅助说明 · 13px 密集元信息 · 14px 正文 · 16px 区块标题 · 20px 卡片标题 · 28px 页面标题 · 36px 英雄标题 · 44px 大标题
+```txt
+Primary Nav        Object Rail             Detail Panel
+设置 / 工作台       Skills / Workspaces      当前 skill / workspace / schedule 的详情
+```
 
----
+界面气质是安静、精确、可扫描。不要使用玻璃态、重阴影、夸张渐变、大标题 hero、营销文案和装饰性图形。控制中心的好坏取决于用户能否快速判断：当前在哪个模块、选中了什么对象、对象是什么状态、下一步能执行什么。
 
-## 色彩
-- **策略：** 克制
-- **主色：** `#1F252D` 石墨色。用于高信任度操作、主按钮、密集 Chrome 框架和强调标题。
-- **辅色：** `#B67A28` 信号琥珀色。用于进度、优先级、激活导航高亮和编辑强调。禁止大面积铺底使用。
-- **中性色：** 暖灰系统，从 `#FBF8F2`（页面底）到 `#101418`（深墨），关键节点为 `#F2EEE7`、`#E5DED2`、`#C9C0B2`、`#7A746B`、`#3D433F`。
-- **语义色：** 成功 `#2F7D57` · 警告 `#B67A28` · 错误 `#C84C3C` · 信息 `#2F6B9A`
-- **深色模式：** 保持相同色相系，饱和度降低约 12%，通过叠加深炭灰色卡片面提升对比度，琥珀色仅在焦点时刻保留。
+推荐一级导航：
 
----
+1. Workbench / 工作台
+2. WorkspaceHub
+3. Skills
+4. Schedule / 调度
+5. Diagnostics / 诊断
 
-## 间距
-- **基础单位：** 4px
-- **密度：** 舒适-紧凑
-- **比例：** 2xs(2) · xs(4) · sm(8) · md(16) · lg(24) · xl(32) · 2xl(48) · 3xl(64)
+在视觉上，`Skills` 视图最贴近参考图：中间栏展示 skill 分组和文件树，右侧展示 `SKILL.md` 元数据、描述、标签和代码/Markdown 预览。`WorkspaceHub` 和 `Schedule` 也沿用同一骨架，只替换对象类型。
 
----
+## Colors
 
-## 布局
-- **策略：** 网格规范
-- **栅格：** 桌面 12 列，平板尺寸弹窗 8 列，紧凑 / 移动宽度 4 列。
-- **最大内容宽度：** 页面级 1440px，弹窗控制面 1280px。
-- **圆角：** sm 6px · md 10px · lg 14px · xl 20px · full 9999px。不要将所有组件默认为胶囊形状。
+色彩系统以中性灰白为主体，绿色只表达“启用 / 正常 / 可运行”。不要沿用“每张卡都有品牌色点缀”的控制台模板。
 
----
+- **Background `#f4f4f2`**：页面底色，接近桌面设置面板的灰白，不使用纯白铺满整个窗口。
+- **Rail `#f2f2f0` / Background subtle `#f8f8f6`**：左侧一级导航与中间对象列表的底色，靠 `1px` 边框区分层级。
+- **Surface `#ffffff`**：详情主卡片与输入区。白色只用于承载内容，不用于整屏背景。
+- **Foreground `#1f1f1f`**：标题、正文与主按钮。
+- **Muted foreground `#6f6f6a`**：元信息、说明、路径、列表二级文本。
+- **Accent `#34c284`**：仅用于开启状态、正常状态、小型状态点和 Switch。不要用于大面积背景、标题或装饰线。
+- **Destructive `#d2483d`**：只用于删除、失败和不可恢复动作。
 
-## 动效
-- **策略：** 极简功能性
-- **缓动曲线：** 进入 `cubic-bezier(0.2, 0.8, 0.2, 1)` · 退出 `cubic-bezier(0.4, 0, 1, 1)` · 移动 `cubic-bezier(0.2, 0.6, 0.2, 1)`
-- **时长：** 微动 70ms · 短 160ms · 中 240ms · 长 360ms
+状态表达尽量用“圆点 + 文本”或 Switch，而不是彩色药丸。标签使用浅灰底，不抢内容。
 
----
+## Typography
 
-## 稳妥选择
-- **保持 Shell 框架低调：** 高密度生产力应用靠稳定框架赢得信任，而非响亮的装饰。
-- **以状态芯片和卡片作为主要信息扫描元素：** 在安装、运行时和 Bridge 界面，用户天然期望能一眼看清运营状态。
-- **保留必要的双语技术名词：** `Kimi CLI`、`IM Bridge`、`Session`、`Skill` 等词指向具体的运行时概念，保留是合理的。
+字体采用系统 UI 栈，保证桌面端原生感。不要使用品牌化大标题或网页 hero 字号。
 
----
+- **Title lg, 20px / 650**：详情页主标题，例如当前 skill、workspace 或调度任务名。
+- **Title md, 16px / 650**：主内容卡片标题，例如 `Notion`、`Quick Reference`、`工作区心跳`。
+- **Body md, 14px / 400**：主要说明文字。
+- **Body sm, 13px / 400**：列表行、按钮、字段值。
+- **Label sm, 12px / 500**：表单标签与分组标题。
+- **Meta xs, 11px / 600**：大写分区标题、状态说明、时间戳。
+- **Code sm, 12px / monospace**：代码块、路径、命令、计划片段。
 
-## 值得尝试的风险
-- **移除控制中心当前的衬线编辑排版风格：** 虽然失去了视觉新意，但换来工作区、预填和运营界面的统一面貌。
-- **以琥珀色作为唯一的非语义品牌强调色：** 比蓝色更有辨识度，比多色渐变更可控。代价是对"科技产品"的第一印象不够直接，但能为产品建立更具归属感的信号语言。
-- **收紧圆角、减少光泽渐变：** 让应用更具桌面原生感，而非 Web 模板感。代价是初次印象偏冷，需要文案和间距的温度来平衡。
+正文行高保持 1.4–1.65。列表文本不得使用过多字重；选中态靠背景色和上下文，不靠加粗到 700。
 
----
+## Layout
 
-## 实施规范
-- **一套产品，一套字体系统：** 不允许 Shell 用系统无衬线、仪表盘用衬线、孤立卡片再用随意英文展示字体。
-- **每个面板只有一个主 CTA：** 次要操作在视觉上归组；危险操作通过色调、间距或区块边界与其他操作隔离。
-- **中文优先文案：** 优先使用简洁中文标签，英文作为辅助元信息或产品名词，不作为竞争性标题出现。
-- **状态先于解释：** 每个界面先呈现"当前状态"和"下一步做什么"，再展示日志、深度细节或配置琐项。
-- **禁止引入紫色渐变、泛用的三列营销卡片或全圆角 UI。**
+默认布局是三栏：
 
----
+```txt
+┌────────────────┬────────────────────┬────────────────────────────────────┐
+│ Primary Nav    │ Object Rail         │ Detail Panel                        │
+│ 208px          │ 248px               │ fluid, max content 1120px           │
+└────────────────┴────────────────────┴────────────────────────────────────┘
+```
 
-## 决策记录
+- **Primary Nav**：一级导航，包含工作台、WorkspaceHub、Skills、Schedule、Diagnostics。宽度固定，背景为 `rail`。
+- **Object Rail**：当前一级视图下的对象列表。例如 Skills 视图列出 skill 分组；WorkspaceHub 视图列出 harness；Schedule 视图列出 workspace。宽度固定，背景为 `background-subtle`。
+- **Detail Panel**：当前对象的详情和配置。滚动只发生在该列内部；详情内容最大宽度约 1120px，左对齐。
 
-| 日期 | 决策内容 | 决策依据 |
-|------|----------|----------|
-| 2026-03-22 | 初版设计系统创建 | 基于现有代码库、截图及 Kimi App UI 审计，由 /design-consultation 生成。 |
-| 2026-03-22 | 采用工业/功能主义视觉方向 | 比当前 Shell 极简框架与编辑风格控制中心的分裂状态更适合高密度桌面 Shell。 |
-| 2026-03-22 | 统一采用克制石墨 + 琥珀配色方案 | 在不牺牲运营清晰度的前提下，建立更强的产品辨识度。 |
+窄屏下布局变成：Primary Nav 收窄为 icon rail 或抽屉；Object Rail 与 Detail Panel 上下堆叠。不要在窄屏保留三列挤压。
+
+内容区布局应像参考图一样“元信息在上、正文卡片在下”：
+
+1. 顶部详情标题行：标题、状态开关、更多操作。
+2. 元信息网格：created by、last updated、runtime、workspace path 等。
+3. 描述与标签。
+4. 主内容卡片：配置、代码、任务计划、运行记录或 markdown 预览。
+
+## Elevation & Depth
+
+层级靠底色、边框和留白，不靠阴影。
+
+- 一级导航与对象列表之间用 `1px border`。
+- 详情主卡片用 `1px border + 16px radius`，不加普通阴影。
+- 浮层（Dialog、Popover、Dropdown）可以使用非常轻的 shadow，但普通 Card、ListItem、StatCard 不允许有阴影。
+- 背景可以保留极轻的径向雾化光斑，透明度低于 0.45，只作为窗口质感，不作为内容装饰。
+- Hover 只改变背景色，不做 `translateY`、放大、漂浮。
+
+## Shapes
+
+圆角克制，主要来自桌面设置面板的自然曲率。
+
+- 列表项：`8px`。
+- 按钮、输入框、标签：`6–8px`。
+- 详情主卡片、代码块：`12–16px`。
+- Switch 可用 full radius，因为它是原生开关形态。
+- 不要把所有 badge 都做成胶囊；普通标签用小圆角矩形。
+
+## Components
+
+### App Shell
+
+应用壳是全高三栏容器。`PrimaryNav` 与 `ObjectRail` 固定，`DetailPanel` 独立滚动。禁止让整个 window 同时滚动，以免切换视图时上下文丢失。
+
+### Primary Navigation
+
+一级导航文案保持短词：`Workbench`、`WorkspaceHub`、`Skills`、`Schedule`、`Diagnostics`。中文界面可用：`工作台`、`WorkspaceHub`、`Skills`、`调度`、`诊断`。
+
+选中态使用浅灰背景 `rail-selected`，图标与文字不需要品牌色。只有在线状态、启用状态用绿色。
+
+### Object Rail
+
+对象列表支持分组标题、折叠、搜索与新建。每一行包含 icon、名称、可选状态点和二级信息。选中对象使用浅灰背景，不使用描边框或彩色左边线。
+
+### Detail Header
+
+详情页顶部必须包含标题、元信息、描述、标签和启用开关。右上角最多一个 Switch 和一个更多菜单。不要在标题区堆多个按钮。
+
+### Cards
+
+详情主卡片用于展示一个主要实体的说明、代码、运行计划或配置。Card 背景白色、边框浅灰、圆角 16px。Card 内部标题 16px，正文 14px。
+
+### Code Block
+
+代码块使用白色或近白背景，边框清晰，圆角 12px。行号使用 muted 文本。工具按钮（复制、下载）放在右上角，图标 16px，不显示大按钮。
+
+### Buttons
+
+主按钮使用深色背景，只在真正会写入、创建或启动的动作上使用。次级按钮使用浅灰背景或 ghost。危险按钮只用红色文字与浅红 hover，不大面积铺红。
+
+### Switches
+
+Switch 表示启用状态。开启为绿色，关闭为灰色。切换必须立刻反馈，但长耗时动作需要显示 pending 状态或 toast。
+
+### WorkspaceHub
+
+WorkspaceHub 使用同样的三栏结构：对象列表是 harness 模板，详情页展示模板用途、变量、将生成的文件树和创建按钮。openclaw 与 Hermes 模板不应做成营销卡片，而应做成可审阅的工作区骨架。
+
+### Skills
+
+Skills 视图最接近参考图：左侧对象列表列出内置技能、工作区技能、用户技能；右侧详情展示 `SKILL.md` 的 frontmatter、描述、标签、快速参考和文件预览。
+
+### Schedule
+
+调度视图以 workspace 为对象列表。详情页分为“工作区心跳”“定时任务”“运行记录”三个主卡片。状态用绿色 / 灰色 / 红色圆点，运行结果以 plan + outcome 卡片呈现。
+
+## Do's and Don'ts
+
+**Do**
+
+- 使用三栏布局保留上下文。
+- 使用灰白层级、细边框、紧凑列表。
+- 把绿色限制为启用、正常、运行中状态。
+- 让每个详情页只有一个主操作。
+- 用 `SKILL.md`、`AGENTS.md`、路径、计划、运行记录作为真实内容。
+- 为加载、空、错误、禁用、键盘焦点、窄屏分别设计状态。
+
+**Don't**
+
+- 不用玻璃态、重阴影、大面积渐变和漂浮卡片。
+- 不写“赋能、打造、闭环、智能化中枢”这类营销词。
+- 不把每个标签都做成彩色 pill。
+- 不在标题区堆三四个按钮。
+- 不让整个页面滚动；滚动应发生在对象列表或详情面板内部。
+- 不在 hover 时位移或缩放列表项。

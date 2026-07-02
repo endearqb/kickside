@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Boxes, FolderOpen, Play, RefreshCw, Search, Sparkles } from "lucide-react";
+import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
+import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
+import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -23,23 +27,46 @@ function formatRuntime(value: string) {
   return "Other";
 }
 
+function formatDate(value?: string | null) {
+  if (!value) return "未记录";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
 function valueFrom(values: Record<string, string>, key: string) {
   return values[key] ?? "";
+}
+
+function makeHarnessItemId(id: string) {
+  return `harness:${id}`;
+}
+
+function makeWorkspaceItemId(id: string) {
+  return `workspace:${id}`;
 }
 
 export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
   const [harnesses, setHarnesses] = useState<HarnessManifest[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
-  const [selectedHarnessId, setSelectedHarnessId] = useState<string>("");
+  const [selectedItemId, setSelectedItemId] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [dryRun, setDryRun] = useState<HarnessDryRunResult | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<WorkspaceRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const selectedKind = selectedItemId.startsWith("workspace:") ? "workspace" : "harness";
+  const selectedHarnessId =
+    selectedKind === "harness" ? selectedItemId.replace(/^harness:/, "") : "";
+  const selectedWorkspaceId =
+    selectedKind === "workspace" ? selectedItemId.replace(/^workspace:/, "") : "";
+
   const selectedHarness = useMemo(
     () => harnesses.find((harness) => harness.id === selectedHarnessId) ?? null,
     [harnesses, selectedHarnessId],
+  );
+  const selectedWorkspace = useMemo(
+    () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
+    [workspaces, selectedWorkspaceId],
   );
 
   async function refresh() {
@@ -52,7 +79,25 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
       ]);
       setHarnesses(nextHarnesses);
       setWorkspaces(nextWorkspaces);
-      setSelectedHarnessId((current) => current || nextHarnesses[0]?.id || "");
+      setSelectedItemId((current) => {
+        if (
+          current.startsWith("harness:") &&
+          nextHarnesses.some((harness) => makeHarnessItemId(harness.id) === current)
+        ) {
+          return current;
+        }
+        if (
+          current.startsWith("workspace:") &&
+          nextWorkspaces.some((workspace) => makeWorkspaceItemId(workspace.id) === current)
+        ) {
+          return current;
+        }
+        return nextHarnesses[0]
+          ? makeHarnessItemId(nextHarnesses[0].id)
+          : nextWorkspaces[0]
+            ? makeWorkspaceItemId(nextWorkspaces[0].id)
+            : "";
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -99,10 +144,12 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
     setMessage(null);
     try {
       const result = await createHarnessWorkspace(selectedHarness.id, values);
+      const nextWorkspaces = await listWorkspaces();
       setCreatedWorkspace(result.workspace);
       setMessage(`已创建 ${result.workspace.name}，写入 ${result.fileCount} 个文件。`);
       setDryRun(null);
-      setWorkspaces(await listWorkspaces());
+      setWorkspaces(nextWorkspaces);
+      setSelectedItemId(makeWorkspaceItemId(result.workspace.id));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -124,182 +171,302 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
     }
   }
 
-  return (
-    <div className="space-y-4 text-[var(--foreground)]">
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">
-              WorkspaceHub
-            </p>
-            <h2 className="mt-1 text-lg font-semibold">工作区创建</h2>
+  const rail = (
+    <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
+      <div className="cc-primary-nav-group-label">Harness templates</div>
+      {harnesses.map((harness) => {
+        const itemId = makeHarnessItemId(harness.id);
+        const selected = itemId === selectedItemId;
+        return (
+          <button
+            key={harness.id}
+            type="button"
+            className={`cc-control-list-item ${selected ? "is-active" : ""}`}
+            onClick={() => setSelectedItemId(itemId)}
+            aria-current={selected ? "true" : undefined}
+          >
+            <span className="cc-control-list-item-header">
+              <span className="cc-control-list-item-copy">
+                <strong>{harness.name}</strong>
+                <small>{formatRuntime(harness.agentRuntime)} · v{harness.version}</small>
+              </span>
+              <Boxes size={15} />
+            </span>
+          </button>
+        );
+      })}
+      {harnesses.length === 0 ? (
+        <ControlCenterEmptyState
+          title="未找到 harness"
+          description="内置模板加载后会显示在这里。"
+          icon={<Boxes size={18} />}
+        />
+      ) : null}
+
+      <div className="cc-primary-nav-group-label">Registered workspaces</div>
+      {workspaces.map((workspace) => {
+        const itemId = makeWorkspaceItemId(workspace.id);
+        const selected = itemId === selectedItemId;
+        return (
+          <button
+            key={workspace.id}
+            type="button"
+            className={`cc-control-list-item ${selected ? "is-active" : ""}`}
+            onClick={() => setSelectedItemId(itemId)}
+            aria-current={selected ? "true" : undefined}
+          >
+            <span className="cc-control-list-item-header">
+              <span className="cc-control-list-item-copy">
+                <strong>{workspace.name}</strong>
+                <small>{formatRuntime(workspace.agentRuntime)}</small>
+              </span>
+              <ControlCenterStatusBadge tone="success">ready</ControlCenterStatusBadge>
+            </span>
+            <span className="cc-control-list-item-meta">
+              <span>{workspace.harnessId ?? "manual"}</span>
+            </span>
+          </button>
+        );
+      })}
+      {workspaces.length === 0 ? (
+        <div className="cc-control-muted">还没有注册工作区。</div>
+      ) : null}
+    </div>
+  );
+
+  const harnessDetail = selectedHarness ? (
+    <div className="cc-control-detail-stack">
+      <div className="cc-control-detail-head">
+        <div className="cc-control-detail-copy">
+          <h3>{selectedHarness.name}</h3>
+          <p>{selectedHarness.summary}</p>
+          <div className="cc-control-chip-row">
+            <ControlCenterStatusBadge tone="neutral">{selectedHarness.id}</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="neutral">
+              {formatRuntime(selectedHarness.agentRuntime)}
+            </ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="neutral">
+              v{selectedHarness.version}
+            </ControlCenterStatusBadge>
           </div>
-          <Button variant="outline" size="sm" icon={<RefreshCw size={15} />} onClick={refresh} disabled={busy}>
-            刷新
+        </div>
+        <div className="cc-control-action-row">
+          <Button
+            variant="outline"
+            icon={<Search size={15} />}
+            onClick={handleDryRun}
+            disabled={busy}
+          >
+            预览文件
+          </Button>
+          <Button icon={<Sparkles size={15} />} onClick={handleCreate} disabled={busy}>
+            创建工作区
           </Button>
         </div>
+      </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(220px,280px)_1fr]">
-          <div className="space-y-2">
-            {harnesses.map((harness) => (
-              <button
-                key={harness.id}
-                type="button"
-                className={`w-full rounded-md border px-3 py-3 text-left transition-colors ${
-                  harness.id === selectedHarnessId
-                    ? "border-[var(--accent)] bg-[var(--muted)]"
-                    : "border-[var(--border)] bg-transparent hover:bg-[var(--muted)]"
-                }`}
-                onClick={() => setSelectedHarnessId(harness.id)}
-              >
-                <span className="flex items-center gap-2 text-sm font-semibold">
-                  <Boxes size={15} />
-                  {harness.name}
-                </span>
-                <span className="mt-1 block text-xs text-[var(--muted-foreground)]">
-                  {formatRuntime(harness.agentRuntime)} · v{harness.version}
-                </span>
-              </button>
-            ))}
-            {harnesses.length === 0 ? (
-              <div className="rounded-md border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted-foreground)]">
-                未找到内置 harness。
-              </div>
-            ) : null}
+      <div className="cc-control-summary-grid">
+        <ControlCenterMetricCard
+          label="Variables"
+          value={`${selectedHarness.variables.length} 个`}
+        />
+        <ControlCenterMetricCard label="Skills" value={`${selectedHarness.skills.length} 个`} />
+        <ControlCenterMetricCard label="Template" value={selectedHarness.template} />
+        <ControlCenterMetricCard
+          label="Post create"
+          value={selectedHarness.postCreate.openWith ?? "无自动打开"}
+        />
+      </div>
+
+      {selectedHarness.tags.length > 0 ? (
+        <div className="cc-control-chip-row">
+          {selectedHarness.tags.map((tag) => (
+            <ControlCenterStatusBadge key={tag} tone="neutral">
+              {tag}
+            </ControlCenterStatusBadge>
+          ))}
+        </div>
+      ) : null}
+
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>Variables</h4>
+            <p>预览和创建工作区前先确认变量。secret 字段不会在预览中插值。</p>
           </div>
-
-          <div className="space-y-4">
-            {selectedHarness ? (
-              <>
-                <div className="rounded-md border border-[var(--border)] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-base font-semibold">{selectedHarness.name}</h3>
-                      <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                        {selectedHarness.summary}
-                      </p>
-                    </div>
-                    <span className="rounded-sm border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted-foreground)]">
-                      {selectedHarness.id}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    {selectedHarness.variables.map((variable) => (
-                      <label key={variable.key} className="space-y-1 text-sm">
-                        <span className="font-medium">
-                          {variable.label}
-                          {variable.required ? " *" : ""}
-                        </span>
-                        <Input
-                          value={valueFrom(values, variable.key)}
-                          placeholder={variable.placeholder ?? ""}
-                          type={variable.secret ? "password" : "text"}
-                          onChange={(event) =>
-                            setValues((current) => ({
-                              ...current,
-                              [variable.key]: event.currentTarget.value,
-                            }))
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button variant="outline" icon={<Search size={15} />} onClick={handleDryRun} disabled={busy}>
-                      预览文件
-                    </Button>
-                    <Button icon={<Sparkles size={15} />} onClick={handleCreate} disabled={busy}>
-                      创建工作区
-                    </Button>
-                    {createdWorkspace ? (
-                      <Button
-                        variant="ghost"
-                        icon={<FolderOpen size={15} />}
-                        onClick={() => void handleOpenWorkspace(createdWorkspace)}
-                        disabled={busy}
-                      >
-                        打开
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-
-                {dryRun ? (
-                  <div className="rounded-md border border-[var(--border)] p-3">
-                    <h3 className="text-sm font-semibold">文件预览</h3>
-                    {dryRun.warnings.length ? (
-                      <div className="mt-2 rounded-md border border-[var(--warning)]/60 bg-[var(--warning)]/10 p-2 text-xs">
-                        {dryRun.warnings.join("；")}
-                      </div>
-                    ) : null}
-                    <div className="mt-2 max-h-64 overflow-auto rounded-md border border-[var(--border)]">
-                      {dryRun.files.map((file) => (
-                        <div key={file.relPath} className="border-b border-[var(--border)] px-3 py-2 last:border-b-0">
-                          <div className="font-mono text-xs">{file.relPath}</div>
-                          {file.preview ? (
-                            <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-[var(--muted)] p-2 text-xs">
-                              {file.preview}
-                            </pre>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </>
-            ) : null}
+        </header>
+        <div className="cc-surface-section-body">
+          <div className="cc-control-detail-grid">
+            {selectedHarness.variables.map((variable) => (
+              <label key={variable.key} className="cc-control-field">
+                <span>
+                  {variable.label}
+                  {variable.required ? " *" : ""}
+                </span>
+                <Input
+                  value={valueFrom(values, variable.key)}
+                  placeholder={variable.placeholder ?? ""}
+                  type={variable.secret ? "password" : "text"}
+                  onChange={(event) =>
+                    setValues((current) => ({
+                      ...current,
+                      [variable.key]: event.currentTarget.value,
+                    }))
+                  }
+                />
+              </label>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">已注册工作区</h2>
-          <span className="text-xs text-[var(--muted-foreground)]">{workspaces.length} 个</span>
-        </div>
-        <div className="mt-3 grid gap-2">
-          {workspaces.map((workspace) => (
-            <div
-              key={workspace.id}
-              className="grid gap-3 rounded-md border border-[var(--border)] p-3 md:grid-cols-[1fr_auto]"
-            >
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="truncate text-sm font-semibold">{workspace.name}</h3>
-                  <span className="rounded-sm bg-[var(--muted)] px-2 py-1 text-xs text-[var(--muted-foreground)]">
-                    {formatRuntime(workspace.agentRuntime)}
-                  </span>
-                  {workspace.harnessId ? (
-                    <span className="rounded-sm bg-[var(--muted)] px-2 py-1 text-xs text-[var(--muted-foreground)]">
-                      {workspace.harnessId}
-                    </span>
+      {dryRun ? (
+        <section className="cc-surface-section">
+          <header className="cc-surface-section-header">
+            <div className="cc-surface-section-copy">
+              <h4>Dry run 文件树</h4>
+              <p>{dryRun.files.length} 个文件或目录将被写入目标工作区。</p>
+            </div>
+            {dryRun.warnings.length > 0 ? (
+              <ControlCenterStatusBadge tone="warning">
+                {dryRun.warnings.length} warning
+              </ControlCenterStatusBadge>
+            ) : null}
+          </header>
+          <div className="cc-surface-section-body">
+            {dryRun.warnings.length > 0 ? (
+              <div className="cc-control-detail-item" role="alert">
+                {dryRun.warnings.join("；")}
+              </div>
+            ) : null}
+            <div className="cc-control-path-list">
+              {dryRun.files.map((file) => (
+                <div key={file.relPath} className="cc-control-path-item">
+                  <strong>{file.isDir ? "Directory" : "File"}</strong>
+                  <code>{file.relPath}</code>
+                  {file.preview ? (
+                    <pre className="cc-code-preview">{file.preview}</pre>
                   ) : null}
                 </div>
-                <p className="mt-1 truncate font-mono text-xs text-[var(--muted-foreground)]">
-                  {workspace.cwd}
-                </p>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {createdWorkspace ? (
+        <section className="cc-surface-section">
+          <header className="cc-surface-section-header">
+            <div className="cc-surface-section-copy">
+              <h4>创建结果</h4>
+              <p>{createdWorkspace.cwd}</p>
+            </div>
+            <Button
+              variant="outline"
+              icon={<FolderOpen size={15} />}
+              onClick={() => void handleOpenWorkspace(createdWorkspace)}
+              disabled={busy}
+            >
+              打开工作区
+            </Button>
+          </header>
+        </section>
+      ) : null}
+    </div>
+  ) : null;
+
+  const workspaceDetail = selectedWorkspace ? (
+    <div className="cc-control-detail-stack">
+      <div className="cc-control-detail-head">
+        <div className="cc-control-detail-copy">
+          <h3>{selectedWorkspace.name}</h3>
+          <p>{selectedWorkspace.cwd}</p>
+          <div className="cc-control-chip-row">
+            <ControlCenterStatusBadge tone="success">registered</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="neutral">
+              {formatRuntime(selectedWorkspace.agentRuntime)}
+            </ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="neutral">{selectedWorkspace.source}</ControlCenterStatusBadge>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          icon={<Play size={15} />}
+          onClick={() => void handleOpenWorkspace(selectedWorkspace)}
+          disabled={busy}
+        >
+          打开工作区
+        </Button>
+      </div>
+
+      <dl className="cc-control-detail-grid">
+        <div>
+          <dt>Workspace path</dt>
+          <dd>
+            <code>{selectedWorkspace.cwd}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Harness</dt>
+          <dd>{selectedWorkspace.harnessId ?? "manual"}</dd>
+        </div>
+        <div>
+          <dt>Created</dt>
+          <dd>{formatDate(selectedWorkspace.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>Last opened</dt>
+          <dd>{formatDate(selectedWorkspace.lastOpenedAt)}</dd>
+        </div>
+      </dl>
+
+      {selectedWorkspace.tags.length > 0 ? (
+        <div className="cc-control-chip-row">
+          {selectedWorkspace.tags.map((tag) => (
+            <ControlCenterStatusBadge key={tag} tone="neutral">
+              {tag}
+            </ControlCenterStatusBadge>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
+  return (
+    <div className="cc-control-stack workspace-hub-panel">
+      <ControlCenterWorkbenchLayout
+        mode="stack-on-mobile"
+        className="workspace-hub-workbench"
+        railHeader={
+          <div className="cc-control-toolbar">
+            <div className="cc-control-detail-head">
+              <div className="cc-control-detail-copy">
+                <h3>WorkspaceHub</h3>
+                <p>选择 harness 或已注册工作区，右侧审阅详情并执行下一步。</p>
               </div>
               <Button
                 variant="outline"
-                size="sm"
-                icon={<Play size={15} />}
-                onClick={() => void handleOpenWorkspace(workspace)}
+                size="icon-sm"
+                icon={<RefreshCw size={15} />}
+                onClick={refresh}
                 disabled={busy}
-              >
-                打开
-              </Button>
+                aria-label="刷新 WorkspaceHub"
+              />
             </div>
-          ))}
-          {workspaces.length === 0 ? (
-            <div className="rounded-md border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted-foreground)]">
-              还没有注册工作区。
-            </div>
-          ) : null}
-        </div>
-      </section>
-
+          </div>
+        }
+        rail={rail}
+        detail={selectedKind === "workspace" ? workspaceDetail : harnessDetail}
+        emptyDetail={
+          <ControlCenterEmptyState
+            title="选择对象"
+            description="从左侧选择一个 harness 模板或已注册工作区。"
+            icon={<Boxes size={18} />}
+          />
+        }
+      />
       {message ? (
-        <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm">
+        <div className="cc-control-detail-item" role="alert">
           {message}
         </div>
       ) : null}

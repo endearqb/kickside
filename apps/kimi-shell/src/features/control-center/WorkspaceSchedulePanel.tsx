@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, Play, RefreshCw, Trash2 } from "lucide-react";
+import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
+import { ControlCenterMetricCard } from "@/components/control-center/ControlCenterMetricCard";
+import {
+  ControlCenterStatusBadge,
+  type ControlCenterStatusTone,
+} from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,11 +51,12 @@ function formatOutcome(value?: ScheduleOutcome | null) {
   }
 }
 
-function outcomeClass(value?: ScheduleOutcome | null) {
-  if (value === "executed") return "border-[var(--success)] text-[var(--success)]";
-  if (value === "blocked_by_permission") return "border-[var(--warning)] text-[var(--warning)]";
-  if (value === "failed") return "border-[var(--destructive)] text-[var(--destructive)]";
-  return "border-[var(--border)] text-[var(--muted-foreground)]";
+function outcomeTone(value?: ScheduleOutcome | null): ControlCenterStatusTone {
+  if (value === "executed") return "success";
+  if (value === "blocked_by_permission" || value === "skipped") return "warning";
+  if (value === "failed") return "danger";
+  if (value === "executing" || value === "planned") return "accent";
+  return "neutral";
 }
 
 function formatCadence(cadence: ScheduleCadence) {
@@ -97,9 +105,9 @@ export function WorkspaceSchedulePanel() {
     setMessage(null);
     try {
       const [nextWorkspaces, nextSchedule] = await Promise.all([listWorkspaces(), listSchedule()]);
+      const nextWorkspaceId = workspaceId || nextWorkspaces[0]?.id || "";
       setWorkspaces(nextWorkspaces);
       setSchedule(nextSchedule);
-      const nextWorkspaceId = workspaceId || nextWorkspaces[0]?.id || "";
       setSelectedWorkspaceId(nextWorkspaceId);
       setRuns(nextWorkspaceId ? await listRuns(nextWorkspaceId, 25) : []);
     } catch (error) {
@@ -202,254 +210,331 @@ export function WorkspaceSchedulePanel() {
     }
   }
 
-  return (
-    <div className="space-y-4 text-[var(--foreground)]">
-      <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">
-              Schedule
-            </p>
-            <h2 className="mt-1 text-lg font-semibold">工作区调度</h2>
+  const rail = (
+    <div className="cc-control-list" aria-label="调度工作区列表">
+      <div className="cc-primary-nav-group-label">Workspaces</div>
+      {workspaces.map((workspace) => {
+        const itemHeartbeat =
+          schedule.heartbeats.find((item) => item.workspaceId === workspace.id) ?? null;
+        const itemTasks = schedule.tasks.filter((task) => task.workspaceId === workspace.id);
+        const selected = workspace.id === selectedWorkspaceId;
+        return (
+          <button
+            key={workspace.id}
+            type="button"
+            className={`cc-control-list-item ${selected ? "is-active" : ""}`}
+            onClick={() => void handleWorkspaceChange(workspace.id)}
+            aria-current={selected ? "true" : undefined}
+          >
+            <span className="cc-control-list-item-header">
+              <span className="cc-control-list-item-copy">
+                <strong>{workspace.name}</strong>
+                <small>{workspace.cwd}</small>
+              </span>
+              <ControlCenterStatusBadge
+                tone={itemHeartbeat?.enabled ? "success" : "neutral"}
+              >
+                {itemHeartbeat?.enabled ? "heartbeat" : "off"}
+              </ControlCenterStatusBadge>
+            </span>
+            <span className="cc-control-list-item-meta">
+              <span>{itemTasks.length} tasks</span>
+              <span>{formatOutcome(itemHeartbeat?.lastOutcome)}</span>
+            </span>
+          </button>
+        );
+      })}
+      {workspaces.length === 0 ? (
+        <ControlCenterEmptyState
+          title="没有工作区"
+          description="先在 WorkspaceHub 注册或创建工作区。"
+          icon={<CalendarClock size={18} />}
+        />
+      ) : null}
+    </div>
+  );
+
+  const detail = selectedWorkspace ? (
+    <div className="cc-control-detail-stack">
+      <div className="cc-control-detail-head">
+        <div className="cc-control-detail-copy">
+          <h3>{selectedWorkspace.name}</h3>
+          <p>{selectedWorkspace.cwd}</p>
+          <div className="cc-control-chip-row">
+            <ControlCenterStatusBadge tone={heartbeat?.enabled ? "success" : "neutral"}>
+              {heartbeat?.enabled ? "心跳已启用" : "心跳未启用"}
+            </ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="neutral">{tasks.length} tasks</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone={outcomeTone(heartbeat?.lastOutcome)}>
+              {formatOutcome(heartbeat?.lastOutcome)}
+            </ControlCenterStatusBadge>
           </div>
-          <Button variant="outline" size="sm" icon={<RefreshCw size={15} />} onClick={() => void refresh()} disabled={busy}>
-            刷新
+        </div>
+        <div className="cc-control-action-row">
+          <Button
+            variant={heartbeat?.enabled ? "outline" : "default"}
+            onClick={() => void handleSetHeartbeat(!heartbeat?.enabled)}
+            disabled={busy}
+          >
+            {heartbeat?.enabled ? "停用心跳" : "启用心跳"}
+          </Button>
+          <Button
+            variant="ghost"
+            icon={<Play size={15} />}
+            onClick={() => void handleRunHeartbeat(heartbeat)}
+            disabled={busy}
+          >
+            立即心跳
           </Button>
         </div>
+      </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-[minmax(220px,320px)_1fr]">
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">工作区</span>
-            <select
-              className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 text-sm"
-              value={selectedWorkspaceId}
-              onChange={(event) => void handleWorkspaceChange(event.currentTarget.value)}
-            >
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="rounded-md border border-[var(--border)] p-3">
-            <div className="text-sm font-semibold">{selectedWorkspace?.name ?? "未选择工作区"}</div>
-            <div className="mt-1 truncate font-mono text-xs text-[var(--muted-foreground)]">
-              {selectedWorkspace?.cwd ?? "请先在 WorkspaceHub 注册工作区"}
-            </div>
+      <div className="cc-control-summary-grid">
+        <ControlCenterMetricCard
+          label="Heartbeat interval"
+          value={`${heartbeat?.intervalMinutes ?? heartbeatInterval} min`}
+          meta={heartbeat?.enabled ? "enabled" : "disabled"}
+        />
+        <ControlCenterMetricCard label="Last run" value={formatDate(heartbeat?.lastRunAt)} />
+        <ControlCenterMetricCard label="Next run" value={formatDate(heartbeat?.nextRunAt)} />
+        <ControlCenterMetricCard label="Last outcome" value={formatOutcome(heartbeat?.lastOutcome)} />
+      </div>
+
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>只读心跳</h4>
+            <p>定时检查工作区状态。修改间隔后，启用或停用心跳会保存配置。</p>
           </div>
+          <ControlCenterStatusBadge tone={heartbeat?.enabled ? "success" : "neutral"}>
+            {heartbeat?.enabled ? "enabled" : "disabled"}
+          </ControlCenterStatusBadge>
+        </header>
+        <div className="cc-surface-section-body">
+          <label className="cc-control-field">
+            <span>间隔分钟</span>
+            <Input
+              value={String(heartbeatInterval)}
+              type="number"
+              min={5}
+              max={1440}
+              onChange={(event) => setHeartbeatInterval(Number(event.currentTarget.value) || 30)}
+            />
+          </label>
         </div>
       </section>
 
-      {selectedWorkspace ? (
-        <>
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-            <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-              <div>
-                <h2 className="text-lg font-semibold">只读心跳</h2>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                  最近：{formatDate(heartbeat?.lastRunAt)} · 下次：{formatDate(heartbeat?.nextRunAt)}
-                </p>
-                <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <label className="space-y-1 text-sm">
-                    <span className="font-medium">间隔分钟</span>
-                    <Input
-                      value={String(heartbeatInterval)}
-                      type="number"
-                      min={5}
-                      max={1440}
-                      onChange={(event) => setHeartbeatInterval(Number(event.currentTarget.value) || 30)}
-                    />
-                  </label>
-                  <span className={`rounded-sm border px-2 py-1 text-xs ${outcomeClass(heartbeat?.lastOutcome)}`}>
-                    {formatOutcome(heartbeat?.lastOutcome)}
-                  </span>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-start gap-2 lg:justify-end">
-                <Button
-                  variant={heartbeat?.enabled ? "outline" : "default"}
-                  onClick={() => void handleSetHeartbeat(!heartbeat?.enabled)}
-                  disabled={busy}
-                >
-                  {heartbeat?.enabled ? "停用" : "启用"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  icon={<Play size={15} />}
-                  onClick={() => void handleRunHeartbeat(heartbeat)}
-                  disabled={busy}
-                >
-                  立即心跳
-                </Button>
-              </div>
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>新增 plan-then-run</h4>
+            <p>任务会先生成计划，再按权限执行。</p>
+          </div>
+          <Button icon={<CalendarClock size={15} />} onClick={handleCreateTask} disabled={busy}>
+            创建任务
+          </Button>
+        </header>
+        <div className="cc-surface-section-body">
+          <div className="cc-control-detail-grid">
+            <label className="cc-control-field">
+              <span>任务名</span>
+              <Input value={taskName} onChange={(event) => setTaskName(event.currentTarget.value)} />
+            </label>
+            <label className="cc-control-field">
+              <span>频率</span>
+              <select
+                className="cc-control-select"
+                value={cadenceKind}
+                onChange={(event) => setCadenceKind(event.currentTarget.value as "daily" | "weekday" | "cron")}
+              >
+                <option value="daily">每天</option>
+                <option value="weekday">工作日</option>
+                <option value="cron">Cron</option>
+              </select>
+            </label>
+            {cadenceKind === "cron" ? (
+              <label className="cc-control-field">
+                <span>表达式</span>
+                <Input value={cronExpression} onChange={(event) => setCronExpression(event.currentTarget.value)} />
+              </label>
+            ) : (
+              <label className="cc-control-field">
+                <span>时间</span>
+                <Input value={cadenceAt} onChange={(event) => setCadenceAt(event.currentTarget.value)} />
+              </label>
+            )}
+            <label className="cc-control-field">
+              <span>执行权限</span>
+              <select
+                className="cc-control-select"
+                value={permission}
+                onChange={(event) => setPermission(event.currentTarget.value as AcpExecutionPermission)}
+              >
+                <option value="auto">auto</option>
+                <option value="yolo">yolo</option>
+              </select>
+            </label>
+          </div>
+          <label className="cc-control-field">
+            <span>目标</span>
+            <textarea
+              className="cc-control-textarea"
+              value={taskPrompt}
+              onChange={(event) => setTaskPrompt(event.currentTarget.value)}
+            />
+          </label>
+          {permission === "yolo" ? (
+            <div className="cc-control-detail-item" role="alert">
+              yolo 允许更高风险自动执行，仅用于可信工作区。
             </div>
-          </section>
+          ) : (
+            <div className="cc-control-muted">
+              auto 会自动执行安全操作，遇到权限阻断则停止。
+            </div>
+          )}
+        </div>
+      </section>
 
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-            <div className="grid gap-4 xl:grid-cols-[minmax(280px,360px)_1fr]">
-              <div className="space-y-3 rounded-md border border-[var(--border)] p-3">
-                <div className="flex items-center gap-2">
-                  <CalendarClock size={16} />
-                  <h2 className="text-base font-semibold">新增 plan-then-run</h2>
-                </div>
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">任务名</span>
-                  <Input value={taskName} onChange={(event) => setTaskName(event.currentTarget.value)} />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">目标</span>
-                  <textarea
-                    className="min-h-24 w-full resize-y rounded-md border border-[var(--border)] bg-[var(--background)] p-3 text-sm"
-                    value={taskPrompt}
-                    onChange={(event) => setTaskPrompt(event.currentTarget.value)}
-                  />
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="space-y-1 text-sm">
-                    <span className="font-medium">频率</span>
-                    <select
-                      className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 text-sm"
-                      value={cadenceKind}
-                      onChange={(event) => setCadenceKind(event.currentTarget.value as "daily" | "weekday" | "cron")}
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>任务列表</h4>
+            <p>{tasks.length} 个任务绑定到当前工作区。</p>
+          </div>
+        </header>
+        <div className="cc-surface-section-body">
+          <div className="cc-control-detail-list">
+            {tasks.map((task) => (
+              <div key={task.id} className="cc-control-detail-item">
+                <div className="cc-control-detail-head">
+                  <div className="cc-control-detail-copy">
+                    <h3>{task.name}</h3>
+                    <p>{formatCadence(task.cadence)} · 下次 {formatDate(task.nextRunAt)}</p>
+                    <div className="cc-control-chip-row">
+                      <ControlCenterStatusBadge tone={outcomeTone(task.lastOutcome)}>
+                        {formatOutcome(task.lastOutcome)}
+                      </ControlCenterStatusBadge>
+                      <ControlCenterStatusBadge
+                        tone={task.executionPermission === "yolo" ? "warning" : "neutral"}
+                      >
+                        {task.executionPermission}
+                      </ControlCenterStatusBadge>
+                    </div>
+                  </div>
+                  <div className="cc-control-action-row">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      icon={<Play size={15} />}
+                      onClick={() => void handleRunTask(task)}
+                      disabled={busy}
                     >
-                      <option value="daily">每天</option>
-                      <option value="weekday">工作日</option>
-                      <option value="cron">Cron</option>
-                    </select>
-                  </label>
-                  {cadenceKind === "cron" ? (
-                    <label className="space-y-1 text-sm">
-                      <span className="font-medium">表达式</span>
-                      <Input value={cronExpression} onChange={(event) => setCronExpression(event.currentTarget.value)} />
-                    </label>
-                  ) : (
-                    <label className="space-y-1 text-sm">
-                      <span className="font-medium">时间</span>
-                      <Input value={cadenceAt} onChange={(event) => setCadenceAt(event.currentTarget.value)} />
-                    </label>
-                  )}
+                      Run now
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      icon={<Trash2 size={15} />}
+                      aria-label="删除任务"
+                      onClick={() => void handleDeleteTask(task)}
+                      disabled={busy}
+                    />
+                  </div>
                 </div>
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">执行权限</span>
-                  <select
-                    className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 text-sm"
-                    value={permission}
-                    onChange={(event) => setPermission(event.currentTarget.value as AcpExecutionPermission)}
-                  >
-                    <option value="auto">auto</option>
-                    <option value="yolo">yolo</option>
-                  </select>
-                </label>
-                {permission === "yolo" ? (
-                  <div className="rounded-md border border-[var(--warning)] bg-[var(--warning)]/10 p-2 text-xs">
-                    yolo 会允许更高风险的自动执行，请只用于可信工作区。
-                  </div>
-                ) : null}
-                <Button onClick={handleCreateTask} disabled={busy}>
-                  创建任务
-                </Button>
+                <p className="cc-control-muted">{task.prompt}</p>
               </div>
+            ))}
+          </div>
+          {tasks.length === 0 ? (
+            <ControlCenterEmptyState
+              title="还没有定时任务"
+              description="创建一个 plan-then-run 任务后会显示在这里。"
+              icon={<CalendarClock size={18} />}
+            />
+          ) : null}
+        </div>
+      </section>
 
-              <div className="space-y-2">
-                {tasks.map((task) => (
-                  <div key={task.id} className="rounded-md border border-[var(--border)] p-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-semibold">{task.name}</h3>
-                          <span className={`rounded-sm border px-2 py-1 text-xs ${outcomeClass(task.lastOutcome)}`}>
-                            {formatOutcome(task.lastOutcome)}
-                          </span>
-                          <span className="rounded-sm bg-[var(--muted)] px-2 py-1 text-xs text-[var(--muted-foreground)]">
-                            {task.executionPermission}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-                          {formatCadence(task.cadence)} · 下次 {formatDate(task.nextRunAt)}
-                        </p>
-                        <p className="mt-2 line-clamp-2 text-sm">{task.prompt}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          icon={<Play size={15} />}
-                          onClick={() => void handleRunTask(task)}
-                          disabled={busy}
-                        >
-                          Run now
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          icon={<Trash2 size={15} />}
-                          aria-label="删除任务"
-                          onClick={() => void handleDeleteTask(task)}
-                          disabled={busy}
-                        />
-                      </div>
-                    </div>
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>Run history</h4>
+            <p>{runs.length} 条最近运行记录。plan/result 默认折叠。</p>
+          </div>
+        </header>
+        <div className="cc-surface-section-body">
+          <div className="cc-control-detail-list">
+            {runs.map((run) => (
+              <details key={run.id} className="cc-control-detail-item">
+                <summary className="cc-run-summary">
+                  <span>
+                    <strong>{run.taskName}</strong>
+                    <small>{formatDate(run.startedAt)}</small>
+                  </span>
+                  <ControlCenterStatusBadge tone={outcomeTone(run.outcome)}>
+                    {formatOutcome(run.outcome)}
+                  </ControlCenterStatusBadge>
+                </summary>
+                <div className="cc-run-detail-grid">
+                  <div>
+                    <h4>Plan</h4>
+                    <pre className="cc-code-preview">{run.plan ?? "无"}</pre>
                   </div>
-                ))}
-                {tasks.length === 0 ? (
-                  <div className="rounded-md border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted-foreground)]">
-                    还没有定时任务。
+                  <div>
+                    <h4>Result</h4>
+                    <pre className="cc-code-preview">{run.result ?? run.error ?? "无"}</pre>
                   </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold">Run history</h2>
-              <span className="text-xs text-[var(--muted-foreground)]">{runs.length} 条</span>
-            </div>
-            <div className="mt-3 space-y-2">
-              {runs.map((run) => (
-                <details key={run.id} className="rounded-md border border-[var(--border)] p-3">
-                  <summary className="cursor-pointer list-none">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="text-sm font-semibold">{run.taskName}</span>
-                        <span className="ml-2 text-xs text-[var(--muted-foreground)]">
-                          {formatDate(run.startedAt)}
-                        </span>
-                      </div>
-                      <span className={`rounded-sm border px-2 py-1 text-xs ${outcomeClass(run.outcome)}`}>
-                        {formatOutcome(run.outcome)}
-                      </span>
-                    </div>
-                  </summary>
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">Plan</h4>
-                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--muted)] p-2 text-xs">
-                        {run.plan ?? "无"}
-                      </pre>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-semibold uppercase text-[var(--muted-foreground)]">Result</h4>
-                      <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-[var(--muted)] p-2 text-xs">
-                        {run.result ?? run.error ?? "无"}
-                      </pre>
-                    </div>
-                  </div>
-                </details>
-              ))}
-              {runs.length === 0 ? (
-                <div className="rounded-md border border-dashed border-[var(--border)] p-4 text-sm text-[var(--muted-foreground)]">
-                  暂无运行记录。
                 </div>
-              ) : null}
-            </div>
-          </section>
-        </>
-      ) : null}
+              </details>
+            ))}
+          </div>
+          {runs.length === 0 ? (
+            <ControlCenterEmptyState
+              title="暂无运行记录"
+              description="手动运行心跳或任务后会在这里出现。"
+              icon={<Play size={18} />}
+            />
+          ) : null}
+        </div>
+      </section>
+    </div>
+  ) : null;
 
+  return (
+    <div className="cc-control-stack workspace-schedule-panel">
+      <ControlCenterWorkbenchLayout
+        mode="stack-on-mobile"
+        className="workspace-schedule-workbench"
+        railHeader={
+          <div className="cc-control-toolbar">
+            <div className="cc-control-detail-head">
+              <div className="cc-control-detail-copy">
+                <h3>调度</h3>
+                <p>以工作区为对象查看心跳、任务和运行记录。</p>
+              </div>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                icon={<RefreshCw size={15} />}
+                onClick={() => void refresh()}
+                disabled={busy}
+                aria-label="刷新调度"
+              />
+            </div>
+          </div>
+        }
+        rail={rail}
+        detail={detail}
+        emptyDetail={
+          <ControlCenterEmptyState
+            title="选择工作区"
+            description="从左侧选择工作区以查看调度详情。"
+            icon={<CalendarClock size={18} />}
+          />
+        }
+      />
       {message ? (
-        <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-sm">
+        <div className="cc-control-detail-item" role="alert">
           {message}
         </div>
       ) : null}

@@ -349,68 +349,60 @@ type ControlCenterViewProps = {
 const controlSections: Array<{
   id: ControlSectionId;
   label: string;
+  description: string;
+  group: "core" | "setup";
   icon: ReactNode;
 }> = [
   {
     id: "overview",
     label: "工作台",
+    description: "运行状态、当前工作区和需要关注的事项。",
+    group: "core",
     icon: <LayoutDashboard size={15} />,
   },
   {
     id: "workspace_hub",
     label: "WorkspaceHub",
+    description: "Harness 模板、已注册工作区和创建预览。",
+    group: "core",
     icon: <Boxes size={15} />,
   },
   {
     id: "skill_center",
     label: "Skill 中心",
+    description: "已安装 Skill、投影状态和工作区 target。",
+    group: "core",
     icon: <Sparkles size={15} />,
   },
   {
     id: "schedule",
     label: "调度",
+    description: "工作区心跳、计划任务和运行记录。",
+    group: "core",
     icon: <CalendarClock size={15} />,
   },
   {
     id: "runtime_center",
     label: "诊断",
+    description: "启动链路、Doctor、WebView 和日志。",
+    group: "core",
     icon: <Activity size={15} />,
   },
   {
     id: "onboarding",
     label: "快速设置",
+    description: "安装、认证、右键菜单和默认工作目录。",
+    group: "setup",
     icon: <SlidersHorizontal size={15} />,
   },
   {
     id: "bridge_center",
     label: "外部 IM 通道",
+    description: "Telegram、飞书、微信、会话和审批。",
+    group: "setup",
     icon: <Play size={15} />,
   },
 ];
-
-function RuntimePanel({
-  active,
-  onOpen,
-  title,
-  children,
-}: {
-  active: boolean;
-  onOpen: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className={`runtime-panel ${active ? "active" : ""}`}>
-      <button type="button" className="runtime-panel-head" onClick={onOpen}>
-        <div className="runtime-panel-title">
-          <h3>{title}</h3>
-        </div>
-        <ChevronRight size={16} className="runtime-panel-chevron" />
-      </button>
-      {active && <div className="runtime-panel-body">{children}</div>}
-    </section>
-  );
-}
 
 function hasLatinLetters(value: string): boolean {
   return /[A-Za-z]/.test(value);
@@ -873,7 +865,6 @@ export function ControlCenterView({
     useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
-  const [runtimePanelExpanded, setRuntimePanelExpanded] = useState(true);
   const [mainCloseBehaviorSaving, setMainCloseBehaviorSaving] = useState(false);
   const [briefTip, setBriefTip] = useState<AgentTip>(() => pickRandomAgentTip());
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
@@ -910,7 +901,6 @@ export function ControlCenterView({
     (connector) => connector.platform === "feishu" && connector.enabled,
   );
   const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
-  const bridgeFinalStatusTitle = "IM机器人";
   const openBridgeTitle = formatOpenBridgeDisplayName(bridgeDisplayName);
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
@@ -1186,14 +1176,6 @@ export function ControlCenterView({
   }, [activeControlSection, defaultOnboardingCard, expandedOnboardingCard]);
 
   useEffect(() => {
-    if (activeControlSection === "runtime_center") {
-      setRuntimePanelExpanded(true);
-      return;
-    }
-    setRuntimePanelExpanded(false);
-  }, [activeControlSection]);
-
-  useEffect(() => {
     if (
       !selectedBridgeConnectorId ||
       !visibleBridgeConnectors.some((item) => item.id === selectedBridgeConnectorId)
@@ -1327,14 +1309,6 @@ export function ControlCenterView({
   }
 
   async function handleSelectRuntimePanel(panel: RuntimePanelId) {
-    if (
-      activeControlSection === "runtime_center" &&
-      runtimePanelExpanded &&
-      activeRuntimePanel === panel
-    ) {
-      setRuntimePanelExpanded(false);
-      return;
-    }
     try {
       if (panel === "bridge") {
         await Promise.all([
@@ -1353,7 +1327,6 @@ export function ControlCenterView({
     } finally {
       setActiveControlSection("runtime_center");
       setActiveRuntimePanel(panel);
-      setRuntimePanelExpanded(true);
     }
   }
 
@@ -1417,6 +1390,10 @@ export function ControlCenterView({
     }
     if (section === "skill_center") {
       await handleSelectSkillCenterSection();
+      return;
+    }
+    if (section === "workspace_hub" || section === "schedule") {
+      setActiveControlSection(section);
       return;
     }
     await handleSelectRuntimePanel("core");
@@ -1904,10 +1881,8 @@ export function ControlCenterView({
       : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
-  const totalBridgeRobotCount = bridgeSettings.connectors.length;
   const skillDiscoveryRecords = skillDiscoverySnapshot?.records ?? [];
   const externalDiscoveryCount = skillDiscoveryRecords.length;
-  const imFinalStatusLabel = `${totalBridgeRobotCount} 个`;
   const overviewBriefs = [
     !installReady ? "Kimi Code 仍未就绪，建议先完成安装与探测。" : null,
     !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
@@ -1921,35 +1896,33 @@ export function ControlCenterView({
     overviewBriefs[0] ?? "当前所有核心环节已处于可用状态，可以继续检查运行诊断、外部 IM 通道和 Skill 投影。";
 
   function renderOverviewSection() {
+    const attentionItems = overviewBriefs.slice(0, 3);
+    const activeWorkspacePath =
+      status?.activeSessionWorkDir?.trim() || effectiveWorkDir.trim();
+
     return (
-      <div className="cc-overview-shell">
-        <section className="cc-card cc-hero-card">
-          <div className="cc-hero-layout">
-            <div className="cc-hero-main">
-              <span className="cc-kicker">状态总览</span>
-              <h2>控制中心当前状态</h2>
-              <p className="cc-hero-copy">{overviewPrimaryMessage}</p>
-              <div className="cc-hero-status-strip">
-                <article className="cc-signal-card">
-                  <span>后端状态</span>
-                  <strong>{diagnostics?.state ?? status?.state ?? "-"}</strong>
-                </article>
-                <article className="cc-signal-card">
-                  <span>{bridgeFinalStatusTitle}</span>
-                  <strong>{imFinalStatusLabel}</strong>
-                </article>
-                <article className="cc-signal-card">
-                  <span>发现技能</span>
-                  <strong>{externalDiscoveryCount} 个</strong>
-                </article>
-                <article className="cc-signal-card">
-                  <span>待处理项</span>
-                  <strong>{pendingOverviewCount === 0 ? "无" : `${pendingOverviewCount} 项`}</strong>
-                </article>
-              </div>
-              <div className="cc-actions cc-hero-actions">
+      <div className="cc-overview-shell cc-overview-shell-image">
+        <section className="cc-card cc-overview-status-card">
+          <ControlCenterCardHeader
+            eyebrow="状态总览"
+            title="工作台"
+            description={overviewPrimaryMessage}
+            statusLabel={pendingOverviewCount === 0 ? "稳定" : `${pendingOverviewCount} 项关注`}
+            statusTone={pendingOverviewCount === 0 ? "success" : "warning"}
+            primaryAction={
+              <div className="cc-actions">
                 <Button
                   type="button"
+                  icon={<FolderOpen size={15} />}
+                  className="cc-action-btn"
+                  onClick={() => void onOpenFolder(activeWorkspacePath)}
+                  disabled={!activeWorkspacePath}
+                >
+                  打开当前工作区
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
                   icon={<RefreshCw size={15} />}
                   className="cc-action-btn"
                   onClick={() => {
@@ -1961,40 +1934,53 @@ export function ControlCenterView({
                 >
                   刷新全部状态
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  icon={<SlidersHorizontal size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => {
-                    void handleOpenOnboardingEntry();
-                  }}
-                >
-                  打开快速设置
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  icon={<FolderOpen size={15} />}
-                  className="cc-action-btn"
-                  onClick={() => void onOpenLogs()}
-                >
-                  打开日志目录
-                </Button>
               </div>
+            }
+          />
+          <div className="cc-card-body">
+            <div className="cc-overview-meta-grid">
+              <article className="cc-overview-meta-item">
+                <span>Backend state</span>
+                <strong>{diagnostics?.state ?? status?.state ?? "-"}</strong>
+                <small>
+                  active {String(status?.activePort ?? diagnostics?.activePort ?? "-")} / workspace{" "}
+                  {String(status?.workspacePort ?? diagnostics?.workspacePort ?? "-")}
+                </small>
+              </article>
+              <article className="cc-overview-meta-item">
+                <span>Workspace</span>
+                <strong>{activeWorkspacePath || "-"}</strong>
+                <small>{status?.activeSessionId || "no active session"}</small>
+              </article>
+              <article className="cc-overview-meta-item">
+                <span>Auth</span>
+                <strong>{status?.authMode ?? "-"}</strong>
+                <small>Provider {formatProviderApiHealthState(status?.providerApiHealth.state)}</small>
+              </article>
+              <article className="cc-overview-meta-item">
+                <span>Enhanced Web / Hotkey</span>
+                <strong>{status?.enhancedWebHealth.state ?? "-"}</strong>
+                <small>{status?.hotkey || "-"}</small>
+              </article>
             </div>
+          </div>
+        </section>
 
-            <aside className="cc-hero-aside">
-              <div className="cc-editorial-note">
-                <span className="cc-kicker">当前重点</span>
-                <h3>{activeOnboardingStep.title}</h3>
+        <section className="cc-overview-workbench-grid">
+          <section className="cc-card cc-overview-focus-card">
+            <header className="cc-card-header">
+              <h3>当前重点</h3>
+              <ControlCenterStatusBadge tone={activeOnboardingStep.statusTone}>
+                {activeOnboardingStep.statusLabel}
+              </ControlCenterStatusBadge>
+            </header>
+            <div className="cc-card-body">
+              <div className="cc-overview-focus-copy">
+                <span>推荐步骤 {activeOnboardingStep.index}</span>
+                <strong>{activeOnboardingStep.title}</strong>
                 <p>{overviewPrimaryMessage}</p>
-                <div className="cc-chip-row">
-                  <span className={`cc-status-badge tone-${activeOnboardingStep.statusTone}`}>
-                    {activeOnboardingStep.statusLabel}
-                  </span>
-                  <span className="cc-quiet-chip">推荐步骤 {activeOnboardingStep.index}</span>
-                </div>
+              </div>
+              <div className="cc-actions">
                 <Button
                   type="button"
                   className="cc-action-btn"
@@ -2005,121 +1991,88 @@ export function ControlCenterView({
                   处理当前重点
                 </Button>
               </div>
-            </aside>
-          </div>
+            </div>
+          </section>
+
+          <section className="cc-card cc-overview-actions-card">
+            <header className="cc-card-header">
+              <h3>快捷操作</h3>
+            </header>
+            <div className="cc-card-body">
+              <div className="cc-overview-action-list">
+                <button type="button" className="cc-control-list-item" onClick={() => void handleOpenRuntimeEntry("core")}>
+                  <span className="cc-task-card-icon"><Activity size={16} /></span>
+                  <span className="cc-task-card-copy">
+                    <strong>查看运行诊断</strong>
+                    <small>{runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : "稳定"}</small>
+                  </span>
+                </button>
+                <button type="button" className="cc-control-list-item" onClick={() => void handleSelectBridgeSection()}>
+                  <span className="cc-task-card-icon"><Play size={16} /></span>
+                  <span className="cc-task-card-copy">
+                    <strong>{openBridgeTitle}</strong>
+                    <small>{bridgeStatusLabel}</small>
+                  </span>
+                </button>
+                <button type="button" className="cc-control-list-item" onClick={() => void handleSelectSkillCenterSection()}>
+                  <span className="cc-task-card-icon"><Sparkles size={16} /></span>
+                  <span className="cc-task-card-copy">
+                    <strong>Skill 投影与工作区管理</strong>
+                    <small>{externalDiscoveryCount} 个发现技能</small>
+                  </span>
+                </button>
+                <button type="button" className="cc-control-list-item" onClick={() => void onOpenLogs()}>
+                  <span className="cc-task-card-icon"><FolderOpen size={16} /></span>
+                  <span className="cc-task-card-copy">
+                    <strong>打开日志目录</strong>
+                    <small>{status?.logsDir || diagnostics?.logsDir || "-"}</small>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </section>
         </section>
 
-        <section className="cc-overview-columns">
-          <div className="cc-overview-main-column">
-            <section className="cc-card">
-              <header className="cc-card-header">
-                <h3>优先任务</h3>
-              </header>
-              <div className="cc-card-body">
-                <div className="cc-task-grid">
-                  <button
-                    type="button"
-                    className="cc-task-card"
-                    onClick={() => {
-                      void handleOpenOnboardingEntry();
-                    }}
-                  >
-                    <span className="cc-task-card-icon"><SlidersHorizontal size={16} /></span>
-                    <span className="cc-task-card-copy">
-                      <strong>完成快速设置</strong>
-                    </span>
-                    <span className="cc-task-card-meta">
-                      {completedOnboardingCards}/{onboardingSteps.length}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="cc-task-card"
-                    onClick={() => {
-                      void handleOpenRuntimeEntry("core");
-                    }}
-                  >
-                    <span className="cc-task-card-icon"><Activity size={16} /></span>
-                    <span className="cc-task-card-copy">
-                      <strong>查看运行诊断</strong>
-                    </span>
-                    <span className="cc-task-card-meta">
-                      {runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : "稳定"}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="cc-task-card"
-                    onClick={() => {
-                      void handleSelectBridgeSection();
-                    }}
-                  >
-                    <span className="cc-task-card-icon"><Play size={16} /></span>
-                    <span className="cc-task-card-copy">
-                      <strong>{openBridgeTitle}</strong>
-                    </span>
-                    <span className="cc-task-card-meta">{bridgeStatusLabel}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="cc-task-card"
-                    onClick={() => {
-                      void handleSelectSkillCenterSection();
-                    }}
-                  >
-                    <span className="cc-task-card-icon"><Sparkles size={16} /></span>
-                    <span className="cc-task-card-copy">
-                      <strong>打开 Skill 投影与工作区管理</strong>
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <aside className="cc-overview-side-column">
-            <section className="cc-card">
-              <header className="cc-card-header">
-                <h3>待处理与提醒</h3>
-              </header>
-              <div className="cc-card-body">
-                {overviewBriefs.length > 0 ? (
-                  <div className="cc-brief-list">
-                    {overviewBriefs.map((item) => (
-                      <article key={item} className="cc-brief-item">
-                        <strong>{item}</strong>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <article className="cc-brief-tip-card">
-                    <div className="cc-brief-tip-head">
-                      <div className="cc-brief-tip-meta">
-                        <span className="cc-brief-tip-badge">Agent 提示</span>
-                        <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        icon={<RefreshCw size={13} />}
-                        className="cc-brief-tip-refresh"
-                        onClick={() => setBriefTip(pickRandomAgentTip())}
-                        aria-label="刷新 Agent 使用提示"
-                      />
-                    </div>
-                    <div className="cc-brief-tip-article">
-                      <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
-                      <p className="cc-brief-tip-body">{briefTip.body}</p>
-                    </div>
+        <section className="cc-card cc-overview-attention-card">
+          <header className="cc-card-header">
+            <h3>待处理与提醒</h3>
+            <ControlCenterStatusBadge tone={attentionItems.length > 0 ? "warning" : "success"}>
+              {attentionItems.length > 0 ? `${attentionItems.length} 项` : "无"}
+            </ControlCenterStatusBadge>
+          </header>
+          <div className="cc-card-body">
+            {attentionItems.length > 0 ? (
+              <div className="cc-brief-list">
+                {attentionItems.map((item) => (
+                  <article key={item} className="cc-brief-item">
+                    <strong>{item}</strong>
                   </article>
-                )}
+                ))}
               </div>
-            </section>
-          </aside>
+            ) : (
+              <article className="cc-brief-tip-card">
+                <div className="cc-brief-tip-head">
+                  <div className="cc-brief-tip-meta">
+                    <span className="cc-brief-tip-badge">Agent 提示</span>
+                    <span className="cc-brief-tip-number">{briefTip.numberLabel}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    icon={<RefreshCw size={13} />}
+                    className="cc-brief-tip-refresh"
+                    onClick={() => setBriefTip(pickRandomAgentTip())}
+                    aria-label="刷新 Agent 使用提示"
+                  />
+                </div>
+                <div className="cc-brief-tip-article">
+                  <strong className="cc-brief-tip-article-title">{briefTip.title}</strong>
+                  <p className="cc-brief-tip-body">{briefTip.body}</p>
+                </div>
+              </article>
+            )}
+          </div>
         </section>
       </div>
     );
@@ -2129,102 +2082,130 @@ export function ControlCenterView({
     const selectedStepTone = activeOnboardingStep.statusTone;
 
     return (
-      <div className="cc-onboarding-editorial">
-        <aside className="cc-card cc-onboarding-rail">
-          <div className="cc-onboarding-rail-head">
-            <span className="cc-kicker">设置流程</span>
-            <h3>快速设置</h3>
-          </div>
-
-          <div className="cc-onboarding-step-list" role="tablist" aria-label="快速设置步骤">
-            {onboardingSteps.map((step) => {
-              const isActive = step.id === activeOnboardingStep.id;
-              return (
-                <button
-                  key={step.id}
-                  type="button"
-                  className={`cc-onboarding-step-card ${isActive ? "is-active" : ""} ${step.complete ? "is-complete" : ""}`}
-                  onClick={() => toggleOnboardingCard(step.id)}
-                  aria-current={isActive ? "step" : undefined}
-                >
-                  <span className="cc-onboarding-step-index">{step.index}</span>
-                  <span className="cc-onboarding-step-copy">
-                    <strong>{step.title}</strong>
-                    <small>{step.actionLabel}</small>
-                    <span
-                      className={`cc-status-badge cc-onboarding-step-status tone-${step.statusTone}`}
-                    >
-                      {step.statusLabel}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <section className="cc-onboarding-flow-actions">
-            <div className="cc-actions">
-              <Button
-                type="button"
-                icon={<Check size={15} />}
-                className="cc-action-btn"
-                onClick={() => void onCompleteOnboarding()}
-                disabled={actionBusy}
-              >
-                完成引导
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<RefreshCw size={15} />}
-                className="cc-action-btn"
-                onClick={() => {
-                  void onRefreshOnboarding();
-                  void onRefreshDiagnostics();
-                  void onRefreshContextMenuStatus();
-                  void onRefreshBridgeSettings();
-                  void onRefreshBridgeStatus();
-                  void onRefreshBridgeSecretsMask();
-                }}
-                disabled={diagnosticsBusy || contextMenuBusy}
-              >
-                刷新状态
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                icon={<RefreshCcw size={15} />}
-                className="cc-action-btn"
-                onClick={() => void onRetry()}
-                disabled={actionBusy}
-              >
-                重启后端
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                icon={<ChevronRight size={15} />}
-                className="cc-action-btn"
-                onClick={() => void onSkipOnboarding()}
-                disabled={actionBusy}
-              >
-                暂时跳过
-              </Button>
+      <div className="cc-onboarding-editorial cc-onboarding-workbench-shell">
+        <ControlCenterWorkbenchLayout
+          mode="stack-on-mobile"
+          className="cc-onboarding-workbench"
+          railBodyClassName="cc-onboarding-rail-body"
+          detailBodyClassName="cc-onboarding-detail-body"
+          railHeader={
+            <div className="cc-onboarding-rail-head">
+              <span className="cc-kicker">设置流程</span>
+              <h3>快速设置</h3>
+              <div className="cc-onboarding-progress-block">
+                <div className="cc-onboarding-progress-label">
+                  <span>完成进度</span>
+                  <strong>
+                    {completedOnboardingCards}/{onboardingSteps.length}
+                  </strong>
+                </div>
+                <div className="cc-onboarding-progress-track">
+                  <div
+                    className="cc-onboarding-progress-fill"
+                    style={{
+                      width: `${Math.round((completedOnboardingCards / onboardingSteps.length) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </div>
             </div>
-          </section>
-        </aside>
+          }
+          rail={
+            <>
+              <div className="cc-onboarding-step-list" role="tablist" aria-label="快速设置步骤">
+                {onboardingSteps.map((step) => {
+                  const isActive = step.id === activeOnboardingStep.id;
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      className={`cc-control-list-item cc-onboarding-step-card ${
+                        isActive ? "is-active" : ""
+                      } ${step.complete ? "is-complete" : ""}`}
+                      onClick={() => toggleOnboardingCard(step.id)}
+                      aria-current={isActive ? "step" : undefined}
+                    >
+                      <span className="cc-onboarding-step-index">{step.index}</span>
+                      <span className="cc-onboarding-step-copy">
+                        <strong>{step.title}</strong>
+                        <small>{step.actionLabel}</small>
+                      </span>
+                      <ControlCenterStatusBadge tone={step.statusTone}>
+                        {step.statusLabel}
+                      </ControlCenterStatusBadge>
+                    </button>
+                  );
+                })}
+              </div>
 
-        <section className="cc-card cc-onboarding-detail-shell">
-          <section className="cc-card cc-step-detail-card">
-            <ControlCenterCardHeader
-              eyebrow={`步骤 ${activeOnboardingStep.index}`}
-              title="操作与详情"
-              description={activeOnboardingStep.title}
-              statusLabel={activeOnboardingStep.statusLabel}
-              statusTone={selectedStepTone}
-              primaryAction={activeOnboardingStep.primaryAction}
-            />
-            <div className="cc-card-body cc-step-body cc-step-body-single cc-step-detail-scroll">
+              <section className="cc-onboarding-flow-actions">
+                <div className="cc-actions">
+                  <Button
+                    type="button"
+                    icon={<Check size={15} />}
+                    className="cc-action-btn"
+                    onClick={() => void onCompleteOnboarding()}
+                    disabled={actionBusy}
+                  >
+                    完成引导
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<RefreshCw size={15} />}
+                    className="cc-action-btn"
+                    onClick={() => {
+                      void onRefreshOnboarding();
+                      void onRefreshDiagnostics();
+                      void onRefreshContextMenuStatus();
+                      void onRefreshBridgeSettings();
+                      void onRefreshBridgeStatus();
+                      void onRefreshBridgeSecretsMask();
+                    }}
+                    disabled={diagnosticsBusy || contextMenuBusy}
+                  >
+                    刷新状态
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<RefreshCcw size={15} />}
+                    className="cc-action-btn"
+                    onClick={() => void onRetry()}
+                    disabled={actionBusy}
+                  >
+                    重启后端
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    icon={<ChevronRight size={15} />}
+                    className="cc-action-btn"
+                    onClick={() => void onSkipOnboarding()}
+                    disabled={actionBusy}
+                  >
+                    暂时跳过
+                  </Button>
+                </div>
+              </section>
+            </>
+          }
+          detailHeader={
+            <div className="cc-onboarding-detail-head">
+              <div>
+                <span className="cc-kicker">步骤 {activeOnboardingStep.index}</span>
+                <h3>{activeOnboardingStep.title}</h3>
+              </div>
+              <div className="cc-actions">
+                <ControlCenterStatusBadge tone={selectedStepTone}>
+                  {activeOnboardingStep.statusLabel}
+                </ControlCenterStatusBadge>
+                {activeOnboardingStep.primaryAction}
+              </div>
+            </div>
+          }
+          detail={
+            <div className="cc-step-body cc-step-body-single cc-step-detail-scroll">
               <div className="cc-step-main">
                 {activeOnboardingStep.id === "install" ? (
                   <div className="cc-onboarding-install-stack">
@@ -2275,9 +2256,9 @@ export function ControlCenterView({
                     <div className="cc-brief-list">
                       <article className="cc-brief-item">
                         <strong>Provider API</strong>
-                        <span className={`cc-status-badge tone-${providerApiStatusTone}`}>
+                        <ControlCenterStatusBadge tone={providerApiStatusTone}>
                           {providerApiStatusLabel}
-                        </span>
+                        </ControlCenterStatusBadge>
                       </article>
                       <article className="cc-brief-item">
                         <strong>配置文件</strong>
@@ -2323,83 +2304,70 @@ export function ControlCenterView({
                 {activeOnboardingStep.id === "work_dir" ? renderWorkDirStepContent() : null}
               </div>
             </div>
-          </section>
-        </section>
+          }
+        />
       </div>
     );
   }
 
   function renderRuntimeSection() {
-    return (
-      <div className="cc-runtime-shell">
-        <section className="cc-card cc-runtime-hero">
-          <div className="cc-runtime-summary-grid">
-            <article className="cc-runtime-summary-card">
-              <span>核心运行</span>
-              <strong>{diagnostics?.state ?? "-"}</strong>
-              <Button
-                type="button"
-                variant="ghost"
-                className="cc-action-btn"
-                onClick={() => {
-                  void handleSelectRuntimePanel("core");
-                }}
-              >
-                打开核心诊断
-              </Button>
-            </article>
-            <article className="cc-runtime-summary-card">
-              <span>路径与菜单</span>
-              <strong>
-                {runtimeContextMenuSupported
-                  ? runtimeContextMenuEnabled
-                    ? "就绪"
-                    : "待办"
-                  : "不支持"}
-              </strong>
-              <Button
-                type="button"
-                variant="ghost"
-                className="cc-action-btn"
-                onClick={() => {
-                  void handleSelectRuntimePanel("paths");
-                }}
-              >
-                打开路径面板
-              </Button>
-            </article>
-            <article className="cc-runtime-summary-card">
-              <span>日志尾部</span>
-              <strong>
-                {diagnostics?.backendLogTail?.length ?? diagnostics?.appLogTail?.length ?? 0} 行
-              </strong>
-              <Button
-                type="button"
-                variant="ghost"
-                className="cc-action-btn"
-                onClick={() => {
-                  void handleSelectRuntimePanel("logs");
-                }}
-              >
-                查看最近日志
-              </Button>
-            </article>
-          </div>
-        </section>
+    const selectedRuntimePanel: RuntimePanelId =
+      activeRuntimePanel === "paths" || activeRuntimePanel === "logs" ? activeRuntimePanel : "core";
+    const appLogText =
+      diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
+        ? diagnostics.appLogTail.join("\n")
+        : "暂无应用日志。";
+    const backendLogText =
+      diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0
+        ? diagnostics.backendLogTail.join("\n")
+        : "暂无后端日志。";
+    const startupTraceRows = diagnostics?.startupTrace ?? [];
+    const runtimeRailItems: Array<{
+      id: RuntimePanelId;
+      title: string;
+      description: string;
+      status: string;
+      tone: "neutral" | "success" | "warning" | "danger" | "accent";
+    }> = [
+      {
+        id: "core",
+        title: "启动链路 / Doctor",
+        description: "PID、启动阶段、Doctor 与 WebView",
+        status: runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : (diagnostics?.state ?? "-"),
+        tone: runtimeIssues.length > 0 ? "warning" : "success",
+      },
+      {
+        id: "paths",
+        title: "路径与菜单",
+        description: "Kimi 路径、工作目录和右键菜单",
+        status: contextMenuStatusLabel,
+        tone: contextMenuStatusTone,
+      },
+      {
+        id: "logs",
+        title: "日志尾部",
+        description: "应用日志、后端日志和最近摘录",
+        status: `${(diagnostics?.backendLogTail?.length ?? 0) + (diagnostics?.appLogTail?.length ?? 0)} 行`,
+        tone: diagnostics?.lastError || diagnostics?.startupFailureDetail ? "warning" : "neutral",
+      },
+    ];
+    const selectedRuntimeRailItem =
+      runtimeRailItems.find((item) => item.id === selectedRuntimePanel) ?? runtimeRailItems[0];
+    const copyText = (value: string) => {
+      void navigator.clipboard?.writeText(value);
+    };
 
-        <section className="cc-runtime-columns">
-          <section className="cc-card">
-            <header className="cc-card-header">
-              <h3>风险摘要</h3>
-            </header>
-            <div className="cc-card-body">
-              <div className="cc-runtime-issue-list">
-                {(runtimeIssues.length > 0 ? runtimeIssues : ["当前无异常"]).map((issue) => (
-                  <article key={issue} className="cc-runtime-issue-item">
-                    <strong>{issue}</strong>
-                  </article>
-                ))}
-              </div>
+    return (
+      <div className="cc-runtime-shell cc-runtime-shell-image">
+        <ControlCenterWorkbenchLayout
+          mode="stack-on-mobile"
+          className="cc-runtime-workbench"
+          railBodyClassName="cc-runtime-rail-list"
+          detailBodyClassName="cc-runtime-detail-body"
+          railHeader={
+            <div className="cc-runtime-rail-head">
+              <h4>Diagnostics</h4>
+              <p>启动链路、路径、WebView 和日志。</p>
               <div className="cc-actions">
                 <Button
                   type="button"
@@ -2413,158 +2381,238 @@ export function ControlCenterView({
                 <Button
                   type="button"
                   variant="ghost"
-                  icon={<RefreshCcw size={15} />}
+                  icon={<Activity size={15} />}
                   className="cc-action-btn"
-                  onClick={() => void onRefreshContextMenuStatus()}
-                  disabled={contextMenuBusy}
+                  onClick={() => void onRunKimiDoctor()}
+                  disabled={kimiDoctorBusy}
                 >
-                  刷新右键菜单状态
+                  运行 Doctor
                 </Button>
               </div>
             </div>
-          </section>
-
-          <section className="cc-card">
-            <header className="cc-card-header">
-              <h3>最近输出</h3>
-            </header>
-            <div className="cc-card-body">
-              <pre className="log-tail cc-log-snippet">{condensedLogPreview}</pre>
-            </div>
-          </section>
-        </section>
-
-        <section className="cc-card runtime-accordion cc-runtime-deep-dive">
-          <div className="cc-runtime-deep-dive-head">
-            <div>
-              <span className="cc-kicker">详细面板</span>
-              <h3>运行面板</h3>
-            </div>
-          </div>
-
-          <RuntimePanel active={runtimePanelExpanded && activeRuntimePanel === "core"} onOpen={() => { void handleSelectRuntimePanel("core"); }} title="核心运行诊断">
-            <div className="cc-actions">
-              <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
-              <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 Kimi Code Doctor</Button>
-              <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
-            </div>
-            {kimiDoctorResult && (
-              <>
-                <div className="diagnostics-grid">
-                  <DiagnosticItem
-                    label="Kimi Code Doctor"
-                    value={kimiDoctorResult.succeeded ? "通过" : "未通过"}
-                  />
-                  <DiagnosticItem
-                    label="Doctor Exit Code"
-                    value={String(kimiDoctorResult.exitCode ?? "-")}
-                  />
-                  <DiagnosticItem label="Doctor Command" value={kimiDoctorResult.command} />
-                  <DiagnosticItem label="Doctor Kimi Path" value={kimiDoctorResult.kimiPath} />
-                  <DiagnosticItem
-                    label="Doctor Shell Path"
-                    value={kimiDoctorResult.shellPath ?? "-"}
-                  />
+          }
+          rail={
+            <>
+              <div className="cc-runtime-rail-group">
+                <div className="cc-runtime-rail-group-head">
+                  <span>Runtime</span>
+                  <small>{runtimeRailItems.length}</small>
                 </div>
-                <h4 className="log-tail-title">Kimi Code Doctor 输出</h4>
-                <pre className="log-tail">{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
-              </>
-            )}
-            <div className="diagnostics-grid">
-              <DiagnosticItem label="State" value={diagnostics?.state ?? "-"} />
-              <DiagnosticItem label="Active Port" value={String(diagnostics?.activePort ?? "-")} />
-              <DiagnosticItem label="Workspace Port" value={String(diagnostics?.workspacePort ?? "-")} />
-              <DiagnosticItem label="Base Port" value={String(diagnostics?.basePort ?? "-")} />
-              <DiagnosticItem label="Instance ID" value={diagnostics?.instanceId ?? "-"} />
-              <DiagnosticItem label="PID" value={String(diagnostics?.pid ?? "-")} />
-              <DiagnosticItem label="Start Cycle ID" value={String(diagnostics?.startCycleId ?? "-")} />
-              <DiagnosticItem label="Hotkey Owner" value={String(diagnostics?.isHotkeyOwner ?? false)} />
-              <DiagnosticItem label="Shell to Loading (ms)" value={String(diagnostics?.loadingStartupMs ?? "-")} />
-              <DiagnosticItem label="Backend Ready (ms)" value={String(diagnostics?.backendReadyMs ?? "-")} />
-              <DiagnosticItem label="Loading SLA Met" value={String(diagnostics?.loadingSlaMet ?? "-")} />
-              <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
-              <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
-              <DiagnosticItem
-                label="Provider API Health"
-                value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)}
-              />
-              <DiagnosticItem
-                label="Last Provider API Check"
-                value={formatLoginCheckTimestamp(diagnostics?.providerApiHealth.checkedAtMs)}
-              />
-              <DiagnosticItem
-                label="Last Provider API Source"
-                value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)}
-              />
-              <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
-              <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
-              <DiagnosticItem label="WebView Runtime" value={diagnostics?.webviewRuntimeKind ?? "-"} />
-              <DiagnosticItem label="WebView Version" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
-              <DiagnosticItem label="Startup Pending" value={String(diagnostics?.startupPending ?? false)} />
-              <DiagnosticItem label="Startup Exit Cause" value={diagnostics?.startupExitCause ?? "-"} />
-              <DiagnosticItem label="Main Create Mode" value={diagnostics?.mainCreateMode ?? "-"} />
-              <DiagnosticItem label="Startup Attempt ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
-              <DiagnosticItem label="Startup Phase" value={diagnostics?.startupPhase ?? "-"} />
-              <DiagnosticItem label="Startup Failure Kind" value={diagnostics?.startupFailureKind ?? "-"} />
-              <DiagnosticItem label="Startup Failure Detail" value={diagnostics?.startupFailureDetail ?? "-"} />
-              <DiagnosticItem label="Startup Monitor State" value={diagnostics?.startupMonitorState ?? "-"} />
-              <DiagnosticItem label="Startup Monitor Reason" value={diagnostics?.startupMonitorReason ?? "-"} />
-              <DiagnosticItem label="Startup Monitor Target" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
-              <DiagnosticItem label="Startup Monitor Detail" value={diagnostics?.startupMonitorDetail ?? "-"} />
-            </div>
-            <h4 className="log-tail-title">最近启动轨迹</h4>
-            <pre className="log-tail">{diagnostics?.startupTrace && diagnostics.startupTrace.length > 0 ? diagnostics.startupTrace.join("\n") : "暂无启动轨迹。"}</pre>
-          </RuntimePanel>
-
-          <RuntimePanel active={runtimePanelExpanded && activeRuntimePanel === "paths"} onOpen={() => { void handleSelectRuntimePanel("paths"); }} title="路径与上下文菜单">
-            <p className="hint">右键菜单：{contextMenuStatusLabel}</p>
-            {contextMenuStatus?.message && <p className="hint">{contextMenuStatus.message}</p>}
-            <div className="cc-actions">
-              <Button type="button" icon={<Plus size={15} />} className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用右键菜单</Button>
-              <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用右键菜单</Button>
-              <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
-            </div>
-            <div className="cc-runtime-close-behavior">
-              <h4 className="log-tail-title">关闭窗口行为</h4>
-              <p className="hint">仅主窗口生效（prefill 不变）</p>
-              <div className="cc-auth-switch" role="group" aria-label="关闭窗口行为">
-                {mainWindowCloseBehaviorOptions.map((option) => (
+                {runtimeRailItems.map((item) => (
                   <button
-                    key={option.value}
+                    key={item.id}
                     type="button"
-                    className={`cc-auth-switch-btn ${
-                      mainWindowCloseBehavior === option.value ? "active" : ""
+                    className={`cc-control-list-item cc-runtime-rail-item ${
+                      selectedRuntimePanel === item.id ? "is-active" : ""
                     }`}
                     onClick={() => {
-                      void handleSelectMainWindowCloseBehavior(option.value);
+                      void handleSelectRuntimePanel(item.id);
                     }}
-                    disabled={mainCloseBehaviorSaving || actionBusy}
                   >
-                    {option.label}
+                    <div className="cc-control-list-item-main">
+                      <strong>{item.title}</strong>
+                      <span>{item.description}</span>
+                    </div>
+                    <ControlCenterStatusBadge tone={item.tone}>{item.status}</ControlCenterStatusBadge>
                   </button>
                 ))}
               </div>
+              <div className="cc-runtime-rail-group">
+                <div className="cc-runtime-rail-group-head">
+                  <span>Risks</span>
+                  <small>{runtimeIssues.length}</small>
+                </div>
+                <div className="cc-runtime-issue-list">
+                  {(runtimeIssues.length > 0 ? runtimeIssues : ["当前无异常"]).map((issue) => (
+                    <article key={issue} className="cc-runtime-issue-item">
+                      <strong>{issue}</strong>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </>
+          }
+          detailHeader={
+            <div className="cc-runtime-detail-head">
+              <div>
+                <h3>{selectedRuntimeRailItem.title}</h3>
+                <p>{selectedRuntimeRailItem.description}</p>
+              </div>
+              <ControlCenterStatusBadge tone={selectedRuntimeRailItem.tone}>
+                {selectedRuntimeRailItem.status}
+              </ControlCenterStatusBadge>
             </div>
-            <div className="diagnostics-grid">
-              <DiagnosticItem label="Started At (Epoch UTC)" value={diagnostics?.startedAt ?? "-"} />
-              <DiagnosticItem label="Configured Kimi Path" value={diagnostics?.configuredKimiPath ?? "-"} />
-              <DiagnosticItem label="Detected Kimi Path" value={diagnostics?.detectedKimiPath ?? "-"} />
-              <DiagnosticItem label="Configured Work Dir" value={diagnostics?.configuredWorkDir ?? "-"} />
-              <DiagnosticItem label="Effective Work Dir" value={diagnostics?.effectiveWorkDir ?? "-"} />
-              <DiagnosticItem label="Launch Command" value={diagnostics?.launchCommand ?? "-"} />
-              <DiagnosticItem label="App Log Path" value={diagnostics?.appLogPath ?? "-"} />
-              <DiagnosticItem label="Backend Log Path" value={diagnostics?.backendLogPath ?? "-"} />
-              <DiagnosticItem label="Logs Directory" value={diagnostics?.logsDir ?? "-"} />
-            </div>
-          </RuntimePanel>
-
-          <RuntimePanel active={runtimePanelExpanded && activeRuntimePanel === "logs"} onOpen={() => { void handleSelectRuntimePanel("logs"); }} title="最近日志">
-            <h4 className="log-tail-title">最近应用日志</h4>
-            <pre className="log-tail">{diagnostics?.appLogTail && diagnostics.appLogTail.length > 0 ? diagnostics.appLogTail.join("\n") : "暂无应用日志。"}</pre>
-            <h4 className="log-tail-title">最近后端日志</h4>
-            <pre className="log-tail">{diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0 ? diagnostics.backendLogTail.join("\n") : "暂无后端日志。"}</pre>
-          </RuntimePanel>
-        </section>
+          }
+          detail={
+            selectedRuntimePanel === "core" ? (
+              <>
+                <div className="cc-actions">
+                  <Button type="button" icon={<RefreshCw size={15} />} className="cc-action-btn" onClick={() => void onRefreshDiagnostics()} disabled={diagnosticsBusy}>刷新诊断</Button>
+                  <Button type="button" variant="ghost" icon={<Activity size={15} />} className="cc-action-btn" onClick={() => void onRunKimiDoctor()} disabled={kimiDoctorBusy}>运行 Kimi Code Doctor</Button>
+                  <Button type="button" variant="ghost" icon={<RefreshCcw size={15} />} className="cc-action-btn" onClick={() => void onRefreshContextMenuStatus()} disabled={contextMenuBusy}>刷新右键菜单状态</Button>
+                </div>
+                {kimiDoctorResult ? (
+                  <section className="cc-runtime-detail-card">
+                    <div className="cc-runtime-section-head">
+                      <h4>Kimi Code Doctor</h4>
+                      <ControlCenterStatusBadge tone={kimiDoctorResult.succeeded ? "success" : "warning"}>
+                        {kimiDoctorResult.succeeded ? "通过" : "未通过"}
+                      </ControlCenterStatusBadge>
+                    </div>
+                    <div className="diagnostics-grid">
+                      <DiagnosticItem label="Exit Code" value={String(kimiDoctorResult.exitCode ?? "-")} />
+                      <DiagnosticItem label="Command" value={kimiDoctorResult.command} />
+                      <DiagnosticItem label="Kimi Path" value={kimiDoctorResult.kimiPath} />
+                      <DiagnosticItem label="Shell Path" value={kimiDoctorResult.shellPath ?? "-"} />
+                    </div>
+                    <div className="cc-log-block-head">
+                      <h4 className="log-tail-title">Doctor 输出</h4>
+                      <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(formatKimiDoctorOutput(kimiDoctorResult))}>复制</Button>
+                    </div>
+                    <pre className="log-tail">{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
+                  </section>
+                ) : null}
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-runtime-section-head">
+                    <h4>运行摘要</h4>
+                  </div>
+                  <div className="diagnostics-grid">
+                    <DiagnosticItem label="State" value={diagnostics?.state ?? "-"} />
+                    <DiagnosticItem label="Active Port" value={String(diagnostics?.activePort ?? "-")} />
+                    <DiagnosticItem label="Workspace Port" value={String(diagnostics?.workspacePort ?? "-")} />
+                    <DiagnosticItem label="Base Port" value={String(diagnostics?.basePort ?? "-")} />
+                    <DiagnosticItem label="Instance ID" value={diagnostics?.instanceId ?? "-"} />
+                    <DiagnosticItem label="PID" value={String(diagnostics?.pid ?? "-")} />
+                    <DiagnosticItem label="Start Cycle ID" value={String(diagnostics?.startCycleId ?? "-")} />
+                    <DiagnosticItem label="Hotkey Owner" value={String(diagnostics?.isHotkeyOwner ?? false)} />
+                    <DiagnosticItem label="Shell to Loading (ms)" value={String(diagnostics?.loadingStartupMs ?? "-")} />
+                    <DiagnosticItem label="Backend Ready (ms)" value={String(diagnostics?.backendReadyMs ?? "-")} />
+                    <DiagnosticItem label="Loading SLA Met" value={String(diagnostics?.loadingSlaMet ?? "-")} />
+                    <DiagnosticItem label="Kimi Version" value={diagnostics?.kimiVersion ?? "-"} />
+                    <DiagnosticItem label="Version Check Error" value={diagnostics?.versionError ?? "-"} />
+                    <DiagnosticItem label="Provider API Health" value={formatProviderApiHealthState(diagnostics?.providerApiHealth.state)} />
+                    <DiagnosticItem label="Last Provider API Check" value={formatLoginCheckTimestamp(diagnostics?.providerApiHealth.checkedAtMs)} />
+                    <DiagnosticItem label="Last Provider API Source" value={formatProviderApiHealthSource(diagnostics?.providerApiHealth.source)} />
+                    <DiagnosticItem label="Last Error" value={diagnostics?.lastError ?? "-"} />
+                    <DiagnosticItem label="Last Exit Reason" value={diagnostics?.lastExitReason ?? "-"} />
+                    <DiagnosticItem label="WebView Runtime" value={diagnostics?.webviewRuntimeKind ?? "-"} />
+                    <DiagnosticItem label="WebView Version" value={diagnostics?.webviewRuntimeVersion ?? "-"} />
+                    <DiagnosticItem label="Startup Pending" value={String(diagnostics?.startupPending ?? false)} />
+                    <DiagnosticItem label="Startup Exit Cause" value={diagnostics?.startupExitCause ?? "-"} />
+                    <DiagnosticItem label="Main Create Mode" value={diagnostics?.mainCreateMode ?? "-"} />
+                    <DiagnosticItem label="Startup Attempt ID" value={String(diagnostics?.startupAttemptId ?? "-")} />
+                    <DiagnosticItem label="Startup Phase" value={diagnostics?.startupPhase ?? "-"} />
+                    <DiagnosticItem label="Startup Failure Kind" value={diagnostics?.startupFailureKind ?? "-"} />
+                    <DiagnosticItem label="Startup Failure Detail" value={diagnostics?.startupFailureDetail ?? "-"} />
+                    <DiagnosticItem label="Startup Monitor State" value={diagnostics?.startupMonitorState ?? "-"} />
+                    <DiagnosticItem label="Startup Monitor Reason" value={diagnostics?.startupMonitorReason ?? "-"} />
+                    <DiagnosticItem label="Startup Monitor Target" value={diagnostics?.startupMonitorTargetRoute ?? "-"} />
+                    <DiagnosticItem label="Startup Monitor Detail" value={diagnostics?.startupMonitorDetail ?? "-"} />
+                  </div>
+                </section>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-runtime-section-head">
+                    <h4>启动链路</h4>
+                    <span>{startupTraceRows.length} steps</span>
+                  </div>
+                  {startupTraceRows.length > 0 ? (
+                    <div className="cc-startup-trace-list">
+                      {startupTraceRows.map((line, index) => (
+                        <div key={`${index}-${line}`} className="cc-startup-trace-row">
+                          <span>{String(index + 1).padStart(2, "0")}</span>
+                          <code>{line}</code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="hint">暂无启动轨迹。</p>
+                  )}
+                </section>
+              </>
+            ) : selectedRuntimePanel === "paths" ? (
+              <>
+                <div className="cc-actions">
+                  <Button type="button" icon={<Plus size={15} />} className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用右键菜单</Button>
+                  <Button type="button" variant="ghost" icon={<Minus size={15} />} className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用右键菜单</Button>
+                  <Button type="button" variant="ghost" icon={<FolderOpen size={15} />} className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
+                </div>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-runtime-section-head">
+                    <h4>上下文菜单</h4>
+                    <ControlCenterStatusBadge tone={contextMenuStatusTone}>{contextMenuStatusLabel}</ControlCenterStatusBadge>
+                  </div>
+                  {contextMenuStatus?.message ? <p className="hint">{contextMenuStatus.message}</p> : null}
+                </section>
+                <section className="cc-runtime-detail-card cc-runtime-close-behavior">
+                  <div className="cc-runtime-section-head">
+                    <h4>关闭窗口行为</h4>
+                    <span>仅主窗口生效</span>
+                  </div>
+                  <div className="cc-auth-switch" role="group" aria-label="关闭窗口行为">
+                    {mainWindowCloseBehaviorOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`cc-auth-switch-btn ${
+                          mainWindowCloseBehavior === option.value ? "active" : ""
+                        }`}
+                        onClick={() => {
+                          void handleSelectMainWindowCloseBehavior(option.value);
+                        }}
+                        disabled={mainCloseBehaviorSaving || actionBusy}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-runtime-section-head">
+                    <h4>路径</h4>
+                  </div>
+                  <div className="diagnostics-grid">
+                    <DiagnosticItem label="Started At (Epoch UTC)" value={diagnostics?.startedAt ?? "-"} />
+                    <DiagnosticItem label="Configured Kimi Path" value={diagnostics?.configuredKimiPath ?? "-"} />
+                    <DiagnosticItem label="Detected Kimi Path" value={diagnostics?.detectedKimiPath ?? "-"} />
+                    <DiagnosticItem label="Configured Work Dir" value={diagnostics?.configuredWorkDir ?? "-"} />
+                    <DiagnosticItem label="Effective Work Dir" value={diagnostics?.effectiveWorkDir ?? "-"} />
+                    <DiagnosticItem label="Launch Command" value={diagnostics?.launchCommand ?? "-"} />
+                    <DiagnosticItem label="App Log Path" value={diagnostics?.appLogPath ?? "-"} />
+                    <DiagnosticItem label="Backend Log Path" value={diagnostics?.backendLogPath ?? "-"} />
+                    <DiagnosticItem label="Logs Directory" value={diagnostics?.logsDir ?? "-"} />
+                  </div>
+                </section>
+              </>
+            ) : (
+              <>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-log-block-head">
+                    <div>
+                      <h4 className="log-tail-title">最近输出</h4>
+                      <p className="hint">后端优先，否则显示应用日志尾部。</p>
+                    </div>
+                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(condensedLogPreview)}>复制</Button>
+                  </div>
+                  <pre className="log-tail cc-log-snippet">{condensedLogPreview}</pre>
+                </section>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-log-block-head">
+                    <h4 className="log-tail-title">最近应用日志</h4>
+                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(appLogText)}>复制</Button>
+                  </div>
+                  <pre className="log-tail">{appLogText}</pre>
+                </section>
+                <section className="cc-runtime-detail-card">
+                  <div className="cc-log-block-head">
+                    <h4 className="log-tail-title">最近后端日志</h4>
+                    <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(backendLogText)}>复制</Button>
+                  </div>
+                  <pre className="log-tail">{backendLogText}</pre>
+                </section>
+              </>
+            )
+          }
+        />
       </div>
     );
   }
@@ -4115,61 +4163,107 @@ export function ControlCenterView({
     return null;
   }
 
+  const activeControlSectionConfig =
+    controlSections.find((section) => section.id === activeControlSection) ?? controlSections[0];
+  const activeControlSectionLabel =
+    activeControlSection === "bridge_center"
+      ? bridgeDisplayName
+      : activeControlSectionConfig.label;
+  const controlSectionGroups = [
+    {
+      id: "core",
+      label: "核心",
+      items: controlSections.filter((section) => section.group === "core"),
+    },
+    {
+      id: "setup",
+      label: "设置",
+      items: controlSections.filter((section) => section.group === "setup"),
+    },
+  ];
+
   return (
     <section
       className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""}`}
     >
-      <header className="cc-modal-header">
-        <nav className="cc-header-tabs" aria-label="控制中心主导航">
-          {controlSections.map((section) => (
-            <Button
-              key={section.id}
-              type="button"
-              variant="ghost"
-              className={`cc-header-tab ${activeControlSection === section.id ? "active" : ""}`}
-              icon={section.icon}
-              onClick={() => {
-                void handleSelectControlSection(section.id);
-              }}
-            >
-              {section.id === "bridge_center" ? bridgeDisplayName : section.label}
-            </Button>
+      <aside className="cc-primary-nav" aria-label="控制中心导航">
+        <div className="cc-primary-nav-header">
+          <strong>控制中心</strong>
+          <span>Control Center</span>
+        </div>
+        <nav className="cc-primary-nav-list" aria-label="控制中心主导航">
+          {controlSectionGroups.map((group) => (
+            <div key={group.id} className="cc-primary-nav-group">
+              <span className="cc-primary-nav-group-label">{group.label}</span>
+              {group.items.map((section) => {
+                const active = activeControlSection === section.id;
+                return (
+                  <Button
+                    key={section.id}
+                    type="button"
+                    variant="ghost"
+                    className={`cc-primary-nav-item ${active ? "active" : ""}`}
+                    icon={section.icon}
+                    onClick={() => {
+                      void handleSelectControlSection(section.id);
+                    }}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <span className="cc-primary-nav-copy">
+                      <span className="cc-primary-nav-label">
+                        {section.id === "bridge_center" ? bridgeDisplayName : section.label}
+                      </span>
+                      <span className="cc-primary-nav-desc">{section.description}</span>
+                    </span>
+                  </Button>
+                );
+              })}
+            </div>
           ))}
         </nav>
-        {surface === "modal" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            icon={<X size={16} />}
-            className="cc-modal-close-btn"
-            onClick={onClose}
-            aria-label="关闭控制中心"
-          />
-        ) : null}
-      </header>
+      </aside>
 
-      <div className="cc-layout cc-layout-dashboard">
-        <div
-          className={`cc-main ${
-            isOnboardingSection ? "cc-main-onboarding" : ""
-          }`}
-        >
-          {activeTask && !shouldRenderInlineBridgeTask ? (
-            renderActiveTask()
-          ) : (
-            <>
-              {activeControlSection === "overview" ? renderOverviewSection() : null}
-              {activeControlSection === "workspace_hub" ? (
-                <WorkspaceHubPanel onOpenWorkspace={onOpenFolder} />
-              ) : null}
-              {activeControlSection === "schedule" ? <WorkspaceSchedulePanel /> : null}
-              {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
-              {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
-              {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
-              {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
-            </>
-          )}
+      <div className="cc-control-stage">
+        <header className="cc-modal-header cc-detail-topbar">
+          <div className="cc-modal-title">
+            <h3>{activeControlSectionLabel}</h3>
+            <p>{activeControlSectionConfig.description}</p>
+          </div>
+          {surface === "modal" ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              icon={<X size={16} />}
+              className="cc-modal-close-btn"
+              onClick={onClose}
+              aria-label="关闭控制中心"
+            />
+          ) : null}
+        </header>
+
+        <div className="cc-layout cc-layout-dashboard">
+          <div
+            className={`cc-main ${
+              isOnboardingSection ? "cc-main-onboarding" : ""
+            }`}
+          >
+            {activeTask && !shouldRenderInlineBridgeTask ? (
+              renderActiveTask()
+            ) : (
+              <>
+                {activeControlSection === "overview" ? renderOverviewSection() : null}
+                {activeControlSection === "workspace_hub" ? (
+                  <WorkspaceHubPanel onOpenWorkspace={onOpenFolder} />
+                ) : null}
+                {activeControlSection === "schedule" ? <WorkspaceSchedulePanel /> : null}
+                {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
+                {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
+                {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
+                {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
+              </>
+            )}
+          </div>
         </div>
       </div>
       {bridgeDeleteConfirm ? (

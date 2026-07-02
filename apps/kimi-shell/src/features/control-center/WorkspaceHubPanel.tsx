@@ -188,9 +188,8 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
             <span className="cc-control-list-item-header">
               <span className="cc-control-list-item-copy">
                 <strong>{harness.name}</strong>
-                <small>{formatRuntime(harness.agentRuntime)} · v{harness.version}</small>
               </span>
-              <Boxes size={15} />
+              <span className="cc-rail-count">v{harness.version}</span>
             </span>
           </button>
         );
@@ -218,12 +217,8 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
             <span className="cc-control-list-item-header">
               <span className="cc-control-list-item-copy">
                 <strong>{workspace.name}</strong>
-                <small>{formatRuntime(workspace.agentRuntime)}</small>
               </span>
               <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
-            </span>
-            <span className="cc-control-list-item-meta">
-              <span>{workspace.harnessId ?? "manual"}</span>
             </span>
           </button>
         );
@@ -239,16 +234,6 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
       <div className="cc-control-detail-head">
         <div className="cc-control-detail-copy">
           <h3>{selectedHarness.name}</h3>
-          <p>{selectedHarness.summary}</p>
-          <div className="cc-control-chip-row">
-            <ControlCenterStatusBadge tone="neutral">{selectedHarness.id}</ControlCenterStatusBadge>
-            <ControlCenterStatusBadge tone="neutral">
-              {formatRuntime(selectedHarness.agentRuntime)}
-            </ControlCenterStatusBadge>
-            <ControlCenterStatusBadge tone="neutral">
-              v{selectedHarness.version}
-            </ControlCenterStatusBadge>
-          </div>
         </div>
         <div className="cc-control-action-row">
           <Button
@@ -274,6 +259,11 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
           { label: "创建后动作", value: selectedHarness.postCreate.openWith ?? "无自动打开" },
         ]}
       />
+
+      <div className="cc-control-description">
+        <span>描述</span>
+        <p>{selectedHarness.summary}</p>
+      </div>
 
       {selectedHarness.tags.length > 0 ? (
         <div className="cc-control-chip-row">
@@ -377,9 +367,8 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
       <div className="cc-control-detail-head">
         <div className="cc-control-detail-copy">
           <h3>{selectedWorkspace.name}</h3>
-          <p>{selectedWorkspace.cwd}</p>
           <div className="cc-control-chip-row">
-          <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
             <ControlCenterStatusBadge tone="neutral">
               {formatRuntime(selectedWorkspace.agentRuntime)}
             </ControlCenterStatusBadge>
@@ -396,26 +385,15 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         </Button>
       </div>
 
-      <dl className="cc-control-detail-grid">
-        <div>
-          <dt>工作区路径</dt>
-          <dd>
-            <code>{selectedWorkspace.cwd}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Harness</dt>
-          <dd>{selectedWorkspace.harnessId ?? "manual"}</dd>
-        </div>
-        <div>
-          <dt>创建时间</dt>
-          <dd>{formatDate(selectedWorkspace.createdAt)}</dd>
-        </div>
-        <div>
-          <dt>上次打开</dt>
-          <dd>{formatDate(selectedWorkspace.lastOpenedAt)}</dd>
-        </div>
-      </dl>
+      <ControlCenterDescList
+        columns={4}
+        items={[
+          { label: "工作区路径", value: selectedWorkspace.cwd },
+          { label: "Harness", value: selectedWorkspace.harnessId ?? "manual" },
+          { label: "创建时间", value: formatDate(selectedWorkspace.createdAt) },
+          { label: "上次打开", value: formatDate(selectedWorkspace.lastOpenedAt) },
+        ]}
+      />
 
       {selectedWorkspace.tags.length > 0 ? (
         <div className="cc-control-chip-row">
@@ -436,10 +414,8 @@ export function WorkspaceHubPanel({ onOpenWorkspace }: WorkspaceHubPanelProps) {
         className="workspace-hub-workbench"
         railHeader={
           <div className="cc-control-toolbar">
-            <div className="cc-control-detail-head">
-              <div className="cc-control-detail-copy">
-                <h3>WorkspaceHub</h3>
-              </div>
+            <div className="cc-control-rail-title-row">
+              <h4>WorkspaceHub</h4>
               <Button
                 variant="outline"
                 size="icon-sm"

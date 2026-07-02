@@ -82,7 +82,6 @@ import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
@@ -295,19 +294,16 @@ type ControlCenterViewProps = {
   onResetBridgeBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onSkillCenterSearchChange: (value: string) => void;
-  onSkillCenterFilterChange: (value: SkillCenterFilter) => void;
   onSkillCenterSectionChange: (value: SkillCenterSectionId) => void;
   onSkillCenterGitRepoUrlChange: (value: string) => void;
   onSkillCenterGitRefChange: (value: string) => void;
   onSelectSkill: (skillId: string) => Promise<void>;
-  onOpenSkillFromInsights: (skillId: string) => Promise<void>;
   onOpenTask: (
     task: ControlCenterTaskId,
     payload?: ControlCenterTaskPayload | null,
   ) => Promise<void>;
   onCloseTask: () => boolean;
   onSelectDiscoveredSkill: (discoveryId: string) => Promise<void>;
-  onScanDiscoveredSkills: () => Promise<void>;
   onImportDiscoveredSkill: (discoveryId: string) => Promise<void>;
   onSelectWorkspaceSkillTarget: (targetId: string) => Promise<void> | void;
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
@@ -809,16 +805,13 @@ export function ControlCenterView({
   onResetBridgeBindingToDefaultWorkDir,
   onResolveBridgeApproval,
   onSkillCenterSearchChange,
-  onSkillCenterFilterChange,
   onSkillCenterSectionChange,
   onSkillCenterGitRepoUrlChange,
   onSkillCenterGitRefChange,
   onSelectSkill,
-  onOpenSkillFromInsights,
   onOpenTask,
   onCloseTask,
   onSelectDiscoveredSkill,
-  onScanDiscoveredSkills,
   onImportDiscoveredSkill,
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
@@ -1900,7 +1893,7 @@ export function ControlCenterView({
       status?.activeSessionWorkDir?.trim() || effectiveWorkDir.trim();
     const backendState = diagnostics?.state ?? status?.state ?? "-";
     const sessionLabel = status?.activeSessionId ? `会话 ${status.activeSessionId}` : "无活动会话";
-    const statusSummary = `${backendState} · ${sessionLabel} · ${activeWorkspacePath || "未设置工作区"}`;
+    const statusSummary = `${backendState} · ${activeWorkspacePath || "未设置工作区"}`;
 
     return (
       <div className="cc-overview-shell cc-overview-shell-image">
@@ -1998,9 +1991,7 @@ export function ControlCenterView({
                   </div>
                 </>
               ) : (
-                <article className="cc-brief-item">
-                  <strong>暂无待处理</strong>
-                </article>
+                <p className="cc-control-muted">暂无待处理</p>
               )}
             </div>
           </section>
@@ -2418,12 +2409,16 @@ export function ControlCenterView({
                   <span>风险</span>
                   <small>{runtimeIssues.length}</small>
                 </div>
-                <div className="cc-runtime-issue-list">
-                  {(runtimeIssues.length > 0 ? runtimeIssues : ["当前无异常"]).map((issue) => (
-                    <article key={issue} className="cc-runtime-issue-item">
-                      <strong>{issue}</strong>
-                    </article>
-                  ))}
+              <div className="cc-runtime-issue-list">
+                  {runtimeIssues.length > 0 ? (
+                    runtimeIssues.map((issue) => (
+                      <article key={issue} className="cc-runtime-issue-item">
+                        <strong>{issue}</strong>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="cc-control-muted">当前无异常</p>
+                  )}
                 </div>
               </div>
             </>
@@ -2432,7 +2427,6 @@ export function ControlCenterView({
             <div className="cc-runtime-detail-head">
               <div>
                 <h3>{selectedRuntimeRailItem.title}</h3>
-                <p>{selectedRuntimeRailItem.description}</p>
               </div>
               <ControlCenterStatusBadge tone={selectedRuntimeRailItem.tone}>
                 {selectedRuntimeRailItem.status}
@@ -3008,8 +3002,6 @@ export function ControlCenterView({
   }
 
   function renderSkillCenterSection() {
-    const selectedWorkspaceTarget =
-      workspaceSkillTargets.find((target) => target.id === selectedWorkspaceSkillTargetId) ?? null;
     const skillCenterActions =
       skillCenterSection === "manage" ? (
         <div className="skill-center-header-actions">
@@ -3053,42 +3045,13 @@ export function ControlCenterView({
       );
 
     return (
-      <section className="cc-card skill-center-card">
-        <ControlCenterCardHeader
-          title="Skill 投影与工作区管理"
-          titleMeta="Workspace Skills"
-          titleControls={
-            <div className="skill-center-title-controls">
-              <ControlCenterSegmentedControl
-                ariaLabel="Skill 投影分区切换"
-                className="cc-inline-switch"
-                itemClassName="cc-inline-switch-btn"
-                value={skillCenterSection}
-                onChange={(value) => onSkillCenterSectionChange(value)}
-                disabled={skillCenterBusy}
-                items={[
-                  { value: "manage", label: "技能管理" },
-                  { value: "workspace_insights", label: "工作区洞察" },
-                ]}
-              />
-            </div>
-          }
-          titleMetaPlacement="below"
-          className="skill-center-card-header"
-          statusLabel={
-            skillCenterSection === "manage"
-              ? `${activeSessionSkillState.appliedSkillIds.length} 个当前工作区技能`
-              : selectedWorkspaceTarget
-                ? `${selectedWorkspaceTarget.label}${selectedWorkspaceTarget.readOnly ? " · 只读" : " · 可编辑"}`
-                : `工作区目标 ${workspaceSkillTargets.length}`
-          }
-          primaryAction={skillCenterActions}
-        />
-        <div className="cc-card-body cc-skill-center-body">
-          <SkillCenterPanel
-            surface="page"
-            busy={skillCenterBusy}
-            section={skillCenterSection}
+      <div className="cc-skill-center-body">
+        <SkillCenterPanel
+          surface="page"
+          busy={skillCenterBusy}
+          section={skillCenterSection}
+          railActions={skillCenterActions}
+          onSectionChange={onSkillCenterSectionChange}
             installedSkills={installedSkills}
             selectedSkillId={selectedSkillId}
             selectedSkillDetail={selectedSkillDetail}
@@ -3109,14 +3072,8 @@ export function ControlCenterView({
             onSelectSkill={(skillId) => {
               void onSelectSkill(skillId);
             }}
-            onOpenSkillFromInsights={(skillId) => {
-              void onOpenSkillFromInsights(skillId);
-            }}
             onSelectDiscoveredSkill={(discoveryId) => {
               void onSelectDiscoveredSkill(discoveryId);
-            }}
-            onScanDiscoveredSkills={() => {
-              void onScanDiscoveredSkills();
             }}
             onImportDiscoveredSkill={(discoveryId) => {
               void onImportDiscoveredSkill(discoveryId);
@@ -3155,10 +3112,8 @@ export function ControlCenterView({
             search={skillCenterSearch}
             filter={skillCenterFilter}
             onSearchChange={onSkillCenterSearchChange}
-            onFilterChange={onSkillCenterFilterChange}
-          />
-        </div>
-      </section>
+        />
+      </div>
     );
   }
 
@@ -4141,6 +4096,11 @@ export function ControlCenterView({
     activeControlSection === "bridge_center"
       ? bridgeDisplayName
       : activeControlSectionConfig.label;
+  const twoPaneSection =
+    activeControlSection === "workspace_hub" ||
+    activeControlSection === "skill_center" ||
+    activeControlSection === "runtime_center" ||
+    activeControlSection === "bridge_center";
   const controlSectionGroups = [
     {
       id: "core",
@@ -4194,23 +4154,29 @@ export function ControlCenterView({
         </nav>
       </aside>
 
-      <div className="cc-control-stage">
-        <header className="cc-modal-header cc-detail-topbar">
-          <div className="cc-modal-title">
-            <h3>{activeControlSectionLabel}</h3>
-          </div>
-          {surface === "modal" ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              icon={<X size={16} />}
-              className="cc-modal-close-btn"
-              onClick={onClose}
-              aria-label="关闭控制中心"
-            />
-          ) : null}
-        </header>
+      <div
+        className={`cc-control-stage ${
+          twoPaneSection && surface !== "modal" ? "cc-control-stage-no-topbar" : ""
+        }`}
+      >
+        {twoPaneSection && surface !== "modal" ? null : (
+          <header className="cc-modal-header cc-detail-topbar">
+            <div className="cc-modal-title">
+              {twoPaneSection ? null : <h3>{activeControlSectionLabel}</h3>}
+            </div>
+            {surface === "modal" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                icon={<X size={16} />}
+                className="cc-modal-close-btn"
+                onClick={onClose}
+                aria-label="关闭控制中心"
+              />
+            ) : null}
+          </header>
+        )}
 
         <div className="cc-layout cc-layout-dashboard">
           <div

@@ -29,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 type ManageContextId = "skill_center" | "current_workspace" | "user_home" | `workspace:${string}`;
-type SkillDisplaySource = "bundled" | "user" | "harness" | "hub";
 
 type ManageListEntry =
   | {
@@ -71,9 +70,7 @@ type SkillCenterPanelProps = {
   selectedWorkspaceSkillContainerKind: SkillDiscoveryContainerKind;
   currentWorkspaceLabel?: string;
   onSelectSkill: (skillId: string) => void;
-  onOpenSkillFromInsights: (skillId: string) => void;
   onSelectDiscoveredSkill: (discoveryId: string) => void;
-  onScanDiscoveredSkills: () => void;
   onImportDiscoveredSkill: (discoveryId: string) => void;
   onSelectWorkspaceSkillTarget: (targetId: string) => void;
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
@@ -93,7 +90,8 @@ type SkillCenterPanelProps = {
   search: string;
   filter: SkillCenterFilter;
   onSearchChange: (value: string) => void;
-  onFilterChange: (value: SkillCenterFilter) => void;
+  onSectionChange: (value: SkillCenterSectionId) => void;
+  railActions?: ReactNode;
 };
 
 function statusForSkill(
@@ -159,40 +157,11 @@ function formatSkillSource(skill: InstalledSkill) {
   return skill.sourcePath || skill.sourceLabel || "本地导入";
 }
 
-function getSkillDisplaySource(skill: InstalledSkill): SkillDisplaySource {
-  const sourceText = `${skill.sourceLabel ?? ""} ${skill.sourcePath ?? ""}`.toLowerCase();
-  if (skill.sourceType === "bundled") return "bundled";
-  if (sourceText.includes("harness")) return "harness";
-  return "user";
-}
-
-function formatSkillDisplaySource(source: SkillDisplaySource) {
-  if (source === "bundled") return "bundled";
-  if (source === "harness") return "harness";
-  if (source === "hub") return "hub";
-  return "user";
-}
-
 function formatSkillSourceGroup(sourceType: InstalledSkill["sourceType"]) {
   if (sourceType === "bundled") return "Built-in skills";
   if (sourceType === "git") return "Git imports";
   if (sourceType === "discovered_import") return "Discovered imports";
   return "Local imports";
-}
-
-function describeSkillSourceGroup(sourceType: InstalledSkill["sourceType"]) {
-  if (sourceType === "bundled") return "随应用提供的内置能力";
-  if (sourceType === "git") return "来自远端仓库的技能";
-  if (sourceType === "discovered_import") return "从外部位置导入的技能";
-  return "从本机路径导入的技能";
-}
-
-function formatSkillUpdateStatus(kind: InstalledSkill["updateStatus"]["kind"]) {
-  if (kind === "up_to_date") return "已是最新";
-  if (kind === "update_available") return "可更新";
-  if (kind === "source_missing") return "来源缺失";
-  if (kind === "refresh_available") return "可刷新";
-  return "暂不支持更新";
 }
 
 function renderManifestValues(values: string[], emptyLabel = "未声明") {
@@ -344,7 +313,6 @@ export function SkillCenterPanel({
   currentWorkspaceLabel,
   onSelectSkill,
   onSelectDiscoveredSkill,
-  onScanDiscoveredSkills,
   onImportDiscoveredSkill,
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
@@ -360,14 +328,13 @@ export function SkillCenterPanel({
   search,
   filter,
   onSearchChange,
-  onFilterChange,
+  onSectionChange,
+  railActions,
 }: SkillCenterPanelProps) {
-  const [metaExpanded, setMetaExpanded] = useState(false);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
 
   useEffect(() => {
-    setMetaExpanded(false);
     setFilesExpanded(false);
   }, [manageContextId, section, selectedDiscoveryId, selectedSkillId]);
 
@@ -376,10 +343,6 @@ export function SkillCenterPanel({
     workspaceSkillTargets.find((target) => target.isCurrent) ?? null;
   const homeWorkspaceTarget =
     workspaceSkillTargets.find((target) => target.scope === "user_home") ?? null;
-  const knownWorkspaceTargets = workspaceSkillTargets.filter(
-    (target) => target.scope === "workspace" && !target.isCurrent,
-  );
-
   useEffect(() => {
     if (manageContextId === "skill_center") return;
     if (manageContextId === "current_workspace" && currentWorkspaceTarget) return;
@@ -604,6 +567,22 @@ export function SkillCenterPanel({
   const selectedInstalledRestoreResult = selectedInstalledSkill
     ? restoreResultMap.get(selectedInstalledSkill.id) ?? null
     : null;
+  const selectedInstalledRecentLabel =
+    selectedInstalledSkill && workspaceRecentSkillIds.includes(selectedInstalledSkill.id)
+      ? "当前工作区"
+      : "未记录";
+  const selectedInstalledProjectionTarget =
+    selectedInstalledSkill && selectedInstalledState.sessionApplied
+      ? ".agents"
+      : selectedInstalledState.userGlobalApplied
+        ? "~/.agents"
+        : selectedInstalledState.kimiCodeHomeApplied
+          ? "KIMI_CODE_HOME"
+          : ".agents";
+  const selectedInstalledTriggerLabel =
+    selectedInstalledSkill?.metadata?.triggers?.length
+      ? selectedInstalledSkill.metadata.triggers.join(" / ")
+      : selectedInstalledSkill?.projectionName ?? "未声明";
   const selectedInstalledLocations =
     selectedManageEntry?.kind === "installed"
       ? selectedManageEntry.matchedLocations.length > 0
@@ -648,14 +627,6 @@ export function SkillCenterPanel({
     });
   }, [installedSkills, keyword, selectedWorkspaceContainer?.skills]);
 
-  const filterOptions: Array<{ value: SkillCenterFilter; label: string }> = [
-    { value: "all", label: "全部" },
-    { value: "global", label: "已投影" },
-    { value: "session", label: "当前工作区" },
-    { value: "pinned", label: "已固定" },
-    { value: "untrusted", label: "未信任" },
-    { value: "update_available", label: "可更新" },
-  ];
   const isSkillCenterManageContext = manageContextId === "skill_center";
   const installedManageEntries = manageEntries.filter(
     (entry): entry is InstalledManageEntry => entry.kind === "installed",
@@ -673,7 +644,6 @@ export function SkillCenterPanel({
     .map(({ sourceType }) => ({
       sourceType,
       label: formatSkillSourceGroup(sourceType),
-      description: describeSkillSourceGroup(sourceType),
       entries: installedManageEntries.filter(
         (entry) => entry.installedSkill.sourceType === sourceType,
       ),
@@ -702,11 +672,6 @@ export function SkillCenterPanel({
             entry.discoveredRecord.discoveryId;
 
     if (entry.kind === "installed") {
-      const state = statusForSkill(
-        entry.installedSkill.id,
-        globalSkillProjections,
-        activeSessionSkillState,
-      );
       return (
         <button
           key={entry.key}
@@ -720,23 +685,8 @@ export function SkillCenterPanel({
               {entry.installedSkill.trusted
                 ? renderStatusChip("已信任", "ready")
                 : renderStatusChip("未信任", "warning")}
-              {entry.matchedLocations.length > 0
-                ? renderStatusChip(
-                    entry.matchedDiscovery?.importedSkillId ? "已导入" : "外部来源",
-                    "muted",
-                  )
-                : null}
-              {state.userGlobalApplied ? renderStatusChip("~/.agents", "muted") : null}
-              {state.kimiCodeHomeApplied ? renderStatusChip("KIMI_CODE_HOME", "muted") : null}
-              {state.sessionApplied ? renderStatusChip("当前工作区", "muted") : null}
             </div>
           </div>
-          <p className="skill-center-list-description">
-            {entry.installedSkill.description || "这个技能没有提供描述。"}
-          </p>
-          <code className="skill-center-list-projection">
-            {entry.installedSkill.projectionName}
-          </code>
         </button>
       );
     }
@@ -752,26 +702,7 @@ export function SkillCenterPanel({
           <strong>{entry.discoveredRecord.name}</strong>
           <div className="skill-center-chip-row skill-center-chip-row-compact">
             {renderStatusChip("待导入", "warning")}
-            {entry.discoveredRecord.hasScripts ? renderStatusChip("含脚本", "muted") : null}
           </div>
-        </div>
-        <p className="skill-center-list-description">
-          {entry.discoveredRecord.description || "这个外部 Skill 没有提供描述。"}
-        </p>
-        <div className="skill-center-chip-row">
-          {entry.matchedLocations.slice(0, 2).map((location) => (
-            <span
-              key={`${entry.discoveredRecord.discoveryId}-${location.skillPath}-${location.containerKind}`}
-              className="skill-center-chip skill-center-chip-muted"
-            >
-              {formatDiscoveryLocationLabel(location)}
-            </span>
-          ))}
-          {entry.matchedLocations.length > 2 ? (
-            <span className="skill-center-chip skill-center-chip-muted">
-              +{entry.matchedLocations.length - 2} 个位置
-            </span>
-          ) : null}
         </div>
       </button>
     );
@@ -787,71 +718,31 @@ export function SkillCenterPanel({
             detailBodyClassName="skill-center-detail-body"
             railHeader={
               <div className="skill-center-toolbar">
-                <div className="skill-center-manage-toolbar-grid">
-                  <Input
-                    className="skill-center-header-search"
-                    value={search}
-                    onChange={(event) => onSearchChange(event.target.value)}
-                    placeholder={
-                      isSkillCenterManageContext
-                        ? "搜索受管 Skill"
-                        : "搜索技能、外部发现或来源位置"
-                    }
-                  />
-                  <select
-                    className="skill-center-select skill-center-manage-select"
-                    value={manageContextId}
-                    onChange={(event) => setManageContextId(event.target.value as ManageContextId)}
-                    disabled={busy}
-                    aria-label="技能管理范围"
-                  >
-                    <option value="skill_center">受管 Skill</option>
-                    <option value="current_workspace" disabled={!currentWorkspaceTarget}>
-                      {currentWorkspaceTarget ? "当前工作区" : "当前工作区（未识别）"}
-                    </option>
-                    <option value="user_home">主目录</option>
-                    {knownWorkspaceTargets.length > 0 ? (
-                      <optgroup label="已知工作区">
-                        {knownWorkspaceTargets.map((target) => (
-                          <option key={target.id} value={target.id}>
-                            {target.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ) : null}
-                  </select>
-                  {isSkillCenterManageContext ? (
-                    <select
-                      className="skill-center-select skill-center-manage-select"
-                      value={filter}
-                      onChange={(event) =>
-                        onFilterChange(event.target.value as SkillCenterFilter)
-                      }
-                      disabled={busy}
-                      aria-label="技能管理详情筛选"
-                    >
-                      {filterOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="skill-center-manage-action"
-                      onClick={onScanDiscoveredSkills}
-                      disabled={busy}
-                    >
-                      重新扫描
-                    </Button>
-                  )}
+                <div className="skill-center-rail-title-row">
+                  <h4>Skill 中心</h4>
+                  {railActions}
                 </div>
+                <Input
+                  className="skill-center-header-search"
+                  value={search}
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="搜索 skill..."
+                />
               </div>
             }
             rail={
               <>
+                <button
+                  type="button"
+                  className="skill-center-list-item"
+                  onClick={() => onSectionChange("workspace_insights")}
+                  disabled={busy}
+                >
+                  <div className="skill-center-list-header">
+                    <strong>工作区洞察</strong>
+                    <span className="cc-rail-count">{workspaceSkillTargets.length}</span>
+                  </div>
+                </button>
                 {manageEntries.length === 0 && workspaceTargetRows.length === 0 ? (
                   <ControlCenterEmptyState
                     className="skill-center-empty"
@@ -870,7 +761,6 @@ export function SkillCenterPanel({
                       <span>{group.label}</span>
                       <small>{group.entries.length}</small>
                     </div>
-                    <p>{group.description}</p>
                     <div className="skill-center-rail-group-list">
                       {group.entries.map((entry) => renderManageEntry(entry))}
                     </div>
@@ -882,7 +772,6 @@ export function SkillCenterPanel({
                       <span>Discoverable locations</span>
                       <small>{discoveredManageEntries.length}</small>
                     </div>
-                    <p>当前范围内还未导入的外部 Skill。</p>
                     <div className="skill-center-rail-group-list">
                       {discoveredManageEntries.map((entry) => renderManageEntry(entry))}
                     </div>
@@ -894,7 +783,6 @@ export function SkillCenterPanel({
                       <span>Workspace targets</span>
                       <small>{workspaceTargetRows.length}</small>
                     </div>
-                    <p>切换范围以查看工作区、主目录和外部发现。</p>
                     <div className="skill-center-rail-group-list">
                       {workspaceTargetRows.map(({ target, contextId }) => (
                         <button
@@ -916,12 +804,6 @@ export function SkillCenterPanel({
                                 : renderStatusChip("可编辑", "ready")}
                             </div>
                           </div>
-                          <p className="skill-center-list-description">
-                            {describeWorkspaceTarget(target)}
-                          </p>
-                          <code className="skill-center-list-projection">
-                            {target.rootPath}
-                          </code>
                         </button>
                       ))}
                     </div>
@@ -1040,50 +922,24 @@ export function SkillCenterPanel({
                     />
                   </div>
 
-                  {renderCollapsibleSection(
-                    "基础信息",
-                    metaExpanded,
-                    () => setMetaExpanded((current) => !current),
-                    <dl className="skill-center-meta">
-                      <div>
-                        <dt>投影名</dt>
-                        <dd>{selectedInstalledSkill.projectionName}</dd>
-                      </div>
-                      <div>
-                        <dt>来源</dt>
-                        <dd>{formatSkillSource(selectedInstalledSkill)}</dd>
-                      </div>
-                      <div>
-                        <dt>展示来源</dt>
-                        <dd>{formatSkillDisplaySource(getSkillDisplaySource(selectedInstalledSkill))}</dd>
-                      </div>
-                      <div>
-                        <dt>更新状态</dt>
-                        <dd>
-                          {formatSkillUpdateStatus(selectedInstalledSkill.updateStatus.kind)}
-                          {selectedInstalledSkill.updateStatus.detail
-                            ? ` · ${selectedInstalledSkill.updateStatus.detail}`
-                            : ""}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Triggers</dt>
-                        <dd>
-                          {selectedInstalledSkill.metadata?.triggers?.length
-                            ? selectedInstalledSkill.metadata.triggers.join(" / ")
-                            : "未声明"}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>本地路径</dt>
-                        <dd>{selectedInstalledSkill.localPath}</dd>
-                      </div>
-                      <div>
-                        <dt>脚本</dt>
-                        <dd>{selectedInstalledSkill.hasScripts ? "包含 scripts/" : "无 scripts/"}</dd>
-                      </div>
-                    </dl>,
-                  )}
+                  <dl className="skill-center-meta">
+                    <div>
+                      <dt>来源</dt>
+                      <dd>{formatSkillSource(selectedInstalledSkill)}</dd>
+                    </div>
+                    <div>
+                      <dt>最近使用</dt>
+                      <dd>{selectedInstalledRecentLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>投影目标</dt>
+                      <dd>{selectedInstalledProjectionTarget}</dd>
+                    </div>
+                    <div>
+                      <dt>触发词</dt>
+                      <dd>{selectedInstalledTriggerLabel}</dd>
+                    </div>
+                  </dl>
 
                   {selectedInstalledLocations.length > 0 ? (
                     <div className="skill-center-applied-paths">
@@ -1310,6 +1166,10 @@ export function SkillCenterPanel({
             detailBodyClassName="skill-center-detail-body"
             railHeader={
               <div className="skill-center-toolbar">
+                <div className="skill-center-rail-title-row">
+                  <h4>工作区洞察</h4>
+                  {railActions}
+                </div>
                 <Input
                   className="skill-center-header-search"
                   value={search}
@@ -1320,6 +1180,17 @@ export function SkillCenterPanel({
             }
             rail={
               <>
+                <button
+                  type="button"
+                  className="skill-center-list-item"
+                  onClick={() => onSectionChange("manage")}
+                  disabled={busy}
+                >
+                  <div className="skill-center-list-header">
+                    <strong>技能管理</strong>
+                    <span className="cc-rail-count">{installedSkills.length}</span>
+                  </div>
+                </button>
                 {workspaceSkillTargets.length === 0 ? (
                   <ControlCenterEmptyState
                     className="skill-center-empty"

@@ -33,7 +33,7 @@ typography:
     letterSpacing: "0"
   title-md:
     fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-    fontSize: 16px
+    fontSize: 18px
     fontWeight: 650
     lineHeight: 1.25
   body-md:
@@ -77,7 +77,7 @@ spacing:
   xl: 24px
   2xl: 32px
   nav-width: 208px
-  object-rail-width: 248px
+  object-rail-width: 280px
   detail-max-width: 1120px
 components:
   app-shell:
@@ -173,14 +173,15 @@ Primary Nav        Object Rail             Detail Panel
 
 ### 边框预算
 
-- 从 L0 根节点到任意叶子元素，路径上「边框 + 背景」的容器最多 2 层（L0 本身算第 1 层）。
+- 从 L0 根节点到任意叶子元素，路径上「边框 + 背景」的分组容器最多 2 层（L0 本身算第 1 层）。
+- Card 内的功能容器（code-card、table、row、metric）不计入分组预算；它们是内容排版，不是新的层级分组。
 - **卡片资格**：只有可独立交互的对象（点击进详情、可选中、可拖拽的实体，如一个技能、一个机器人、一个模板）才允许渲染为卡片。纯展示的分组一律用 L1 分区。
 - **键值对**一律用 definition list（灰色小标签 + 正常字重的值，行排列），禁止一值一卡。
 - 分组靠字号、字重、留白表达，禁止靠“再包一层框”表达。
 
 ### 视觉 Token
 
-- 圆角只有两档：`--radius-container: 12px`（L0 与合格卡片）、`--radius-control: 6px`（按钮 / 输入框 / 徽章）。
+- 圆角只有五档：`16px` 内容卡、`12px` 代码卡 / 表格 / row、`8px` 列表项 / 按钮 / pill、`6px` tag / 小图标按钮、`4px` 行内 code。
 - 背景只有三档：`--bg-page` / `--bg-surface` / `--bg-inset`。inset 仅用于代码、路径、只读值的内嵌展示，且不加边框。
 - 阴影只给浮层（弹窗、菜单、tooltip）。静态卡片零阴影。
 
@@ -238,7 +239,7 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 字体采用系统 UI 栈，保证桌面端原生感。不要使用品牌化大标题或网页 hero 字号。
 
 - **Title lg, 20px / 650**：详情页主标题，例如当前 skill、workspace 或调度任务名。
-- **Title md, 16px / 650**：主内容卡片标题，例如 `Notion`、`Quick Reference`、`工作区心跳`。
+- **Title md, 18px / 650**：主内容卡片标题，例如 `Notion`、`Quick Reference`、`工作区心跳`。
 - **Body md, 14px / 400**：主要说明文字。
 - **Body sm, 13px / 400**：列表行、按钮、字段值。
 - **Label sm, 12px / 500**：表单标签与分组标题。
@@ -254,7 +255,7 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 ```txt
 ┌────────────────┬────────────────────┬────────────────────────────────────┐
 │ Primary Nav    │ Object Rail         │ Detail Panel                        │
-│ 208px          │ 248px               │ fluid, max content 1120px           │
+│ 208px          │ 280px               │ fluid, max content 1120px           │
 └────────────────┴────────────────────┴────────────────────────────────────┘
 ```
 
@@ -313,7 +314,11 @@ Tooltip 触发器统一跟在标签后，不单独占行；内容不超过 2 行
 
 ### Cards
 
-详情主卡片用于展示一个主要实体的说明、代码、运行计划或配置。Card 背景白色、边框浅灰、圆角 16px。Card 内部标题 16px，正文 14px。
+详情主卡片用于展示一个主要实体的说明、代码、运行计划或配置。Card 背景白色、边框浅灰、圆角 16px。Card 内部标题 18px，正文 14px。
+
+### Metrics
+
+Metric 只能放在 Card 内部，每行最多 3 个。每个 Metric 必须同时有值和 hint 行；顶部对象属性一律使用 MetaGrid，不用 Metric。
 
 ### Code Block
 

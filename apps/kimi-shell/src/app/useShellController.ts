@@ -676,7 +676,7 @@ export function useShellController() {
     useState<MainWindowCloseDecisionRequestPayload | null>(null);
   const [themeMode, setThemeMode] = useState<Theme>(() => getInitialThemeMode());
   const [activeControlSection, setActiveControlSection] =
-    useState<ControlSectionId>("overview");
+    useState<ControlSectionId>("onboarding");
   const [activeRuntimePanel, setActiveRuntimePanel] =
     useState<RuntimePanelId>("paths");
   const [controlCenterModalOpen, setControlCenterModalOpen] = useState(false);
@@ -1027,7 +1027,7 @@ export function useShellController() {
   }
 
   function resetControlCenterNavigation() {
-    setActiveControlSection("overview");
+    setActiveControlSection("onboarding");
     setActiveRuntimePanel("paths");
     setActiveControlTask(null);
     setActiveControlTaskPayload(null);
@@ -1129,7 +1129,7 @@ export function useShellController() {
 
   function parkOnControlCenterOverviewAwaitingWorkspace() {
     setPendingWorkspaceEntryAfterOnboarding(true);
-    setActiveControlSection("overview");
+    setActiveControlSection("onboarding");
     setActiveRuntimePanel("paths");
     if (!controlCenterModalOpen) {
       applyRouteHash("/control-center");

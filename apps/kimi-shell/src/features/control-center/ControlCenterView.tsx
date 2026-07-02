@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Activity,
   Boxes,
   CalendarClock,
   Check,
   ChevronRight,
   Eraser,
   FolderOpen,
-  LayoutDashboard,
   Minus,
   Plus,
   Play,
@@ -70,9 +68,6 @@ import type {
   WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
   WorkspaceSkillTarget,
-} from "@/app/types";
-import {
-  formatProviderApiHealthState,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -353,25 +348,11 @@ const controlSections: Array<{
   icon: ReactNode;
 }> = [
   {
-    id: "overview",
-    label: "工作台",
-    description: "运行状态、当前工作区和需要关注的事项。",
-    group: "core",
-    icon: <LayoutDashboard size={15} />,
-  },
-  {
     id: "onboarding",
-    label: "快速设置",
-    description: "安装、认证、右键菜单和默认工作目录。",
+    label: "小助手设置",
+    description: "安装、认证、右键菜单、默认工作目录和运行诊断。",
     group: "setup",
     icon: <SlidersHorizontal size={15} />,
-  },
-  {
-    id: "runtime_center",
-    label: "运行诊断",
-    description: "启动链路、Doctor、WebView 和日志。",
-    group: "core",
-    icon: <Activity size={15} />,
   },
   {
     id: "bridge_center",
@@ -663,7 +644,6 @@ export function ControlCenterView({
   onboarding,
   contextMenuStatus,
   activeControlSection,
-  activeRuntimePanel,
   stepCompletion,
   actionBusy,
   diagnosticsBusy,
@@ -674,7 +654,6 @@ export function ControlCenterView({
   bridgeSettings,
   bridgeStatus,
   bridgeOnboardingDraft,
-  bridgeOnboardingDirty,
   bridgeOnboardingValidation,
   bridgeSettingsDirty,
   bridgePersistedConnectorIds,
@@ -734,7 +713,6 @@ export function ControlCenterView({
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
-  onRefreshCoreState,
   onRefreshDiagnostics,
   onRunKimiDoctor,
   onRefreshContextMenuStatus,
@@ -839,8 +817,6 @@ export function ControlCenterView({
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
-  const [workspaceHubRailGroups, setWorkspaceHubRailGroups] = useState<UnifiedRailGroup[]>([]);
-  const [scheduleRailGroups, setScheduleRailGroups] = useState<UnifiedRailGroup[]>([]);
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
@@ -867,15 +843,15 @@ export function ControlCenterView({
     contextMenuStatus?.supported ?? onboarding?.contextMenuSupported ?? false;
   const runtimeContextMenuEnabled =
     contextMenuStatus?.enabled ?? onboarding?.contextMenuEnabled ?? false;
-  const isOnboardingSection = activeControlSection === "onboarding";
+  const isAssistantSettingsSection =
+    activeControlSection === "overview" ||
+    activeControlSection === "onboarding" ||
+    activeControlSection === "runtime_center";
+  const isOnboardingSection = isAssistantSettingsSection;
   const isBridgeRunning =
     bridgeStatus.state === "running" ||
     bridgeStatus.state === "starting" ||
     bridgeStatus.state === "degraded";
-  const bridgeEnabled = bridgeSettings.enabled;
-  const feishuEnabled = bridgeSettings.connectors.some(
-    (connector) => connector.platform === "feishu" && connector.enabled,
-  );
   const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
@@ -1037,24 +1013,6 @@ export function ControlCenterView({
     setBridgeConnectorTaskError(null);
   }, [activeTask, effectiveSelectedBridgeConnectorId]);
 
-  const bridgeStatusLabel =
-    bridgeStatus.state === "running"
-      ? "就绪"
-      : bridgeStatus.state === "starting" || bridgeStatus.state === "stopping"
-        ? "进行中"
-        : bridgeStatus.state === "degraded" || bridgeStatus.state === "crashed"
-          ? "异常"
-        : bridgeEnabled || feishuEnabled
-          ? "待办"
-          : "待办";
-  const bridgeRuntimeTone =
-    bridgeStatus.state === "running" || bridgeStatus.state === "degraded"
-      ? "success"
-      : bridgeStatus.state === "starting"
-        ? "warning"
-        : bridgeStatus.state === "crashed"
-          ? "danger"
-          : "neutral";
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
   const installReady = onboarding?.kimiInstalled ?? stepCompletion.install_kimi;
   const workDirReady = Boolean(effectiveWorkDir);
@@ -1278,7 +1236,7 @@ export function ControlCenterView({
       }
     }
     if (section === "overview") {
-      setActiveControlSection("overview");
+      await handleOpenOnboardingEntry();
       return;
     }
     if (section === "onboarding") {
@@ -1310,14 +1268,6 @@ export function ControlCenterView({
       }
       return next;
     });
-  }, []);
-
-  const handleWorkspaceHubRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
-    setWorkspaceHubRailGroups(groups);
-  }, []);
-
-  const handleScheduleRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
-    setScheduleRailGroups(groups);
   }, []);
 
   const handleRailItemActivate = useCallback((itemId: string) => {
@@ -1757,7 +1707,6 @@ export function ControlCenterView({
       primaryAction: workDirPrimaryAction,
     },
   ];
-  const completedOnboardingCards = onboardingSteps.filter((step) => step.complete).length;
   const activeOnboardingCard = expandedOnboardingCard ?? recommendedOnboardingCard;
   const activeOnboardingStep =
     onboardingSteps.find((step) => step.id === activeOnboardingCard) ?? onboardingSteps[0];
@@ -1776,376 +1725,33 @@ export function ControlCenterView({
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
   const skillDiscoveryRecords = skillDiscoverySnapshot?.records ?? [];
-  const overviewBriefs = [
-    !installReady ? "Kimi Code 仍未就绪，建议先完成安装与探测。" : null,
-    !contextMenuReady && runtimeContextMenuSupported ? "资源管理器右键菜单尚未启用。" : null,
-    !workDirReady ? "默认工作目录未设置，跨会话上下文还不稳定。" : null,
-    bridgeStatus.state === "crashed" ? "Bridge 最近出现崩溃，需要优先检查。" : null,
-    kimiCodeAccessDirty ? "控制中心存在未保存修改。" : null,
-    bridgeOnboardingDirty ? "Bridge 配置仍有未保存更改。" : null,
-  ].filter((item): item is string => Boolean(item));
-  const pendingOverviewCount = overviewBriefs.length;
-  const runtimeUnifiedItems = useMemo(
-    () => [
-      {
-        id: "core" as RuntimePanelId,
-        title: "启动链路 / Doctor",
-        status: runtimeIssues.length > 0 ? `${runtimeIssues.length} 条异常` : (diagnostics?.state ?? "-"),
-        tone: runtimeIssues.length > 0 ? ("warning" as const) : ("success" as const),
-      },
-      {
-        id: "paths" as RuntimePanelId,
-        title: "路径与菜单",
-        status: contextMenuStatusLabel,
-        tone: contextMenuStatusTone,
-      },
-      {
-        id: "logs" as RuntimePanelId,
-        title: "日志尾部",
-        status: `${(diagnostics?.backendLogTail?.length ?? 0) + (diagnostics?.appLogTail?.length ?? 0)} 行`,
-        tone: diagnostics?.lastError || diagnostics?.startupFailureDetail
-          ? ("warning" as const)
-          : ("neutral" as const),
-      },
-    ],
-    [
-      contextMenuStatusLabel,
-      contextMenuStatusTone,
-      diagnostics?.appLogTail?.length,
-      diagnostics?.backendLogTail?.length,
-      diagnostics?.lastError,
-      diagnostics?.startupFailureDetail,
-      diagnostics?.state,
-      runtimeIssues.length,
-    ],
-  );
   const unifiedRailGroups = useMemo<UnifiedRailGroup[]>(() => {
     const topLevelItems: UnifiedRailItem[] = controlSections.map((section) => ({
       id: section.id,
       label: section.id === "bridge_center" ? bridgeDisplayName : section.label,
       icon: section.icon,
-      active: activeControlSection === section.id,
-      statusLabel:
-        section.id === "overview"
-          ? pendingOverviewCount > 0
-            ? `${pendingOverviewCount}`
-            : "ready"
-          : section.id === "onboarding"
-            ? `${completedOnboardingCards}`
-            : section.id === "runtime_center"
-              ? runtimeIssues.length > 0
-                ? "risk"
-                : "doctor"
-              : section.id === "bridge_center"
-                ? String(visibleBridgeConnectors.length)
-                : section.id === "skill_center"
-                  ? "scan"
-                  : undefined,
-      statusTone:
-        section.id === "overview"
-          ? pendingOverviewCount > 0
-            ? ("warning" as const)
-            : ("success" as const)
-          : section.id === "runtime_center" && runtimeIssues.length > 0
-            ? ("warning" as const)
-            : section.id === "bridge_center"
-              ? bridgeRuntimeTone
-              : ("neutral" as const),
+      active:
+        section.id === "onboarding"
+          ? isAssistantSettingsSection
+          : activeControlSection === section.id,
       onSelect: () => {
         void handleSelectControlSection(section.id);
       },
     }));
 
-    const skillSourceConfigs: Array<{
-      sourceType: InstalledSkill["sourceType"];
-      label: string;
-      meta: string;
-    }> = [
-      { sourceType: "bundled", label: "Bundled", meta: "内置" },
-      { sourceType: "git", label: "Git", meta: "repo" },
-      { sourceType: "local_import", label: "Local import", meta: "path" },
-      { sourceType: "discovered_import", label: "Discovered import", meta: "scan" },
-    ];
-
-    const groups: UnifiedRailGroup[] = [
+    return [
       {
         id: "sections",
         label: "当前源码里的一级视图",
         items: topLevelItems,
       },
-      {
-        id: "onboarding",
-        label: "快速设置步骤",
-        count: onboardingSteps.length,
-        collapsible: true,
-        items: onboardingSteps.map((step) => ({
-          id: `onboarding:${step.id}`,
-          label: step.title.replace(" / 升级", ""),
-          statusLabel: step.statusLabel,
-          statusTone: step.statusTone as UnifiedRailItem["statusTone"],
-          active: activeControlSection === "onboarding" && activeOnboardingStep.id === step.id,
-          depth: 1,
-          onSelect: () => {
-            setExpandedOnboardingCard(step.id);
-            void handleOpenOnboardingEntry();
-          },
-        })),
-      },
-      {
-        id: "runtime_center",
-        label: "运行诊断",
-        count: runtimeUnifiedItems.length,
-        collapsible: true,
-        items: runtimeUnifiedItems.map((item) => ({
-          id: `runtime:${item.id}`,
-          label: item.title,
-          statusLabel: item.status,
-          statusTone: item.tone as UnifiedRailItem["statusTone"],
-          active: activeControlSection === "runtime_center" && activeRuntimePanel === item.id,
-          depth: 1,
-          onSelect: () => {
-            void handleSelectRuntimePanel(item.id);
-          },
-        })),
-      },
-      {
-        id: "bridge_center",
-        label: "外部 IM Connector",
-        count: visibleBridgeConnectors.length,
-        collapsible: true,
-        items: visibleBridgeConnectors.map((connector) => {
-          const connectorStatus =
-            bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ?? null;
-          return {
-            id: `bridge:${connector.id}`,
-            label: connector.label,
-            meta: bridgePlatformLabel(connector.platform),
-            statusLabel: formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle"),
-            statusTone: formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle"),
-            active:
-              activeControlSection === "bridge_center" &&
-              effectiveSelectedBridgeConnectorId === connector.id,
-            depth: 1,
-            onSelect: () => {
-              setSelectedBridgeConnectorId(connector.id);
-              void handleSelectBridgeSection();
-            },
-          };
-        }),
-      },
-      {
-        id: "skill_center",
-        label: "Skill 来源",
-        count: installedSkills.length,
-        collapsible: true,
-        items: skillSourceConfigs.map((source) => {
-          const firstSkill = installedSkills.find((skill) => skill.sourceType === source.sourceType);
-          const count = installedSkills.filter((skill) => skill.sourceType === source.sourceType).length;
-          return {
-            id: `skill-source:${source.sourceType}`,
-            label: source.label,
-            meta: source.meta,
-            statusLabel: count > 0 ? String(count) : undefined,
-            statusTone: "neutral" as const,
-            active:
-              activeControlSection === "skill_center" &&
-              Boolean(firstSkill && selectedSkillId === firstSkill.id),
-            depth: 1,
-            onSelect: () => {
-              void handleSelectSkillCenterSection();
-              onSkillCenterSectionChange("manage");
-              if (firstSkill) {
-                void onSelectSkill(firstSkill.id);
-              }
-            },
-          };
-        }),
-      },
-      {
-        id: "skill_targets",
-        label: "Skill 工作区目标",
-        count: workspaceSkillTargets.length,
-        collapsible: true,
-        items: workspaceSkillTargets.map((target) => ({
-          id: `skill-target:${target.id}`,
-          label: target.label,
-          meta: target.readOnly ? "只读" : "可编辑",
-          active:
-            activeControlSection === "skill_center" &&
-            selectedWorkspaceSkillTargetId === target.id,
-          depth: 1,
-          onSelect: () => {
-            void handleSelectSkillCenterSection();
-            onSkillCenterSectionChange("workspace_insights");
-            onSelectWorkspaceSkillTarget(target.id);
-          },
-        })),
-      },
-      ...workspaceHubRailGroups,
-      ...scheduleRailGroups,
     ];
-    return groups;
   }, [
     activeControlSection,
-    activeOnboardingStep.id,
-    activeRuntimePanel,
     bridgeDisplayName,
-    bridgeRuntimeTone,
-    bridgeStatus.connectors,
-    completedOnboardingCards,
-    effectiveSelectedBridgeConnectorId,
-    handleSelectBridgeSection,
     handleSelectControlSection,
-    handleSelectRuntimePanel,
-    handleSelectSkillCenterSection,
-    handleOpenOnboardingEntry,
-    installedSkills,
-    onSelectSkill,
-    onSelectWorkspaceSkillTarget,
-    onSkillCenterSectionChange,
-    onboardingSteps,
-    pendingOverviewCount,
-    runtimeIssues.length,
-    runtimeUnifiedItems,
-    scheduleRailGroups,
-    selectedSkillId,
-    selectedWorkspaceSkillTargetId,
-    visibleBridgeConnectors,
-    workspaceHubRailGroups,
-    workspaceSkillTargets,
+    isAssistantSettingsSection,
   ]);
-
-  function renderOverviewSection() {
-    const attentionItems = overviewBriefs.slice(0, 3);
-    const activeWorkspacePath =
-      status?.activeSessionWorkDir?.trim() || effectiveWorkDir.trim();
-    const backendState = diagnostics?.state ?? status?.state ?? "-";
-    const sessionLabel = status?.activeSessionId ? `会话 ${status.activeSessionId}` : "无活动会话";
-
-    return (
-      <section className="cc-image-detail-page">
-        <div
-          id={focusDomId("overview")}
-          className={`cc-image-detail-top ${activeFocusId === "overview" ? "is-focus" : ""}`}
-        >
-          <div>
-            <h1>概览</h1>
-            <p>控制中心默认页，集中查看 Kimi Code 运行态、工作目录、认证模式和下一步操作。</p>
-          </div>
-          <div className="cc-image-top-controls">
-            <span className={`cc-image-switch ${pendingOverviewCount === 0 ? "" : "off"}`} />
-            <Button
-              type="button"
-              variant="outline"
-              icon={<RefreshCw size={15} />}
-              className="cc-action-btn"
-              onClick={() => {
-                void onRefreshCoreState();
-                void onRefreshDiagnostics();
-                void onRefreshContextMenuStatus();
-              }}
-              disabled={diagnosticsBusy || contextMenuBusy}
-            >
-              刷新状态
-            </Button>
-          </div>
-        </div>
-
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            {
-              label: "Backend state",
-              value: backendState,
-              meta: `active port ${String(status?.activePort ?? diagnostics?.activePort ?? "-")}`,
-            },
-            {
-              label: "Workspace",
-              value: activeWorkspacePath || "-",
-              meta: sessionLabel,
-            },
-            {
-              label: "Auth mode",
-              value: status?.authMode ?? "-",
-              meta: formatProviderApiHealthState(status?.providerApiHealth.state),
-            },
-            {
-              label: "Web mode",
-              value: status?.enhancedWebHealth.state ?? "-",
-              meta: status?.hotkey || "-",
-            },
-          ]}
-        />
-
-        <div className="cc-image-description">
-          <div className="cc-image-meta-label">Description</div>
-          <p>当前窗口汇总启动、工作区、认证与运行风险；需要执行的动作保留在右侧详情区。</p>
-        </div>
-        <div className="cc-image-tags">
-          <span>Runtime {backendState}</span>
-          <span>{providerApiConfigured ? "Provider API configured" : "Provider API optional"}</span>
-          <span>{bridgeStatusLabel}</span>
-        </div>
-
-        <section
-          id={focusDomId("overview:runtime")}
-          className={`cc-image-card ${activeFocusId === "overview:runtime" ? "is-focus" : ""}`}
-        >
-          <h2>运行与工作区</h2>
-          <ul className="cc-image-row-list">
-            <li className="cc-image-row">
-              <div>
-                <div className="cc-image-row-title"><span className="cc-dot success" />后端运行态</div>
-                <div className="cc-image-row-desc">{diagnostics?.startupPhase ?? "startup phase 未上报"}</div>
-              </div>
-              <ControlCenterStatusBadge tone={pendingOverviewCount === 0 ? "success" : "warning"}>
-                {pendingOverviewCount === 0 ? "运行中" : `${pendingOverviewCount} 项关注`}
-              </ControlCenterStatusBadge>
-            </li>
-            <li className="cc-image-row">
-              <div>
-                <div className="cc-image-row-title"><span className="cc-dot neutral" />当前工作区</div>
-                <div className="cc-image-row-desc">{activeWorkspacePath || "未设置默认工作目录"}</div>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="cc-action-btn"
-                onClick={() => void onOpenFolder(activeWorkspacePath)}
-                disabled={!activeWorkspacePath}
-              >
-                打开工作区
-              </Button>
-            </li>
-          </ul>
-        </section>
-
-        <section
-          id={focusDomId("overview:attention")}
-          className={`cc-image-card ${activeFocusId === "overview:attention" ? "is-focus" : ""}`}
-        >
-          <h2>需要关注</h2>
-          {attentionItems.length > 0 ? (
-            <ul className="cc-image-row-list">
-              {attentionItems.map((item) => (
-                <li key={item} className="cc-image-row">
-                  <div>
-                    <div className="cc-image-row-title"><span className="cc-dot warning" />{item}</div>
-                  </div>
-                  <Button type="button" className="cc-action-btn" onClick={() => void handleOpenOnboardingEntry()}>
-                    处理待办
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="cc-image-muted">暂无需要处理的事项。</p>
-          )}
-        </section>
-      </section>
-    );
-  }
 
   function renderOnboardingSection() {
     return (
@@ -3819,24 +3425,25 @@ export function ControlCenterView({
               renderActiveTask()
             ) : (
               <>
-                {activeControlSection === "overview" ? renderOverviewSection() : null}
                 {activeControlSection === "workspace_hub" ? (
                   <WorkspaceHubPanel
                     onOpenWorkspace={onOpenFolder}
                     detailOnly
                     activeFocusId={activeFocusId}
-                    onRailGroupsChange={handleWorkspaceHubRailGroupsChange}
                   />
                 ) : null}
                 {activeControlSection === "schedule" ? (
                   <WorkspaceSchedulePanel
                     detailOnly
                     activeFocusId={activeFocusId}
-                    onRailGroupsChange={handleScheduleRailGroupsChange}
                   />
                 ) : null}
-                {activeControlSection === "onboarding" ? renderOnboardingSection() : null}
-                {activeControlSection === "runtime_center" ? renderRuntimeSection() : null}
+                {isAssistantSettingsSection ? (
+                  <>
+                    {renderOnboardingSection()}
+                    {renderRuntimeSection()}
+                  </>
+                ) : null}
                 {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
                 {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
               </>

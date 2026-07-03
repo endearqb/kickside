@@ -88,6 +88,11 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
         },
       ]
     : slots;
+  const isEdgeToEdge =
+    Boolean(maximizedPaneId) ||
+    (preset === "single" &&
+      renderedSlots.length === 1 &&
+      Boolean(renderedSlots[0]?.paneId));
   const gridStyle = maximizedPaneId
     ? ({
         gridTemplateColumns: "minmax(0, 1fr)",
@@ -318,7 +323,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
 
   return (
     <section
-      className="workspace-stage workspace-stage-grid-shell"
+      className={`workspace-stage workspace-stage-grid-shell${
+        isEdgeToEdge ? " is-edge-to-edge" : ""
+      }`}
       aria-label="Workspace Grid"
       tabIndex={0}
       onKeyDown={handleGridKeyDown}

@@ -473,6 +473,7 @@ export interface InstalledSkill {
   hasScripts: boolean;
   metadata: SkillManifestMetadata;
   updateStatus: SkillUpdateStatusView;
+  usageStats?: SkillUsageStats;
   discoveryLocations: SkillDiscoveryLocation[];
 }
 
@@ -481,6 +482,26 @@ export interface SkillDetail {
   relativePaths: string[];
   userGlobalApplied: boolean;
   currentSessionApplied: boolean;
+}
+
+export interface SkillFileEntry {
+  relPath: string;
+  isDir: boolean;
+  size?: number;
+}
+
+export interface SkillFileContent {
+  relPath: string;
+  size: number;
+  isBinary: boolean;
+  truncated: boolean;
+  text?: string;
+}
+
+export interface SkillUsageStats {
+  skillId: string;
+  applyCount: number;
+  lastAppliedAt?: string;
 }
 
 export interface SkillProjectionRecord {

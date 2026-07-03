@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 
 type ControlCenterTaskSurfaceProps = {
   title: string;
-  description?: string;
   className?: string;
   bodyClassName?: string;
   footerClassName?: string;
@@ -18,7 +17,6 @@ type ControlCenterTaskSurfaceProps = {
 
 export function ControlCenterTaskSurface({
   title,
-  description,
   className,
   bodyClassName,
   footerClassName,
@@ -46,7 +44,6 @@ export function ControlCenterTaskSurface({
           </div>
           <div>
             <h3>{title}</h3>
-            {description ? <p>{description}</p> : null}
           </div>
         </div>
         <div className="cc-task-surface-header-actions">

@@ -2704,9 +2704,21 @@ input:focus {
 .workspace-stage-grid-shell {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
-  border: 1px solid transparent;
+  border: 0;
   padding: 0;
   background: var(--surface);
+}
+
+.workspace-stage-grid-shell.is-edge-to-edge {
+  border: 0;
+}
+
+.workspace-stage-grid-shell.is-edge-to-edge .workspace-grid-canvas {
+  gap: 0;
+}
+
+.workspace-stage-grid-shell.is-edge-to-edge .workspace-grid-pane {
+  border-radius: 0;
 }
 
 .workspace-grid-icon-btn {
@@ -5662,6 +5674,33 @@ input:focus {
   overflow: hidden;
 }
 
+.skill-center-directory-surface {
+  display: flex;
+  min-height: 0;
+  max-height: min(72vh, 760px);
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.skill-center-directory-tabs {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+.skill-center-directory-toolbar {
+  flex: 0 0 auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, auto) minmax(138px, auto) minmax(138px, auto) auto;
+  align-items: center;
+}
+
+.skill-center-directory-grid {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .skill-center-toolbar {
   display: grid;
   gap: 10px;
@@ -5862,6 +5901,41 @@ input:focus {
   margin: 0;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+.skill-center-script-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--cc-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: color-mix(in srgb, var(--text-primary) 88%, var(--warning));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.skill-center-action-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--destructive) 38%, var(--cc-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--destructive) 9%, transparent);
+  color: color-mix(in srgb, var(--text-primary) 86%, var(--destructive));
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.skill-center-action-error span {
+  min-width: 0;
+}
+
+.skill-center-action-error button {
+  flex: 0 0 auto;
 }
 
 .skill-center-actions,
@@ -8203,6 +8277,25 @@ input:focus {
 .control-center-shell .skill-center-detail-only .cc-workbench-detail-body > * {
   width: 100%;
   max-width: 1120px;
+}
+
+.control-center-shell .workspace-hub-directory-card {
+  display: flex;
+  min-height: 0;
+  max-height: min(64vh, 680px);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.control-center-shell .workspace-hub-directory-card > h2,
+.control-center-shell .workspace-hub-directory-card > .directory-toolbar {
+  flex: 0 0 auto;
+}
+
+.control-center-shell .workspace-hub-directory-grid {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .control-center-shell .cc-unified-detail-section {

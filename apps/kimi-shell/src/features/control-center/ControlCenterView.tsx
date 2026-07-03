@@ -82,6 +82,7 @@ export function ControlCenterView({
   activeControlSection,
   stepCompletion,
   actionBusy,
+  actionError,
   diagnosticsBusy,
   kimiDoctorBusy,
   contextMenuBusy,
@@ -198,10 +199,12 @@ export function ControlCenterView({
   onResetBridgeBindingToDefaultWorkDir,
   onResolveBridgeApproval,
   onSkillCenterSearchChange,
+  onSkillCenterFilterChange,
   onSkillCenterSectionChange,
   onSkillCenterGitRepoUrlChange,
   onSkillCenterGitRefChange,
   onSelectSkill,
+  onClearSkillSelection,
   onOpenTask,
   onCloseTask,
   onSelectDiscoveredSkill,
@@ -254,6 +257,7 @@ export function ControlCenterView({
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
+  const [workspaceHubFocusPath, setWorkspaceHubFocusPath] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
   void installAction;
@@ -1165,7 +1169,6 @@ export function ControlCenterView({
       : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
         ? diagnostics.appLogTail.slice(-2).join("\n")
         : "暂无最新日志摘录。";
-  const skillDiscoveryRecords = skillDiscoverySnapshot?.records ?? [];
   const unifiedRailGroups = useMemo<UnifiedRailGroup[]>(() => {
     const topLevelItems: UnifiedRailItem[] = controlSections.map((section) => ({
       id: section.id,
@@ -1183,7 +1186,7 @@ export function ControlCenterView({
     return [
       {
         id: "sections",
-        label: "当前源码里的一级视图",
+        label: "页面",
         items: topLevelItems,
       },
     ];
@@ -1203,7 +1206,6 @@ export function ControlCenterView({
         >
           <div>
             <h1>快速设置</h1>
-            <p>把 onboarding、安装、登录、右键菜单、工作目录与 Provider API 配置收敛到一个详情页。</p>
           </div>
           <div className="cc-image-top-controls">
             <Button type="button" className="cc-action-btn" onClick={() => void onSavePathAndRetry()} disabled={actionBusy}>
@@ -1237,17 +1239,6 @@ export function ControlCenterView({
             />
           </div>
         </div>
-
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Recommended step", value: activeOnboardingStep.id },
-            { label: "Kimi installed", value: onboarding?.kimiInstalled ? "detected" : "missing" },
-            { label: "Context menu", value: runtimeContextMenuEnabled ? "supported" : contextMenuStatusLabel },
-            { label: "Auth mode", value: status?.authMode ?? "provider_api" },
-          ]}
-        />
 
         <section className="cc-image-card">
           <h2>引导步骤</h2>
@@ -1317,9 +1308,6 @@ export function ControlCenterView({
 
               {activeOnboardingStep.id === "auth" ? (
                 <div className="cc-auth-panel">
-                  <p className="hint cc-step-summary">
-                    Provider API 是可选配置；未配置也不会阻塞控制中心、工作区或 onboarding。
-                  </p>
                   <div className="cc-brief-list">
                     <article className="cc-brief-item">
                       <strong>Provider API</strong>
@@ -1366,14 +1354,13 @@ export function ControlCenterView({
             columns={3}
             className="cc-image-meta-grid compact"
             items={[
-              { label: "Install source", value: installSource, meta: "可切换官方源或自定义镜像" },
-              { label: "PowerShell preflight", value: powershellPreflight?.kind ?? "unchecked", meta: "Windows 安装前置检查" },
+              { label: "Install source", value: installSource },
+              { label: "PowerShell preflight", value: powershellPreflight?.kind ?? "unchecked" },
               {
                 label: "Mirror health",
                 value: installMirrorHealthReport
                   ? `${installMirrorHealthReport.entries.filter((entry) => entry.healthy).length}/${installMirrorHealthReport.entries.length} ready`
                   : "unchecked",
-                meta: "可刷新镜像可用性",
               },
             ]}
           />
@@ -1404,7 +1391,6 @@ export function ControlCenterView({
         >
           <div>
             <h1>运行诊断</h1>
-            <p>PID、startup trace、Kimi Doctor、WebView runtime 和日志尾部集中查看。</p>
           </div>
           <div className="cc-image-top-controls">
             <Button
@@ -1426,17 +1412,6 @@ export function ControlCenterView({
             </Button>
           </div>
         </div>
-
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Backend state", value: diagnostics?.state ?? "-" },
-            { label: "PID", value: String(diagnostics?.pid ?? "-") },
-            { label: "Startup phase", value: diagnostics?.startupPhase ?? "-" },
-            { label: "WebView", value: diagnostics?.webviewRuntimeVersion ?? diagnostics?.webviewRuntimeKind ?? "-" },
-          ]}
-        />
 
         <section
           id={focusDomId("runtime:core")}
@@ -1538,7 +1513,6 @@ export function ControlCenterView({
         >
           <div>
             <h1>外部 IM 通道</h1>
-            <p>Telegram、飞书、微信 connector，运行态、密钥、sessions、bindings、approvals 与日志。</p>
           </div>
           <div className="cc-image-top-controls">
             <span className={`cc-image-switch ${bridgeSettings.enabled ? "" : "off"}`} aria-label="Bridge enabled" />
@@ -1567,17 +1541,6 @@ export function ControlCenterView({
             />
           </div>
         </div>
-
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Bridge state", value: bridgeStatus.state },
-            { label: "Admin port", value: String(bridgeStatus.adminPort ?? "-") },
-            { label: "Auto start", value: bridgeSettings.autoStart ? "enabled" : "disabled" },
-            { label: "Pending approvals", value: String(bridgeApprovals.length) },
-          ]}
-        />
 
         {shouldRenderInlineBridgeTask ? renderActiveTask() : null}
 
@@ -1608,7 +1571,6 @@ export function ControlCenterView({
                       role="menuitem"
                     >
                       <strong>{bridgePlatformLabel(platform)}</strong>
-                      <small>创建并配置 {bridgePlatformLabel(platform)} connector</small>
                     </button>
                   ))}
                 </div>
@@ -1763,30 +1725,9 @@ export function ControlCenterView({
           className={`cc-image-detail-top ${activeFocusId === "skill_center" ? "is-focus" : ""}`}
         >
           <div>
-            <h1>Skill 投影</h1>
-            <p>安装、导入、扫描、信任、更新、卸载，并投影到用户全局、KIMI_CODE_HOME 或当前 Session。</p>
+            <h1>Skill 中心</h1>
           </div>
           <div className="cc-image-top-controls">{skillCenterActions}</div>
-        </div>
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Installed skills", value: String(installedSkills.length) },
-            { label: "Discovered", value: String(skillDiscoveryRecords.length) },
-            { label: "Workspace target", value: workspaceSkillTargets.find((target) => target.isCurrent)?.label ?? "当前工作区" },
-            { label: "Container", value: selectedWorkspaceSkillContainerKind },
-          ]}
-        />
-        <div className="cc-image-description">
-          <div className="cc-image-meta-label">Description</div>
-          <p>当前 Skill 中心管理已安装 skill、发现外部 skill，并把已安装 skill 加入某个工作区目标容器。</p>
-        </div>
-        <div className="cc-image-tags">
-          <span>Scope user_global_kimi</span>
-          <span>Scope kimi_code_home</span>
-          <span>Scope session_kimi</span>
-          <span>Container .agents / .kimi-code / .codex / .claude</span>
         </div>
         <section
           id={focusDomId(activeFocusId?.startsWith("skill-") ? activeFocusId : "skill_center:list")}
@@ -1797,6 +1738,19 @@ export function ControlCenterView({
             <SkillCenterPanel
               surface="page"
               busy={skillCenterBusy}
+              actionError={actionError}
+              onRetryActionError={() => {
+                void (async () => {
+                  if (skillCenterSection === "workspace_insights") {
+                    await onRefreshWorkspaceSkillManagementState();
+                    return;
+                  }
+                  await onRefreshSkillCenterState();
+                  if (skillCenterSection === "manage") {
+                    await onRefreshSkillDiscoveryState();
+                  }
+                })();
+              }}
               section={skillCenterSection}
               railActions={null}
               onSectionChange={onSkillCenterSectionChange}
@@ -1820,6 +1774,7 @@ export function ControlCenterView({
             onSelectSkill={(skillId) => {
               void onSelectSkill(skillId);
             }}
+            onBackToDirectory={onClearSkillSelection}
             onSelectDiscoveredSkill={(discoveryId) => {
               void onSelectDiscoveredSkill(discoveryId);
             }}
@@ -1833,6 +1788,10 @@ export function ControlCenterView({
               onSelectWorkspaceSkillContainer(containerKind);
             }}
             onOpenFolder={onOpenFolder}
+            onOpenWorkspaceDetail={(path) => {
+              setWorkspaceHubFocusPath(path);
+              setActiveControlSection("workspace_hub");
+            }}
             onAddInstalledSkillToWorkspaceTarget={(skillId, targetId, containerKind) => {
               void onAddInstalledSkillToWorkspaceTarget(skillId, targetId, containerKind);
             }}
@@ -1860,6 +1819,7 @@ export function ControlCenterView({
             search={skillCenterSearch}
             filter={skillCenterFilter}
             onSearchChange={onSkillCenterSearchChange}
+            onFilterChange={onSkillCenterFilterChange}
             detailOnly
             activeFocusId={activeFocusId}
           />
@@ -1891,7 +1851,6 @@ export function ControlCenterView({
       return (
         <ControlCenterTaskSurface
           title="Kimi Code 接入配置"
-          description="仅维护 Kimi API、Search/Fetch 服务和 App 启动时的子 Agent 并发上限。"
           className="cc-config-modal"
           bodyClassName="cc-config-modal-scroll"
           onBack={onCloseTask}
@@ -2779,7 +2738,6 @@ export function ControlCenterView({
       return (
         <ControlCenterTaskSurface
           title="从 Git 安装 Skill"
-          description="输入仓库地址；Ref 可选，支持分支、tag 或 commit。"
           className="cc-skill-task-surface"
           onBack={onCloseTask}
           onClose={onClose}
@@ -2822,7 +2780,6 @@ export function ControlCenterView({
       return (
         <ControlCenterTaskSurface
           title="导入本地 Skill"
-          description="选择要导入的来源类型，然后继续选择目录或 ZIP 文件。"
           className="cc-skill-task-surface"
           onBack={onCloseTask}
           onClose={onClose}
@@ -2885,6 +2842,13 @@ export function ControlCenterView({
                 {activeControlSection === "workspace_hub" ? (
                   <WorkspaceHubPanel
                     onOpenWorkspace={onOpenFolder}
+                    onOpenSchedule={() => setActiveControlSection("schedule")}
+                    onOpenSkill={(skillId) => {
+                      onSkillCenterSectionChange("manage");
+                      setActiveControlSection("skill_center");
+                      void onSelectSkill(skillId);
+                    }}
+                    focusWorkspacePath={workspaceHubFocusPath}
                     detailOnly
                     activeFocusId={activeFocusId}
                   />

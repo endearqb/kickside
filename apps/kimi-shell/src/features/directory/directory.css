@@ -1,0 +1,530 @@
+.directory-file-preview {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.directory-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.directory-toolbar select {
+  min-height: 36px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f1f1f;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.directory-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.directory-card-grid.is-loading {
+  pointer-events: none;
+}
+
+.directory-card {
+  min-height: 132px;
+  border: 1px solid #dededb;
+  border-radius: 14px;
+  background: #fff;
+  cursor: pointer;
+  padding: 18px 20px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.directory-card-skeleton {
+  display: grid;
+  min-height: 132px;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid #dededb;
+  border-radius: 14px;
+  background: #fff;
+  padding: 18px 20px;
+}
+
+.directory-skeleton-line,
+.directory-skeleton-pill {
+  display: block;
+  border-radius: 9999px;
+  background: #e9e9e6;
+}
+
+.directory-skeleton-line {
+  width: 78%;
+  height: 12px;
+}
+
+.directory-skeleton-line.is-title {
+  width: 46%;
+  height: 16px;
+}
+
+.directory-skeleton-line.is-short {
+  width: 58%;
+}
+
+.directory-skeleton-pill {
+  width: 72px;
+  height: 22px;
+  margin-top: 8px;
+}
+
+.directory-card:hover,
+.directory-card:focus-visible,
+.directory-card.is-active {
+  border-color: #c9c9c5;
+  background: #fbfbfa;
+  box-shadow: 0 8px 18px rgba(16, 20, 24, 0.06);
+  outline: none;
+}
+
+.directory-card-main {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.directory-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.directory-card-title-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.directory-card-title-copy strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f1f1f;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-card-title-copy span,
+.directory-card-meta,
+.directory-card p {
+  color: #6f6f6a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.directory-card p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.directory-card-corner-action {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #f8f8f6;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: inherit;
+}
+
+.directory-card-corner-slot {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.directory-card-corner-action:hover,
+.directory-card-corner-action:focus-visible {
+  background: #e7e7e4;
+  outline: none;
+}
+
+.directory-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.directory-card-badge {
+  border-radius: 6px;
+  background: #efefed;
+  color: #6f6f6a;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.directory-card-badge.tone-success {
+  background: color-mix(in srgb, #34c284 14%, #fff);
+  color: #257a58;
+}
+
+.directory-card-badge.tone-warning {
+  background: color-mix(in srgb, #b7791f 14%, #fff);
+  color: #8a5c16;
+}
+
+.directory-card-badge.tone-danger {
+  background: color-mix(in srgb, #d2483d 12%, #fff);
+  color: #a5352e;
+}
+
+.directory-card-badge.tone-accent {
+  background: color-mix(in srgb, #4b76c8 12%, #fff);
+  color: #345a9b;
+}
+
+.directory-description-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #dededb;
+  border-radius: 16px;
+  background: #fff;
+  padding: 18px 20px;
+}
+
+.directory-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: #6f6f6a;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.directory-description-card p {
+  margin: 0;
+  color: #1f1f1f;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.directory-license-link,
+.directory-markdown-link {
+  border: 0;
+  background: transparent;
+  color: #4b76c8;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.directory-license-link {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.directory-markdown-link:disabled {
+  color: inherit;
+  cursor: default;
+}
+
+.directory-preview-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.directory-preview-layout {
+  display: grid;
+  min-height: 360px;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #dededb;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.directory-file-tree {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid #dededb;
+  background: #f8f8f6;
+  padding: 8px;
+}
+
+.directory-file-tree-row {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.directory-file-tree-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-file-tree-row:hover,
+.directory-file-tree-row:focus-visible,
+.directory-file-tree-row.is-active {
+  background: #e7e7e4;
+  outline: none;
+}
+
+.directory-file-tree-row.is-dir {
+  color: #6f6f6a;
+  cursor: pointer;
+}
+
+.directory-file-tree-chevron {
+  flex: 0 0 auto;
+  transition: transform 120ms ease;
+}
+
+.directory-file-tree-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.directory-file-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px;
+}
+
+.directory-file-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #6f6f6a;
+  font-size: 12px;
+}
+
+.directory-code-viewer,
+.directory-markdown-viewer pre {
+  overflow: auto;
+  margin: 0;
+  border-radius: 12px;
+  background: #fbfbfa;
+  color: #1f1f1f;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  padding: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.directory-markdown-viewer {
+  color: #1f1f1f;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.directory-markdown-viewer h1,
+.directory-markdown-viewer h2,
+.directory-markdown-viewer h3,
+.directory-markdown-viewer h4 {
+  margin: 18px 0 8px;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.directory-markdown-viewer h1:first-child,
+.directory-markdown-viewer h2:first-child,
+.directory-markdown-viewer h3:first-child,
+.directory-markdown-viewer h4:first-child {
+  margin-top: 0;
+}
+
+.directory-markdown-viewer p,
+.directory-markdown-viewer ul,
+.directory-markdown-viewer ol,
+.directory-markdown-viewer blockquote,
+.directory-markdown-viewer table,
+.directory-markdown-viewer details {
+  margin: 0 0 12px;
+}
+
+.directory-markdown-viewer blockquote {
+  border-left: 3px solid #dededb;
+  color: #6f6f6a;
+  padding-left: 12px;
+}
+
+.directory-markdown-viewer table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow: hidden;
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.directory-markdown-viewer th,
+.directory-markdown-viewer td {
+  border-bottom: 1px solid #dededb;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.directory-markdown-viewer code {
+  border-radius: 4px;
+  background: #efefed;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 5px;
+}
+
+.directory-markdown-image-placeholder {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dededb;
+  border-radius: 8px;
+  background: #f8f8f6;
+  color: #6f6f6a;
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 5px 8px;
+  vertical-align: middle;
+}
+
+.directory-markdown-image-placeholder code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-file-placeholder,
+.directory-muted,
+.directory-preview-error {
+  color: #6f6f6a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.directory-file-placeholder {
+  display: grid;
+  gap: 10px;
+}
+
+.directory-file-error-state {
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, #d2483d 32%, #dededb);
+  border-radius: 12px;
+  background: color-mix(in srgb, #d2483d 8%, #fff);
+  color: #1f1f1f;
+  padding: 14px 16px;
+}
+
+.directory-file-error-state p {
+  margin: 0;
+  color: #a5352e;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.directory-preview-error {
+  color: #d2483d;
+}
+
+.dark .directory-description-card,
+.dark .directory-card,
+.dark .directory-preview-layout {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.dark .directory-file-tree {
+  border-color: var(--border);
+  background: var(--muted);
+}
+
+.dark .directory-description-card p,
+.dark .directory-card-title-copy strong,
+.dark .directory-file-tree-row,
+.dark .directory-markdown-viewer,
+.dark .directory-code-viewer,
+.dark .directory-markdown-viewer pre {
+  color: var(--foreground);
+}
+
+.dark .directory-card:hover,
+.dark .directory-card:focus-visible,
+.dark .directory-card.is-active,
+.dark .directory-file-tree-row:hover,
+.dark .directory-file-tree-row:focus-visible,
+.dark .directory-file-tree-row.is-active,
+.dark .directory-card-corner-action,
+.dark .directory-markdown-viewer code {
+  background: var(--secondary);
+}
+
+.dark .directory-code-viewer,
+.dark .directory-markdown-viewer pre {
+  background: var(--code-background);
+}
+
+@media (max-width: 900px) {
+  .directory-toolbar,
+  .directory-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .directory-description-card,
+  .directory-preview-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .directory-preview-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .directory-file-tree {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid #dededb;
+  }
+}

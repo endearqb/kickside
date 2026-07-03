@@ -7,8 +7,11 @@ import type {
   SkillApplyScope,
   SkillDiscoverySnapshot,
   SkillDetail,
+  SkillFileContent,
+  SkillFileEntry,
   SkillProjectionRecord,
   SkillRecommendation,
+  SkillUsageStats,
   WorkspaceDiscoveryRoot,
   SkillDiscoveryContainerKind,
   WorkspaceSkillInventory,
@@ -85,6 +88,26 @@ export function importDiscoveredSkill(discoveryId: string) {
 
 export function getSkillDetail(skillId: string) {
   return invoke<SkillDetail>("get_skill_detail", { skillId });
+}
+
+export function listSkillFileEntries(skillId: string) {
+  return invoke<SkillFileEntry[]>("list_skill_file_entries", { skillId });
+}
+
+export function readSkillFile(skillId: string, relPath: string) {
+  return invoke<SkillFileContent>("read_skill_file", { skillId, relPath });
+}
+
+export function getSkillUsageStats(skillIds?: string[]) {
+  return invoke<SkillUsageStats[]>("get_skill_usage_stats", { skillIds });
+}
+
+export function listDiscoveredSkillFileEntries(discoveryId: string) {
+  return invoke<SkillFileEntry[]>("list_discovered_skill_file_entries", { discoveryId });
+}
+
+export function readDiscoveredSkillFile(discoveryId: string, relPath: string) {
+  return invoke<SkillFileContent>("read_discovered_skill_file", { discoveryId, relPath });
 }
 
 export function setSkillTrust(skillId: string, trusted: boolean) {

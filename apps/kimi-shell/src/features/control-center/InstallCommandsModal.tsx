@@ -196,7 +196,6 @@ export function InstallCommandsModal({
         <header className="cc-install-commands-modal-header">
           <div className="cc-install-commands-modal-title">
             <h3>完整安装命令</h3>
-            <p>当前仅展示 {getSourceLabel(installSource)} 对应步骤与共享验证项，请按顺序复制到 PowerShell 执行。</p>
           </div>
           <div className="cc-install-commands-modal-actions">
             <Button
@@ -228,7 +227,6 @@ export function InstallCommandsModal({
             <span>{visibleEntries.length} 个条目</span>
           </p>
           <p>{visibleStepCount} 个步骤</p>
-          <p>默认折叠，展开后可逐步复制。</p>
         </div>
 
         <div className="cc-install-commands-modal-body">

@@ -901,6 +901,16 @@ pub struct SkillManifestMetadata {
     pub recommended_scopes: Vec<SkillApplyScope>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillUsageStats {
+    #[serde(default)]
+    pub skill_id: String,
+    #[serde(default)]
+    pub apply_count: u32,
+    pub last_applied_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillDiscoveryScope {
@@ -1051,6 +1061,8 @@ pub struct InstalledSkill {
     #[serde(default)]
     pub update_status: SkillUpdateStatusView,
     #[serde(default)]
+    pub usage_stats: SkillUsageStats,
+    #[serde(default)]
     pub discovery_locations: Vec<SkillDiscoveryLocation>,
 }
 
@@ -1062,6 +1074,24 @@ pub struct SkillDetail {
     pub relative_paths: Vec<String>,
     pub user_global_applied: bool,
     pub current_session_applied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFileEntry {
+    pub rel_path: String,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFileContent {
+    pub rel_path: String,
+    pub size: u64,
+    pub is_binary: bool,
+    pub truncated: bool,
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

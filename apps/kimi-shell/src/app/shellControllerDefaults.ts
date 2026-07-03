@@ -141,6 +141,10 @@ export function parseHashRoute(hash: string): string {
   return hash.replace(/^#\/?/, "");
 }
 
+export function buildSkillUninstallConfirmMessage(label: string, projectionCount: number) {
+  return `确定卸载“${label}”吗？当前记录的投影数量：${projectionCount}。如果它仍应用在全局或 Session 中，系统会先阻止卸载。`;
+}
+
 export function createDefaultInstallMirrorConfig(): InstallCustomMirrorConfig {
   return {
     gitReleasePages: [],

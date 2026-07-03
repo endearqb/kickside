@@ -82,6 +82,23 @@ describe("WorkspaceGridView", () => {
     expect(useWorkspaceGridStore.getState().activePaneId).toBe("pane-chat");
   });
 
+  it("does not use edge-to-edge chrome in the default multi-pane layout", () => {
+    render(<WorkspaceGridView {...props} />);
+
+    expect(screen.getByRole("region").classList.contains("is-edge-to-edge")).toBe(
+      false,
+    );
+  });
+
+  it("uses edge-to-edge chrome for populated single-pane layouts", () => {
+    useWorkspaceGridStore.getState().setPreset("single");
+    render(<WorkspaceGridView {...props} />);
+
+    expect(screen.getByRole("region").classList.contains("is-edge-to-edge")).toBe(
+      true,
+    );
+  });
+
   it("does not offer Kimi.com as an empty-pane or header action", () => {
     useWorkspaceGridStore.getState().setPreset("1x3");
     render(<WorkspaceGridView {...props} />);

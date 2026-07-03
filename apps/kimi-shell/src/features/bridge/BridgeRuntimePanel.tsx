@@ -420,7 +420,6 @@ export function BridgeRuntimePanel({
 
       <ControlCenterSurfaceSection
         title="待处理审批"
-        description="审批列表已经按当前机器人过滤，不会混入其他 connector 的请求。"
         actions={
           <div className="cc-actions">
             <Button
@@ -496,7 +495,6 @@ export function BridgeRuntimePanel({
 
       <ControlCenterSurfaceSection
         title="凭据与日志"
-        description="凭据只展示掩码，日志优先过滤到当前 connector，找不到时回退到全局尾部。"
         actions={
           <div className="cc-actions">
             <Button

@@ -134,23 +134,6 @@ function formatInstallSourceLabel(source: InstallSource): string {
   return source === "mirror" ? "镜像源" : "官方源";
 }
 
-function formatMirrorPresetLabel(preset: InstallSettingsView["mirrorPreset"]) {
-  switch (preset) {
-    case "mixed":
-      return "综合回退";
-    case "tuna":
-      return "清华优先";
-    case "ustc":
-      return "中科大优先";
-    case "aliyun":
-      return "综合回退";
-    case "custom":
-      return "自定义";
-    default:
-      return "综合回退";
-  }
-}
-
 function formatMirrorCategoryLabel(category: InstallMirrorHealthCategory) {
   switch (category) {
     case "git_release_page":
@@ -461,7 +444,7 @@ export function InstallFlowTaskContent({
           <div className="cc-install-overview-copy">
             <ControlCenterStatusBadge tone={sessionTone}>{sessionStatusLabel}</ControlCenterStatusBadge>
             <h4>安装 / 管理 Kimi Code</h4>
-            <p>{session.message?.trim() || "先看状态，再执行安装、升级或卸载。"}</p>
+            {session.message?.trim() ? <p>{session.message}</p> : null}
           </div>
         </div>
 
@@ -474,7 +457,7 @@ export function InstallFlowTaskContent({
           <article className="cc-install-overview-card">
             <span>后端状态</span>
             <strong>{formatBackendStateLabel(backendState)}</strong>
-            <small>{showRestartAction ? "升级完成后需手动恢复后端" : "用于判断是否需要恢复运行环境"}</small>
+            {showRestartAction ? <small>升级完成后需手动恢复后端</small> : null}
           </article>
           <article className="cc-install-overview-card">
             <span>当前来源</span>
@@ -506,7 +489,6 @@ export function InstallFlowTaskContent({
         <div className="cc-install-console-head">
           <div>
             <h4>主操作区</h4>
-            <p>保留安装、升级、卸载和详细选项入口。</p>
           </div>
           <div className="cc-install-primary-action-groups">
             <div className="cc-install-primary-action-stack">
@@ -584,7 +566,6 @@ export function InstallFlowTaskContent({
               <div className="cc-install-console-head">
                 <div>
                   <h4>安装来源</h4>
-                  <p>切换官方源或镜像源。</p>
                 </div>
               </div>
               <div className="cc-install-flow-source" role="group" aria-label="安装来源">
@@ -612,7 +593,6 @@ export function InstallFlowTaskContent({
               <div className="cc-install-console-head">
                 <div>
                   <h4>镜像策略</h4>
-                  <p>当前预设：{formatMirrorPresetLabel(mirrorDraft.mirrorPreset)}</p>
                 </div>
                 <div className="cc-install-flow-actions">
                   <Button
@@ -760,10 +740,9 @@ export function InstallFlowTaskContent({
             ) : null}
 
             <div className="cc-install-console-head">
-              <div>
-                <h4>PowerShell 预检</h4>
-                <p>只在需要排障时查看。</p>
-              </div>
+                <div>
+                  <h4>PowerShell 预检</h4>
+                </div>
               <div className="cc-install-flow-actions">
                 <Button
                   type="button"
@@ -809,7 +788,6 @@ export function InstallFlowTaskContent({
               <div className="cc-install-console-head">
                 <div>
                   <h4>手动路径</h4>
-                  <p>自动探测不到 Kimi 时再补充。</p>
                 </div>
                 <div className="cc-install-flow-actions">
                   <Button

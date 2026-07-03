@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SkillFileContent, SkillFileEntry } from "@/app/types";
 
 export type AgentRuntime = "kimi-code" | "hermes" | "other";
 export type WorkspaceSource = "harness" | "manual" | "grid_migration";
@@ -154,6 +155,17 @@ export async function dryRunHarness(
   values: Record<string, string>,
 ): Promise<HarnessDryRunResult> {
   return invoke<HarnessDryRunResult>("harness_dry_run", { harnessId, values });
+}
+
+export async function listHarnessFileEntries(harnessId: string): Promise<SkillFileEntry[]> {
+  return invoke<SkillFileEntry[]>("list_harness_file_entries", { harnessId });
+}
+
+export async function readHarnessFile(
+  harnessId: string,
+  relPath: string,
+): Promise<SkillFileContent> {
+  return invoke<SkillFileContent>("read_harness_file", { harnessId, relPath });
 }
 
 export async function createHarnessWorkspace(

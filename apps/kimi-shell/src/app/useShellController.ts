@@ -27,6 +27,7 @@ import {
   createEmptyKimiCodeAccessInput,
   createEmptySessionSkillState,
   createEmptyWorkspaceSkillProfile,
+  buildSkillUninstallConfirmMessage,
   deriveKimiCodeAccessSummary,
   formatBridgeErrorEntry,
   getBridgeChannelEnabled,
@@ -3298,6 +3299,14 @@ export function useShellController() {
     }
   }
 
+  function handleClearSkillSelection() {
+    setSelectedSkillId(null);
+    setSelectedSkillDetail(null);
+    setSelectedDiscoveryId(null);
+    setSelectedDiscoveryDetail(null);
+    setActionError(null);
+  }
+
   function openSkillCenter() {
     setActionError(null);
     handleCloseInstallCommands();
@@ -3503,8 +3512,15 @@ export function useShellController() {
     const target =
       installedSkills.find((skill) => skill.id === skillId) ?? selectedSkillDetail?.skill;
     const label = target?.name || "这个 Skill";
+    const globalProjectionCount = globalSkillProjections.filter(
+      (projection) => projection.skillId === skillId,
+    ).length;
+    const sessionProjectionCount =
+      activeSessionSkillState.projections.filter(
+        (projection) => projection.skillId === skillId,
+      ).length || (activeSessionSkillState.appliedSkillIds.includes(skillId) ? 1 : 0);
     const confirmed = window.confirm(
-      `确定卸载“${label}”吗？如果它仍应用在全局或 Session 中，系统会先阻止卸载。`,
+      buildSkillUninstallConfirmMessage(label, globalProjectionCount + sessionProjectionCount),
     );
     if (!confirmed) {
       return;
@@ -4133,6 +4149,7 @@ export function useShellController() {
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleSelectSkill,
+    handleClearSkillSelection,
     handleOpenSkillFromInsights,
     handleSelectDiscoveredSkill,
     handleScanDiscoveredSkills,

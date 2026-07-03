@@ -59,10 +59,11 @@ use types::{
     KimiCodeAuthResult, KimiDoctorResult, KimiLoginHealthSource, KimiLoginHealthState,
     MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
     PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
-    SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillProjectionRecord,
-    SkillRecommendation, StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
-    StartupMonitorReason, StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute,
-    SubmitPrefillAck, WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
+    SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillFileContent, SkillFileEntry,
+    SkillProjectionRecord, SkillRecommendation, SkillUsageStats,
+    StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput, StartupMonitorReason,
+    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
+    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
     WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
     WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
     WorkspaceSkillTarget, WorkspaceWebSettingsInput, WorkspaceWebSettingsView,
@@ -860,6 +861,50 @@ fn list_installed_skills(app: AppHandle) -> Result<Vec<InstalledSkill>, String> 
 #[tauri::command]
 fn get_skill_detail(app: AppHandle, skill_id: String) -> Result<SkillDetail, String> {
     skill_center::get_skill_detail(&app, &skill_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_skill_file_entries(
+    app: AppHandle,
+    skill_id: String,
+) -> Result<Vec<SkillFileEntry>, String> {
+    skill_center::list_skill_file_entries(&app, &skill_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn read_skill_file(
+    app: AppHandle,
+    skill_id: String,
+    rel_path: String,
+) -> Result<SkillFileContent, String> {
+    skill_center::read_skill_file(&app, &skill_id, &rel_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_skill_usage_stats(
+    app: AppHandle,
+    skill_ids: Option<Vec<String>>,
+) -> Result<Vec<SkillUsageStats>, String> {
+    skill_center::get_skill_usage_stats(&app, skill_ids).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_discovered_skill_file_entries(
+    app: AppHandle,
+    discovery_id: String,
+) -> Result<Vec<SkillFileEntry>, String> {
+    skill_center::list_discovered_skill_file_entries(&app, &discovery_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn read_discovered_skill_file(
+    app: AppHandle,
+    discovery_id: String,
+    rel_path: String,
+) -> Result<SkillFileContent, String> {
+    skill_center::read_discovered_skill_file(&app, &discovery_id, &rel_path)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1771,6 +1816,11 @@ pub fn run() {
             import_discovered_skill,
             list_installed_skills,
             get_skill_detail,
+            list_skill_file_entries,
+            read_skill_file,
+            get_skill_usage_stats,
+            list_discovered_skill_file_entries,
+            read_discovered_skill_file,
             set_skill_trust,
             apply_skill,
             remove_skill,
@@ -1791,6 +1841,8 @@ pub fn run() {
             harness::harness_list,
             harness::harness_get,
             harness::harness_dry_run,
+            harness::list_harness_file_entries,
+            harness::read_harness_file,
             harness::harness_create,
             scheduler::schedule_list,
             scheduler::schedule_set_heartbeat,

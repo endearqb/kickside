@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronRight, FolderOpen, Shield, ShieldOff, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Eraser, FolderOpen, Plus, Shield, ShieldOff, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
   DiscoveredSkillRecord,
@@ -27,8 +27,22 @@ import { ControlCenterSurfaceSection } from "@/components/control-center/Control
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DirectoryCardGrid, type DirectoryCardItem } from "@/features/directory/DirectoryCardGrid";
+import { DirectoryFilePreview } from "@/features/directory/DirectoryFilePreview";
+import {
+  listDiscoveredSkillFileEntries,
+  listSkillFileEntries,
+  readDiscoveredSkillFile,
+  readSkillFile,
+} from "@/services/skillCenterService";
 
 type ManageContextId = "skill_center" | "current_workspace" | "user_home" | `workspace:${string}`;
+type SkillDirectorySection = "library" | "discovery" | "targets";
+type SkillDirectorySourceFilter =
+  | "all"
+  | InstalledSkill["sourceType"]
+  | "discovered";
+type SkillDirectorySortKey = "name" | "source" | "updated" | "status";
 
 type ManageListEntry =
   | {
@@ -51,6 +65,8 @@ type DiscoveredManageEntry = Extract<ManageListEntry, { kind: "discovered" }>;
 type SkillCenterPanelProps = {
   surface: "page";
   busy: boolean;
+  actionError?: string | null;
+  onRetryActionError?: () => void;
   section: SkillCenterSectionId;
   installedSkills: InstalledSkill[];
   selectedSkillId: string | null;
@@ -70,11 +86,13 @@ type SkillCenterPanelProps = {
   selectedWorkspaceSkillContainerKind: SkillDiscoveryContainerKind;
   currentWorkspaceLabel?: string;
   onSelectSkill: (skillId: string) => void;
+  onBackToDirectory?: () => void;
   onSelectDiscoveredSkill: (discoveryId: string) => void;
   onImportDiscoveredSkill: (discoveryId: string) => void;
   onSelectWorkspaceSkillTarget: (targetId: string) => void;
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
   onOpenFolder: (path: string) => Promise<void>;
+  onOpenWorkspaceDetail?: (path: string) => void;
   onAddInstalledSkillToWorkspaceTarget: (
     skillId: string,
     targetId?: string | null,
@@ -90,6 +108,7 @@ type SkillCenterPanelProps = {
   search: string;
   filter: SkillCenterFilter;
   onSearchChange: (value: string) => void;
+  onFilterChange: (value: SkillCenterFilter) => void;
   onSectionChange: (value: SkillCenterSectionId) => void;
   railActions?: ReactNode;
   detailOnly?: boolean;
@@ -164,6 +183,51 @@ function formatSkillSourceGroup(sourceType: InstalledSkill["sourceType"]) {
   if (sourceType === "git") return "Git imports";
   if (sourceType === "discovered_import") return "Discovered imports";
   return "Local imports";
+}
+
+function formatSkillCardSource(skill: InstalledSkill) {
+  if (skill.sourceType === "bundled") return "内置";
+  if (skill.sourceType === "git") return "Git";
+  if (skill.sourceType === "discovered_import") return "工作区发现";
+  return "本地导入";
+}
+
+function formatSkillCardDate(value?: string | null) {
+  if (!value) return "未记录";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatSkillUsageMetric(skill: InstalledSkill) {
+  const applyCount = skill.usageStats?.applyCount ?? 0;
+  if (applyCount > 0) {
+    return `应用 ${applyCount} 次`;
+  }
+  return `更新 ${formatSkillCardDate(skill.updatedAt)}`;
+}
+
+export function matchesSkillDirectorySource(
+  source: SkillDirectorySourceFilter,
+  candidate: { kind: "installed"; sourceType: InstalledSkill["sourceType"] } | { kind: "discovered" },
+) {
+  if (source === "all") return true;
+  if (candidate.kind === "discovered") return source === "discovered";
+  return candidate.sourceType === source;
+}
+
+function skillDirectorySectionLabel(section: SkillDirectorySection) {
+  if (section === "library") return "技能库";
+  if (section === "discovery") return "工作区发现";
+  return "工作区目标";
+}
+
+export function getSkillDirectoryEmptyCopy(rawCount: number) {
+  return rawCount === 0
+    ? { title: "本分区为空", description: "刷新后仍为空时，这里还没有可显示对象。" }
+    : { title: "没有匹配结果", description: "清空搜索或切换筛选条件。" };
+}
+
+export function shouldBackToSkillDirectory(key: string, hasDirectoryDetail: boolean) {
+  return key === "Escape" && hasDirectoryDetail;
 }
 
 function renderManifestValues(values: string[], emptyLabel = "未声明") {
@@ -295,6 +359,8 @@ function renderCollapsibleSection(
 export function SkillCenterPanel({
   surface,
   busy,
+  actionError,
+  onRetryActionError,
   section,
   installedSkills,
   selectedSkillId,
@@ -314,11 +380,13 @@ export function SkillCenterPanel({
   selectedWorkspaceSkillContainerKind,
   currentWorkspaceLabel,
   onSelectSkill,
+  onBackToDirectory,
   onSelectDiscoveredSkill,
   onImportDiscoveredSkill,
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
   onOpenFolder,
+  onOpenWorkspaceDetail,
   onAddInstalledSkillToWorkspaceTarget,
   onSetTrust,
   onApplySkill,
@@ -330,15 +398,19 @@ export function SkillCenterPanel({
   search,
   filter,
   onSearchChange,
+  onFilterChange,
   onSectionChange,
   railActions,
   detailOnly = false,
 }: SkillCenterPanelProps) {
-  const [filesExpanded, setFilesExpanded] = useState(false);
+  const [filesExpanded, setFilesExpanded] = useState(true);
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
+  const [directorySource, setDirectorySource] = useState<SkillDirectorySourceFilter>("all");
+  const [directorySort, setDirectorySort] = useState<SkillDirectorySortKey>("name");
+  const actionErrorText = actionError?.trim() ?? "";
 
   useEffect(() => {
-    setFilesExpanded(false);
+    setFilesExpanded(true);
   }, [manageContextId, section, selectedDiscoveryId, selectedSkillId]);
 
   const keyword = search.trim().toLowerCase();
@@ -358,6 +430,43 @@ export function SkillCenterPanel({
     }
     setManageContextId("skill_center");
   }, [currentWorkspaceTarget, homeWorkspaceTarget, manageContextId, workspaceSkillTargets]);
+
+  const defaultWorkspaceDiscoveryContext = useMemo<ManageContextId | null>(() => {
+    if (currentWorkspaceTarget) return "current_workspace";
+    const knownWorkspace = workspaceSkillTargets.find((target) => target.scope === "workspace");
+    return knownWorkspace ? (knownWorkspace.id as ManageContextId) : null;
+  }, [currentWorkspaceTarget, workspaceSkillTargets]);
+
+  const skillDirectorySection: SkillDirectorySection =
+    section === "workspace_insights"
+      ? "targets"
+      : manageContextId === "skill_center"
+        ? "library"
+        : "discovery";
+
+  function resetSkillDirectoryFilters() {
+    onSearchChange("");
+    onFilterChange("all");
+    setDirectorySource("all");
+    setDirectorySort("name");
+  }
+
+  function handleSkillDirectorySectionChange(nextSection: SkillDirectorySection) {
+    resetSkillDirectoryFilters();
+    if (nextSection === "library") {
+      setManageContextId("skill_center");
+      onSectionChange("manage");
+      return;
+    }
+    if (nextSection === "discovery") {
+      if (defaultWorkspaceDiscoveryContext) {
+        setManageContextId(defaultWorkspaceDiscoveryContext);
+      }
+      onSectionChange("manage");
+      return;
+    }
+    onSectionChange("workspace_insights");
+  }
 
   const recentSkills = useMemo(
     () =>
@@ -543,6 +652,40 @@ export function SkillCenterPanel({
         ? selectedDiscoveryDetail.record
         : selectedManageEntry.discoveredRecord
       : null;
+  const selectedInstalledSkillId = selectedInstalledSkill?.id ?? "";
+  const selectedDiscoveredSkillId = selectedDiscoveredRecord?.discoveryId ?? "";
+  const loadSelectedInstalledFileEntries = useCallback(
+    () =>
+      selectedInstalledSkillId
+        ? listSkillFileEntries(selectedInstalledSkillId)
+        : Promise.resolve([]),
+    [selectedInstalledSkillId],
+  );
+  const readSelectedInstalledFile = useCallback(
+    (relPath: string) => {
+      if (!selectedInstalledSkillId) {
+        return Promise.reject(new Error("missing selected skill"));
+      }
+      return readSkillFile(selectedInstalledSkillId, relPath);
+    },
+    [selectedInstalledSkillId],
+  );
+  const loadSelectedDiscoveredFileEntries = useCallback(
+    () =>
+      selectedDiscoveredSkillId
+        ? listDiscoveredSkillFileEntries(selectedDiscoveredSkillId)
+        : Promise.resolve([]),
+    [selectedDiscoveredSkillId],
+  );
+  const readSelectedDiscoveredFile = useCallback(
+    (relPath: string) => {
+      if (!selectedDiscoveredSkillId) {
+        return Promise.reject(new Error("missing selected discovered skill"));
+      }
+      return readDiscoveredSkillFile(selectedDiscoveredSkillId, relPath);
+    },
+    [selectedDiscoveredSkillId],
+  );
 
   const selectedInstalledState = selectedInstalledSkill
     ? statusForSkill(selectedInstalledSkill.id, globalSkillProjections, activeSessionSkillState)
@@ -665,6 +808,215 @@ export function SkillCenterPanel({
       matchesKeyword(keyword, target.label, target.rootPath, describeWorkspaceTarget(target)),
     );
 
+  const skillDirectoryCards = useMemo<DirectoryCardItem[]>(() => {
+    const pinnedSkillIds = new Set(workspaceSkillProfile?.pinnedSkillIds ?? []);
+    const rows = manageEntries
+      .filter((entry) =>
+        entry.kind === "installed"
+          ? matchesSkillDirectorySource(directorySource, {
+              kind: "installed",
+              sourceType: entry.installedSkill.sourceType,
+            })
+          : matchesSkillDirectorySource(directorySource, { kind: "discovered" }),
+      )
+      .map((entry) => {
+        if (entry.kind === "installed") {
+          const skill = entry.installedSkill;
+          const state = statusForSkill(
+            skill.id,
+            globalSkillProjections,
+            activeSessionSkillState,
+          );
+          const badges: DirectoryCardItem["badges"] = [
+            {
+              label: skill.trusted ? "已信任" : "未信任",
+              tone: skill.trusted ? "success" : "warning",
+            },
+          ];
+          if (skill.updateStatus.kind === "update_available") {
+            badges.push({ label: "有更新", tone: "accent" });
+          } else if (state.sessionApplied) {
+            badges.push({ label: "会话已应用", tone: "accent" });
+          } else if (state.globalApplied) {
+            badges.push({ label: "全局已应用", tone: "neutral" });
+          } else if (pinnedSkillIds.has(skill.id)) {
+            badges.push({ label: "已置顶", tone: "neutral" });
+          } else if (skill.hasScripts) {
+            badges.push({ label: "包含 scripts", tone: "neutral" });
+          }
+          return {
+            item: {
+              id: `installed:${skill.id}`,
+              title: `/${skill.projectionName}`,
+              subtitle: skill.name,
+              meta: `${formatSkillCardSource(skill)} · ${formatSkillUsageMetric(skill)}`,
+              description: skill.description || "这个技能没有提供描述。",
+              active:
+                selectedManageEntry?.kind === "installed" &&
+                selectedManageEntry.installedSkill.id === skill.id,
+              badges: badges.slice(0, 2),
+              cornerSlot: (
+                <ControlCenterActionMenu
+                  label={`${skill.name} 操作`}
+                  disabled={busy}
+                  items={[
+                    { label: "查看详情", onSelect: () => onSelectSkill(skill.id) },
+                    {
+                      label: "投影到当前工作区",
+                      description: !skill.trusted
+                        ? "先信任技能"
+                        : state.sessionApplied
+                          ? "已应用"
+                          : undefined,
+                      disabled: !skill.trusted || state.sessionApplied,
+                      onSelect: () => onApplySkill(skill.id, "session_kimi"),
+                    },
+                    ...(state.sessionApplied
+                      ? [
+                          {
+                            label: "从当前工作区移除",
+                            onSelect: () => onRemoveSkill(skill.id, "session_kimi"),
+                          },
+                        ]
+                      : []),
+                    ...(state.userGlobalApplied
+                      ? [
+                          {
+                            label: "从 ~/.agents 移除",
+                            onSelect: () => onRemoveSkill(skill.id, "user_global_kimi"),
+                          },
+                        ]
+                      : []),
+                    ...(state.kimiCodeHomeApplied
+                      ? [
+                          {
+                            label: "从 KIMI_CODE_HOME 移除",
+                            onSelect: () => onRemoveSkill(skill.id, "kimi_code_home"),
+                          },
+                        ]
+                      : []),
+                    {
+                      label: pinnedSkillIds.has(skill.id) ? "取消置顶" : "置顶",
+                      onSelect: () => onSetPin(skill.id, !pinnedSkillIds.has(skill.id)),
+                    },
+                    {
+                      label: skill.trusted ? "取消信任" : "信任技能",
+                      onSelect: () => onSetTrust(skill.id, !skill.trusted),
+                    },
+                    { label: "更新技能", onSelect: () => onUpdateSkill(skill.id) },
+                    { label: "打开目录", onSelect: () => void onOpenFolder(skill.localPath) },
+                    {
+                      label: "卸载技能",
+                      tone: "danger" as const,
+                      onSelect: () => onUninstallSkill(skill.id),
+                    },
+                  ]}
+                />
+              ),
+              onOpen: () => onSelectSkill(skill.id),
+            },
+            sortName: skill.projectionName,
+            sortSource: skill.sourceType,
+            sortUpdated: skill.updatedAt,
+            sortStatus: `${skill.trusted ? "1" : "0"}-${state.sessionApplied ? "0" : "1"}`,
+          };
+        }
+
+        const record = entry.discoveredRecord;
+        return {
+          item: {
+            id: `discovered:${record.discoveryId}`,
+            title: `/${record.projectionName}`,
+            subtitle: record.name,
+            meta: `待导入 · 扫描 ${formatSkillCardDate(record.lastScannedAt)}`,
+            description: record.description || "这个外部 Skill 没有提供描述。",
+            active:
+              selectedManageEntry?.kind === "discovered" &&
+              selectedManageEntry.discoveredRecord.discoveryId === record.discoveryId,
+            badges: [
+              { label: "待导入", tone: "warning" as const },
+              ...(record.hasScripts
+                ? [{ label: "包含 scripts", tone: "neutral" as const }]
+                : []),
+            ].slice(0, 2),
+            cornerAction: record.importedSkillId
+              ? undefined
+              : {
+                  label: "导入技能库",
+                  icon: <Plus size={14} />,
+                  onSelect: () => onImportDiscoveredSkill(record.discoveryId),
+                },
+            onOpen: () => onSelectDiscoveredSkill(record.discoveryId),
+          },
+          sortName: record.projectionName,
+          sortSource: "discovered",
+          sortUpdated: record.lastScannedAt,
+          sortStatus: "0",
+        };
+      });
+
+    rows.sort((left, right) => {
+      if (directorySort === "source") return left.sortSource.localeCompare(right.sortSource);
+      if (directorySort === "updated") return right.sortUpdated.localeCompare(left.sortUpdated);
+      if (directorySort === "status") return left.sortStatus.localeCompare(right.sortStatus);
+      return left.sortName.localeCompare(right.sortName);
+    });
+    return rows.map((row) => row.item);
+  }, [
+    activeSessionSkillState,
+    directorySort,
+    directorySource,
+    globalSkillProjections,
+    manageEntries,
+    onImportDiscoveredSkill,
+    onApplySkill,
+    onOpenFolder,
+    onRemoveSkill,
+    onSelectDiscoveredSkill,
+    onSelectSkill,
+    onSetPin,
+    onSetTrust,
+    onUninstallSkill,
+    onUpdateSkill,
+    selectedManageEntry,
+    workspaceSkillProfile?.pinnedSkillIds,
+    busy,
+  ]);
+
+  const workspaceTargetDirectoryCards = useMemo<DirectoryCardItem[]>(
+    () =>
+      workspaceTargetRows.map(({ target }) => ({
+        id: `target:${target.id}`,
+        title: target.label,
+        subtitle: target.rootPath,
+        meta: describeWorkspaceTarget(target),
+        description: `${target.containerRoots.length} 个 Skill 容器`,
+        active: selectedWorkspaceSkillTargetId === target.id,
+        badges: [
+          {
+            label: target.readOnly ? "只读" : "可编辑",
+            tone: target.readOnly ? "warning" : "success",
+          },
+        ],
+        onOpen: () => {
+          onSectionChange("workspace_insights");
+          onSelectWorkspaceSkillTarget(target.id);
+        },
+      })),
+    [onSectionChange, onSelectWorkspaceSkillTarget, selectedWorkspaceSkillTargetId, workspaceTargetRows],
+  );
+
+  const visibleSkillDirectoryCards =
+    skillDirectorySection === "targets" ? workspaceTargetDirectoryCards : skillDirectoryCards;
+  const skillDirectoryRawCount =
+    skillDirectorySection === "library"
+      ? installedSkills.length
+      : skillDirectorySection === "discovery"
+        ? contextDiscoveryEntries.length
+        : workspaceSkillTargets.length;
+  const skillDirectoryEmptyCopy = getSkillDirectoryEmptyCopy(skillDirectoryRawCount);
+  const hasDirectoryDetail = Boolean(selectedInstalledSkill || selectedDiscoveredRecord);
+
   function renderManageEntry(entry: ManageListEntry) {
     const isSelected =
       entry.kind === "installed"
@@ -712,8 +1064,126 @@ export function SkillCenterPanel({
   }
 
   return (
-    <div className={`skill-center skill-center-${surface} ${detailOnly ? "skill-center-detail-only" : ""}`}>
+    <div
+      className={`skill-center skill-center-${surface} ${detailOnly ? "skill-center-detail-only" : ""}`}
+      onKeyDownCapture={(event) => {
+        if (shouldBackToSkillDirectory(event.key, hasDirectoryDetail) && onBackToDirectory) {
+          event.preventDefault();
+          event.stopPropagation();
+          onBackToDirectory();
+        }
+      }}
+    >
       <div className="skill-center-content">
+        {detailOnly ? (
+          <div className="skill-center-directory-surface">
+            <ControlCenterSegmentedControl<SkillDirectorySection>
+              ariaLabel="Skill 中心二级导航"
+              className="skill-center-directory-tabs"
+              value={skillDirectorySection}
+              onChange={handleSkillDirectorySectionChange}
+              items={[
+                {
+                  value: "library",
+                  label: skillDirectorySectionLabel("library"),
+                  description: installedSkills.length,
+                },
+                {
+                  value: "discovery",
+                  label: skillDirectorySectionLabel("discovery"),
+                  description: contextDiscoveryEntries.length,
+                  disabled: !defaultWorkspaceDiscoveryContext,
+                },
+                {
+                  value: "targets",
+                  label: skillDirectorySectionLabel("targets"),
+                  description: workspaceSkillTargets.length,
+                },
+              ]}
+            />
+            <div className="directory-toolbar skill-center-directory-toolbar">
+              <Input
+                value={search}
+                onChange={(event) => onSearchChange(event.currentTarget.value)}
+                placeholder="搜索 Skill、描述、来源或路径"
+                aria-label="搜索 Skill"
+              />
+              <ControlCenterSegmentedControl<SkillDirectorySourceFilter>
+                ariaLabel="Skill 来源筛选"
+                value={directorySource}
+                onChange={setDirectorySource}
+                items={[
+                  { value: "all", label: "全部" },
+                  { value: "bundled", label: "内置" },
+                  { value: "git", label: "Git" },
+                  { value: "local_import", label: "本地导入" },
+                  { value: "discovered_import", label: "工作区发现" },
+                  { value: "discovered", label: "待导入" },
+                ]}
+              />
+              <select
+                value={filter}
+                onChange={(event) => onFilterChange(event.currentTarget.value as SkillCenterFilter)}
+                aria-label="Skill Filter by"
+              >
+                <option value="all">Filter：全部</option>
+                <option value="session">会话已应用</option>
+                <option value="global">全局已应用</option>
+                <option value="pinned">已置顶</option>
+                <option value="untrusted">未信任</option>
+                <option value="update_available">有更新</option>
+              </select>
+              <select
+                value={directorySort}
+                onChange={(event) => setDirectorySort(event.currentTarget.value as SkillDirectorySortKey)}
+                aria-label="Skill Sort by"
+              >
+                <option value="name">Sort：名称 A-Z</option>
+                <option value="updated">最近更新</option>
+                <option value="source">来源</option>
+                <option value="status">状态</option>
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                icon={<Eraser size={14} />}
+                onClick={resetSkillDirectoryFilters}
+                disabled={!search && filter === "all" && directorySource === "all" && directorySort === "name"}
+              >
+                清空筛选
+              </Button>
+            </div>
+            {actionErrorText ? (
+              <div className="skill-center-action-error" role="alert">
+                <span>操作失败：{actionErrorText}</span>
+                {onRetryActionError ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onRetryActionError}
+                    disabled={busy}
+                  >
+                    重试
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            <DirectoryCardGrid
+              className="skill-center-directory-grid"
+              items={visibleSkillDirectoryCards}
+              loading={busy && visibleSkillDirectoryCards.length === 0}
+              empty={
+                <ControlCenterEmptyState
+                  className="skill-center-empty"
+                  title={skillDirectoryEmptyCopy.title}
+                  description={skillDirectoryEmptyCopy.description}
+                  icon={<Sparkles size={16} />}
+                />
+              }
+            />
+          </div>
+        ) : null}
         {section === "manage" ? (
           <ControlCenterWorkbenchLayout
             mode="stack-on-mobile"
@@ -819,6 +1289,17 @@ export function SkillCenterPanel({
                 <>
                   <div className="skill-center-detail-header">
                     <div className="skill-center-detail-title">
+                      {onBackToDirectory ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          icon={<ChevronLeft size={14} />}
+                          onClick={onBackToDirectory}
+                        >
+                          返回
+                        </Button>
+                      ) : null}
                       <h3>{selectedInstalledSkill.name}</h3>
                     </div>
                     <div className="skill-center-chip-row skill-center-chip-row-detail">
@@ -832,6 +1313,14 @@ export function SkillCenterPanel({
                   </p>
 
                   {renderInstalledManifestGrid(selectedInstalledSkill)}
+
+                  {selectedInstalledSkill.hasScripts ? (
+                    <div className="skill-center-script-warning" role="alert">
+                      {selectedInstalledSkill.trusted
+                        ? "包含 scripts/，更新或重新信任前请复核脚本内容。"
+                        : "包含 scripts/，信任前不能投影；请先检查脚本内容。"}
+                    </div>
+                  ) : null}
 
                   <div className="skill-center-actions skill-center-actions-primary">
                     <Button
@@ -958,6 +1447,16 @@ export function SkillCenterPanel({
                           >
                             <strong>{formatDiscoveryLocationLabel(location)}</strong>
                             <code>{location.skillPath}</code>
+                            {location.scope === "workspace" && location.workspaceId && onOpenWorkspaceDetail ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onOpenWorkspaceDetail(location.workspaceId ?? "")}
+                              >
+                                查看工作区
+                              </Button>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -968,13 +1467,13 @@ export function SkillCenterPanel({
                     "技能内容预览",
                     filesExpanded,
                     () => setFilesExpanded((current) => !current),
-                    <div className="skill-center-files">
-                      <div className="skill-center-file-list">
-                        {(selectedSkillDetail?.relativePaths ?? []).slice(0, 48).map((item) => (
-                          <code key={item}>{item}</code>
-                        ))}
-                      </div>
-                    </div>,
+                    <DirectoryFilePreview
+                      entityKey={`installed:${selectedInstalledSkill.id}`}
+                      description={selectedInstalledSkill.description || "这个技能没有提供描述。"}
+                      loadEntries={loadSelectedInstalledFileEntries}
+                      readFile={readSelectedInstalledFile}
+                      onOpenRoot={() => onOpenFolder(selectedInstalledSkill.localPath)}
+                    />,
                   )}
 
                   <div className="skill-center-recent">
@@ -1074,6 +1573,17 @@ export function SkillCenterPanel({
                 <>
                   <div className="skill-center-detail-header">
                     <div className="skill-center-detail-title">
+                      {onBackToDirectory ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          icon={<ChevronLeft size={14} />}
+                          onClick={onBackToDirectory}
+                        >
+                          返回
+                        </Button>
+                      ) : null}
                       <h3>{selectedDiscoveredRecord.name}</h3>
                     </div>
                     <div className="skill-center-chip-row skill-center-chip-row-detail">
@@ -1135,17 +1645,13 @@ export function SkillCenterPanel({
                     </div>
                   </div>
 
-                  <div className="skill-center-files">
-                    <div className="skill-center-section-header">
-                      <h4>技能内容预览</h4>
-                      <span>{selectedDiscoveryDetail?.relativePaths.length ?? 0} 个文件</span>
-                    </div>
-                    <div className="skill-center-file-list">
-                      {(selectedDiscoveryDetail?.relativePaths ?? []).slice(0, 64).map((item) => (
-                        <code key={item}>{item}</code>
-                      ))}
-                    </div>
-                  </div>
+                  <DirectoryFilePreview
+                    entityKey={`discovered:${selectedDiscoveredRecord.discoveryId}`}
+                    description={selectedDiscoveredRecord.description || "这个外部 Skill 没有提供描述。"}
+                    loadEntries={loadSelectedDiscoveredFileEntries}
+                    readFile={readSelectedDiscoveredFile}
+                    onOpenRoot={() => onOpenFolder(selectedDiscoveredRecord.canonicalPath)}
+                  />
                 </>
               ) : null
             }
@@ -1246,6 +1752,16 @@ export function SkillCenterPanel({
                         aria-label="在资源管理器中打开工作区"
                         title="在资源管理器中打开工作区"
                       />
+                      {!selectedWorkspaceTarget.readOnly && onOpenWorkspaceDetail ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onOpenWorkspaceDetail(selectedWorkspaceTarget.rootPath)}
+                        >
+                          查看工作区
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
 

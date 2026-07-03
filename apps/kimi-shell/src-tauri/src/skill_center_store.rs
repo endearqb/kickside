@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use crate::types::{
     DiscoveredSkillRecord, InstalledSkill, SessionSkillState, SkillDiscoveryLocation,
     SkillDiscoveryScope, SkillDiscoverySnapshot, SkillProjectionRecord, SkillSourceType,
-    WorkspaceDiscoveryRoot, WorkspaceSkillProfile,
+    SkillUsageStats, WorkspaceDiscoveryRoot, WorkspaceSkillProfile,
 };
 
 const SKILL_CENTER_DIR_NAME: &str = "skill-center";
@@ -702,6 +702,19 @@ pub fn find_skill_mut<'a>(
     skills.iter_mut().find(|skill| skill.id == skill_id.trim())
 }
 
+pub fn record_skill_usage(
+    skills: &mut [InstalledSkill],
+    skill_id: &str,
+    applied_at: String,
+) -> anyhow::Result<SkillUsageStats> {
+    let skill = find_skill_mut(skills, skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    normalize_skill_usage_stats(skill);
+    skill.usage_stats.apply_count = skill.usage_stats.apply_count.saturating_add(1);
+    skill.usage_stats.last_applied_at = Some(applied_at);
+    Ok(skill.usage_stats.clone())
+}
+
 pub fn normalize_workspace_key(path: &str) -> String {
     let trimmed = normalize_display_path(path);
     if cfg!(windows) {
@@ -860,6 +873,9 @@ fn sanitize_file_component(value: &str) -> String {
 
 fn normalize_legacy_skill(skill: &mut InstalledSkill) -> bool {
     let mut dirty = false;
+    if normalize_skill_usage_stats(skill) {
+        dirty = true;
+    }
     if skill.source_label.trim().is_empty() || skill.source_key.trim().is_empty() {
         dirty = true;
         if let Some(repo_url) = skill
@@ -892,6 +908,14 @@ fn normalize_legacy_skill(skill: &mut InstalledSkill) -> bool {
         }
     }
     dirty
+}
+
+fn normalize_skill_usage_stats(skill: &mut InstalledSkill) -> bool {
+    if skill.usage_stats.skill_id == skill.id {
+        return false;
+    }
+    skill.usage_stats.skill_id = skill.id.clone();
+    true
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> anyhow::Result<T> {
@@ -1084,6 +1108,73 @@ mod tests {
         let deduped = dedupe_discovery_locations(&[location.clone(), location]);
 
         assert_eq!(deduped.len(), 1);
+    }
+
+    #[test]
+    fn legacy_registry_without_usage_stats_deserializes() {
+        let raw = r#"{
+          "installed": [
+            {
+              "id": "skill-a",
+              "name": "Skill A",
+              "description": "",
+              "localPath": "D:/skills/a",
+              "projectionName": "skill-a",
+              "trusted": true,
+              "installedAt": "2026-07-03T00:00:00+08:00",
+              "updatedAt": "2026-07-03T00:00:00+08:00",
+              "hasScripts": false
+            }
+          ]
+        }"#;
+        let mut file: SkillRegistryFile = serde_json::from_str(raw).expect("registry");
+        let skill = file.installed.first_mut().expect("skill");
+
+        assert_eq!(skill.usage_stats.apply_count, 0);
+        assert_eq!(skill.usage_stats.last_applied_at, None);
+        assert!(normalize_legacy_skill(skill));
+        assert_eq!(skill.usage_stats.skill_id, "skill-a");
+    }
+
+    #[test]
+    fn record_skill_usage_increments_count_and_timestamp() {
+        let mut file: SkillRegistryFile = serde_json::from_str(
+            r#"{
+              "installed": [
+                {
+                  "id": "skill-a",
+                  "name": "Skill A",
+                  "description": "",
+                  "localPath": "D:/skills/a",
+                  "projectionName": "skill-a",
+                  "trusted": true,
+                  "installedAt": "2026-07-03T00:00:00+08:00",
+                  "updatedAt": "2026-07-03T00:00:00+08:00",
+                  "hasScripts": false,
+                  "usageStats": {
+                    "skillId": "skill-a",
+                    "applyCount": 1,
+                    "lastAppliedAt": "2026-07-03T00:00:00+08:00"
+                  }
+                }
+              ]
+            }"#,
+        )
+        .expect("registry");
+
+        let stats = record_skill_usage(
+            &mut file.installed,
+            "skill-a",
+            "2026-07-03T01:00:00+08:00".to_string(),
+        )
+        .expect("record usage");
+
+        assert_eq!(stats.skill_id, "skill-a");
+        assert_eq!(stats.apply_count, 2);
+        assert_eq!(
+            stats.last_applied_at.as_deref(),
+            Some("2026-07-03T01:00:00+08:00")
+        );
     }
 
     #[test]

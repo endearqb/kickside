@@ -1,29 +1,74 @@
-import { useEffect, useMemo, useState } from "react";
-import { Boxes, FolderOpen, Play, RefreshCw, Search, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import {
+  Boxes,
+  CalendarClock,
+  ChevronLeft,
+  FolderOpen,
+  Play,
+  RefreshCw,
+  Search,
+  Sparkles,
+} from "lucide-react";
+import type {
+  SkillDiscoveryContainerKind,
+  WorkspaceSkillInventory,
+  WorkspaceSkillTarget,
+} from "@/app/types";
 import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
+import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import {
+  ControlCenterStatusBadge,
+  type ControlCenterStatusTone,
+} from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { UnifiedRailGroup } from "@/features/control-center/ControlCenterUnifiedRail";
+import { DirectoryCardGrid } from "@/features/directory/DirectoryCardGrid";
+import { DirectoryFilePreview } from "@/features/directory/DirectoryFilePreview";
+import {
+  getWorkspaceSkillInventory,
+  listWorkspaceSkillTargets,
+} from "@/services/skillCenterService";
 import {
   createHarnessWorkspace,
   dryRunHarness,
+  listHarnessFileEntries,
   listHarnesses,
+  listSchedule,
   listWorkspaces,
   markWorkspaceOpened,
+  readHarnessFile,
   type HarnessDryRunResult,
   type HarnessManifest,
+  type ScheduleCadence,
+  type ScheduleOutcome,
+  type ScheduleStore,
   type WorkspaceRecord,
 } from "./controlCenterRebuildApi";
 
 type WorkspaceHubPanelProps = {
   onOpenWorkspace: (path: string) => Promise<void>;
+  onOpenSchedule?: () => void;
+  onOpenSkill?: (skillId: string) => void;
+  focusWorkspacePath?: string | null;
   detailOnly?: boolean;
   activeFocusId?: string | null;
   onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
 };
+
+type WorkspaceHubDirectoryFilter =
+  | "all"
+  | "harness"
+  | "workspace"
+  | "kimi_code"
+  | "recent"
+  | "harness_source"
+  | "manual";
+
+type WorkspaceHubSortKey = "name" | "runtime" | "recent" | "source";
 
 function formatRuntime(value: string) {
   if (value === "kimi-code") return "Kimi Code";
@@ -40,6 +85,123 @@ function valueFrom(values: Record<string, string>, key: string) {
   return values[key] ?? "";
 }
 
+function matchesDirectoryQuery(query: string, values: Array<string | undefined | null>) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return values.some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function workspaceDirectoryName(workspace: WorkspaceRecord) {
+  return workspace.name || workspace.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() || workspace.cwd;
+}
+
+function formatDiscoveryContainer(kind: SkillDiscoveryContainerKind) {
+  if (kind === "agents") return ".agents/skills";
+  if (kind === "kimi_code") return ".kimi-code/skills";
+  if (kind === "legacy_agents") return "~/.config/agents/skills legacy";
+  if (kind === "codex") return ".codex/skills inventory";
+  return ".claude/skills inventory";
+}
+
+function formatScheduleDate(value?: string | null) {
+  if (!value) return "未计划";
+  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatScheduleOutcome(value?: ScheduleOutcome | null) {
+  switch (value) {
+    case "executed":
+      return "已执行";
+    case "failed":
+      return "失败";
+    case "skipped":
+      return "已跳过";
+    case "blocked_by_permission":
+      return "权限阻断";
+    case "schedule_error":
+      return "调度异常";
+    case "planned":
+      return "已规划";
+    case "executing":
+      return "执行中";
+    default:
+      return "暂无";
+  }
+}
+
+function scheduleOutcomeTone(value?: ScheduleOutcome | null): ControlCenterStatusTone {
+  if (value === "executed") return "success";
+  if (value === "blocked_by_permission" || value === "skipped") return "warning";
+  if (value === "failed" || value === "schedule_error") return "danger";
+  if (value === "executing" || value === "planned") return "accent";
+  return "neutral";
+}
+
+function formatScheduleCadence(cadence: ScheduleCadence) {
+  if (cadence.kind === "daily") return `每天 ${cadence.at}`;
+  if (cadence.kind === "weekday") return `工作日 ${cadence.at}`;
+  return `cron ${cadence.expression}`;
+}
+
+export function normalizeWorkspacePathKey(value?: string | null) {
+  return (value ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+export function shouldBackToWorkspaceDirectory(key: string, hasDirectoryDetail: boolean) {
+  return key === "Escape" && hasDirectoryDetail;
+}
+
+export function findWorkspaceTargetForRecord(
+  workspace: WorkspaceRecord | null,
+  targets: WorkspaceSkillTarget[],
+) {
+  if (!workspace) return null;
+  const workspacePathKey = normalizeWorkspacePathKey(workspace.cwd);
+  return (
+    targets.find(
+      (target) =>
+        target.scope === "workspace" &&
+        normalizeWorkspacePathKey(target.rootPath) === workspacePathKey,
+    ) ??
+    targets.find(
+      (target) =>
+        target.scope === "workspace" &&
+        normalizeWorkspacePathKey(target.id.replace(/^workspace:/, "")) === workspacePathKey,
+    ) ??
+    null
+  );
+}
+
+export function findWorkspaceRecordByPath(
+  workspaces: WorkspaceRecord[],
+  path?: string | null,
+) {
+  const targetPathKey = normalizeWorkspacePathKey(path);
+  if (!targetPathKey) return null;
+  return (
+    workspaces.find(
+      (workspace) => normalizeWorkspacePathKey(workspace.cwd) === targetPathKey,
+    ) ?? null
+  );
+}
+
+export function summarizeWorkspaceSchedule(store: ScheduleStore | null, workspaceId: string) {
+  const heartbeat =
+    store?.heartbeats.find((item) => item.workspaceId === workspaceId) ?? null;
+  const tasks = store?.tasks.filter((task) => task.workspaceId === workspaceId) ?? [];
+  const nextRunAt =
+    [heartbeat?.nextRunAt, ...tasks.map((task) => task.nextRunAt)]
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null;
+
+  return {
+    heartbeat,
+    tasks,
+    enabledTaskCount: tasks.filter((task) => task.enabled).length,
+    nextRunAt,
+  };
+}
+
 function makeHarnessItemId(id: string) {
   return `harness:${id}`;
 }
@@ -54,6 +216,9 @@ function focusDomId(id: string) {
 
 export function WorkspaceHubPanel({
   onOpenWorkspace,
+  onOpenSchedule,
+  onOpenSkill,
+  focusWorkspacePath,
   detailOnly = false,
   activeFocusId,
   onRailGroupsChange,
@@ -64,6 +229,14 @@ export function WorkspaceHubPanel({
   const [values, setValues] = useState<Record<string, string>>({});
   const [dryRun, setDryRun] = useState<HarnessDryRunResult | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<WorkspaceRecord | null>(null);
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryFilter, setDirectoryFilter] = useState<WorkspaceHubDirectoryFilter>("all");
+  const [directorySort, setDirectorySort] = useState<WorkspaceHubSortKey>("name");
+  const [workspaceSkillTargets, setWorkspaceSkillTargets] = useState<WorkspaceSkillTarget[]>([]);
+  const [workspaceSkillInventory, setWorkspaceSkillInventory] =
+    useState<WorkspaceSkillInventory | null>(null);
+  const [workspaceDetailMessage, setWorkspaceDetailMessage] = useState<string | null>(null);
+  const [scheduleStore, setScheduleStore] = useState<ScheduleStore | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -81,6 +254,31 @@ export function WorkspaceHubPanel({
     () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
     [workspaces, selectedWorkspaceId],
   );
+  const hasDirectoryDetail = Boolean(selectedHarness || selectedWorkspace);
+  const selectedWorkspaceTarget = useMemo(
+    () => findWorkspaceTargetForRecord(selectedWorkspace, workspaceSkillTargets),
+    [selectedWorkspace, workspaceSkillTargets],
+  );
+  const selectedWorkspaceSchedule = useMemo(
+    () => summarizeWorkspaceSchedule(scheduleStore, selectedWorkspace?.id ?? ""),
+    [scheduleStore, selectedWorkspace?.id],
+  );
+  const loadSelectedHarnessFileEntries = useCallback(
+    () =>
+      selectedHarnessId
+        ? listHarnessFileEntries(selectedHarnessId)
+        : Promise.resolve([]),
+    [selectedHarnessId],
+  );
+  const readSelectedHarnessFile = useCallback(
+    (relPath: string) => {
+      if (!selectedHarnessId) {
+        return Promise.reject(new Error("missing selected harness"));
+      }
+      return readHarnessFile(selectedHarnessId, relPath);
+    },
+    [selectedHarnessId],
+  );
 
   async function refresh() {
     setBusy(true);
@@ -93,6 +291,7 @@ export function WorkspaceHubPanel({
       setHarnesses(nextHarnesses);
       setWorkspaces(nextWorkspaces);
       setSelectedItemId((current) => {
+        if (!current) return "";
         if (
           current.startsWith("harness:") &&
           nextHarnesses.some((harness) => makeHarnessItemId(harness.id) === current)
@@ -118,9 +317,30 @@ export function WorkspaceHubPanel({
     }
   }
 
+  const handleBackToDirectory = useCallback(() => {
+    setSelectedItemId("");
+  }, []);
+
+  const handleWorkspaceHubKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (shouldBackToWorkspaceDirectory(event.key, hasDirectoryDetail)) {
+        event.preventDefault();
+        handleBackToDirectory();
+      }
+    },
+    [handleBackToDirectory, hasDirectoryDetail],
+  );
+
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    const focusedWorkspace = findWorkspaceRecordByPath(workspaces, focusWorkspacePath);
+    if (focusedWorkspace) {
+      setSelectedItemId(makeWorkspaceItemId(focusedWorkspace.id));
+    }
+  }, [focusWorkspacePath, workspaces]);
 
   useEffect(() => {
     if (!selectedHarness) return;
@@ -136,6 +356,45 @@ export function WorkspaceHubPanel({
       return next;
     });
   }, [selectedHarness]);
+
+  useEffect(() => {
+    if (!selectedWorkspace) {
+      setWorkspaceSkillInventory(null);
+      setWorkspaceDetailMessage(null);
+      setScheduleStore(null);
+      return;
+    }
+
+    let canceled = false;
+    async function loadWorkspaceDetailState() {
+      setWorkspaceSkillInventory(null);
+      setWorkspaceDetailMessage(null);
+      try {
+        const [targets, nextScheduleStore] = await Promise.all([
+          listWorkspaceSkillTargets(),
+          listSchedule(),
+        ]);
+        if (canceled) return;
+        setWorkspaceSkillTargets(targets);
+        setScheduleStore(nextScheduleStore);
+        const target = findWorkspaceTargetForRecord(selectedWorkspace, targets);
+        if (!target) return;
+        const inventory = await getWorkspaceSkillInventory(target.id);
+        if (!canceled) {
+          setWorkspaceSkillInventory(inventory);
+        }
+      } catch (error) {
+        if (!canceled) {
+          setWorkspaceDetailMessage(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    void loadWorkspaceDetailState();
+    return () => {
+      canceled = true;
+    };
+  }, [selectedWorkspace]);
 
   async function handleDryRun() {
     if (!selectedHarness) return;
@@ -183,6 +442,107 @@ export function WorkspaceHubPanel({
       setBusy(false);
     }
   }
+
+  const directoryCards = useMemo(() => {
+    const harnessCards = harnesses
+      .filter(() => directoryFilter === "all" || directoryFilter === "harness")
+      .filter((harness) =>
+        matchesDirectoryQuery(directoryQuery, [
+          harness.id,
+          harness.name,
+          harness.summary,
+          harness.version,
+          harness.agentRuntime,
+          ...harness.tags,
+          ...harness.skills.map((skill) => skill.id),
+        ]),
+      )
+      .map((harness) => {
+        const itemId = makeHarnessItemId(harness.id);
+        return {
+          id: itemId,
+          title: `/${harness.id}`,
+          subtitle: harness.name,
+          meta: `v${harness.version} · ${formatRuntime(harness.agentRuntime)}`,
+          description: harness.summary,
+          active: itemId === selectedItemId,
+          badges: [
+            { label: "Harness", tone: "neutral" as const },
+            { label: `${harness.skills.length} 技能`, tone: "accent" as const },
+          ],
+          cornerAction: {
+            label: "查看模板",
+            icon: "+",
+            onSelect: () => setSelectedItemId(itemId),
+          },
+          onOpen: () => setSelectedItemId(itemId),
+          sortName: harness.id,
+          sortRuntime: harness.agentRuntime,
+          sortRecent: "",
+          sortSource: "harness",
+        };
+      });
+
+    const workspaceCards = workspaces
+      .filter((workspace) => {
+        if (directoryFilter === "all" || directoryFilter === "workspace") return true;
+        if (directoryFilter === "kimi_code") return workspace.agentRuntime === "kimi-code";
+        if (directoryFilter === "recent") return Boolean(workspace.lastOpenedAt);
+        if (directoryFilter === "harness_source") return workspace.source === "harness" || Boolean(workspace.harnessId);
+        if (directoryFilter === "manual") return workspace.source === "manual";
+        return false;
+      })
+      .filter((workspace) =>
+        matchesDirectoryQuery(directoryQuery, [
+          workspace.name,
+          workspace.cwd,
+          workspace.harnessId,
+          workspace.agentRuntime,
+          workspace.source,
+          ...workspace.tags,
+        ]),
+      )
+      .map((workspace) => {
+        const itemId = makeWorkspaceItemId(workspace.id);
+        return {
+          id: itemId,
+          title: workspaceDirectoryName(workspace),
+          subtitle: workspace.cwd,
+          meta: `${formatRuntime(workspace.agentRuntime)} · 最近打开 ${formatDate(workspace.lastOpenedAt)}`,
+          description: workspace.cwd,
+          active: itemId === selectedItemId,
+          badges: [
+            { label: "已注册", tone: "success" as const },
+            { label: workspace.source === "harness" ? "Harness 来源" : workspace.source, tone: "neutral" as const },
+          ],
+          cornerSlot: (
+            <ControlCenterActionMenu
+              label={`${workspace.name} 操作`}
+              disabled={busy}
+              items={[
+                { label: "查看详情", onSelect: () => setSelectedItemId(itemId) },
+                { label: "打开工作区", onSelect: () => void handleOpenWorkspace(workspace) },
+                { label: "显示目录", onSelect: () => void onOpenWorkspace(workspace.cwd) },
+              ]}
+            />
+          ),
+          onOpen: () => setSelectedItemId(itemId),
+          sortName: workspaceDirectoryName(workspace),
+          sortRuntime: workspace.agentRuntime,
+          sortRecent: workspace.lastOpenedAt ?? "",
+          sortSource: workspace.source,
+        };
+      });
+
+    const cards = [...harnessCards, ...workspaceCards];
+    cards.sort((left, right) => {
+      if (directorySort === "runtime") return left.sortRuntime.localeCompare(right.sortRuntime);
+      if (directorySort === "recent") return right.sortRecent.localeCompare(left.sortRecent);
+      if (directorySort === "source") return left.sortSource.localeCompare(right.sortSource);
+      return left.sortName.localeCompare(right.sortName);
+    });
+    return cards;
+  }, [busy, directoryFilter, directoryQuery, directorySort, harnesses, onOpenWorkspace, selectedItemId, workspaces]);
 
   const rail = (
     <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
@@ -246,6 +606,15 @@ export function WorkspaceHubPanel({
     <div className="cc-control-detail-stack">
       <div className="cc-control-detail-head">
         <div className="cc-control-detail-copy">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon={<ChevronLeft size={14} />}
+            onClick={handleBackToDirectory}
+          >
+            返回
+          </Button>
           <h3>{selectedHarness.name}</h3>
         </div>
         <div className="cc-control-action-row">
@@ -287,6 +656,13 @@ export function WorkspaceHubPanel({
           ))}
         </div>
       ) : null}
+
+      <DirectoryFilePreview
+        entityKey={`harness:${selectedHarness.id}`}
+        description={selectedHarness.summary}
+        loadEntries={loadSelectedHarnessFileEntries}
+        readFile={readSelectedHarnessFile}
+      />
 
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
@@ -375,10 +751,29 @@ export function WorkspaceHubPanel({
     </div>
   ) : null;
 
+  const workspaceSkillCount =
+    workspaceSkillInventory?.containers.reduce(
+      (total, container) => total + container.skills.length,
+      0,
+    ) ?? 0;
+  const workspaceScheduleOutcome =
+    selectedWorkspaceSchedule.heartbeat?.lastOutcome ??
+    selectedWorkspaceSchedule.tasks.find((task) => task.lastOutcome)?.lastOutcome ??
+    null;
+
   const workspaceDetail = selectedWorkspace ? (
     <div className="cc-control-detail-stack">
       <div className="cc-control-detail-head">
         <div className="cc-control-detail-copy">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon={<ChevronLeft size={14} />}
+            onClick={handleBackToDirectory}
+          >
+            返回
+          </Button>
           <h3>{selectedWorkspace.name}</h3>
           <div className="cc-control-chip-row">
             <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
@@ -388,14 +783,25 @@ export function WorkspaceHubPanel({
             <ControlCenterStatusBadge tone="neutral">{selectedWorkspace.source}</ControlCenterStatusBadge>
           </div>
         </div>
-        <Button
-          variant="outline"
-          icon={<Play size={15} />}
-          onClick={() => void handleOpenWorkspace(selectedWorkspace)}
-          disabled={busy}
-        >
-          打开工作区
-        </Button>
+        <div className="cc-control-action-row">
+          {onOpenSchedule ? (
+            <Button
+              variant="ghost"
+              icon={<CalendarClock size={15} />}
+              onClick={onOpenSchedule}
+            >
+              编辑调度
+            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            icon={<Play size={15} />}
+            onClick={() => void handleOpenWorkspace(selectedWorkspace)}
+            disabled={busy}
+          >
+            打开工作区
+          </Button>
+        </div>
       </div>
 
       <ControlCenterDescList
@@ -417,6 +823,156 @@ export function WorkspaceHubPanel({
           ))}
         </div>
       ) : null}
+
+      {workspaceDetailMessage ? (
+        <div className="cc-control-detail-item" role="alert">
+          {workspaceDetailMessage}
+        </div>
+      ) : null}
+
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>Skill 清单</h4>
+            <p>{selectedWorkspaceTarget?.rootPath ?? "未匹配到 Workspace Skill 目标"}</p>
+          </div>
+          <ControlCenterStatusBadge tone={workspaceSkillCount > 0 ? "success" : "neutral"}>
+            {workspaceSkillCount} 个
+          </ControlCenterStatusBadge>
+        </header>
+        <div className="cc-surface-section-body">
+          {!selectedWorkspaceTarget ? (
+            <p className="cc-control-muted">还没有扫描到这个工作区的 Skill 目标。</p>
+          ) : !workspaceSkillInventory ? (
+            <p className="cc-control-muted">正在读取 Workspace Skill 清单。</p>
+          ) : (
+            <div className="cc-control-detail-list">
+              {workspaceSkillInventory.containers.map((container) => (
+                <div key={container.containerKind} className="cc-control-detail-item">
+                  <div className="cc-control-detail-head">
+                    <div className="cc-control-detail-copy">
+                      <h3>{formatDiscoveryContainer(container.containerKind)}</h3>
+                      <code>{container.containerPath}</code>
+                    </div>
+                    <div className="cc-control-chip-row">
+                      <ControlCenterStatusBadge tone={container.readOnly ? "warning" : "success"}>
+                        {container.readOnly ? "只读" : "可编辑"}
+                      </ControlCenterStatusBadge>
+                      <ControlCenterStatusBadge tone="neutral">
+                        {container.skills.length} 个
+                      </ControlCenterStatusBadge>
+                    </div>
+                  </div>
+                  {container.skills.length === 0 ? (
+                    <p className="cc-control-muted">这个容器里还没有 Skill。</p>
+                  ) : (
+                    <div className="cc-control-path-list">
+                      {container.skills.map((skill) => (
+                        <div key={skill.skillPath} className="cc-control-path-item">
+                          <div className="cc-control-detail-head">
+                            <div className="cc-control-detail-copy">
+                              <strong>{skill.name}</strong>
+                              <p>{skill.description || "这个工作区 Skill 没有提供描述。"}</p>
+                            </div>
+                            <div className="cc-control-action-row">
+                              <ControlCenterStatusBadge
+                                tone={skill.matchedInstalledSkillId ? "success" : "neutral"}
+                              >
+                                {skill.matchedInstalledSkillId ? "已关联" : "目录内 Skill"}
+                              </ControlCenterStatusBadge>
+                              {skill.matchedInstalledSkillId && onOpenSkill ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => onOpenSkill(skill.matchedInstalledSkillId ?? "")}
+                                >
+                                  查看 Skill
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                          <code>{skill.skillPath}</code>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="cc-surface-section">
+        <header className="cc-surface-section-header">
+          <div className="cc-surface-section-copy">
+            <h4>调度摘要</h4>
+          </div>
+          <ControlCenterStatusBadge
+            tone={selectedWorkspaceSchedule.heartbeat?.enabled ? "success" : "neutral"}
+          >
+            {selectedWorkspaceSchedule.heartbeat?.enabled ? "运行中" : "已停止"}
+          </ControlCenterStatusBadge>
+        </header>
+        <div className="cc-surface-section-body">
+          {!scheduleStore ? (
+            <p className="cc-control-muted">正在读取调度摘要。</p>
+          ) : (
+            <>
+              <ControlCenterDescList
+                columns={4}
+                items={[
+                  {
+                    label: "心跳",
+                    value: selectedWorkspaceSchedule.heartbeat
+                      ? `${selectedWorkspaceSchedule.heartbeat.intervalMinutes} 分钟`
+                      : "未配置",
+                    meta: selectedWorkspaceSchedule.heartbeat?.enabled ? "已启用" : "已停用",
+                  },
+                  {
+                    label: "计划任务",
+                    value: `${selectedWorkspaceSchedule.tasks.length} 个`,
+                    meta: `启用 ${selectedWorkspaceSchedule.enabledTaskCount} 个`,
+                  },
+                  {
+                    label: "下次运行",
+                    value: formatScheduleDate(selectedWorkspaceSchedule.nextRunAt),
+                  },
+                  {
+                    label: "最近结果",
+                    value: formatScheduleOutcome(workspaceScheduleOutcome),
+                  },
+                ]}
+              />
+              {selectedWorkspaceSchedule.tasks.length === 0 ? (
+                <p className="cc-control-muted">这个工作区还没有计划任务。</p>
+              ) : (
+                <div className="cc-control-detail-list">
+                  {selectedWorkspaceSchedule.tasks.slice(0, 4).map((task) => (
+                    <div key={task.id} className="cc-control-detail-item">
+                      <div className="cc-control-detail-head">
+                        <div className="cc-control-detail-copy">
+                          <h3>{task.name}</h3>
+                          <p>{formatScheduleCadence(task.cadence)} · 下次 {formatScheduleDate(task.nextRunAt)}</p>
+                        </div>
+                        <div className="cc-control-chip-row">
+                          <ControlCenterStatusBadge tone={task.enabled ? "success" : "neutral"}>
+                            {task.enabled ? "运行中" : "已停止"}
+                          </ControlCenterStatusBadge>
+                          <ControlCenterStatusBadge tone={scheduleOutcomeTone(task.lastOutcome)}>
+                            {formatScheduleOutcome(task.lastOutcome)}
+                          </ControlCenterStatusBadge>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </section>
     </div>
   ) : null;
 
@@ -467,14 +1023,16 @@ export function WorkspaceHubPanel({
 
   if (detailOnly) {
     return (
-      <section className="cc-image-detail-page workspace-hub-panel workspace-hub-panel-detail-only">
+      <section
+        className="cc-image-detail-page workspace-hub-panel workspace-hub-panel-detail-only"
+        onKeyDownCapture={handleWorkspaceHubKeyDown}
+      >
         <div
           id={focusDomId("workspace_hub")}
           className={`cc-image-detail-top ${activeFocusId === "workspace_hub" ? "is-focus" : ""}`}
         >
           <div>
             <h1>WorkspaceHub</h1>
-            <p>Harness 模板、变量、dry run 文件树和已注册工作区集中管理。</p>
           </div>
           <div className="cc-image-top-controls">
             <Button variant="outline" icon={<RefreshCw size={15} />} onClick={refresh} disabled={busy}>
@@ -483,67 +1041,56 @@ export function WorkspaceHubPanel({
           </div>
         </div>
 
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Harness templates", value: String(harnesses.length) },
-            { label: "Registered workspaces", value: String(workspaces.length) },
-            { label: "Selected type", value: selectedKind },
-            { label: "Dry run", value: dryRun ? `${dryRun.files.length} files` : "not previewed" },
-          ]}
-        />
-
-        <div className="cc-image-description">
-          <div className="cc-image-meta-label">Description</div>
-          <p>选择 harness 后可填写变量并预览文件树；选择工作区后可直接打开目录。</p>
-        </div>
-        <div className="cc-image-tags">
-          <span>Harness</span>
-          <span>Workspace</span>
-          <span>Kimi Code</span>
-        </div>
-
-        <section className="cc-image-card">
+        <section className="cc-image-card workspace-hub-directory-card">
           <h2>Harness 与工作区</h2>
-          <ul className="cc-image-row-list">
-            {harnesses.map((harness) => {
-              const itemId = makeHarnessItemId(harness.id);
-              return (
-                <li
-                  key={itemId}
-                  id={focusDomId(itemId)}
-                  className={`cc-image-row ${activeFocusId === itemId ? "is-focus" : ""}`}
-                >
-                  <div>
-                    <div className="cc-image-row-title"><span className="cc-dot neutral" />{harness.name}</div>
-                    <div className="cc-image-row-desc">{harness.summary}</div>
-                  </div>
-                  <Button type="button" variant="outline" className="cc-action-btn" onClick={() => setSelectedItemId(itemId)}>
-                    查看模板
-                  </Button>
-                </li>
-              );
-            })}
-            {workspaces.map((workspace) => {
-              const itemId = makeWorkspaceItemId(workspace.id);
-              return (
-                <li
-                  key={itemId}
-                  id={focusDomId(itemId)}
-                  className={`cc-image-row ${activeFocusId === itemId ? "is-focus" : ""}`}
-                >
-                  <div>
-                    <div className="cc-image-row-title"><span className="cc-dot success" />{workspace.name}</div>
-                    <div className="cc-image-row-desc">{workspace.cwd}</div>
-                  </div>
-                  <Button type="button" variant="outline" className="cc-action-btn" onClick={() => setSelectedItemId(itemId)}>
-                    查看工作区
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="directory-toolbar">
+            <Input
+              value={directoryQuery}
+              onChange={(event) => setDirectoryQuery(event.currentTarget.value)}
+              placeholder="搜索 Harness、工作区、路径或 runtime"
+              aria-label="搜索 WorkspaceHub"
+            />
+            <ControlCenterSegmentedControl<WorkspaceHubDirectoryFilter>
+              ariaLabel="WorkspaceHub 类型筛选"
+              value={directoryFilter}
+              onChange={setDirectoryFilter}
+              items={[
+                { value: "all", label: "全部", description: harnesses.length + workspaces.length },
+                { value: "harness", label: "Harness", description: harnesses.length },
+                { value: "workspace", label: "工作区", description: workspaces.length },
+                { value: "kimi_code", label: "Kimi Code" },
+                { value: "recent", label: "最近打开" },
+                { value: "harness_source", label: "Harness 来源" },
+                { value: "manual", label: "手动" },
+              ]}
+            />
+            <select
+              value={directorySort}
+              onChange={(event) => setDirectorySort(event.currentTarget.value as WorkspaceHubSortKey)}
+              aria-label="WorkspaceHub 排序"
+            >
+              <option value="name">名称 A-Z</option>
+              <option value="recent">最近打开</option>
+              <option value="runtime">Runtime</option>
+              <option value="source">来源</option>
+            </select>
+          </div>
+          <DirectoryCardGrid
+            className="workspace-hub-directory-grid"
+            items={directoryCards}
+            loading={busy && directoryCards.length === 0}
+            empty={
+              <ControlCenterEmptyState
+                title={harnesses.length + workspaces.length === 0 ? "还没有对象" : "没有匹配结果"}
+                description={
+                  harnesses.length + workspaces.length === 0
+                    ? "内置模板或注册工作区加载后会显示在这里。"
+                    : "清空搜索或切换筛选条件。"
+                }
+                icon={<Boxes size={18} />}
+              />
+            }
+          />
         </section>
 
         <section className="cc-image-card">
@@ -566,7 +1113,7 @@ export function WorkspaceHubPanel({
   }
 
   return (
-    <div className="cc-control-stack workspace-hub-panel">
+    <div className="cc-control-stack workspace-hub-panel" onKeyDownCapture={handleWorkspaceHubKeyDown}>
       <ControlCenterWorkbenchLayout
         mode="stack-on-mobile"
         className="workspace-hub-workbench"

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -17,17 +17,20 @@ use crate::{
         BackendState, DiscoveredSkillDetail, DiscoveredSkillRecord, InstalledSkill,
         SessionSkillState, SkillApplyResult, SkillApplyScope, SkillDetail,
         SkillDiscoveryContainerKind, SkillDiscoveryLocation, SkillDiscoveryScope,
-        SkillDiscoverySnapshot, SkillManifestMetadata, SkillProjectionMethod,
-        SkillProjectionRecord, SkillRecommendation, SkillSourceType, SkillUpdateStatusKind,
-        SkillUpdateStatusView, WorkspaceDiscoveryRoot, WorkspaceManagedSkillRecord,
-        WorkspaceSkillContainerInventory, WorkspaceSkillInventory, WorkspaceSkillProfile,
-        WorkspaceSkillTarget, WorkspaceSkillTargetContainerRoot,
+        SkillDiscoverySnapshot, SkillFileContent, SkillFileEntry, SkillManifestMetadata,
+        SkillProjectionMethod, SkillProjectionRecord, SkillRecommendation, SkillSourceType,
+        SkillUpdateStatusKind, SkillUpdateStatusView, SkillUsageStats, WorkspaceDiscoveryRoot,
+        WorkspaceManagedSkillRecord, WorkspaceSkillContainerInventory, WorkspaceSkillInventory,
+        WorkspaceSkillProfile, WorkspaceSkillTarget, WorkspaceSkillTargetContainerRoot,
     },
 };
 
 const BUNDLED_SKILLS_DIR_NAME: &str = "skills";
 const LEGACY_BUNDLED_SKILLS_DIR_SEGMENTS: [&str; 4] = ["_up_", "_up_", "_up_", "skills"];
 const DEV_WORKSPACE_FALLBACK_ENV: &str = "KIMI_DEV_ALLOW_WORKSPACE_FALLBACK";
+const SKILL_FILE_ENTRY_LIMIT: usize = 512;
+const SKILL_FILE_READ_LIMIT: u64 = 512 * 1024;
+const BINARY_SNIFF_LIMIT: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingSkillAction {
@@ -177,6 +180,232 @@ pub fn get_skill_detail(app: &AppHandle, skill_id: &str) -> anyhow::Result<Skill
     })
 }
 
+pub fn list_skill_file_entries(
+    app: &AppHandle,
+    skill_id: &str,
+) -> anyhow::Result<Vec<SkillFileEntry>> {
+    list_safe_file_entries(&installed_skill_root(app, skill_id)?)
+}
+
+pub fn read_skill_file(
+    app: &AppHandle,
+    skill_id: &str,
+    rel_path: &str,
+) -> anyhow::Result<SkillFileContent> {
+    read_safe_file(&installed_skill_root(app, skill_id)?, rel_path)
+}
+
+pub fn list_discovered_skill_file_entries(
+    app: &AppHandle,
+    discovery_id: &str,
+) -> anyhow::Result<Vec<SkillFileEntry>> {
+    list_safe_file_entries(&discovered_skill_root(app, discovery_id)?)
+}
+
+pub fn read_discovered_skill_file(
+    app: &AppHandle,
+    discovery_id: &str,
+    rel_path: &str,
+) -> anyhow::Result<SkillFileContent> {
+    read_safe_file(&discovered_skill_root(app, discovery_id)?, rel_path)
+}
+
+fn installed_skill_root(app: &AppHandle, skill_id: &str) -> anyhow::Result<PathBuf> {
+    let registry = skill_center_store::load_registry(app)?;
+    let skill = skill_center_store::find_skill(&registry, skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill not found: {}", skill_id.trim()))?;
+    Ok(PathBuf::from(&skill.local_path))
+}
+
+fn discovered_skill_root(app: &AppHandle, discovery_id: &str) -> anyhow::Result<PathBuf> {
+    let snapshot = skill_center_store::load_discovery_cache(app)?;
+    let record = snapshot
+        .records
+        .iter()
+        .find(|item| item.discovery_id == discovery_id.trim())
+        .ok_or_else(|| anyhow::anyhow!("discovered skill not found: {}", discovery_id.trim()))?;
+    Ok(PathBuf::from(&record.canonical_path))
+}
+
+pub(crate) fn list_safe_file_entries(root: &Path) -> anyhow::Result<Vec<SkillFileEntry>> {
+    let root = skill_center_store::canonicalize_source_path(root)?;
+    if !root.is_dir() {
+        return Err(anyhow::anyhow!(
+            "skill file root is not a directory: {}",
+            root.display()
+        ));
+    }
+
+    let mut entries = Vec::new();
+    collect_safe_file_entries(&root, &root, &mut entries)?;
+    entries.sort_by(|left, right| file_entry_sort_key(left).cmp(&file_entry_sort_key(right)));
+    Ok(entries)
+}
+
+fn collect_safe_file_entries(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<SkillFileEntry>,
+) -> anyhow::Result<()> {
+    if entries.len() >= SKILL_FILE_ENTRY_LIMIT {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current)
+        .with_context(|| format!("failed to read skill file directory: {}", current.display()))?
+    {
+        if entries.len() >= SKILL_FILE_ENTRY_LIMIT {
+            break;
+        }
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read skill file entry in directory: {}",
+                current.display()
+            )
+        })?;
+        let name = entry.file_name();
+        if should_skip_file_entry_name(&name) {
+            continue;
+        }
+        let file_type = entry.file_type().with_context(|| {
+            format!("failed to read skill file type: {}", entry.path().display())
+        })?;
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let path = entry.path();
+        let canonical = match skill_center_store::canonicalize_source_path(&path) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        if !canonical.starts_with(root) {
+            continue;
+        }
+        let is_dir = file_type.is_dir();
+        let metadata = entry
+            .metadata()
+            .with_context(|| format!("failed to read skill file metadata: {}", path.display()))?;
+        entries.push(SkillFileEntry {
+            rel_path: relative_file_path(root, &canonical)?,
+            is_dir,
+            size: if is_dir { None } else { Some(metadata.len()) },
+        });
+
+        if is_dir {
+            collect_safe_file_entries(root, &canonical, entries)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn read_safe_file(root: &Path, rel_path: &str) -> anyhow::Result<SkillFileContent> {
+    let root = skill_center_store::canonicalize_source_path(root)?;
+    let target = resolve_within(&root, rel_path)?;
+    let metadata = fs::metadata(&target)
+        .with_context(|| format!("failed to read skill file metadata: {}", target.display()))?;
+    if metadata.is_dir() {
+        return Err(anyhow::anyhow!(
+            "skill file path points to a directory: {}",
+            rel_path
+        ));
+    }
+
+    let mut file = File::open(&target)
+        .with_context(|| format!("failed to open skill file: {}", target.display()))?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(SKILL_FILE_READ_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read skill file: {}", target.display()))?;
+    let truncated = bytes.len() as u64 > SKILL_FILE_READ_LIMIT;
+    if truncated {
+        bytes.truncate(SKILL_FILE_READ_LIMIT as usize);
+    }
+
+    let is_binary = bytes.iter().take(BINARY_SNIFF_LIMIT).any(|byte| *byte == 0);
+    let text = if is_binary {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    };
+
+    Ok(SkillFileContent {
+        rel_path: relative_file_path(&root, &target)?,
+        size: metadata.len(),
+        is_binary,
+        truncated,
+        text,
+    })
+}
+
+fn resolve_within(root: &Path, rel_path: &str) -> anyhow::Result<PathBuf> {
+    let rel_path = rel_path.trim();
+    if rel_path.is_empty() {
+        return Err(anyhow::anyhow!("skill file path cannot be empty"));
+    }
+    let rel = Path::new(rel_path);
+    if rel.is_absolute() {
+        return Err(anyhow::anyhow!("absolute skill file paths are not allowed"));
+    }
+    if rel
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(anyhow::anyhow!(
+            "skill file path must stay within the skill root"
+        ));
+    }
+
+    let target = skill_center_store::canonicalize_source_path(&root.join(rel))?;
+    if !target.starts_with(root) {
+        return Err(anyhow::anyhow!("skill file path escapes the skill root"));
+    }
+    Ok(target)
+}
+
+fn should_skip_file_entry_name(name: &std::ffi::OsStr) -> bool {
+    let value = name.to_string_lossy();
+    value == ".git" || value == "node_modules" || value.starts_with('.')
+}
+
+fn relative_file_path(root: &Path, path: &Path) -> anyhow::Result<String> {
+    let rel = path.strip_prefix(root).with_context(|| {
+        format!(
+            "failed to build relative skill file path: {}",
+            path.display()
+        )
+    })?;
+    Ok(rel
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+fn file_entry_sort_key(entry: &SkillFileEntry) -> (u8, String) {
+    let file_name = entry
+        .rel_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(entry.rel_path.as_str())
+        .to_ascii_uppercase();
+    let is_root = !entry.rel_path.contains('/');
+    let rank = if is_root && file_name == "SKILL.MD" {
+        0
+    } else if is_root && (file_name.starts_with("README.") || file_name == "README") {
+        1
+    } else if is_root && file_name.starts_with("LICENSE") {
+        9
+    } else if entry.is_dir {
+        2
+    } else {
+        3
+    };
+    (rank, entry.rel_path.to_ascii_lowercase())
+}
+
 pub fn set_skill_trust(app: &AppHandle, skill_id: &str, trusted: bool) -> anyhow::Result<()> {
     let mut registry = skill_center_store::load_registry(app)?;
     let skill = skill_center_store::find_skill_mut(&mut registry, skill_id)
@@ -223,7 +452,25 @@ pub fn apply_skill(
         &skill.id,
         matches!(scope, SkillApplyScope::SessionKimi),
     )?;
+    record_skill_apply_usage(app, &skill.id)?;
     build_apply_result(app, scope)
+}
+
+pub fn get_skill_usage_stats(
+    app: &AppHandle,
+    skill_ids: Option<Vec<String>>,
+) -> anyhow::Result<Vec<SkillUsageStats>> {
+    let requested: HashSet<String> = skill_ids
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    Ok(skill_center_store::load_registry(app)?
+        .into_iter()
+        .filter(|skill| requested.is_empty() || requested.contains(&skill.id))
+        .map(|skill| skill.usage_stats)
+        .collect())
 }
 
 pub fn remove_skill(
@@ -1173,7 +1420,7 @@ fn install_skill_from_source(
     skill_center_store::copy_skill_source(source_dir, &target_dir)?;
     let timestamp = skill_center_store::now_timestamp();
     let installed = InstalledSkill {
-        id: install_id,
+        id: install_id.clone(),
         name: raw_name,
         description,
         source_type: metadata.source_type,
@@ -1191,6 +1438,10 @@ fn install_skill_from_source(
         has_scripts: skill_center_store::has_scripts_dir(&target_dir),
         metadata: manifest_metadata,
         update_status: SkillUpdateStatusView::default(),
+        usage_stats: SkillUsageStats {
+            skill_id: install_id.clone(),
+            ..SkillUsageStats::default()
+        },
         discovery_locations: metadata.discovery_locations.clone(),
     };
     registry.push(installed.clone());
@@ -1622,6 +1873,17 @@ fn build_apply_result(app: &AppHandle, scope: SkillApplyScope) -> anyhow::Result
         global_skills: list_global_skills(app)?,
         active_session: current_active_session_state(app)?,
     })
+}
+
+fn record_skill_apply_usage(app: &AppHandle, skill_id: &str) -> anyhow::Result<SkillUsageStats> {
+    let mut registry = skill_center_store::load_registry(app)?;
+    let stats = skill_center_store::record_skill_usage(
+        &mut registry,
+        skill_id,
+        skill_center_store::now_timestamp(),
+    )?;
+    skill_center_store::save_registry(app, &registry)?;
+    Ok(stats)
 }
 
 fn active_session_identity(app: &AppHandle) -> anyhow::Result<Option<(String, String)>> {
@@ -2391,6 +2653,104 @@ mod tests {
             skill_center_store::path_to_display_string(&valid)
         );
         assert_eq!(skipped, vec!["broken-skill".to_string()]);
+    }
+
+    #[test]
+    fn resolve_within_rejects_path_traversal() {
+        let temp = TempDir::new("file-preview-traversal");
+        fs::write(temp.path.join("SKILL.md"), "# Skill").expect("skill file");
+
+        let error = resolve_within(&temp.path, "../SKILL.md").expect_err("traversal rejected");
+        assert!(error.to_string().contains("within the skill root"));
+    }
+
+    #[test]
+    fn resolve_within_rejects_absolute_paths() {
+        let temp = TempDir::new("file-preview-absolute");
+        let absolute = temp.path.join("SKILL.md");
+        fs::write(&absolute, "# Skill").expect("skill file");
+
+        let error =
+            resolve_within(&temp.path, &absolute.to_string_lossy()).expect_err("absolute rejected");
+        assert!(error.to_string().contains("absolute"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_within_rejects_symlink_escape() {
+        let temp = TempDir::new("file-preview-symlink");
+        let root = temp.path.join("root");
+        let outside = temp.path.join("outside");
+        fs::create_dir_all(&root).expect("root dir");
+        fs::create_dir_all(&outside).expect("outside dir");
+        fs::write(outside.join("secret.txt"), "secret").expect("outside file");
+        std::os::unix::fs::symlink(&outside, root.join("link")).expect("symlink");
+
+        let error = resolve_within(&root, "link/secret.txt").expect_err("escape rejected");
+        assert!(error.to_string().contains("escapes the skill root"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_within_rejects_junction_escape() {
+        let temp = TempDir::new("file-preview-junction");
+        let root = temp.path.join("root");
+        let outside = temp.path.join("outside");
+        let link = root.join("link");
+        fs::create_dir_all(&root).expect("root dir");
+        fs::create_dir_all(&outside).expect("outside dir");
+        fs::write(outside.join("secret.txt"), "secret").expect("outside file");
+        let status = std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                &link.to_string_lossy(),
+                &outside.to_string_lossy(),
+            ])
+            .status()
+            .expect("mklink /J");
+        assert!(status.success(), "mklink /J should create a junction");
+
+        let error = resolve_within(&root, "link/secret.txt").expect_err("escape rejected");
+        assert!(error.to_string().contains("escapes the skill root"));
+    }
+
+    #[test]
+    fn read_safe_file_marks_binary_without_text() {
+        let temp = TempDir::new("file-preview-binary");
+        fs::write(temp.path.join("blob.bin"), b"abc\0def").expect("binary file");
+
+        let content = read_safe_file(&temp.path, "blob.bin").expect("binary read");
+        assert!(content.is_binary);
+        assert!(content.text.is_none());
+    }
+
+    #[test]
+    fn read_safe_file_handles_invalid_utf8_lossily() {
+        let temp = TempDir::new("file-preview-invalid-utf8");
+        fs::write(temp.path.join("bad.txt"), b"hello\xffworld").expect("invalid utf8 file");
+
+        let content = read_safe_file(&temp.path, "bad.txt").expect("lossy read");
+        assert!(!content.is_binary);
+        assert_eq!(content.text.as_deref(), Some("hello\u{fffd}world"));
+    }
+
+    #[test]
+    fn read_safe_file_truncates_large_text() {
+        let temp = TempDir::new("file-preview-large");
+        fs::write(
+            temp.path.join("large.md"),
+            vec![b'a'; (SKILL_FILE_READ_LIMIT + 2) as usize],
+        )
+        .expect("large file");
+
+        let content = read_safe_file(&temp.path, "large.md").expect("large read");
+        assert!(content.truncated);
+        assert_eq!(
+            content.text.as_deref().unwrap_or_default().len(),
+            SKILL_FILE_READ_LIMIT as usize
+        );
     }
 
     #[test]

@@ -264,12 +264,11 @@ export function WorkspaceSchedulePanel({
           <div
             id={focusDomId("schedule")}
             className={`cc-image-detail-top ${activeFocusId === "schedule" ? "is-focus" : ""}`}
-          >
-            <div>
-              <h1>调度</h1>
-              <p>以 workspace 为对象管理心跳、plan-then-run 任务和运行记录。</p>
+            >
+              <div>
+                <h1>调度</h1>
+              </div>
             </div>
-          </div>
         ) : null}
         <ControlCenterEmptyState
           title="还没有可调度的工作区"
@@ -388,7 +387,6 @@ export function WorkspaceSchedulePanel({
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
             <h4>只读心跳</h4>
-            <p>定时检查工作区状态。修改间隔后，启用或停用心跳会保存配置。</p>
           </div>
           <ControlCenterStatusBadge tone={heartbeat?.enabled ? "success" : "neutral"}>
             {heartbeat?.enabled ? "运行中" : "已停止"}
@@ -412,7 +410,6 @@ export function WorkspaceSchedulePanel({
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
             <h4>新增计划任务</h4>
-            <p>任务会先生成计划，再按权限执行。</p>
           </div>
           <Button icon={<CalendarClock size={15} />} onClick={handleCreateTask} disabled={busy}>
             创建任务
@@ -483,7 +480,6 @@ export function WorkspaceSchedulePanel({
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
             <h4>任务列表</h4>
-            <p>{tasks.length} 个任务绑定到当前工作区。</p>
           </div>
         </header>
         <div className="cc-surface-section-body">
@@ -543,7 +539,6 @@ export function WorkspaceSchedulePanel({
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
             <h4>运行记录</h4>
-            <p>{runs.length} 条最近运行记录，计划和结果默认折叠。</p>
           </div>
         </header>
         <div className="cc-surface-section-body">
@@ -593,7 +588,6 @@ export function WorkspaceSchedulePanel({
         >
           <div>
             <h1>调度</h1>
-            <p>以 workspace 为对象管理心跳、plan-then-run 任务和运行记录。</p>
           </div>
           <div className="cc-image-top-controls">
             <Button variant="outline" icon={<RefreshCw size={15} />} onClick={() => void refresh()} disabled={busy}>
@@ -601,17 +595,6 @@ export function WorkspaceSchedulePanel({
             </Button>
           </div>
         </div>
-
-        <ControlCenterDescList
-          columns={4}
-          className="cc-image-meta-grid"
-          items={[
-            { label: "Workspaces", value: String(workspaces.length) },
-            { label: "Heartbeat", value: heartbeat?.enabled ? "enabled" : "disabled" },
-            { label: "Tasks", value: String(tasks.length) },
-            { label: "Last outcome", value: formatOutcome(heartbeat?.lastOutcome) },
-          ]}
-        />
 
         <section className="cc-image-card">
           <h2>调度工作区</h2>

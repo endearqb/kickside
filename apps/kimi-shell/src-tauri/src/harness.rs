@@ -8,6 +8,7 @@ use anyhow::{anyhow, bail, Context};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::types::{SkillFileContent, SkillFileEntry};
 use crate::workspaces::{
     self, AgentRuntime, WorkspaceRecord, WorkspaceRegisterInput, WorkspaceSource,
 };
@@ -302,6 +303,20 @@ pub fn create(
     })
 }
 
+pub fn list_file_entries(app: &AppHandle, harness_id: &str) -> anyhow::Result<Vec<SkillFileEntry>> {
+    let manifest = find_manifest(app, harness_id)?;
+    crate::skill_center::list_safe_file_entries(&template_dir(&manifest))
+}
+
+pub fn read_file(
+    app: &AppHandle,
+    harness_id: &str,
+    rel_path: &str,
+) -> anyhow::Result<SkillFileContent> {
+    let manifest = find_manifest(app, harness_id)?;
+    crate::skill_center::read_safe_file(&template_dir(&manifest), rel_path)
+}
+
 fn validate_values(
     manifest: &HarnessManifest,
     values: &HashMap<String, String>,
@@ -443,6 +458,23 @@ pub fn harness_dry_run(
 }
 
 #[tauri::command]
+pub fn list_harness_file_entries(
+    app: AppHandle,
+    harness_id: String,
+) -> Result<Vec<SkillFileEntry>, String> {
+    list_file_entries(&app, &harness_id).map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+pub fn read_harness_file(
+    app: AppHandle,
+    harness_id: String,
+    rel_path: String,
+) -> Result<SkillFileContent, String> {
+    read_file(&app, &harness_id, &rel_path).map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
 pub fn harness_create(
     app: AppHandle,
     harness_id: String,
@@ -454,6 +486,33 @@ pub fn harness_create(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("kimi-harness-{name}-{unique}"));
+            fs::create_dir_all(&path).expect("temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn interpolate_supports_var_prefix_and_keeps_unknowns() {
@@ -490,5 +549,31 @@ mod tests {
             &HashMap::from([("secret".into(), "value".into())]),
         );
         assert!(!map.contains_key("secret"));
+    }
+
+    #[test]
+    fn harness_template_preview_lists_and_reads_readme() {
+        let temp = TempDir::new("preview-readme");
+        let template = temp.path.join("template");
+        fs::create_dir_all(&template).expect("template dir");
+        fs::write(template.join("README.md"), "# Harness").expect("readme");
+
+        let entries = crate::skill_center::list_safe_file_entries(&template).expect("entries");
+        assert_eq!(entries[0].rel_path, "README.md");
+
+        let content = crate::skill_center::read_safe_file(&template, "README.md").expect("read");
+        assert_eq!(content.text.as_deref(), Some("# Harness"));
+    }
+
+    #[test]
+    fn harness_template_preview_rejects_traversal() {
+        let temp = TempDir::new("preview-traversal");
+        let template = temp.path.join("template");
+        fs::create_dir_all(&template).expect("template dir");
+        fs::write(temp.path.join("secret.txt"), "secret").expect("outside file");
+
+        let error =
+            crate::skill_center::read_safe_file(&template, "../secret.txt").expect_err("rejected");
+        assert!(error.to_string().contains("within the skill root"));
     }
 }

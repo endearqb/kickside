@@ -14,6 +14,7 @@ import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
 import "./components/control-center/control-center.css";
+import "./features/directory/directory.css";
 
 function App() {
   const shell = useShellController();
@@ -100,6 +101,7 @@ function App() {
     activeRuntimePanel: shell.activeRuntimePanel,
     stepCompletion: shell.stepCompletion,
     actionBusy: shell.actionBusy,
+    actionError: shell.actionError,
     diagnosticsBusy: shell.diagnosticsBusy,
     kimiDoctorBusy: shell.kimiDoctorBusy,
     contextMenuBusy: shell.contextMenuBusy,
@@ -226,10 +228,12 @@ function App() {
       shell.handleResetBridgeBindingToDefaultWorkDir,
     onResolveBridgeApproval: shell.handleResolveBridgeApproval,
     onSkillCenterSearchChange: shell.setSkillCenterSearch,
+    onSkillCenterFilterChange: shell.setSkillCenterFilter,
     onSkillCenterSectionChange: shell.setSkillCenterSection,
     onSkillCenterGitRepoUrlChange: shell.setSkillCenterGitRepoUrl,
     onSkillCenterGitRefChange: shell.setSkillCenterGitRef,
     onSelectSkill: shell.handleSelectSkill,
+    onClearSkillSelection: shell.handleClearSkillSelection,
     onSelectDiscoveredSkill: shell.handleSelectDiscoveredSkill,
     onImportDiscoveredSkill: shell.handleImportDiscoveredSkill,
     onSelectWorkspaceSkillTarget: shell.handleSelectWorkspaceSkillTarget,

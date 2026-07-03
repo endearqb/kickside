@@ -112,6 +112,7 @@ export type ControlCenterViewProps = {
   activeRuntimePanel: RuntimePanelId;
   stepCompletion: StepCompletion;
   actionBusy: boolean;
+  actionError: string | null;
   diagnosticsBusy: boolean;
   kimiDoctorBusy: boolean;
   contextMenuBusy: boolean;
@@ -252,10 +253,12 @@ export type ControlCenterViewProps = {
   onResetBridgeBindingToDefaultWorkDir: (bindingId: string) => Promise<void>;
   onResolveBridgeApproval: (approvalId: string, status: string) => Promise<void>;
   onSkillCenterSearchChange: (value: string) => void;
+  onSkillCenterFilterChange: (value: SkillCenterFilter) => void;
   onSkillCenterSectionChange: (value: SkillCenterSectionId) => void;
   onSkillCenterGitRepoUrlChange: (value: string) => void;
   onSkillCenterGitRefChange: (value: string) => void;
   onSelectSkill: (skillId: string) => Promise<void>;
+  onClearSkillSelection: () => void;
   onOpenTask: (
     task: ControlCenterTaskId,
     payload?: ControlCenterTaskPayload | null,
@@ -304,42 +307,36 @@ export type ControlCenterViewProps = {
 export const controlSections: Array<{
   id: ControlSectionId;
   label: string;
-  description: string;
   group: "core" | "setup";
   icon: ReactNode;
 }> = [
   {
     id: "onboarding",
     label: "小助手设置",
-    description: "安装、认证、右键菜单、默认工作目录和运行诊断。",
     group: "setup",
     icon: <SlidersHorizontal size={15} />,
   },
   {
     id: "bridge_center",
     label: "外部 IM 通道",
-    description: "Telegram、飞书、微信、会话和审批。",
     group: "setup",
     icon: <Play size={15} />,
   },
   {
     id: "skill_center",
-    label: "Skill 投影",
-    description: "已安装 Skill、投影状态和工作区 target。",
+    label: "Skill 中心",
     group: "core",
     icon: <Sparkles size={15} />,
   },
   {
     id: "workspace_hub",
     label: "WorkspaceHub",
-    description: "Harness 模板、已注册工作区和创建预览。",
     group: "core",
     icon: <Boxes size={15} />,
   },
   {
     id: "schedule",
     label: "调度",
-    description: "工作区心跳、计划任务和运行记录。",
     group: "core",
     icon: <CalendarClock size={15} />,
   },

@@ -76,7 +76,8 @@ export type ScheduleOutcome =
   | "executed"
   | "failed"
   | "skipped"
-  | "blocked_by_permission";
+  | "blocked_by_permission"
+  | "schedule_error";
 
 export type ScheduleCadence =
   | { kind: "daily"; at: string }

@@ -137,7 +137,7 @@ where
     if !(200..300).contains(&status) {
         bail!(
             "kimi-code API returned HTTP {status}: {}",
-            truncate_for_error(&body, 240)
+            truncate_for_error(body, 240)
         );
     }
 

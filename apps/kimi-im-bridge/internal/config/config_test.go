@@ -26,8 +26,8 @@ func TestLoadOrCreateSettingsWritesDefaults(t *testing.T) {
 	if settings.FeishuReplyRenderer != FeishuReplyRendererStreaming {
 		t.Fatalf("expected feishuReplyRenderer to default streaming, got %q", settings.FeishuReplyRenderer)
 	}
-	if !settings.FeishuAutoApprove {
-		t.Fatalf("expected feishuAutoApprove to default true")
+	if settings.FeishuAutoApprove {
+		t.Fatalf("expected feishuAutoApprove to default false")
 	}
 	if len(settings.WorkDirPresets) != 0 {
 		t.Fatalf("expected workDirPresets to default empty, got %d", len(settings.WorkDirPresets))
@@ -126,7 +126,7 @@ func TestLoadOrCreateSettingsDefaultsWeixinReplyMode(t *testing.T) {
 	}
 }
 
-func TestLoadOrCreateSettingsBackfillsMissingFeishuAutoApprove(t *testing.T) {
+func TestLoadOrCreateSettingsBackfillsMissingFeishuAutoApproveToFalse(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -141,8 +141,28 @@ func TestLoadOrCreateSettingsBackfillsMissingFeishuAutoApprove(t *testing.T) {
 		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
 	}
 
+	if settings.FeishuAutoApprove {
+		t.Fatalf("expected missing feishuAutoApprove to default false")
+	}
+}
+
+func TestLoadOrCreateSettingsPreservesFeishuAutoApproveTrue(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bridge_settings.json")
+	raw := []byte(`{"enabled":true,"adminPort":60110,"autoStart":false,"feishuAutoApprove":true,"channels":[{"platform":"feishu","enabled":true}]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("failed to seed settings file: %v", err)
+	}
+
+	settings, err := LoadOrCreateSettings(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateSettings returned error: %v", err)
+	}
+
 	if !settings.FeishuAutoApprove {
-		t.Fatalf("expected missing feishuAutoApprove to default true")
+		t.Fatalf("expected explicit feishuAutoApprove=true to be preserved")
 	}
 }
 

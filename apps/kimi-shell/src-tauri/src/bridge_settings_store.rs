@@ -464,10 +464,7 @@ fn apply_onboarding_input(
                     telegram: None,
                     weixin: None,
                 });
-            let existing = connector_secrets
-                .feishu
-                .clone()
-                .unwrap_or_else(BridgeFeishuSecrets::default);
+            let existing = connector_secrets.feishu.clone().unwrap_or_default();
             connector_secrets.feishu = Some(BridgeFeishuSecrets {
                 app_id: next_app_id.or(existing.app_id),
                 app_secret: next_app_secret.or(existing.app_secret),
@@ -522,7 +519,50 @@ where
             .with_context(|| format!("failed to create parent directory: {}", parent.display()))?;
     }
     let raw = serde_json::to_string_pretty(value).context("failed to serialize json")?;
-    fs::write(path, raw).with_context(|| format!("failed to write json file: {}", path.display()))
+    write_atomic(path, raw.as_bytes())
+        .with_context(|| format!("failed to write json file: {}", path.display()))
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes)
+        .with_context(|| format!("failed to write tmp json file: {}", tmp.display()))?;
+    replace_file(&tmp, path)
+        .with_context(|| format!("failed to replace json file: {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(tmp: &Path, target: &Path) -> anyhow::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        },
+    };
+
+    let tmp_wide: Vec<u16> = tmp.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target_wide: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        MoveFileExW(
+            PCWSTR(tmp_wide.as_ptr()),
+            PCWSTR(target_wide.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .with_context(|| format!("failed to move {} to {}", tmp.display(), target.display()))
+}
+
+#[cfg(not(windows))]
+fn replace_file(tmp: &Path, target: &Path) -> anyhow::Result<()> {
+    fs::rename(tmp, target).with_context(|| {
+        format!(
+            "failed to rename tmp json file {} to {}",
+            tmp.display(),
+            target.display()
+        )
+    })
 }
 
 fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
@@ -534,7 +574,7 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
             .unwrap_or(DEFAULT_BRIDGE_ADMIN_PORT),
         skills_mode: BridgeSkillsMode::Disabled,
         feishu_reply_renderer: FeishuReplyRenderer::Streaming,
-        feishu_auto_approve: true,
+        feishu_auto_approve: false,
         reset_binding_session_on_bridge_start: true,
         feishu_reply_cards: None,
         default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
@@ -846,7 +886,7 @@ fn default_connector(platform: BridgePlatform, index: usize) -> BridgeConnectorC
         label: default_connector_label(platform, index),
         default_work_dir: None,
         reset_binding_session_on_start: None,
-        feishu_auto_approve: (platform == BridgePlatform::Feishu).then_some(true),
+        feishu_auto_approve: (platform == BridgePlatform::Feishu).then_some(false),
         feishu_reply_renderer: (platform == BridgePlatform::Feishu)
             .then_some(FeishuReplyRenderer::Streaming),
         weixin_reply_mode: (platform == BridgePlatform::Weixin)
@@ -943,7 +983,7 @@ mod tests {
             bridge_settings.feishu_reply_renderer,
             FeishuReplyRenderer::Interactive
         );
-        assert!(bridge_settings.feishu_auto_approve);
+        assert!(!bridge_settings.feishu_auto_approve);
         assert!(bridge_settings.reset_binding_session_on_bridge_start);
         assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
@@ -1010,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn load_or_default_backfills_missing_feishu_auto_approve_to_true() {
+    fn load_or_default_backfills_missing_feishu_auto_approve_to_false() {
         let temp = TempDirGuard::new("inherit-feishu-auto-approve");
         let settings_path = temp.path.join("settings.json");
         let bridge_settings_path = temp.path.join("bridge_settings.json");
@@ -1030,7 +1070,7 @@ mod tests {
         let (_, bridge_settings) =
             load_or_default_files(&settings_path, &bridge_settings_path).expect("bridge settings");
 
-        assert!(bridge_settings.feishu_auto_approve);
+        assert!(!bridge_settings.feishu_auto_approve);
         assert!(bridge_settings.reset_binding_session_on_bridge_start);
     }
 

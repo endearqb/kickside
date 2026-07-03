@@ -210,7 +210,7 @@ function createDefaultBridgeConnector(
     label,
     defaultWorkDir: undefined,
     resetBindingSessionOnStart: true,
-    feishuAutoApprove: platform === "feishu" ? true : undefined,
+    feishuAutoApprove: platform === "feishu" ? false : undefined,
     feishuReplyRenderer: platform === "feishu" ? "streaming" : undefined,
     weixinReplyMode: platform === "weixin" ? "status_only" : undefined,
   };
@@ -334,7 +334,7 @@ function createDefaultBridgeSettings(): BridgeSettings {
     autoStart: false,
     adminPort: 60110,
     feishuReplyRenderer: "streaming",
-    feishuAutoApprove: true,
+    feishuAutoApprove: false,
     resetBindingSessionOnBridgeStart: true,
     defaultWorkDir: "",
     workDirPresets: [],

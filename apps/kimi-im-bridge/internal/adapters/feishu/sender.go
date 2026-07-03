@@ -172,9 +172,6 @@ func buildReplyCardContent(text string) (string, error) {
 
 func (s *Service) sendRecordedMessage(ctx context.Context, request SendMessageRequest, deliveryKey string, sourceMessageID string) error {
 	renderer := strings.TrimSpace(request.MessageType)
-	if renderer == "interactive" {
-		renderer = "interactive"
-	}
 	return s.sendRecordedRequest(ctx, request, deliveryKey, sourceMessageID, strings.TrimSpace(request.MessageType), renderer, nil)
 }
 

@@ -1198,6 +1198,7 @@ fn install_skill_from_source(
     Ok(installed)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn refresh_existing_bundled_skill(
     app: &AppHandle,
     registry: &mut [InstalledSkill],
@@ -2167,7 +2168,7 @@ fn extract_zip_archive(zip_path: &Path, target_dir: &Path) -> anyhow::Result<()>
                 zip_path.display()
             )
         })?;
-        let Some(relative_path) = entry.enclosed_name().map(PathBuf::from) else {
+        let Some(relative_path) = entry.enclosed_name() else {
             continue;
         };
         let output_path = target_dir.join(relative_path);

@@ -117,7 +117,7 @@ fn rotate_file_if_needed(path: &PathBuf, max_bytes: u64, max_files: usize) -> an
     Ok(())
 }
 
-fn rotated_path(path: &PathBuf, index: usize) -> PathBuf {
+fn rotated_path(path: &Path, index: usize) -> PathBuf {
     PathBuf::from(format!("{}.{}", path.display(), index))
 }
 

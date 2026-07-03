@@ -49,6 +49,8 @@ function formatOutcome(value?: ScheduleOutcome | null) {
       return "已跳过";
     case "blocked_by_permission":
       return "权限阻断";
+    case "schedule_error":
+      return "调度异常";
     case "planned":
       return "已规划";
     case "executing":
@@ -61,7 +63,7 @@ function formatOutcome(value?: ScheduleOutcome | null) {
 function outcomeTone(value?: ScheduleOutcome | null): ControlCenterStatusTone {
   if (value === "executed") return "success";
   if (value === "blocked_by_permission" || value === "skipped") return "warning";
-  if (value === "failed") return "danger";
+  if (value === "failed" || value === "schedule_error") return "danger";
   if (value === "executing" || value === "planned") return "accent";
   return "neutral";
 }

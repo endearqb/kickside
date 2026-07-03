@@ -22,7 +22,7 @@ pub fn resolve_auth_mode_snapshot(
     login_verified_fallback: bool,
 ) -> Result<AuthModeSnapshot, String> {
     let login_health = read_runtime_login_health(app, login_verified_fallback)?;
-    Ok(evaluate_auth_mode_from_config(app, login_health.state)?)
+    evaluate_auth_mode_from_config(app, login_health.state)
 }
 
 pub fn evaluate_auth_mode(
@@ -288,10 +288,8 @@ fn evaluate_auth_mode_from_config(
 }
 
 fn normalize_string(value: &str) -> Option<String> {
-    Some(value)
-        .map(str::trim)
-        .map(ToString::to_string)
-        .filter(|item| !item.is_empty())
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 #[cfg(test)]

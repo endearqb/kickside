@@ -921,7 +921,50 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()> {
         })?;
     }
     let raw = serde_json::to_string_pretty(value).context("failed to serialize json")?;
-    fs::write(path, raw).with_context(|| format!("failed to write json file: {}", path.display()))
+    write_atomic(path, raw.as_bytes())
+        .with_context(|| format!("failed to write json file: {}", path.display()))
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes)
+        .with_context(|| format!("failed to write tmp json file: {}", tmp.display()))?;
+    replace_file(&tmp, path)
+        .with_context(|| format!("failed to replace json file: {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file(tmp: &Path, target: &Path) -> anyhow::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::{
+        core::PCWSTR,
+        Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        },
+    };
+
+    let tmp_wide: Vec<u16> = tmp.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target_wide: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    unsafe {
+        MoveFileExW(
+            PCWSTR(tmp_wide.as_ptr()),
+            PCWSTR(target_wide.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    }
+    .with_context(|| format!("failed to move {} to {}", tmp.display(), target.display()))
+}
+
+#[cfg(not(windows))]
+fn replace_file(tmp: &Path, target: &Path) -> anyhow::Result<()> {
+    fs::rename(tmp, target).with_context(|| {
+        format!(
+            "failed to rename tmp json file {} to {}",
+            tmp.display(),
+            target.display()
+        )
+    })
 }
 
 #[cfg(test)]

@@ -159,9 +159,11 @@
 - Steps:
   - 在私聊、群聊显式召唤、线程中分别发送消息。
   - 触发 approval 并完成一次 resolve。
+  - 构造一个长时间运行或阻塞中的 turn；在该 turn 未完成时，从飞书 approval 卡片点击 Approve / Reject。
 - Expected:
   - 三类入口都能正确路由。
   - approval 结果能更新原卡片或回退文本状态。
+  - turn 阻塞期间，CardAction 仍能在飞书超时窗口内返回结果，不被 websocket 读循环卡住。
 - Evidence:
   - 飞书会话截图。
   - Control Center approvals 截图。

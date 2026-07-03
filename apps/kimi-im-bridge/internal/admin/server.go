@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -247,7 +248,8 @@ func authorize(writer http.ResponseWriter, request *http.Request, expectedToken 
 		writeAdminError(writer, request, http.StatusUnauthorized, "missing_admin_token", "admin token is not configured", nil)
 		return false
 	}
-	if request.Header.Get("X-Bridge-Admin-Token") != expectedToken {
+	actualToken := request.Header.Get("X-Bridge-Admin-Token")
+	if subtle.ConstantTimeCompare([]byte(actualToken), []byte(expectedToken)) != 1 {
 		writeAdminError(writer, request, http.StatusUnauthorized, "unauthorized", "invalid admin token", nil)
 		return false
 	}

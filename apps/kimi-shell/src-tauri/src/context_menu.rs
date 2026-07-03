@@ -173,7 +173,7 @@ fn truncate_for_status_message(value: &str, max_chars: usize) -> String {
 pub fn status(_app: &AppHandle) -> ContextMenuStatus {
     #[cfg(target_os = "windows")]
     {
-        return match inspect_windows_context_menu_state() {
+        match inspect_windows_context_menu_state() {
             Ok(report) => report,
             Err(error) => ContextMenuStatus {
                 supported: true,
@@ -182,7 +182,7 @@ pub fn status(_app: &AppHandle) -> ContextMenuStatus {
                     "无法读取 Explorer 右键菜单状态，请点击“启用”重写配置。详情：{error}"
                 )),
             },
-        };
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -248,7 +248,7 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             write_cascading_menu(&hkcu, keyset, &expected)?;
         }
 
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -283,7 +283,7 @@ pub fn disable(_app: &AppHandle) -> Result<(), String> {
         ] {
             delete_key_if_exists(&hkcu, subkey)?;
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]

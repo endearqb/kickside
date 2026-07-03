@@ -753,7 +753,7 @@ fn resolve_bridge_admin_port(
 
 fn probe_local_port(port: u16) -> Result<(), String> {
     TcpListener::bind(("127.0.0.1", port))
-        .map(|listener| drop(listener))
+        .map(drop)
         .map_err(|error| {
             format!(
                 "requested admin port {port} is unavailable: {}",
@@ -988,7 +988,7 @@ fn development_binary_path() -> PathBuf {
 fn binary_name() -> OsString {
     #[cfg(windows)]
     {
-        return OsString::from("kimi-im-bridge.exe");
+        OsString::from("kimi-im-bridge.exe")
     }
 
     #[cfg(not(windows))]
@@ -1669,7 +1669,7 @@ fn push_bridge_redaction_value(values: &mut Vec<String>, value: Option<&str>) {
 fn redact_bridge_log_line(line: &str, secrets: &[String]) -> String {
     let mut redacted = line.to_string();
     let mut ordered = secrets.iter().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| right.len().cmp(&left.len()));
+    ordered.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
     for secret in ordered {
         redacted = redacted.replace(secret, "[REDACTED]");
     }

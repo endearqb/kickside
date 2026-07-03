@@ -31,6 +31,8 @@ const source = readUtf8(resolve(root, "third_party/kimi-cli-web/SOURCE.md"));
 const notices = readUtf8(resolve(root, "docs/third-party-notices.md"));
 const license = readUtf8(resolve(root, "third_party/kimi-cli-web/LICENSE"));
 const maintenance = readUtf8(resolve(root, "docs/kimi-web-maintenance.md"));
+const enhancedWebScript = readUtf8(resolve(root, "public/enhanced-kimi-web/enhanced-web.js"));
+const enhancedWebIndex = readUtf8(resolve(root, "public/enhanced-kimi-web/index.html"));
 
 const commit = manifest.upstreamCommit;
 if (!commit || !source.includes(commit)) {
@@ -62,6 +64,20 @@ if (!notices.includes("不代表 MoonshotAI 官方背书")) {
 if (!maintenance.includes("当前运行时仍使用 workspace proxy 同源注入")) {
   console.error("Maintenance guide must describe the current injection-based runtime boundary.");
   process.exit(1);
+}
+
+for (const [label, body] of [
+  ["enhanced-web.js", enhancedWebScript],
+  ["index.html", enhancedWebIndex],
+]) {
+  if (!body.includes('nextUrl.protocol !== "http:"') || !body.includes('nextUrl.protocol !== "https:"')) {
+    console.error(`${label} must restrict workspace URLs to http/https.`);
+    process.exit(1);
+  }
+  if (!body.includes("event.source === frame?.contentWindow") || !body.includes("event.origin === targetOrigin()")) {
+    console.error(`${label} must validate relay source and upstream origin.`);
+    process.exit(1);
+  }
 }
 
 console.log(`Enhanced Web compliance check passed (${commit}).`);

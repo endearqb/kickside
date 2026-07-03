@@ -34,7 +34,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 ## 运行环境
 
 - Node.js 18+（建议 20+）
-- pnpm 8+
+- pnpm 10.34.4
 - Rust stable
 - Windows WebView2 Runtime（Tauri 桌面运行时依赖）
 

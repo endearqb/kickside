@@ -39,9 +39,11 @@ type fakeRuntime struct {
 	events          []TurnEvent
 	ensuredSession  RuntimeSession
 	ensureCallCount int
+	runCallCount    int
 }
 
 func (f *fakeRuntime) RunTurn(_ context.Context, _ RuntimeTarget, _ TurnRequest, sink TurnEventSink) (TurnResult, error) {
+	f.runCallCount++
 	for _, event := range f.events {
 		if err := sink(event); err != nil {
 			return TurnResult{}, err
@@ -69,8 +71,9 @@ func (f *fakeApprovals) CreateApprovalTicket(_ context.Context, ticket domain.Ap
 }
 
 type fakeTurns struct {
-	turns    []domain.BridgeTurn
-	sessions []domain.BridgeSession
+	turns     []domain.BridgeTurn
+	sessions  []domain.BridgeSession
+	createErr error
 }
 
 func (f *fakeTurns) UpsertSession(_ context.Context, session domain.BridgeSession) error {
@@ -79,6 +82,9 @@ func (f *fakeTurns) UpsertSession(_ context.Context, session domain.BridgeSessio
 }
 
 func (f *fakeTurns) CreateTurn(_ context.Context, turn domain.BridgeTurn) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
 	f.turns = append(f.turns, turn)
 	return nil
 }
@@ -178,6 +184,39 @@ func TestOrchestratorPersistsSessionAutoApproveFromHandleOptions(t *testing.T) {
 	}
 	if !turns.sessions[len(turns.sessions)-1].AutoApprove {
 		t.Fatalf("expected AutoApprove=true to be persisted, got %+v", turns.sessions[len(turns.sessions)-1])
+	}
+}
+
+func TestOrchestratorSkipsDuplicateInbound(t *testing.T) {
+	t.Parallel()
+
+	turns := &fakeTurns{createErr: domain.ErrDuplicateInbound}
+	runtime := &fakeRuntime{}
+	orchestrator := NewOrchestrator(&fakeBindings{
+		binding: &domain.SessionBinding{
+			BindingID:     "binding-1",
+			KimiSessionID: "session-1",
+			WorkDir:       "D:/workspace",
+		},
+	}, runtime, &fakeApprovals{}, turns, &fakeEventStore{})
+
+	result, err := orchestrator.HandleInbound(context.Background(), adapterkit.NormalizedInbound{
+		MessageID:   "msg-1",
+		ConnectorID: "feishu-default",
+		Platform:    "feishu",
+		ChatID:      "chat-1",
+		Text:        "ping",
+		ReceivedAt:  "2026-03-16T00:00:00Z",
+		BindingKey:  domain.BindingKey{ConnectorID: "feishu-default", Platform: "feishu", ChatID: "chat-1"},
+	}, HandleOptions{DefaultWorkDir: "D:/workspace"}, nil)
+	if err != nil {
+		t.Fatalf("HandleInbound returned error: %v", err)
+	}
+	if !result.Duplicate {
+		t.Fatalf("expected duplicate result, got %+v", result)
+	}
+	if runtime.runCallCount != 0 {
+		t.Fatalf("expected duplicate inbound to skip runtime, got %d calls", runtime.runCallCount)
 	}
 }
 

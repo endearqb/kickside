@@ -50,7 +50,7 @@ pub enum WeixinReplyMode {
 }
 
 fn default_feishu_auto_approve() -> bool {
-    true
+    false
 }
 
 fn default_reset_binding_session_on_bridge_start() -> bool {
@@ -1528,33 +1528,23 @@ pub enum InstallTaskGroup {
     Upgrade,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallSource {
+    #[default]
     Official,
     Mirror,
 }
 
-impl Default for InstallSource {
-    fn default() -> Self {
-        Self::Official
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallMirrorPreset {
+    #[default]
     Mixed,
     Tuna,
     Ustc,
     Aliyun,
     Custom,
-}
-
-impl Default for InstallMirrorPreset {
-    fn default() -> Self {
-        Self::Mixed
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1776,6 +1766,7 @@ impl Default for InstallSessionSnapshot {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum InstallSessionEvent {

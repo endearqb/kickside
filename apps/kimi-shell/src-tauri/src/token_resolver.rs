@@ -81,12 +81,24 @@ pub fn build_workspace_url(origin: &str, token: Option<&str>) -> String {
     let origin = origin.trim_end_matches('/');
     match token.map(str::trim).filter(|value| !value.is_empty()) {
         Some(token) => {
-            let encoded =
-                url::form_urlencoded::byte_serialize(token.as_bytes()).collect::<String>();
+            let encoded = percent_encode_fragment_value(token);
             format!("{origin}/#token={encoded}")
         }
         None => origin.to_string(),
     }
+}
+
+fn percent_encode_fragment_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
 }
 
 pub fn redact_token(token: &str) -> String {
@@ -147,7 +159,7 @@ mod tests {
     #[test]
     fn workspace_url_includes_encoded_token_fragment() {
         let url = build_workspace_url("http://127.0.0.1:55000/", Some("tok en/#"));
-        assert_eq!(url, "http://127.0.0.1:55000/#token=tok+en%2F%23");
+        assert_eq!(url, "http://127.0.0.1:55000/#token=tok%20en%2F%23");
     }
 
     #[test]

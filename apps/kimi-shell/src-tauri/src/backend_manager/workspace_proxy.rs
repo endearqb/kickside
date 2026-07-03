@@ -1,6 +1,8 @@
 use super::workspace_injection::inject_workspace_scripts;
 use super::*;
 
+type UpstreamResponseHead = (u16, Vec<(String, String)>, Vec<u8>);
+
 pub(super) fn start_workspace_proxy(
     app: &AppHandle,
     generation: u64,
@@ -387,10 +389,7 @@ pub(super) fn is_websocket_upgrade_request(request: &tiny_http::Request) -> bool
         }
     }
 
-    (has_upgrade_websocket && has_connection_upgrade)
-        || (has_upgrade_websocket && has_websocket_key)
-        || (has_connection_upgrade && has_websocket_key)
-        || has_websocket_key
+    has_websocket_key || (has_upgrade_websocket && has_connection_upgrade)
 }
 
 pub(super) fn extract_session_id_from_stream_path(raw_url: &str) -> Option<String> {
@@ -438,7 +437,7 @@ pub(super) fn build_upstream_websocket_request(
 
 pub(super) fn read_upstream_response_head(
     stream: &mut TcpStream,
-) -> anyhow::Result<(u16, Vec<(String, String)>, Vec<u8>)> {
+) -> anyhow::Result<UpstreamResponseHead> {
     let mut buffer = Vec::with_capacity(8 * 1024);
     let mut chunk = [0u8; 4096];
 
@@ -587,11 +586,7 @@ pub(super) fn tunnel_websocket_streams(
     let mut upstream_reader = upstream_stream;
     let mut upstream_to_client_total = 0u64;
     let mut buffer = [0u8; 8192];
-    loop {
-        let read = match upstream_reader.read(&mut buffer) {
-            Ok(read) => read,
-            Err(_) => break,
-        };
+    while let Ok(read) = upstream_reader.read(&mut buffer) {
         if read == 0 {
             break;
         }

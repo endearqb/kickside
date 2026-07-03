@@ -1245,11 +1245,10 @@ fn workspace_name_stem(files: &[PathBuf]) -> String {
 fn sanitize_name_component(raw: &str, max_len: usize) -> String {
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
-        let sanitized = if ch.is_ascii_control() {
-            '_'
-        } else if matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
-            '_'
-        } else if ch.is_whitespace() {
+        let sanitized = if ch.is_ascii_control()
+            || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+            || ch.is_whitespace()
+        {
             '_'
         } else {
             ch

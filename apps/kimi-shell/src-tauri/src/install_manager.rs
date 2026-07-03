@@ -376,7 +376,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 false,
                 false,
                 vec![step_kimi_official()],
-                vec![step_kimi_mirror(&mirror_config)],
+                vec![step_kimi_mirror(mirror_config)],
                 None,
             ),
             task(
@@ -388,7 +388,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 false,
                 false,
                 vec![step_uv_official()],
-                vec![step_uv_mirror(&mirror_config)],
+                vec![step_uv_mirror(mirror_config)],
                 None,
             ),
             task(
@@ -400,7 +400,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 false,
                 false,
                 vec![step_python_official()],
-                vec![step_python_mirror(&mirror_config)],
+                vec![step_python_mirror(mirror_config)],
                 None,
             ),
             task(
@@ -412,7 +412,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 false,
                 false,
                 vec![step_kimi_official()],
-                vec![step_kimi_mirror(&mirror_config)],
+                vec![step_kimi_mirror(mirror_config)],
                 None,
             ),
             task(
@@ -424,7 +424,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 false,
                 false,
                 vec![step_upgrade_official()],
-                vec![step_upgrade_mirror(&mirror_config)],
+                vec![step_upgrade_mirror(mirror_config)],
                 None,
             ),
             task(
@@ -448,7 +448,7 @@ fn build_install_flow_catalog_with_mirror_config(
                 true,
                 true,
                 vec![step_git_official()],
-                vec![step_git_mirror(&mirror_config)],
+                vec![step_git_mirror(mirror_config)],
                 Some("Git for Windows uses an external elevated installer.".to_string()),
             ),
             task(
@@ -771,21 +771,18 @@ fn check_python_installer_health(
     url: &str,
 ) -> InstallMirrorHealthEntry {
     let checked_at = now_rfc3339();
-    match client.head(url).send() {
-        Ok(response) => {
-            let status_code = Some(response.status().as_u16());
-            if response.status().is_success() || response.status().is_redirection() {
-                return InstallMirrorHealthEntry {
-                    category: InstallMirrorHealthCategory::PythonInstaller,
-                    url: url.to_string(),
-                    healthy: true,
-                    status_code,
-                    detail: "HEAD succeeded".to_string(),
-                    checked_at,
-                };
-            }
+    if let Ok(response) = client.head(url).send() {
+        let status_code = Some(response.status().as_u16());
+        if response.status().is_success() || response.status().is_redirection() {
+            return InstallMirrorHealthEntry {
+                category: InstallMirrorHealthCategory::PythonInstaller,
+                url: url.to_string(),
+                healthy: true,
+                status_code,
+                detail: "HEAD succeeded".to_string(),
+                checked_at,
+            };
         }
-        Err(_) => {}
     }
 
     match client.get(url).send() {
@@ -1254,6 +1251,7 @@ fn stream_output<R>(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn task(
     id: InstallTaskId,
     title: &str,

@@ -297,6 +297,7 @@ pub fn unix_time_millis() -> u64 {
 fn try_acquire_hotkey_lock(lock_path: PathBuf) -> anyhow::Result<(bool, Option<File>)> {
     let lock_file = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)

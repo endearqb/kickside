@@ -288,11 +288,11 @@ fn classify_reqwest_transport_failure(error: &reqwest::Error) -> TransportFailur
     let lower = message.to_ascii_lowercase();
     let kind = if error.is_timeout() || lower.contains("timed out") {
         TransportFailureKind::Timeout
-    } else if error.is_connect()
-        && (lower.contains("dns") || lower.contains("name or service not known"))
+    } else if (error.is_connect()
+        && (lower.contains("dns") || lower.contains("name or service not known")))
+        || lower.contains("dns")
+        || lower.contains("no such host")
     {
-        TransportFailureKind::Dns
-    } else if lower.contains("dns") || lower.contains("no such host") {
         TransportFailureKind::Dns
     } else if lower.contains("tls") || lower.contains("certificate") || lower.contains("handshake")
     {

@@ -230,7 +230,17 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         ),
     );
 
-    let base_port = port_manager::choose_start_port();
+    let base_port = match port_manager::choose_start_port() {
+        Ok(port) => port,
+        Err(error) => {
+            set_crashed(
+                app,
+                generation,
+                format!("No available kimi-code port: {error:#}"),
+            );
+            return Ok(());
+        }
+    };
     let log_path = log_manager::backend_log_path(app)?;
     let command_args = build_kimi_server_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
@@ -255,7 +265,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     log_manager::append_line(app, "KIMI_CODE_NO_AUTO_UPDATE=1");
 
     let spawn_started = Instant::now();
-    let child = spawn_backend_process(
+    let mut child = spawn_backend_process(
         &kimi_path,
         &work_dir,
         &command_args,
@@ -284,7 +294,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             return Ok(());
         }
 
-        runtime.child = Some(child);
+        runtime.child = None;
         runtime.state = BackendState::Starting;
         runtime.base_port = Some(base_port);
         runtime.active_port = None;
@@ -297,32 +307,39 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     let _ = skill_center::track_workspace_root(app, &work_dir);
 
     let health_started = Instant::now();
-    let Some(active_port) = port_manager::wait_for_ready_port(base_port) else {
-        log_manager::append_line(
-            app,
-            format!(
-                "startup_timing health_wait_ms={} total_ms={}",
-                health_started.elapsed().as_millis(),
-                startup_started.elapsed().as_millis()
-            ),
-        );
-        stop_child_for_generation(app, generation);
-        set_crashed(
-            app,
-            generation,
-            format!(
-                "Startup timed out. No kimi-code health response on port {} within {} seconds.",
-                base_port,
-                port_manager::STARTUP_TIMEOUT_SECS
-            ),
-        );
-        return Ok(());
+    let active_port = match port_manager::wait_for_ready_port(base_port, &mut child) {
+        Ok(port) => port,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "startup_timing health_wait_ms={} total_ms={}",
+                    health_started.elapsed().as_millis(),
+                    startup_started.elapsed().as_millis()
+                ),
+            );
+            terminate_child(&mut child);
+            set_crashed(app, generation, format!("Startup failed: {error:#}"));
+            return Ok(());
+        }
     };
     let health_wait_ms = health_started.elapsed().as_millis();
     log_manager::append_line(
         app,
         format!("startup_timing health_wait_ms={health_wait_ms}"),
     );
+    {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        if runtime.generation != generation {
+            terminate_child(&mut child);
+            return Ok(());
+        }
+        runtime.child = Some(child);
+    }
 
     let token_started = Instant::now();
     let token = match token_resolver::resolve_server_token_with_retry() {

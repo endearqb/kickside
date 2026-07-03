@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -73,6 +74,39 @@ func TestChannelBindingUniqueIndexHandlesNullFields(t *testing.T) {
 	second.KimiSessionID = "session-2"
 	if err := store.CreateBinding(ctx, second); err == nil {
 		t.Fatalf("expected unique constraint error for duplicate nullable binding key")
+	}
+}
+
+func TestCreateTurnRejectsDuplicateInboundMessage(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	base := domain.BridgeTurn{
+		TurnID:           "turn-1",
+		ConnectorID:      "feishu-default",
+		KimiSessionID:    "session-1",
+		Platform:         "feishu",
+		ChatID:           "chat-1",
+		InboundMessageID: "message-1",
+		PromptText:       "ping",
+		Status:           "accepted",
+		ProviderName:     "kimi",
+		StartedAt:        "2026-03-16T00:00:00Z",
+		CreatedAt:        "2026-03-16T00:00:00Z",
+		UpdatedAt:        "2026-03-16T00:00:00Z",
+	}
+	if err := store.CreateTurn(ctx, base); err != nil {
+		t.Fatalf("CreateTurn returned error: %v", err)
+	}
+	base.TurnID = "turn-2"
+	if err := store.CreateTurn(ctx, base); !errors.Is(err, domain.ErrDuplicateInbound) {
+		t.Fatalf("expected ErrDuplicateInbound, got %v", err)
 	}
 }
 

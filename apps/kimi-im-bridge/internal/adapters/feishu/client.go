@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"net/url"
@@ -27,6 +28,20 @@ import (
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/reliability"
 )
+
+const (
+	feishuDispatchShardCount = 32
+	feishuFragmentTTL        = 2 * time.Minute
+)
+
+type dispatchShards struct {
+	locks []sync.Mutex
+}
+
+type combinedPayload struct {
+	createdAt time.Time
+	parts     [][]byte
+}
 
 type ClientOptions struct {
 	HTTPClient *http.Client
@@ -319,7 +334,8 @@ func (c *Client) Run(ctx context.Context, handler EventHandler) error {
 	}()
 	go c.pingLoop(ctx, conn, writeMu, serviceID, pingInterval)
 
-	combined := map[string][][]byte{}
+	combined := map[string]*combinedPayload{}
+	shards := newDispatchShards(feishuDispatchShardCount)
 	for {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
@@ -341,7 +357,7 @@ func (c *Client) Run(ctx context.Context, handler EventHandler) error {
 		case larkws.FrameTypeControl:
 			c.handleControlFrame(frame, &pingInterval)
 		case larkws.FrameTypeData:
-			if err := c.handleDataFrame(ctx, conn, writeMu, dispatch, combined, frame); err != nil {
+			if err := c.handleDataFrame(ctx, conn, writeMu, dispatch, shards, combined, frame); err != nil {
 				return err
 			}
 		}
@@ -450,6 +466,12 @@ func (c *Client) logStageFailure(stage string, err error) {
 	)
 }
 
+func (c *Client) logf(format string, args ...any) {
+	if c.logger != nil {
+		c.logger.Printf(format, args...)
+	}
+}
+
 func (c *Client) pingLoop(ctx context.Context, conn *socket.Conn, writeMu *sync.Mutex, serviceID int32, interval time.Duration) {
 	if interval <= 0 {
 		interval = 2 * time.Minute
@@ -498,7 +520,8 @@ func (c *Client) handleDataFrame(
 	conn *socket.Conn,
 	writeMu *sync.Mutex,
 	dispatch *dispatcher.EventDispatcher,
-	combined map[string][][]byte,
+	shards *dispatchShards,
+	combined map[string]*combinedPayload,
 	frame *larkws.Frame,
 ) error {
 	headers := larkws.Headers(frame.Headers)
@@ -509,34 +532,60 @@ func (c *Client) handleDataFrame(
 
 	payload := frame.Payload
 	if sum > 1 {
-		payload = combinePayload(combined, messageID, sum, seq, payload)
+		c.pruneCombinedPayloads(combined, time.Now())
+		payload = combinePayload(combined, messageID, sum, seq, payload, c.logger)
 		if payload == nil {
 			return nil
 		}
 	}
 
 	startedAt := time.Now()
-	var responseData any
-	var err error
 	switch messageType {
-	case larkws.MessageTypeEvent, larkws.MessageTypeCard:
-		responseData, err = dispatch.Do(ctx, payload)
+	case larkws.MessageTypeEvent:
+		if err := c.writeDataResponse(conn, writeMu, headers, frame, startedAt, http.StatusOK, nil); err != nil {
+			return err
+		}
+		key := dispatchKey(payload, messageID)
+		shards.Go(ctx, key, func() {
+			if _, err := dispatch.Do(ctx, payload); err != nil {
+				c.logf("feishu async event dispatch failed key=%s err=%q", key, err.Error())
+			}
+		})
+		return nil
+	case larkws.MessageTypeCard:
+		responseData, err := dispatch.Do(ctx, payload)
+		status := http.StatusOK
+		if err != nil {
+			var notFound *dispatcher.NotFoundEventHandlerErr
+			if !errors.As(err, &notFound) {
+				status = http.StatusInternalServerError
+			}
+		}
+		if writeErr := c.writeDataResponse(conn, writeMu, headers, frame, startedAt, status, responseData); writeErr != nil {
+			return writeErr
+		}
+		return err
 	default:
 		return nil
 	}
+}
 
-	response := larkws.NewResponseByCode(http.StatusOK)
-	if err != nil {
-		var notFound *dispatcher.NotFoundEventHandlerErr
-		if !errors.As(err, &notFound) {
-			response = larkws.NewResponseByCode(http.StatusInternalServerError)
-		}
-	}
-	if err == nil && responseData != nil {
-		response.Data, err = json.Marshal(responseData)
+func (c *Client) writeDataResponse(
+	conn *socket.Conn,
+	writeMu *sync.Mutex,
+	headers larkws.Headers,
+	frame *larkws.Frame,
+	startedAt time.Time,
+	status int,
+	responseData any,
+) error {
+	response := larkws.NewResponseByCode(status)
+	if responseData != nil {
+		data, err := json.Marshal(responseData)
 		if err != nil {
 			return reliability.Wrap("payload_invalid", err)
 		}
+		response.Data = data
 	}
 
 	headers.Add(larkws.HeaderBizRt, fmt.Sprintf("%d", time.Since(startedAt).Milliseconds()))
@@ -552,9 +601,6 @@ func (c *Client) handleDataFrame(
 	writeMu.Unlock()
 	if writeErr != nil {
 		return reliability.Wrap(classifyFeishuError(writeErr).Code, writeErr)
-	}
-	if err != nil {
-		return err
 	}
 	return nil
 }
@@ -656,21 +702,64 @@ func convertCardActionResult(result *CardActionResult) *callback.CardActionTrigg
 	return response
 }
 
-func combinePayload(combined map[string][][]byte, messageID string, sum int, seq int, payload []byte) []byte {
+func newDispatchShards(count int) *dispatchShards {
+	if count <= 0 {
+		count = 1
+	}
+	return &dispatchShards{locks: make([]sync.Mutex, count)}
+}
+
+func (s *dispatchShards) Go(ctx context.Context, key string, fn func()) {
+	if s == nil || len(s.locks) == 0 {
+		go fn()
+		return
+	}
+	index := int(hashString(key) % uint32(len(s.locks)))
+	go func() {
+		lock := &s.locks[index]
+		lock.Lock()
+		defer lock.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		fn()
+	}()
+}
+
+func hashString(value string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(value))
+	return h.Sum32()
+}
+
+func (c *Client) pruneCombinedPayloads(combined map[string]*combinedPayload, now time.Time) {
+	for messageID, entry := range combined {
+		if now.Sub(entry.createdAt) > feishuFragmentTTL {
+			delete(combined, messageID)
+			c.logf("feishu dropped stale fragmented frame messageID=%s", messageID)
+		}
+	}
+}
+
+func combinePayload(combined map[string]*combinedPayload, messageID string, sum int, seq int, payload []byte, logger Logger) []byte {
 	if sum <= 1 || messageID == "" {
 		return payload
 	}
-	buffer := combined[messageID]
-	if buffer == nil {
-		buffer = make([][]byte, sum)
-		combined[messageID] = buffer
+	if seq < 0 || seq >= sum {
+		if logger != nil {
+			logger.Printf("feishu dropped fragmented frame with invalid seq messageID=%s sum=%d seq=%d", messageID, sum, seq)
+		}
+		return nil
 	}
-	if seq >= 0 && seq < len(buffer) {
-		buffer[seq] = payload
+	entry := combined[messageID]
+	if entry == nil || len(entry.parts) != sum {
+		entry = &combinedPayload{createdAt: time.Now(), parts: make([][]byte, sum)}
+		combined[messageID] = entry
 	}
+	entry.parts[seq] = payload
 
 	total := 0
-	for _, part := range buffer {
+	for _, part := range entry.parts {
 		if len(part) == 0 {
 			return nil
 		}
@@ -678,11 +767,43 @@ func combinePayload(combined map[string][][]byte, messageID string, sum int, seq
 	}
 
 	merged := make([]byte, 0, total)
-	for _, part := range buffer {
+	for _, part := range entry.parts {
 		merged = append(merged, part...)
 	}
 	delete(combined, messageID)
 	return merged
+}
+
+func dispatchKey(payload []byte, fallback string) string {
+	var value any
+	if err := json.Unmarshal(payload, &value); err == nil {
+		if chatID := nestedString(value, "event", "message", "chat_id"); chatID != "" {
+			return chatID
+		}
+		if chatID := nestedString(value, "event", "context", "open_chat_id"); chatID != "" {
+			return chatID
+		}
+		if eventID := nestedString(value, "header", "event_id"); eventID != "" {
+			return eventID
+		}
+	}
+	if strings.TrimSpace(fallback) != "" {
+		return strings.TrimSpace(fallback)
+	}
+	return "default"
+}
+
+func nestedString(value any, path ...string) string {
+	current := value
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
 }
 
 func parseHandshakeError(resp *http.Response) error {

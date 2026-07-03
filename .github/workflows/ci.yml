@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  bridge-go:
+    name: Go bridge Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/kimi-im-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kimi-im-bridge/go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  bridge-go-race:
+    name: Go bridge race
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/kimi-im-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kimi-im-bridge/go.mod
+      - run: go test -race ./...
+
+  shell-rust:
+    name: Rust shell
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/kimi-shell/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - run: cargo fmt -- --check
+      - run: cargo check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test --no-run
+
+  shell-frontend:
+    name: Frontend shell
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/kimi-shell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/kimi-shell/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: .\node_modules\.bin\tsc.cmd --noEmit
+      - run: pnpm test

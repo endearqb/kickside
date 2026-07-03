@@ -1,5 +1,9 @@
 package domain
 
+import "errors"
+
+var ErrDuplicateInbound = errors.New("duplicate inbound message")
+
 type BridgeRuntimeState string
 
 const (

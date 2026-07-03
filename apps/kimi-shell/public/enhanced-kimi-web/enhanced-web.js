@@ -15,12 +15,14 @@ const title = document.querySelector(".enhanced-title strong");
 const params = new URLSearchParams(window.location.search);
 const upstreamUrl = params.get("workspaceUrl") || params.get("upstream");
 const initialTheme = params.get("theme") === "dark" ? "dark" : "light";
+const upstream = parseUpstreamUrl(upstreamUrl);
 let frameReady = false;
 let pendingMessages = [];
 let messages = {
   "app.title": "Kimi Web 本地增强版",
   "loading.workspace": "正在接入 Kimi Web...",
   "error.missingWorkspaceUrl": "缺少 Kimi Web 工作区地址。",
+  "error.invalidWorkspaceUrl": "Kimi Web 工作区地址必须使用 http 或 https。",
 };
 
 function setTheme(theme) {
@@ -29,23 +31,35 @@ function setTheme(theme) {
   document.documentElement.style.colorScheme = nextTheme;
 }
 
-function targetOrigin() {
+function parseUpstreamUrl(value) {
+  if (!value) {
+    return null;
+  }
   try {
-    return upstreamUrl ? new URL(upstreamUrl).origin : "*";
+    const nextUrl = new URL(value);
+    if (nextUrl.protocol !== "http:" && nextUrl.protocol !== "https:") {
+      return null;
+    }
+    return nextUrl;
   } catch {
-    return "*";
+    return null;
   }
 }
 
+function targetOrigin() {
+  return upstream?.origin ?? "";
+}
+
 function postToFrame(payload) {
-  if (!frame?.contentWindow) {
+  const origin = targetOrigin();
+  if (!origin || !frame?.contentWindow) {
     return;
   }
   if (!frameReady) {
     pendingMessages.push(payload);
     return;
   }
-  frame.contentWindow.postMessage(payload, targetOrigin());
+  frame.contentWindow.postMessage(payload, origin);
 }
 
 function flushPendingMessages() {
@@ -96,7 +110,11 @@ fetch("./manifest.json")
   });
 
 if (upstreamUrl && frame) {
-  frame.src = upstreamUrl;
+  if (upstream) {
+    frame.src = upstream.href;
+  } else if (loading) {
+    loading.innerHTML = `<p>${messages["error.invalidWorkspaceUrl"]}</p>`;
+  }
 } else if (loading) {
   loading.innerHTML = `<p>${messages["error.missingWorkspaceUrl"]}</p>`;
 }
@@ -114,18 +132,30 @@ window.addEventListener("message", (event) => {
     return;
   }
 
+  const fromParent = event.source === window.parent;
+  const fromFrame = event.source === frame?.contentWindow && event.origin === targetOrigin();
+
   if (data.source === THEME_SYNC_SOURCE) {
+    if (!fromParent) {
+      return;
+    }
     setTheme(data.theme);
     postToFrame(data);
     return;
   }
 
   if (data.source === SESSION_SYNC_SOURCE || data.source === PREFILL_SYNC_SOURCE) {
+    if (!fromParent) {
+      return;
+    }
     postToFrame(data);
     return;
   }
 
   if (data.source === THEME_BRIDGE_SOURCE) {
+    if (!fromFrame) {
+      return;
+    }
     setTheme(data.theme);
     window.parent?.postMessage(data, "*");
     return;
@@ -136,6 +166,9 @@ window.addEventListener("message", (event) => {
     data.source === PREFILL_BRIDGE_SOURCE ||
     data.source === EXTERNAL_LINK_BRIDGE_SOURCE
   ) {
+    if (!fromFrame) {
+      return;
+    }
     window.parent?.postMessage(data, "*");
   }
 });

@@ -34,6 +34,8 @@ type Service struct {
 	lastReadyAt       string
 	consecutiveFails  int
 	recoveryPending   bool
+	recentEvents      map[string]struct{}
+	recentEventOrder  []string
 }
 
 func NewService(options Options) *Service {
@@ -57,7 +59,8 @@ func NewService(options Options) *Service {
 			Platform: platformID,
 			Logger:   options.Logger,
 		}),
-		done: closedDone(),
+		done:         closedDone(),
+		recentEvents: make(map[string]struct{}),
 	}
 }
 
@@ -204,6 +207,9 @@ func (s *Service) OnMessage(ctx context.Context, event *MessageEvent) error {
 	if shouldSkipCheckpoint(s.checkpoint(), event.EventID) {
 		return nil
 	}
+	if s.rememberEvent(event.EventID) {
+		return nil
+	}
 	advance, err := s.processMessageEvent(ctx, event)
 	if err != nil {
 		return err
@@ -216,6 +222,9 @@ func (s *Service) OnMessage(ctx context.Context, event *MessageEvent) error {
 
 func (s *Service) OnCardAction(ctx context.Context, event *CardActionEvent) (*CardActionResult, error) {
 	if shouldSkipCheckpoint(s.checkpoint(), event.EventID) {
+		return &CardActionResult{Toast: "already handled"}, nil
+	}
+	if s.rememberEvent(event.EventID) {
 		return &CardActionResult{Toast: "already handled"}, nil
 	}
 
@@ -298,6 +307,9 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 				}
 			}
 			return false, err
+		}
+		if result.Duplicate {
+			return true, nil
 		}
 		if binding == nil {
 			s.maybeSendAutoOnboarding(ctx, event, key, &result.Binding)
@@ -754,6 +766,27 @@ func (s *Service) setCheckpoint(value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.currentCheckpoint = strings.TrimSpace(value)
+}
+
+func (s *Service) rememberEvent(eventID string) bool {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.recentEvents[eventID]; ok {
+		return true
+	}
+	s.recentEvents[eventID] = struct{}{}
+	s.recentEventOrder = append(s.recentEventOrder, eventID)
+	for len(s.recentEventOrder) > maxRecentEventIDs {
+		oldest := s.recentEventOrder[0]
+		s.recentEventOrder = s.recentEventOrder[1:]
+		delete(s.recentEvents, oldest)
+	}
+	return false
 }
 
 func shouldSkipCheckpoint(checkpoint string, eventID string) bool {

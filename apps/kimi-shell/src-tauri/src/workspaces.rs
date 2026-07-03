@@ -10,32 +10,22 @@ use tauri::{AppHandle, Manager};
 
 use crate::skill_center;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentRuntime {
+    #[default]
     KimiCode,
     Hermes,
     Other,
 }
 
-impl Default for AgentRuntime {
-    fn default() -> Self {
-        Self::KimiCode
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceSource {
     Harness,
+    #[default]
     Manual,
     GridMigration,
-}
-
-impl Default for WorkspaceSource {
-    fn default() -> Self {
-        Self::Manual
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

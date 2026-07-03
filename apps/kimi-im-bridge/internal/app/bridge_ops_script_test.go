@@ -74,6 +74,12 @@ func TestBridgeOpsScriptStatusAcceptsExplicitAuthFileWithoutEnv(t *testing.T) {
 		t.Fatal("runtime.Caller failed")
 	}
 	scriptPath := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "..", "skills", "bridge-ops", "scripts", "bridge_ops.ps1"))
+	if _, err := os.Stat(scriptPath); err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("bridge ops skill script is not present: %s", scriptPath)
+		}
+		t.Fatalf("failed to stat bridge ops script: %v", err)
+	}
 
 	cmd := exec.Command(
 		"powershell",

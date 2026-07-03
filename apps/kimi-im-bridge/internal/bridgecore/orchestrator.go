@@ -3,6 +3,7 @@ package bridgecore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -52,6 +53,13 @@ func (o *Orchestrator) HandleInbound(
 		UpdatedAt:        now,
 	}
 	if err := o.turns.CreateTurn(ctx, turn); err != nil {
+		if errors.Is(err, domain.ErrDuplicateInbound) {
+			return HandleResult{
+				Binding:   *binding,
+				SessionID: binding.KimiSessionID,
+				Duplicate: true,
+			}, nil
+		}
 		return HandleResult{}, err
 	}
 

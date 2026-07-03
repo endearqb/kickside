@@ -12,7 +12,7 @@ import (
 func TestSendReplyUsesInteractiveCardsWhenEnabled(t *testing.T) {
 	t.Parallel()
 
-	service, _, gateway, _ := newTestService(t, Config{
+	service, storeHandle, gateway, _ := newTestService(t, Config{
 		AppID:         "cli_a",
 		AppSecret:     "secret",
 		ReplyRenderer: "interactive",
@@ -35,6 +35,13 @@ func TestSendReplyUsesInteractiveCardsWhenEnabled(t *testing.T) {
 	}
 	if gateway.replyCalls[0].MessageType != "interactive" {
 		t.Fatalf("expected interactive reply, got %q", gateway.replyCalls[0].MessageType)
+	}
+	event, err := storeHandle.GetDeliveryEventByKey(context.Background(), "feishu:chat-1:msg-1:reply:0")
+	if err != nil {
+		t.Fatalf("GetDeliveryEventByKey returned error: %v", err)
+	}
+	if event == nil || event.Renderer != "interactive" {
+		t.Fatalf("expected interactive renderer to be recorded, got %+v", event)
 	}
 
 	card := decodeCardPayload(t, gateway.replyCalls[0].Content)

@@ -60,7 +60,7 @@ IM Bridge provides channel controls, current binding/session switching, and work
 Requirements:
 
 - Node.js 18+
-- pnpm 8+
+- pnpm 10.34.4
 - Rust stable
 - WebView2 Runtime on Windows
 

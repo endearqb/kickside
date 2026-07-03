@@ -16,6 +16,7 @@ const (
 	feishuCardMaxRunes           = 2400
 	defaultPendingAttachmentTTL  = 30 * time.Minute
 	maxPendingAttachmentsPerChat = 10
+	maxRecentEventIDs            = 512
 )
 
 type BindingRouter interface {

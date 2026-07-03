@@ -10,10 +10,11 @@ use std::{
 
 use anyhow::{anyhow, bail, Context};
 use chrono::{
-    DateTime, Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime,
-    TimeZone, Utc,
+    DateTime, Datelike, Duration as ChronoDuration, Local, LocalResult, NaiveDate, NaiveDateTime,
+    NaiveTime, TimeZone, Utc,
 };
 use cron::Schedule;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -33,6 +34,7 @@ pub enum ScheduleOutcome {
     Failed,
     Skipped,
     BlockedByPermission,
+    ScheduleError,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,22 +84,13 @@ pub struct ScheduledTask {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleStore {
     #[serde(default)]
     pub heartbeats: Vec<HeartbeatConfig>,
     #[serde(default)]
     pub tasks: Vec<ScheduledTask>,
-}
-
-impl Default for ScheduleStore {
-    fn default() -> Self {
-        Self {
-            heartbeats: Vec::new(),
-            tasks: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -196,10 +189,20 @@ fn tick(app: &AppHandle) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     for id in due_heartbeats {
-        let _ = run_now_inner(app, "heartbeat", &id);
+        let app = app.clone();
+        thread::spawn(move || {
+            if let Err(error) = run_now_inner(&app, "heartbeat", &id) {
+                log_manager::append_line(&app, format!("scheduler heartbeat failed: {error:#}"));
+            }
+        });
     }
     for id in due_tasks {
-        let _ = run_now_inner(app, "task", &id);
+        let app = app.clone();
+        thread::spawn(move || {
+            if let Err(error) = run_now_inner(&app, "task", &id) {
+                log_manager::append_line(&app, format!("scheduler task failed: {error:#}"));
+            }
+        });
     }
     Ok(())
 }
@@ -448,16 +451,24 @@ fn update_task_after_run(
     let mut state = load_state(app)?;
     if let Some(task) = state.tasks.iter_mut().find(|task| task.id == task_id) {
         let now = Utc::now();
+        let mut stored_outcome = outcome;
         task.last_run_at = Some(now.to_rfc3339());
         task.next_run_at = if task.enabled {
-            compute_next_run(&task.cadence, now)
-                .ok()
-                .flatten()
-                .map(|date| date.to_rfc3339())
+            match compute_next_run(&task.cadence, now) {
+                Ok(next) => next.map(|date| date.to_rfc3339()),
+                Err(error) => {
+                    stored_outcome = ScheduleOutcome::ScheduleError;
+                    log_manager::append_line(
+                        app,
+                        format!("scheduler next_run failed task={} err={error:#}", task.id),
+                    );
+                    Some((now + ChronoDuration::hours(1)).to_rfc3339())
+                }
+            }
         } else {
             None
         };
-        task.last_outcome = Some(outcome);
+        task.last_outcome = Some(stored_outcome);
         task.updated_at = now.to_rfc3339();
         save_state(app, &state)?;
     }
@@ -563,7 +574,10 @@ fn compute_next_run(
         ScheduleCadence::Cron { expression } => {
             let schedule = Schedule::from_str(expression)
                 .with_context(|| format!("invalid cron expression: {expression}"))?;
-            Ok(schedule.upcoming(Utc).next())
+            Ok(schedule
+                .upcoming(Local)
+                .next()
+                .map(|date| date.with_timezone(&Utc)))
         }
     }
 }
@@ -602,12 +616,15 @@ fn next_weekday(at: NaiveTime, after: DateTime<Utc>) -> anyhow::Result<DateTime<
 }
 
 fn local_datetime(date: NaiveDate, time: NaiveTime) -> anyhow::Result<DateTime<Local>> {
-    let naive = NaiveDateTime::new(date, time);
-    Local
-        .from_local_datetime(&naive)
-        .single()
-        .or_else(|| Local.from_local_datetime(&naive).earliest())
-        .ok_or_else(|| anyhow!("invalid local schedule time: {naive}"))
+    let mut naive = NaiveDateTime::new(date, time);
+    for _ in 0..3 {
+        match Local.from_local_datetime(&naive) {
+            LocalResult::Single(value) => return Ok(value),
+            LocalResult::Ambiguous(earliest, _) => return Ok(earliest),
+            LocalResult::None => naive += ChronoDuration::hours(1),
+        }
+    }
+    bail!("invalid local schedule time: {naive}")
 }
 
 #[tauri::command]
@@ -683,7 +700,7 @@ pub fn schedule_create_task(
         None
     };
     let task = ScheduledTask {
-        id: format!("task_{}", now.timestamp_millis()),
+        id: random_task_id(),
         workspace_id: input.workspace_id,
         name: input.name.trim().to_string(),
         prompt: input.prompt.trim().to_string(),
@@ -703,6 +720,32 @@ pub fn schedule_create_task(
     state.tasks.push(task.clone());
     save_state(&app, &state).map_err(|error| format!("{error:#}"))?;
     Ok(task)
+}
+
+fn random_task_id() -> String {
+    let mut bytes = [0_u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "task_{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15]
+    )
 }
 
 #[tauri::command]
@@ -809,5 +852,17 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(next > after);
+    }
+
+    #[test]
+    fn task_ids_are_uuid_shaped() {
+        let first = random_task_id();
+        let second = random_task_id();
+        assert!(first.starts_with("task_"));
+        assert_eq!(
+            first.len(),
+            "task_00000000-0000-4000-8000-000000000000".len()
+        );
+        assert_ne!(first, second);
     }
 }

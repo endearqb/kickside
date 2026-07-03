@@ -583,7 +583,7 @@ func defaultLegacyAccountLabel(platform string) string {
 }
 
 func defaultFeishuAutoApprove() bool {
-	return true
+	return false
 }
 
 func defaultFeishuReplyRenderer() string {

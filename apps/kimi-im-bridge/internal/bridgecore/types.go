@@ -96,6 +96,7 @@ type HandleResult struct {
 	ReplyText string
 	Artifacts []domain.RuntimeArtifact
 	Renderer  string
+	Duplicate bool
 	Result    TurnResult
 }
 

@@ -17,6 +17,12 @@ apps/kimi-shell/node_modules/
 apps/kimi-shell/dist/
 apps/kimi-im-bridge/bin/
 
+# Local generated artifacts
+.tmp/
+*.tgz
+__pycache__/
+*.py[cod]
+
 # Rust / Tauri build artifacts
 target/
 apps/kimi-shell/src-tauri/target/

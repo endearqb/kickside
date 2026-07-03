@@ -1622,7 +1622,7 @@ pub fn run() {
     let shortcut = shortcut_manager::default_shortcut();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            window_manager::show_and_focus(&app);
+            window_manager::show_and_focus(app);
             open_request::handle_external_cli_request(app.clone(), args, Some(cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -1880,15 +1880,12 @@ pub fn run() {
                     _ => {}
                 }
             } else if label == window_manager::WORKSPACE_IMPORT_PICKER_WINDOW_LABEL {
-                match event {
-                    tauri::WindowEvent::CloseRequested { api, .. } => {
-                        api.prevent_close();
-                        window_manager::handle_workspace_import_picker_close_requested(
-                            app_handle,
-                            "workspace_import_picker_close_requested",
-                        );
-                    }
-                    _ => {}
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    window_manager::handle_workspace_import_picker_close_requested(
+                        app_handle,
+                        "workspace_import_picker_close_requested",
+                    );
                 }
             }
         }

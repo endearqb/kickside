@@ -18,7 +18,7 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 12
+const userVersion = 13
 
 type Store struct {
 	db *sql.DB
@@ -1564,6 +1564,9 @@ func (s *Store) CreateTurn(ctx context.Context, turn domain.BridgeTurn) error {
 		turn.UpdatedAt,
 	)
 	if err != nil {
+		if isInboundDedupeConstraint(err) {
+			return domain.ErrDuplicateInbound
+		}
 		return fmt.Errorf("failed to create turn %s: %w", turn.TurnID, err)
 	}
 	return nil
@@ -1790,6 +1793,15 @@ func isUniqueConstraint(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
+}
+
+func isInboundDedupeConstraint(err error) bool {
+	if !isUniqueConstraint(err) {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "bridge_turns") &&
+		strings.Contains(message, "inbound_message_id")
 }
 
 type channelErrorPayload struct {

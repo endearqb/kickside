@@ -892,6 +892,11 @@ export function ControlCenterView({
     selectedBridgeConnectorSecrets?.feishu?.appId.configured &&
       selectedBridgeConnectorSecrets?.feishu?.appSecret.configured,
   );
+  const selectedFeishuAutoApprove = Boolean(
+    selectedBridgeConnector?.platform === "feishu"
+      ? (selectedBridgeConnector.feishuAutoApprove ?? bridgeSettings.feishuAutoApprove)
+      : false,
+  );
   const selectedWeixinSecretsConfigured = Boolean(
     selectedBridgeConnectorSecrets?.weixin?.botToken.configured &&
       selectedBridgeConnectorSecrets?.weixin?.ownerUserId,
@@ -1352,7 +1357,7 @@ export function ControlCenterView({
       label: defaultBridgeConnectorLabel(platform, index),
       defaultWorkDir: bridgeSettings.defaultWorkDir,
       resetBindingSessionOnStart: true,
-      feishuAutoApprove: platform === "feishu" ? true : undefined,
+      feishuAutoApprove: platform === "feishu" ? false : undefined,
       feishuReplyRenderer: platform === "feishu" ? "streaming" : undefined,
       weixinReplyMode: platform === "weixin" ? "status_only" : undefined,
     };
@@ -2676,6 +2681,22 @@ export function ControlCenterView({
                       ))}
                     </select>
                   </label>
+                  <ControlCenterToggleField
+                    label="自动审批"
+                    description="跳过手动确认，直接批准飞书侧 approval。"
+                    checked={selectedFeishuAutoApprove}
+                    onChange={(checked) =>
+                      updateBridgeConnector(selectedBridgeConnector.id, {
+                        feishuAutoApprove: checked,
+                      })
+                    }
+                    tone={selectedFeishuAutoApprove ? "danger" : "default"}
+                  />
+                  {selectedFeishuAutoApprove ? (
+                    <p className="hint bridge-error-text">
+                      自动审批会让飞书触发的敏感操作绕过人工确认，只建议在可信测试环境短时开启。
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 

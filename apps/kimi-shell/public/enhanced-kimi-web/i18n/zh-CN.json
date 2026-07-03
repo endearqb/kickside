@@ -1,5 +1,6 @@
 {
   "app.title": "Kimi Web 本地增强版",
   "loading.workspace": "正在接入 Kimi Web...",
-  "error.missingWorkspaceUrl": "缺少 Kimi Web 工作区地址。"
+  "error.missingWorkspaceUrl": "缺少 Kimi Web 工作区地址。",
+  "error.invalidWorkspaceUrl": "Kimi Web 工作区地址必须使用 http 或 https。"
 }

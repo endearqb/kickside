@@ -12,5 +12,4 @@
 - 验证命令：`verification-gates.md`
 
 ## 已知缺口
-- 根目录 `.ai/CONSTITUTION.md` 仍缺失。
 - `dependency-boundaries.md`、`module-map.md`、`authorization-ontology.md` 尚未补齐。

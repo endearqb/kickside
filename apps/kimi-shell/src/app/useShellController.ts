@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -16,7 +16,25 @@ import {
   normalizeExternalOpenUrl,
 } from "@/app/linkBridge";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
-import { createEmptyInstallSessionSnapshot } from "@/app/types";
+import {
+  cloneKimiCodeAccessInput,
+  createBridgeOnboardingValidation,
+  createDefaultBridgeOnboardingConfigInput,
+  createDefaultBridgeSecretsMaskView,
+  createDefaultBridgeSettings,
+  createDefaultBridgeStatus,
+  createDefaultWorkspaceWebSettings,
+  createEmptyKimiCodeAccessInput,
+  createEmptySessionSkillState,
+  createEmptyWorkspaceSkillProfile,
+  deriveKimiCodeAccessSummary,
+  formatBridgeErrorEntry,
+  getBridgeChannelEnabled,
+  hasBridgeDraftSecretValue,
+  parseHashRoute,
+  toKimiCodeAccessInput,
+} from "@/app/shellControllerDefaults";
+
 import {
   CHAT_EXTERNAL_LINK_BRIDGE_SOURCE,
   clampWorkspaceSplitRatio,
@@ -43,12 +61,10 @@ import type {
   BindingRecord,
   DiscoveredSkillDetail,
   BridgeApprovalRecord,
-  BridgeConnectorConfig,
   BridgeConnectorSecretsInput,
   FeishuConnectorOnboardingSession,
   WeixinConnectorOnboardingSession,
   BridgeOnboardingConfigInput,
-  BridgeOnboardingValidation,
   BridgeApprovalResolveInput,
   BridgeSessionImportInput,
   BridgeSessionRecord,
@@ -60,21 +76,9 @@ import type {
   ControlCenterTaskPayload,
   ControlSectionId,
   DiagnosticsInfo,
-  InstallFlowCatalog,
-  InstallCommandCatalog,
-  InstallCustomMirrorConfig,
-  InstallLogChunk,
-  InstallMirrorHealthReport,
   FrontendReadyAck,
-  InstallProbeStatus,
-  InstallSessionEvent,
-  InstallSessionSnapshot,
-  InstallSettingsView,
-  InstallSource,
-  InstallTaskId,
   InstalledSkill,
   KimiCodeAccessConfigInput,
-  KimiCodeAccessSummaryView,
   KimiCodeAccessConfigTestResult,
   KimiCodeAccessConfigView,
   KimiDoctorResult,
@@ -89,7 +93,6 @@ import type {
   RuntimePanelId,
   Screen,
   ShellRoutePayload,
-  PowerShellPreflightSummary,
   SkillDiscoverySnapshot,
   SkillCenterSectionId,
   StartFeishuConnectorOnboardingInput,
@@ -119,6 +122,7 @@ import type {
   WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
+import { useInstallController } from "@/app/useInstallController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import {
   applySkill,
@@ -165,363 +169,17 @@ const PREFILL_ACK_TIMEOUT_MS = 2600;
 const PREFILL_RETRY_DELAY_MS = 1600;
 const PREFILL_MAX_ATTEMPTS = 12;
 const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
-const INSTALL_PROBE_TIMEOUT_MS = 180_000;
-const INSTALL_PROBE_INTERVAL_MS = 1500;
-const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-app-api-key";
-const KIMI_CODING_PLAN_MODEL_ID = "kimi-app/kimi-for-coding";
-const KIMI_CODING_PLAN_BASE_URL = "https://api.kimi.com/coding/v1";
-const KIMI_CODING_PLAN_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
-const KIMI_CODING_PLAN_FETCH_URL = "https://api.kimi.com/coding/v1/fetch";
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 const ENHANCED_WEB_READY_SOURCE = "kimi-app-enhanced-web-ready";
 let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
-type InstallAction =
-  | "dependencies"
-  | "kimi"
-  | "upgrade_kimi"
-  | "uninstall_kimi"
-  | "nodejs";
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type BootHint = Pick<
   FrontendReadyAck,
   "backendState" | "workspaceUrl" | "startCycleId"
 >;
-
-function createDefaultBridgeConnector(
-  platform: "telegram" | "feishu" | "weixin",
-  index = 1,
-): BridgeConnectorConfig {
-  const base =
-    platform === "telegram" ? "telegram" : platform === "feishu" ? "feishu" : "weixin";
-  const label =
-    platform === "telegram"
-      ? `Telegram 机器人 ${String(index).padStart(2, "0")}`
-      : platform === "feishu"
-        ? `飞书机器人 ${String(index).padStart(2, "0")}`
-        : `微信机器人 ${String(index).padStart(2, "0")}`;
-  return {
-    id: index <= 1 ? `${base}-default` : `${base}-${index}`,
-    platform,
-    enabled: false,
-    mode: platform === "feishu" ? "websocket" : "polling",
-    label,
-    defaultWorkDir: undefined,
-    resetBindingSessionOnStart: true,
-    feishuAutoApprove: platform === "feishu" ? false : undefined,
-    feishuReplyRenderer: platform === "feishu" ? "streaming" : undefined,
-    weixinReplyMode: platform === "weixin" ? "status_only" : undefined,
-  };
-}
-
-function getBridgePlatformConnectors(
-  settings: BridgeSettings,
-  platform: "telegram" | "feishu" | "weixin",
-): BridgeConnectorConfig[] {
-  return settings.connectors.filter((connector) => connector.platform === platform);
-}
-
-function createEmptyKimiCodeAccessInput(): KimiCodeAccessConfigInput {
-  return {
-    providerBaseUrl: KIMI_CODING_PLAN_BASE_URL,
-    providerApiKey: undefined,
-    clearProviderApiKey: false,
-    searchBaseUrl: KIMI_CODING_PLAN_SEARCH_URL,
-    searchApiKeyMode: "reuse_provider",
-    searchApiKey: undefined,
-    fetchBaseUrl: KIMI_CODING_PLAN_FETCH_URL,
-    fetchApiKeyMode: "reuse_provider",
-    fetchApiKey: undefined,
-    agentSwarmMaxConcurrency: undefined,
-    clearAgentSwarmMaxConcurrency: false,
-  };
-}
-
-function serviceModeFromView(
-  configured: boolean,
-  usesProviderApiKey: boolean,
-): KimiCodeAccessConfigInput["searchApiKeyMode"] {
-  if (usesProviderApiKey) return "reuse_provider";
-  if (configured) return "keep_existing";
-  return "reuse_provider";
-}
-
-function toKimiCodeAccessInput(view: KimiCodeAccessConfigView): KimiCodeAccessConfigInput {
-  return {
-    providerBaseUrl: view.provider.baseUrl ?? KIMI_CODING_PLAN_BASE_URL,
-    providerApiKey: undefined,
-    clearProviderApiKey: false,
-    searchBaseUrl: view.services.search.baseUrl ?? KIMI_CODING_PLAN_SEARCH_URL,
-    searchApiKeyMode: serviceModeFromView(
-      view.services.search.apiKeyConfigured,
-      view.services.search.usesProviderApiKey,
-    ),
-    searchApiKey: undefined,
-    fetchBaseUrl: view.services.fetch.baseUrl ?? KIMI_CODING_PLAN_FETCH_URL,
-    fetchApiKeyMode: serviceModeFromView(
-      view.services.fetch.apiKeyConfigured,
-      view.services.fetch.usesProviderApiKey,
-    ),
-    fetchApiKey: undefined,
-    agentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency,
-    clearAgentSwarmMaxConcurrency: view.runtimeLimits.agentSwarmMaxConcurrency == null,
-  };
-}
-
-function cloneKimiCodeAccessInput(
-  input: KimiCodeAccessConfigInput,
-): KimiCodeAccessConfigInput {
-  return JSON.parse(JSON.stringify(input)) as KimiCodeAccessConfigInput;
-}
-
-function deriveKimiCodeAccessSummary(
-  view: KimiCodeAccessConfigView | null,
-): KimiCodeAccessSummaryView | null {
-  if (!view) {
-    return null;
-  }
-
-  const hasApiKey =
-    view.provider.apiKeyConfigured ||
-    view.services.search.apiKeyConfigured ||
-    view.services.fetch.apiKeyConfigured;
-  const templateConfigured =
-    view.provider.type === "kimi" &&
-    view.provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
-    hasApiKey &&
-    view.model.exists &&
-    view.services.search.baseUrl?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
-    view.services.search.apiKeyConfigured &&
-    view.services.fetch.baseUrl?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
-    view.services.fetch.apiKeyConfigured;
-
-  return {
-    configPath: view.configPath,
-    providerId: KIMI_CODING_PLAN_PROVIDER_ID,
-    model: KIMI_CODING_PLAN_MODEL_ID,
-    baseUrl: KIMI_CODING_PLAN_BASE_URL,
-    hasApiKey,
-    templateConfigured,
-  };
-}
-
-function parseHashRoute(hash: string): string {
-  return hash.replace(/^#\/?/, "");
-}
-
-function createDefaultInstallMirrorConfig(): InstallCustomMirrorConfig {
-  return {
-    gitReleasePages: [],
-    uvReleasePages: [],
-    pythonInstallerUrls: [],
-    pypiIndexUrls: [],
-  };
-}
-
-function createDefaultInstallSettingsView(): InstallSettingsView {
-  return {
-    preferredSource: "official",
-    mirrorPreset: "mixed",
-    customMirrorConfig: createDefaultInstallMirrorConfig(),
-  };
-}
-
-function createDefaultBridgeSettings(): BridgeSettings {
-  return {
-    enabled: false,
-    autoStart: false,
-    adminPort: 60110,
-    feishuReplyRenderer: "streaming",
-    feishuAutoApprove: false,
-    resetBindingSessionOnBridgeStart: true,
-    defaultWorkDir: "",
-    workDirPresets: [],
-    connectors: [
-      createDefaultBridgeConnector("telegram"),
-      createDefaultBridgeConnector("feishu"),
-      createDefaultBridgeConnector("weixin"),
-    ],
-  };
-}
-
-function createDefaultWorkspaceWebSettings(): WorkspaceWebSettingsView {
-  return {
-    mode: "official",
-    autoFallback: true,
-    sourceCommit: undefined,
-    health: {
-      state: "not_configured",
-      message: "尚未读取本地增强版状态。",
-    },
-    disclaimer:
-      "本地增强版基于 MoonshotAI/kimi-cli 开源 Web 构建，由本应用维护；不代表 MoonshotAI 官方背书。",
-  };
-}
-
-function createDefaultBridgeStatus(): BridgeStatus {
-  return {
-    state: "stopped",
-    adminPort: 60110,
-    version: undefined,
-    kimiRuntimeLocator: {
-      configured: false,
-      readable: false,
-    },
-    runtimeAdapter: {
-      name: "server",
-      state: "unavailable",
-    },
-    connectors: [],
-    pendingApprovals: 0,
-    bindings: 0,
-    lastErrorCode: undefined,
-    lastError: undefined,
-  };
-}
-
-function createEmptySessionSkillState(): SessionSkillState {
-  return {
-    appliedSkillIds: [],
-    projections: [],
-  };
-}
-
-function createEmptyWorkspaceSkillProfile(): WorkspaceSkillProfile | null {
-  return null;
-}
-
-function formatBridgeErrorEntry(
-  errorCode: string | null | undefined,
-  message: string | null | undefined,
-  prefix?: string,
-): string | null {
-  const trimmedMessage = message?.trim();
-  const trimmedCode = errorCode?.trim();
-  if (!trimmedMessage && !trimmedCode) {
-    return null;
-  }
-
-  const parts: string[] = [];
-  if (prefix) {
-    parts.push(prefix);
-  }
-  if (trimmedCode) {
-    parts.push(`[${trimmedCode}]`);
-  }
-  if (trimmedMessage) {
-    parts.push(trimmedMessage);
-  }
-  return parts.join(" ").trim();
-}
-
-function createDefaultBridgeSecretsMaskView(): BridgeSecretsMaskView {
-  return {
-    connectors: [],
-    telegram: {
-      botToken: {
-        configured: false,
-      },
-    },
-    feishu: {
-      appId: {
-        configured: false,
-      },
-      appSecret: {
-        configured: false,
-      },
-      verificationToken: {
-        configured: false,
-      },
-      encryptKey: {
-        configured: false,
-      },
-    },
-    weixin: {
-      botToken: {
-        configured: false,
-      },
-    },
-  };
-}
-
-function getBridgeChannelEnabled(
-  settings: BridgeSettings,
-  platform: "telegram" | "feishu" | "weixin",
-): boolean {
-  return getBridgePlatformConnectors(settings, platform).some((connector) => connector.enabled);
-}
-
-function createDefaultBridgeOnboardingConfigInput(
-  settings: BridgeSettings = createDefaultBridgeSettings(),
-): BridgeOnboardingConfigInput {
-  return {
-    enabled: settings.enabled,
-    feishuEnabled: getBridgeChannelEnabled(settings, "feishu"),
-    autoStart: settings.autoStart,
-    feishu: {
-      appId: "",
-      appSecret: "",
-      verificationToken: "",
-      encryptKey: "",
-    },
-  };
-}
-
-function hasBridgeDraftSecretValue(value?: string): boolean {
-  return Boolean(value?.trim());
-}
-
-function createBridgeOnboardingValidation(
-  draft: BridgeOnboardingConfigInput,
-  secretsMask: BridgeSecretsMaskView,
-  dirty: boolean,
-): BridgeOnboardingValidation {
-  const draftHasFeishuSecrets =
-    hasBridgeDraftSecretValue(draft.feishu.appId) &&
-    hasBridgeDraftSecretValue(draft.feishu.appSecret);
-  const savedHasFeishuSecrets =
-    secretsMask.connectors.some(
-      (connector) =>
-        connector.platform === "feishu" &&
-        connector.feishu?.appId.configured &&
-        connector.feishu?.appSecret.configured,
-    ) ||
-    (secretsMask.feishu.appId.configured && secretsMask.feishu.appSecret.configured);
-  const wantsEnabled = draft.enabled || draft.feishuEnabled;
-
-  if (draft.feishuEnabled && !draftHasFeishuSecrets && !savedHasFeishuSecrets) {
-    return {
-      canSave: false,
-      canStart: false,
-      message: "启用 Feishu 前需要至少一个已配置 appId/appSecret 的飞书机器人。",
-    };
-  }
-
-  if (!wantsEnabled) {
-    return {
-      canSave: true,
-      canStart: false,
-        message: "这是可选配置；保存并启用外部 IM 通道后，才能从这里直接启动 bridge。",
-    };
-  }
-
-  if (dirty) {
-    return {
-      canSave: true,
-      canStart: false,
-        message: "存在未保存的外部 IM 通道配置，请先点击“保存并启用”再启动 bridge。",
-    };
-  }
-
-  return {
-    canSave: true,
-    canStart: true,
-    message:
-      "配置已就绪；现在只能说明 sidecar 可以尝试建立飞书长连接，是否被平台识别为已连接仍取决于长连接和应用权限。",
-  };
-}
 
 export function useShellController() {
   const [status, setStatus] = useState<AppStatus | null>(null);
@@ -558,10 +216,6 @@ export function useShellController() {
   const [kimiCodeAccessTesting, setKimiCodeAccessTesting] = useState(false);
   const [kimiCodeAccessTestResult, setKimiCodeAccessTestResult] =
     useState<KimiCodeAccessConfigTestResult | null>(null);
-  const [installSource, setInstallSource] = useState<InstallSource>("official");
-  const [installSettings, setInstallSettings] = useState<InstallSettingsView>(
-    () => createDefaultInstallSettingsView(),
-  );
   const [workspaceWebSettings, setWorkspaceWebSettings] =
     useState<WorkspaceWebSettingsView>(() => createDefaultWorkspaceWebSettings());
   const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
@@ -638,24 +292,6 @@ export function useShellController() {
   const [bridgeOnboardingDraftTouched, setBridgeOnboardingDraftTouched] =
     useState(false);
   const [bridgeBusy, setBridgeBusy] = useState(false);
-  const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
-  const [powershellPreflight, setPowershellPreflight] =
-    useState<PowerShellPreflightSummary | null>(null);
-  const [installBusy, setInstallBusy] = useState(false);
-  const [installAction, setInstallAction] = useState<InstallAction | null>(null);
-  const [installMessage, setInstallMessage] = useState("");
-  const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
-  const [installFlowCatalog, setInstallFlowCatalog] =
-    useState<InstallFlowCatalog | null>(null);
-  const [installSessionSnapshot, setInstallSessionSnapshot] =
-    useState<InstallSessionSnapshot>(() => createEmptyInstallSessionSnapshot());
-  const [installMirrorHealthReport, setInstallMirrorHealthReport] =
-    useState<InstallMirrorHealthReport | null>(null);
-  const [installMirrorHealthBusy, setInstallMirrorHealthBusy] = useState(false);
-  const [installCommandsOpen, setInstallCommandsOpen] = useState(false);
-  const [installCommandsBusy, setInstallCommandsBusy] = useState(false);
-  const [installCommandCatalog, setInstallCommandCatalog] =
-    useState<InstallCommandCatalog | null>(null);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [activeWorkspaceView, setActiveWorkspaceView] =
     useState<WorkspaceViewKind>(() => getInitialWorkspaceView());
@@ -715,6 +351,39 @@ export function useShellController() {
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
+  const {
+    installProbe,
+    installSource,
+    installSettings,
+    installSettingsBusy,
+    powershellPreflight,
+    installBusy,
+    installAction,
+    installMessage,
+    installFlowCatalog,
+    installSessionSnapshot,
+    installMirrorHealthReport,
+    installMirrorHealthBusy,
+    installCommandsOpen,
+    installCommandCatalog,
+    refreshInstallProbe,
+    refreshInstallSettings,
+    refreshInstallMirrorHealth,
+    refreshPowerShellPreflight,
+    handleInstallSourceChange,
+    handleSaveInstallSettings,
+    handleInstallDependencies,
+    handleInstallKimi,
+    handleUpgradeKimi,
+    handleInstallNodejs,
+    handleStartInstallTask,
+    handleCancelInstallTask,
+    handleCloseInstallCommands,
+  } = useInstallController({
+    tauriRuntime,
+    refreshOnboarding,
+    setActionError,
+  });
   const loadingReportCycleRef = useRef<number | null>(null);
   const workspaceIframeRef = useRef<HTMLIFrameElement | null>(null);
   const chatIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -1117,7 +786,7 @@ export function useShellController() {
   function navigateToWorkspaceAfterOnboarding() {
     setPendingWorkspaceEntryAfterOnboarding(false);
     if (controlCenterModalOpen) {
-      setInstallCommandsOpen(false);
+      handleCloseInstallCommands();
       resetControlCenterNavigation();
       setControlCenterModalOpen(false);
       return;
@@ -2370,37 +2039,6 @@ export function useShellController() {
     }
   }
 
-  async function refreshInstallProbe() {
-    const data = await invoke<InstallProbeStatus>("get_install_probe_status");
-    setInstallProbe(data);
-    return data;
-  }
-
-  async function handleRefreshInstallProbe() {
-    setInstallBusy(true);
-    setInstallMessage("正在检测安装环境...");
-    setActionError(null);
-    try {
-      const data = await refreshInstallProbe();
-      setInstallMessage("环境检测完成。");
-      return data;
-    } catch (error) {
-      const detail = String(error);
-      setInstallMessage(detail);
-      setActionError(detail);
-      throw error;
-    } finally {
-      setInstallBusy(false);
-    }
-  }
-
-  async function refreshInstallSettings() {
-    const data = await invoke<InstallSettingsView>("get_install_settings");
-    setInstallSettings(data);
-    setInstallSource(data.preferredSource);
-    return data;
-  }
-
   async function refreshWorkspaceWebSettings() {
     const data = await invoke<WorkspaceWebSettingsView>("get_workspace_web_settings");
     if (data.mode === "enhanced_local") {
@@ -2431,165 +2069,6 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
       throw error;
-    }
-  }
-
-  async function saveCurrentInstallSettings(input: InstallSettingsView) {
-    setInstallSettingsBusy(true);
-    try {
-      const data = await invoke<InstallSettingsView>("save_install_settings", { input });
-      setInstallSettings(data);
-      setInstallSource(data.preferredSource);
-      return data;
-    } finally {
-      setInstallSettingsBusy(false);
-    }
-  }
-
-  async function refreshInstallMirrorHealth(input?: InstallSettingsView) {
-    const payload = input ?? installSettings;
-    setInstallMirrorHealthBusy(true);
-    try {
-      const data = await invoke<InstallMirrorHealthReport>("get_install_mirror_health_report", {
-        input: payload,
-      });
-      setInstallMirrorHealthReport(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      throw error;
-    } finally {
-      setInstallMirrorHealthBusy(false);
-    }
-  }
-
-  async function refreshPowerShellPreflight() {
-    const data = await invoke<PowerShellPreflightSummary>("get_powershell_preflight");
-    setPowershellPreflight(data);
-    return data;
-  }
-
-  function mergeInstallLogChunk(
-    current: InstallSessionSnapshot,
-    chunk: InstallLogChunk,
-  ): InstallSessionSnapshot {
-    const nextLogs = [...current.logs, chunk];
-    const overflow = Math.max(0, nextLogs.length - 400);
-    return {
-      ...current,
-      logs: overflow > 0 ? nextLogs.slice(overflow) : nextLogs,
-      logsTruncated: current.logsTruncated || overflow > 0,
-    };
-  }
-
-  async function refreshInstallFlowCatalog() {
-    const catalog = await invoke<InstallFlowCatalog>("get_install_flow_catalog");
-    setInstallFlowCatalog(catalog);
-    return catalog;
-  }
-
-  useEffect(() => {
-    if (!tauriRuntime) {
-      return;
-    }
-
-    const channel = new Channel<InstallSessionEvent>();
-    channel.onmessage = (event) => {
-      if (event.event === "snapshot") {
-        setInstallSessionSnapshot(event.snapshot);
-        if (event.snapshot.probe) {
-          setInstallProbe(event.snapshot.probe);
-        }
-        if (event.snapshot.powershellDiagnostic) {
-          setPowershellPreflight(event.snapshot.powershellDiagnostic);
-        }
-        return;
-      }
-
-      setInstallSessionSnapshot((current) => mergeInstallLogChunk(current, event.chunk));
-    };
-
-    void invoke<InstallSessionSnapshot>("register_install_session_channel", { channel })
-      .then((snapshot) => {
-        setInstallSessionSnapshot(snapshot);
-        if (snapshot.probe) {
-          setInstallProbe(snapshot.probe);
-        }
-        if (snapshot.powershellDiagnostic) {
-          setPowershellPreflight(snapshot.powershellDiagnostic);
-        }
-      })
-      .catch((error) => {
-        setActionError(String(error));
-      });
-  }, [tauriRuntime]);
-
-  async function waitForInstallProbe(
-    predicate: (probe: InstallProbeStatus) => boolean,
-    timeoutMs = INSTALL_PROBE_TIMEOUT_MS,
-  ) {
-    const startedAt = Date.now();
-    let probe = await refreshInstallProbe();
-    if (predicate(probe)) {
-      return probe;
-    }
-
-    while (Date.now() - startedAt < timeoutMs) {
-      await new Promise((resolve) => window.setTimeout(resolve, INSTALL_PROBE_INTERVAL_MS));
-      probe = await refreshInstallProbe();
-      if (predicate(probe)) {
-        return probe;
-      }
-    }
-
-    throw new Error("安装复检超时，请检查外置终端输出并确认安装是否完成。");
-  }
-
-  async function runInstallAction({
-    action,
-    invokeCommand,
-    invokeArgs,
-    alreadyInstalled,
-    alreadyMessage,
-    successMessage,
-    predicate,
-  }: {
-    action: InstallAction;
-    invokeCommand:
-      | "install_kimi_dependencies"
-      | "install_kimi_code"
-      | "upgrade_kimi_code"
-      | "install_nodejs";
-    invokeArgs?: Record<string, unknown>;
-    alreadyInstalled: (probe: InstallProbeStatus) => boolean;
-    alreadyMessage: string;
-    successMessage: string;
-    predicate: (probe: InstallProbeStatus) => boolean;
-  }) {
-    setActionError(null);
-    try {
-      const currentProbe = installProbe;
-      if (currentProbe && alreadyInstalled(currentProbe)) {
-        setInstallMessage(alreadyMessage);
-        return currentProbe;
-      }
-
-      setInstallBusy(true);
-      setInstallAction(action);
-      const summary = await invoke<string>(invokeCommand, invokeArgs);
-      setInstallMessage(summary.trim() || "已启动外置终端，正在等待安装复检。");
-      const nextProbe = await waitForInstallProbe(predicate);
-      setInstallMessage(successMessage);
-      await refreshOnboarding();
-      return nextProbe;
-    } catch (error) {
-      const detail = String(error);
-      setInstallMessage(detail);
-      setActionError(detail);
-      return null;
-    } finally {
-      setInstallBusy(false);
-      setInstallAction(null);
     }
   }
 
@@ -2894,7 +2373,7 @@ export function useShellController() {
       return;
     }
     setControlCenterModalOpen(false);
-    setInstallCommandsOpen(false);
+    handleCloseInstallCommands();
     if (screen !== "control_center") {
       resetControlCenterNavigation();
     }
@@ -3768,206 +3247,6 @@ export function useShellController() {
     }
   }
 
-  function handleInstallSourceChange(source: InstallSource) {
-    setInstallSource(source);
-    setInstallMessage("");
-    const next = {
-      ...installSettings,
-      preferredSource: source,
-    };
-    setInstallSettings(next);
-    void saveCurrentInstallSettings(next).catch((error) => {
-      setActionError(String(error));
-    });
-  }
-
-  async function handleSaveInstallSettings(input: InstallSettingsView) {
-    setActionError(null);
-    try {
-      const saved = await saveCurrentInstallSettings(input);
-      await refreshInstallFlowCatalog();
-      await refreshPowerShellPreflight();
-      return saved;
-    } catch (error) {
-      setActionError(String(error));
-      throw error;
-    }
-  }
-
-  async function handleStartInstallTask(taskId: InstallTaskId) {
-    setActionError(null);
-    try {
-      const catalog = installFlowCatalog ?? (await refreshInstallFlowCatalog());
-      const task = catalog.tasks.find((item) => item.id === taskId);
-      if (task?.requiresElevation) {
-        const accepted = window.confirm(
-          `${task.title} will open an elevated external PowerShell window. Continue?`,
-        );
-        if (!accepted) {
-          return;
-        }
-      }
-
-      const snapshot = await invoke<InstallSessionSnapshot>("start_install_task", {
-        taskId,
-        source: installSource,
-      });
-      setInstallSessionSnapshot(snapshot);
-      if (snapshot.probe) {
-        setInstallProbe(snapshot.probe);
-      }
-      if (snapshot.powershellDiagnostic) {
-        setPowershellPreflight(snapshot.powershellDiagnostic);
-      }
-      await refreshOnboarding();
-    } catch (error) {
-      setActionError(String(error));
-    }
-  }
-
-  async function handleCancelInstallTask() {
-    setActionError(null);
-    try {
-      const snapshot = await invoke<InstallSessionSnapshot>("cancel_install_task");
-      setInstallSessionSnapshot(snapshot);
-      if (snapshot.probe) {
-        setInstallProbe(snapshot.probe);
-      }
-      if (snapshot.powershellDiagnostic) {
-        setPowershellPreflight(snapshot.powershellDiagnostic);
-      }
-    } catch (error) {
-      setActionError(String(error));
-    }
-  }
-
-  async function handleQuickInstallCore() {
-    await handleStartInstallTask("quick_install_core");
-  }
-
-  async function handleInstallKimiTask() {
-    await handleStartInstallTask("install_kimi");
-  }
-
-  async function handleUpgradeKimiTask() {
-    await handleStartInstallTask("upgrade_kimi");
-  }
-
-  async function handleInstallNodejsTask() {
-    await handleStartInstallTask("install_nodejs");
-  }
-
-  async function handleInstallDependencies() {
-    setActionError(null);
-    try {
-      if (installProbe?.kimiReady) {
-        setInstallMessage("检测到 Kimi Code 已安装。");
-        window.alert("Kimi Code 已安装，无需重复安装。");
-        return;
-      }
-
-      setInstallBusy(true);
-      const summary = await invoke<string>("install_kimi_dependencies", {
-        source: installSource,
-      });
-      setInstallMessage(summary.trim() || "Kimi Code 安装命令执行完成。");
-      await refreshOnboarding();
-      await refreshInstallProbe();
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setInstallBusy(false);
-    }
-  }
-
-  async function handleInstallKimi() {
-    setActionError(null);
-    try {
-      if (installProbe?.kimiReady) {
-        setInstallMessage("检测到 Kimi Code 已安装。");
-        window.alert("Kimi Code 已安装，无需重复安装。");
-        return;
-      }
-
-      setInstallBusy(true);
-      const summary = await invoke<string>("install_kimi_code", {
-        source: installSource,
-      });
-      setInstallMessage(summary.trim() || "Kimi Code 安装命令执行完成。");
-      await refreshOnboarding();
-      await refreshInstallProbe();
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setInstallBusy(false);
-    }
-  }
-
-  async function handleInstallDependenciesExternal() {
-    await runInstallAction({
-      action: "dependencies",
-      invokeCommand: "install_kimi_dependencies",
-      invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) => probe.kimiReady,
-      alreadyMessage: "已检测到 Kimi Code，无需重复安装。",
-      successMessage: "Kimi Code 安装复检通过。",
-      predicate: (probe) => probe.kimiReady,
-    });
-  }
-
-  async function handleInstallKimiExternal() {
-    await runInstallAction({
-      action: "kimi",
-      invokeCommand: "install_kimi_code",
-      invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) => probe.kimiReady,
-      alreadyMessage: "已检测到 Kimi Code，无需重复安装。",
-      successMessage: "Kimi 安装复检通过。",
-      predicate: (probe) => probe.kimiReady,
-    });
-  }
-
-  async function handleUpgradeKimi() {
-    await runInstallAction({
-      action: "upgrade_kimi",
-      invokeCommand: "upgrade_kimi_code",
-      invokeArgs: { source: installSource },
-      alreadyInstalled: (probe) => !probe.kimiReady,
-      alreadyMessage: "升级前请先安装 Kimi Code。",
-      successMessage: "Kimi 升级复检通过。",
-      predicate: (probe) => probe.kimiReady,
-    });
-  }
-
-  async function handleInstallNodejs() {
-    await runInstallAction({
-      action: "nodejs",
-      invokeCommand: "install_nodejs",
-      alreadyInstalled: (probe) => probe.nodeReady,
-      alreadyMessage: "已检测到 Node.js，无需重复安装。",
-      successMessage: "Node.js 安装复检通过。",
-      predicate: (probe) => probe.nodeReady,
-    });
-  }
-
-  async function handleOpenInstallCommands() {
-    setInstallCommandsBusy(true);
-    setActionError(null);
-    try {
-      const catalog = await invoke<InstallCommandCatalog>("get_install_command_catalog");
-      setInstallCommandCatalog(catalog);
-      setInstallCommandsOpen(true);
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setInstallCommandsBusy(false);
-    }
-  }
-
-  function handleCloseInstallCommands() {
-    setInstallCommandsOpen(false);
-  }
-
   async function handleCompleteOnboarding() {
     setActionBusy(true);
     setActionError(null);
@@ -4006,7 +3285,7 @@ export function useShellController() {
 
   function closeControlCenterModal() {
     setControlCenterModalOpen(false);
-    setInstallCommandsOpen(false);
+    handleCloseInstallCommands();
     resetControlCenterNavigation();
   }
 
@@ -4021,7 +3300,7 @@ export function useShellController() {
 
   function openSkillCenter() {
     setActionError(null);
-    setInstallCommandsOpen(false);
+    handleCloseInstallCommands();
     setActiveControlSection("skill_center");
     setControlCenterTask(null);
     if (screen === "workspace") {
@@ -4545,17 +3824,6 @@ export function useShellController() {
     };
   }, [chatRemoteUrl]);
 
-  void installBusy;
-  void installCommandsOpen;
-  void installCommandsBusy;
-  void handleInstallDependencies;
-  void handleInstallKimi;
-  void handleInstallDependenciesExternal;
-  void handleInstallKimiExternal;
-  void handleUpgradeKimi;
-  void handleInstallNodejs;
-  void handleOpenInstallCommands;
-  void handleCloseInstallCommands;
 
   const stepCompletion = useMemo<StepCompletion>(
     () => ({
@@ -4770,10 +4038,7 @@ export function useShellController() {
     installSettings,
     installSettingsBusy,
     powershellPreflight,
-    installBusy:
-      installSessionSnapshot.status === "starting" ||
-      installSessionSnapshot.status === "running" ||
-      installSessionSnapshot.status === "cancelling",
+    installBusy,
     installAction,
     installMessage,
     installFlowCatalog,
@@ -4801,7 +4066,7 @@ export function useShellController() {
     refreshSkillCenterState,
     refreshSkillDiscoveryState,
     refreshWorkspaceSkillManagementState,
-    refreshInstallProbe: handleRefreshInstallProbe,
+    refreshInstallProbe,
     refreshInstallSettings,
     refreshWorkspaceWebSettings,
     refreshInstallMirrorHealth,
@@ -4859,10 +4124,10 @@ export function useShellController() {
     handleResolveBridgeApproval,
     handleInstallSourceChange,
     handleSaveInstallSettings,
-    handleInstallDependencies: handleQuickInstallCore,
-    handleInstallKimi: handleInstallKimiTask,
-    handleUpgradeKimi: handleUpgradeKimiTask,
-    handleInstallNodejs: handleInstallNodejsTask,
+    handleInstallDependencies,
+    handleInstallKimi,
+    handleUpgradeKimi,
+    handleInstallNodejs,
     handleStartInstallTask,
     handleCancelInstallTask,
     handleEnableContextMenu,

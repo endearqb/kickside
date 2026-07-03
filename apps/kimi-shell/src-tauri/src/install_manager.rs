@@ -1,3 +1,5 @@
+mod catalog;
+
 use std::{
     env, fs,
     io::{BufReader, Read, Write},
@@ -19,7 +21,7 @@ use crate::{
         InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
         InstallMirrorHealthReport, InstallMirrorPreset, InstallProbeStatus, InstallSessionEvent,
         InstallSessionSnapshot, InstallSessionStage, InstallSessionStatus, InstallSettingsView,
-        InstallSource, InstallTaskDefinition, InstallTaskGroup, InstallTaskId, InstallTaskStep,
+        InstallSource, InstallTaskDefinition, InstallTaskId, InstallTaskStep,
         PowerShellDiagnosticKind, PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
     },
 };
@@ -359,112 +361,7 @@ pub fn get_install_mirror_health_report(
 
 pub fn build_install_flow_catalog(app: &AppHandle) -> InstallFlowCatalog {
     let mirror_config = resolved_mirror_config(app);
-    build_install_flow_catalog_with_mirror_config(&mirror_config)
-}
-
-fn build_install_flow_catalog_with_mirror_config(
-    mirror_config: &ResolvedMirrorConfig,
-) -> InstallFlowCatalog {
-    InstallFlowCatalog {
-        tasks: vec![
-            task(
-                InstallTaskId::QuickInstallCore,
-                "Quick Core Install",
-                "Install Kimi Code from the official installer.",
-                InstallTaskGroup::Core,
-                true,
-                false,
-                false,
-                vec![step_kimi_official()],
-                vec![step_kimi_mirror(mirror_config)],
-                None,
-            ),
-            task(
-                InstallTaskId::InstallUv,
-                "Install uv (legacy)",
-                "Legacy repair task for old Python-based Kimi Code installs.",
-                InstallTaskGroup::Optional,
-                false,
-                false,
-                false,
-                vec![step_uv_official()],
-                vec![step_uv_mirror(mirror_config)],
-                None,
-            ),
-            task(
-                InstallTaskId::InstallPython313,
-                "Install Python 3.13 (legacy)",
-                "Legacy repair task for old Python-based Kimi Code installs.",
-                InstallTaskGroup::Optional,
-                false,
-                false,
-                false,
-                vec![step_python_official()],
-                vec![step_python_mirror(mirror_config)],
-                None,
-            ),
-            task(
-                InstallTaskId::InstallKimi,
-                "Install Kimi Code",
-                "Install Kimi Code.",
-                InstallTaskGroup::Core,
-                false,
-                false,
-                false,
-                vec![step_kimi_official()],
-                vec![step_kimi_mirror(mirror_config)],
-                None,
-            ),
-            task(
-                InstallTaskId::UpgradeKimi,
-                "Upgrade Kimi Code",
-                "Upgrade the installed Kimi Code to the latest version.",
-                InstallTaskGroup::Upgrade,
-                false,
-                false,
-                false,
-                vec![step_upgrade_official()],
-                vec![step_upgrade_mirror(mirror_config)],
-                None,
-            ),
-            task(
-                InstallTaskId::UninstallKimi,
-                "Uninstall Kimi Code",
-                "Remove only the installed Kimi Code.",
-                InstallTaskGroup::Core,
-                false,
-                false,
-                false,
-                vec![step_uninstall_kimi()],
-                vec![step_uninstall_kimi()],
-                None,
-            ),
-            task(
-                InstallTaskId::InstallGit,
-                "Install Git for Windows",
-                "Optional enhancement for broader development workflows.",
-                InstallTaskGroup::Optional,
-                false,
-                true,
-                true,
-                vec![step_git_official()],
-                vec![step_git_mirror(mirror_config)],
-                Some("Git for Windows uses an external elevated installer.".to_string()),
-            ),
-            task(
-                InstallTaskId::InstallNodejs,
-                "Install Node.js",
-                "Optional enhancement for Node-based tooling.",
-                InstallTaskGroup::Optional,
-                false,
-                true,
-                true,
-                vec![step_node()],
-                vec![step_node()],
-                Some("Node.js uses an external elevated installer.".to_string()),
-            ),
-        ],
-    }
+    catalog::build_install_flow_catalog_with_mirror_config(&mirror_config)
 }
 
 pub fn get_powershell_preflight() -> PowerShellPreflightSummary {
@@ -866,7 +763,7 @@ fn run_managed_task(
         return;
     }
 
-    for step in steps_for_source(&task, source) {
+    for step in catalog::steps_for_source(&task, source) {
         if manager.is_cancel_requested() {
             manager.finish(
                 app,
@@ -925,7 +822,7 @@ fn run_fallback_task(
     task: InstallTaskDefinition,
     source: InstallSource,
 ) {
-    let commands = join_commands(&steps_for_source(&task, source));
+    let commands = catalog::join_commands(&catalog::steps_for_source(&task, source));
     let preflight = get_powershell_preflight();
     if preflight.kind != PowerShellDiagnosticKind::Ok {
         push_system_log(
@@ -1251,351 +1148,6 @@ fn stream_output<R>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn task(
-    id: InstallTaskId,
-    title: &str,
-    description: &str,
-    group: InstallTaskGroup,
-    recommended: bool,
-    requires_elevation: bool,
-    optional: bool,
-    official_steps: Vec<InstallTaskStep>,
-    mirror_steps: Vec<InstallTaskStep>,
-    fallback_reason: Option<String>,
-) -> InstallTaskDefinition {
-    InstallTaskDefinition {
-        id,
-        title: title.to_string(),
-        description: description.to_string(),
-        group,
-        recommended,
-        runs_in_app: !requires_elevation,
-        requires_elevation,
-        optional,
-        fallback_reason,
-        official_steps,
-        mirror_steps,
-    }
-}
-
-fn step(id: &str, title: &str, description: &str, command: &str) -> InstallTaskStep {
-    InstallTaskStep {
-        id: id.to_string(),
-        title: title.to_string(),
-        description: description.to_string(),
-        command: command.trim().to_string(),
-    }
-}
-
-fn ps_array(values: &[String]) -> String {
-    format!(
-        "@({})",
-        values
-            .iter()
-            .map(|value| ps_quote(value))
-            .collect::<Vec<_>>()
-            .join(",")
-    )
-}
-
-fn step_uv_official() -> InstallTaskStep {
-    step(
-        "install_uv",
-        "Install uv",
-        "Prefer winget and fall back to the official installer script.",
-        r#"
-$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
-if (-not $uvCmd) {
-  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget is required to install uv.' }
-  try { winget install --id astral-sh.uv -e --source winget --accept-source-agreements --accept-package-agreements } catch { Write-Host 'winget install uv failed, falling back to official script.' }
-}
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Invoke-RestMethod -Uri 'https://astral.sh/uv/install.ps1' | Invoke-Expression }
-Invoke-KimiShellVersionCheck 'uv' @((Join-Path $HOME '.local\bin\uv.exe'),(Join-Path $HOME '.cargo\bin\uv.exe')) @('--version')
-"#,
-    )
-}
-
-fn step_uv_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
-    let command = r#"
-$releaseUrls = __RELEASE_URLS__
-$assetPattern = '(?i)uv-x86_64-pc-windows-msvc\.zip$'
-$uvInstallDir = Join-Path $HOME '.local\bin'
-$uvZipPath = Join-Path $env:TEMP 'kimi-shell-uv.zip'
-$uvExtractDir = Join-Path $env:TEMP 'kimi-shell-uv'
-New-Item -ItemType Directory -Force -Path $uvInstallDir | Out-Null
-$installedUv = Join-Path $uvInstallDir 'uv.exe'
-foreach ($releaseUrl in $releaseUrls) {
-  try {
-    $releasePage = Invoke-WebRequest -Uri $releaseUrl -TimeoutSec 45 -ErrorAction Stop
-    $assetHref = @($releasePage.Links | Where-Object { $_.href } | ForEach-Object { $_.href } | Where-Object { $_ -match $assetPattern } | Select-Object -First 1)[0]
-    if (-not $assetHref) { throw 'missing uv asset' }
-    if (Test-Path $uvZipPath) { Remove-Item $uvZipPath -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $uvExtractDir) { Remove-Item $uvExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Invoke-WebRequest -Uri ([System.Uri]::new([System.Uri]$releaseUrl, $assetHref).AbsoluteUri) -OutFile $uvZipPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
-    Expand-Archive -Path $uvZipPath -DestinationPath $uvExtractDir -Force
-    $uvExe = Get-ChildItem -Path $uvExtractDir -Recurse -Filter 'uv.exe' | Select-Object -First 1
-    if (-not $uvExe) { throw 'expanded archive does not contain uv.exe' }
-    Copy-Item -Path $uvExe.FullName -Destination $installedUv -Force
-    if (-not (Test-Path $installedUv)) { throw 'uv.exe was not copied into the install directory' }
-    break
-  } catch {
-    Write-Host ('uv mirror install failed, trying next source: ' + $releaseUrl)
-  }
-}
-Invoke-KimiShellVersionCheck 'uv' @((Join-Path $HOME '.local\bin\uv.exe'),(Join-Path $HOME '.cargo\bin\uv.exe')) @('--version')
-"#
-    .replace("__RELEASE_URLS__", &ps_array(&config.uv_release_pages));
-    step(
-        "install_uv",
-        "Install uv",
-        "Download the uv archive from mirror release pages.",
-        &command,
-    )
-}
-
-fn step_python_official() -> InstallTaskStep {
-    step(
-        "install_python313",
-        "Install Python 3.13",
-        "Install and verify Python 3.13 through uv.",
-        &python_install_command(),
-    )
-}
-
-fn step_python_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
-    let command = r#"
-try { Invoke-KimiShellPython313Check; exit 0 } catch {}
-Ensure-KimiShellPath
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-  try { uv python install 3.13; Invoke-KimiShellPython313Check; exit 0 } catch { Write-Host 'uv-managed Python unavailable, trying installer mirror.' }
-}
-$pythonMirrors = __PYTHON_MIRRORS__
-$pythonInstallerPath = Join-Path $env:TEMP 'kimi-shell-python-3.13.12-amd64.exe'
-foreach ($mirrorUrl in $pythonMirrors) {
-  try {
-    Invoke-WebRequest -Uri $mirrorUrl -OutFile $pythonInstallerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
-    $proc = Start-Process -FilePath $pythonInstallerPath -ArgumentList @('/quiet','InstallAllUsers=0','PrependPath=1','Include_pip=1','Include_test=0') -Wait -PassThru
-    if ($null -eq $proc -or $proc.ExitCode -ne 0) { throw 'python installer failed' }
-    Invoke-KimiShellPython313Check
-    exit 0
-  } catch {
-    Write-Host ('python mirror install failed, trying next source: ' + $mirrorUrl)
-  }
-}
-throw 'Python 3.13 mirror install failed.'
-"#
-    .replace("__PYTHON_MIRRORS__", &ps_array(&config.python_installer_urls));
-    step(
-        "install_python313",
-        "Install Python 3.13",
-        "Try uv first, then use a mirrored Python installer.",
-        &command,
-    )
-}
-
-fn python_install_command() -> String {
-    r#"
-Ensure-KimiShellPath
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv is required before installing Python 3.13.' }
-uv python install 3.13
-Invoke-KimiShellPython313Check
-"#
-    .to_string()
-}
-
-fn step_kimi_official() -> InstallTaskStep {
-    step(
-        "install_kimi",
-        "Install Kimi Code",
-        "Install Kimi Code with the official Windows installer.",
-        &kimi_install_command(None),
-    )
-}
-
-fn step_kimi_mirror(_config: &ResolvedMirrorConfig) -> InstallTaskStep {
-    step(
-        "install_kimi",
-        "Install Kimi Code",
-        "Install Kimi Code. Mirror source does not change the official Kimi installer.",
-        &kimi_install_command(None),
-    )
-}
-
-fn step_upgrade_official() -> InstallTaskStep {
-    step(
-        "upgrade_kimi",
-        "Upgrade Kimi Code",
-        "Upgrade Kimi Code from the official source.",
-        &kimi_upgrade_command(None),
-    )
-}
-
-fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
-    step(
-        "upgrade_kimi",
-        "Upgrade Kimi Code",
-        "Upgrade Kimi Code. Mirror source does not change the official Kimi upgrade command.",
-        &kimi_upgrade_command(Some(&ps_array(&config.pypi_index_urls))),
-    )
-}
-
-fn step_uninstall_kimi() -> InstallTaskStep {
-    step(
-        "uninstall_kimi",
-        "Uninstall Kimi Code",
-        "Remove only the managed Kimi Code binary/package.",
-        &kimi_uninstall_command(),
-    )
-}
-
-fn kimi_install_command(indexes_expr: Option<&str>) -> String {
-    let _ = indexes_expr;
-    r#"
-Ensure-KimiShellPath
-Invoke-RestMethod -Uri '__KIMI_CODE_INSTALL_SCRIPT_URL__' | Invoke-Expression
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
-"#
-    .replace(
-        "__KIMI_CODE_INSTALL_SCRIPT_URL__",
-        KIMI_CODE_INSTALL_SCRIPT_URL,
-    )
-    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
-}
-
-fn kimi_upgrade_command(indexes_expr: Option<&str>) -> String {
-    let _ = indexes_expr;
-    r#"
-Ensure-KimiShellPath
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
-$kimi = Ensure-KimiShellCommandPath 'kimi' __KIMI_CANDIDATE_PATHS__
-& $kimi upgrade
-if ($LASTEXITCODE -ne 0) { throw "kimi upgrade failed with exit code $LASTEXITCODE." }
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
-"#
-    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
-}
-
-fn kimi_uninstall_command() -> String {
-    r#"
-Ensure-KimiShellPath
-$managed = __KIMI_CANDIDATE_PATHS__
-$removed = $false
-if (Get-Command npm -ErrorAction SilentlyContinue) {
-  npm uninstall -g __KIMI_CODE_NPM_PACKAGE__
-  if ($LASTEXITCODE -eq 0) { $removed = $true }
-}
-$binary = Join-Path $HOME '.kimi-code\bin\kimi.exe'
-if (Test-Path $binary) {
-  Remove-Item $binary -Force
-  $removed = $true
-}
-foreach ($candidate in $managed | Where-Object { $_ }) {
-  if (Test-Path $candidate) { throw "managed kimi command is still present after uninstall: $candidate" }
-}
-if (-not $removed) { Write-Host 'No managed Kimi Code install was found.' }
-"#
-    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
-    .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
-}
-
-fn kimi_ps_candidate_paths() -> String {
-    "@((Join-Path $HOME '.kimi-code\\bin\\kimi.exe'),(Join-Path $env:APPDATA 'npm\\kimi.cmd'),(Join-Path $HOME '.local\\bin\\kimi.exe'),(Join-Path $HOME '.cargo\\bin\\kimi.exe'))".to_string()
-}
-
-fn step_git_official() -> InstallTaskStep {
-    step(
-        "install_git",
-        "Install Git for Windows",
-        "Install Git through winget.",
-        r#"
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget is required to install Git.' }
-winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements
-Invoke-KimiShellVersionCheck 'git' @((Join-Path $env:ProgramFiles 'Git\cmd\git.exe'),(Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe')) @('--version')
-"#,
-    )
-}
-
-fn step_git_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
-    let command = r#"
-$releasePages = __RELEASE_PAGES__
-$installerPath = Join-Path $env:TEMP 'kimi-shell-git-installer.exe'
-foreach ($latestReleaseUrl in $releasePages) {
-  try {
-    $baseUri = [System.Uri]$latestReleaseUrl
-    $page = Invoke-WebRequest -Uri $latestReleaseUrl -TimeoutSec 45 -ErrorAction Stop
-    $installerHref = @($page.Links | Where-Object { $_.href } | ForEach-Object { $_.href } | Where-Object { $_ -match '(?i)Git-[^/]*-64-bit\.exe$' } | Select-Object -First 1)[0]
-    if (-not $installerHref) { throw 'Mirror page does not contain a Git installer.' }
-    Invoke-WebRequest -Uri ([System.Uri]::new($baseUri, $installerHref).AbsoluteUri) -OutFile $installerPath -TimeoutSec 180 -MaximumRedirection 8 -ErrorAction Stop
-    Start-Process -FilePath $installerPath -Wait
-    Invoke-KimiShellVersionCheck 'git' @((Join-Path $env:ProgramFiles 'Git\cmd\git.exe'),(Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe')) @('--version')
-    exit 0
-  } catch {
-    Write-Host ('Git mirror install failed, trying next source: ' + $latestReleaseUrl)
-  }
-}
-throw 'Git mirror install failed.'
-"#
-    .replace("__RELEASE_PAGES__", &ps_array(&config.git_release_pages));
-    step(
-        "install_git",
-        "Install Git for Windows",
-        "Download the Git installer from a mirror.",
-        &command,
-    )
-}
-
-fn step_node() -> InstallTaskStep {
-    step(
-        "install_nodejs",
-        "Install Node.js",
-        "Install Node.js through winget.",
-        r#"
-if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw 'winget is required to install Node.js.' }
-winget install OpenJS.NodeJS --accept-source-agreements --accept-package-agreements
-Invoke-KimiShellVersionCheck 'node' @((Join-Path $env:ProgramFiles 'nodejs\node.exe'),(Join-Path ${env:ProgramFiles(x86)} 'nodejs\node.exe')) @('-v')
-"#,
-    )
-}
-
-fn steps_for_source(task: &InstallTaskDefinition, source: InstallSource) -> Vec<InstallTaskStep> {
-    match source {
-        InstallSource::Official => {
-            if task.official_steps.is_empty() {
-                task.mirror_steps.clone()
-            } else {
-                task.official_steps.clone()
-            }
-        }
-        InstallSource::Mirror => {
-            if task.mirror_steps.is_empty() {
-                task.official_steps.clone()
-            } else {
-                task.mirror_steps.clone()
-            }
-        }
-    }
-}
-
-fn join_commands(steps: &[InstallTaskStep]) -> String {
-    steps
-        .iter()
-        .enumerate()
-        .map(|(index, step)| {
-            format!(
-                "# {}. {}\n# {}\n{}\n",
-                index + 1,
-                step.title,
-                step.description,
-                step.command.trim()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
-}
-
 fn write_temp_ps1(step: &InstallTaskStep, script_text: &str) -> Result<PathBuf, String> {
     let mut path = env::temp_dir();
     path.push(format!(
@@ -1803,7 +1355,7 @@ fn launch_external_fallback(
     source: InstallSource,
     commands: &str,
 ) -> Result<String, String> {
-    let first_step = steps_for_source(task, source)
+    let first_step = catalog::steps_for_source(task, source)
         .into_iter()
         .next()
         .ok_or_else(|| "fallback task has no steps".to_string())?;
@@ -2351,10 +1903,11 @@ fn format_failure_summary(step_title: &str, exit_code: Option<i32>, detail: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::InstallTaskGroup;
 
     #[test]
     fn quick_core_has_three_steps() {
-        let task = build_install_flow_catalog_with_mirror_config(
+        let task = catalog::build_install_flow_catalog_with_mirror_config(
             &resolved_mirror_config_from_settings(&AppSettings::default()),
         )
         .tasks
@@ -2367,7 +1920,7 @@ mod tests {
 
     #[test]
     fn optional_tasks_use_fallback_mode() {
-        let tasks = build_install_flow_catalog_with_mirror_config(
+        let tasks = catalog::build_install_flow_catalog_with_mirror_config(
             &resolved_mirror_config_from_settings(&AppSettings::default()),
         )
         .tasks;
@@ -2387,7 +1940,12 @@ mod tests {
 
     #[test]
     fn join_commands_contains_titles_and_commands() {
-        let text = join_commands(&[step("sample", "Sample", "Desc", "Write-Output 'ok'")]);
+        let text = catalog::join_commands(&[catalog::step(
+            "sample",
+            "Sample",
+            "Desc",
+            "Write-Output 'ok'",
+        )]);
         assert!(text.contains("Sample"));
         assert!(text.contains("Write-Output 'ok'"));
     }
@@ -2413,7 +1971,7 @@ mod tests {
 
     #[test]
     fn upgrade_command_uses_kimi_upgrade() {
-        let command = kimi_upgrade_command(None);
+        let command = catalog::kimi_upgrade_command(None);
         assert!(command.contains("& $kimi upgrade"));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
         assert!(!command.contains("uv tool upgrade kimi-cli"));
@@ -2423,7 +1981,7 @@ mod tests {
 
     #[test]
     fn install_command_uses_official_kimi_code_installer() {
-        let command = kimi_install_command(None);
+        let command = catalog::kimi_install_command(None);
         assert!(command.contains(KIMI_CODE_INSTALL_SCRIPT_URL));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
         assert!(!command.contains("uv tool install kimi-cli"));
@@ -2433,7 +1991,7 @@ mod tests {
 
     #[test]
     fn python_install_command_uses_python313_helper() {
-        let command = python_install_command();
+        let command = catalog::python_install_command();
         assert!(command.contains("uv python install 3.13"));
         assert!(command.contains("Invoke-KimiShellPython313Check"));
         assert!(!command.contains("Invoke-KimiShellVersionCheck 'python'"));
@@ -2615,7 +2173,7 @@ mod tests {
             },
             ..AppSettings::default()
         };
-        let catalog = build_install_flow_catalog_with_mirror_config(
+        let catalog = catalog::build_install_flow_catalog_with_mirror_config(
             &resolved_mirror_config_from_settings(&settings),
         );
         let uv_task = catalog

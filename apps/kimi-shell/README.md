@@ -58,6 +58,12 @@ pnpm check:nfr:port-conflict
 pnpm check:nfr:reliability
 ```
 
+## 代码组织
+
+- `src/app/useShellController.ts` 保留窗口、workspace、prefill、skill 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
+- `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`。
+- `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`。
+
 ## 打包命令
 
 ```bash

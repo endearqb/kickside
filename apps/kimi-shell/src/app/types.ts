@@ -163,6 +163,7 @@ export interface AppStatus {
   serverTokenPath?: string;
   serverTokenRedacted?: string;
   workspaceUrl?: string;
+  workspaceUrlRedacted?: string;
   startupAttemptId: number;
   startupPhase: StartupPhase;
   startupFailureKind?: StartupFailureKind;
@@ -845,6 +846,7 @@ export interface DiagnosticsInfo {
   serverTokenPath?: string;
   serverTokenRedacted?: string;
   workspaceUrl?: string;
+  workspaceUrlRedacted?: string;
   kimiVersion?: string;
   versionError?: string;
   lastError?: string;

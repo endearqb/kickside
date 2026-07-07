@@ -202,6 +202,9 @@ func (s *Service) Start() error {
 		Addr:              address,
 		Handler:           admin.NewHandler(s, s.options.AdminToken),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	s.mu.Lock()

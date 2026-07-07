@@ -2,8 +2,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import frameWorkspaceBridgeScript from "../../src-tauri/src/frame_workspace_bridge.js?raw";
 import {
-  isKnownWorkspaceIframeSource,
+  createWorkspaceBridgeNonce,
+  isExpectedWorkspaceBridgeNonce,
+  isTrustedWorkspaceIframeSource,
   normalizeExternalOpenUrl,
+  redactWorkspaceUrlForDisplay,
 } from "./linkBridge";
 
 describe("link bridge iframe source checks", () => {
@@ -18,15 +21,19 @@ describe("link bridge iframe source checks", () => {
       .forEach((node) => node.remove());
   });
 
-  it("trusts only workspace iframe windows", () => {
+  it("trusts only the current workspace iframe window", () => {
     const workspaceFrame = document.createElement("iframe");
     workspaceFrame.className = "workspace-iframe";
     const otherFrame = document.createElement("iframe");
     document.body.append(workspaceFrame, otherFrame);
 
-    expect(isKnownWorkspaceIframeSource(workspaceFrame.contentWindow)).toBe(true);
-    expect(isKnownWorkspaceIframeSource(otherFrame.contentWindow)).toBe(false);
-    expect(isKnownWorkspaceIframeSource(window)).toBe(false);
+    expect(isTrustedWorkspaceIframeSource(workspaceFrame.contentWindow, workspaceFrame)).toBe(
+      true,
+    );
+    expect(isTrustedWorkspaceIframeSource(otherFrame.contentWindow, workspaceFrame)).toBe(
+      false,
+    );
+    expect(isTrustedWorkspaceIframeSource(window, workspaceFrame)).toBe(false);
   });
 
   it("normalizes only http and https external open URLs", () => {
@@ -43,6 +50,28 @@ describe("link bridge iframe source checks", () => {
     expect(normalizeExternalOpenUrl("shell:AppsFolder")).toBeNull();
     expect(normalizeExternalOpenUrl("")).toBeNull();
     expect(normalizeExternalOpenUrl("://bad")).toBeNull();
+  });
+
+  it("requires the exact workspace bridge nonce", () => {
+    const nonce = createWorkspaceBridgeNonce();
+
+    expect(nonce.length).toBeGreaterThan(0);
+    expect(isExpectedWorkspaceBridgeNonce(nonce, nonce)).toBe(true);
+    expect(isExpectedWorkspaceBridgeNonce(`${nonce}-other`, nonce)).toBe(false);
+    expect(isExpectedWorkspaceBridgeNonce("", nonce)).toBe(false);
+    expect(isExpectedWorkspaceBridgeNonce(null, nonce)).toBe(false);
+  });
+
+  it("redacts workspace URL fragments for display", () => {
+    expect(redactWorkspaceUrlForDisplay("http://127.0.0.1:1234/#token=secret")).toBe(
+      "http://127.0.0.1:1234/#token=[REDACTED]",
+    );
+    expect(redactWorkspaceUrlForDisplay("http://127.0.0.1:1234")).toBe(
+      "http://127.0.0.1:1234/",
+    );
+    expect(redactWorkspaceUrlForDisplay("not-a-url#token=secret")).toBe(
+      "not-a-url#[REDACTED]",
+    );
   });
 
   it("injects pane theme metadata and head style from theme sync messages", () => {

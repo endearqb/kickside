@@ -18,11 +18,16 @@ type Logger struct {
 	secrets []string
 }
 
+const maxLogFileBytes = 5 << 20
+
 func New(path string) (*Logger, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory for %s: %w", path, err)
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err := rotateOversizedLog(path); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open log file %s: %w", path, err)
 	}
@@ -30,6 +35,26 @@ func New(path string) (*Logger, error) {
 		file:   file,
 		logger: log.New(file, "", 0),
 	}, nil
+}
+
+func rotateOversizedLog(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to stat log file %s: %w", path, err)
+	}
+	if info.Size() <= maxLogFileBytes {
+		return nil
+	}
+
+	rotatedPath := path + ".1"
+	_ = os.Remove(rotatedPath)
+	if err := os.Rename(path, rotatedPath); err != nil {
+		return fmt.Errorf("failed to rotate log file %s: %w", path, err)
+	}
+	return nil
 }
 
 func (l *Logger) Printf(format string, args ...any) {

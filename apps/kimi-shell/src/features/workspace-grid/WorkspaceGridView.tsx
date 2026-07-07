@@ -69,11 +69,16 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [gridMessage, setGridMessage] = useState("");
   const [resizeDraft, setResizeDraft] = useState<ResizeDraft | null>(null);
+  const [resizePreviewTrackSizes, setResizePreviewTrackSizes] =
+    useState<WorkspaceGridTrackSizes | null>(null);
   const [paneDragDraft, setPaneDragDraft] = useState<PaneDragDraft | null>(null);
 
   const template = GRID_PRESETS[preset];
   const trackCounts = getGridTrackCounts(preset);
-  const customTrackSizes = normalizeGridTrackSizes(trackSizes, preset);
+  const customTrackSizes = normalizeGridTrackSizes(
+    resizePreviewTrackSizes ?? trackSizes,
+    preset,
+  );
   const effectiveColumns =
     customTrackSizes?.columns ?? createEqualTrackSizes(trackCounts.columns);
   const effectiveRows =
@@ -292,18 +297,23 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       client - resizeDraft.startClient,
       resizeDraft.totalPx,
     );
-    setGridTrackSizes({
+    setResizePreviewTrackSizes({
       ...resizeDraft.startTrackSizes,
       [resizeDraft.axis]: resized,
     });
     event.preventDefault();
   }
 
-  function handleResizeEnd() {
+  function handleResizeEnd(persist: boolean) {
     if (!resizeDraft) {
       return;
     }
+    const nextTrackSizes = resizePreviewTrackSizes;
     setResizeDraft(null);
+    setResizePreviewTrackSizes(null);
+    if (persist && nextTrackSizes) {
+      setGridTrackSizes(nextTrackSizes);
+    }
   }
 
   function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -312,12 +322,12 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   }
 
   function handleCanvasPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
-    handleResizeEnd();
+    handleResizeEnd(true);
     handlePaneDragEnd(event);
   }
 
   function handleCanvasPointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
-    handleResizeEnd();
+    handleResizeEnd(false);
     handlePaneDragCancel(event);
   }
 
@@ -368,6 +378,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 codeFrameKey={props.codeFrameKey}
                 chatRemoteUrl={props.chatRemoteUrl}
                 workspaceIframeRef={props.workspaceIframeRef}
+                workspaceBridgeNonce={props.workspaceBridgeNonce}
                 chatIframeRef={props.chatIframeRef}
                 codePaneState={props.codePaneState}
                 chatPaneState={props.chatPaneState}

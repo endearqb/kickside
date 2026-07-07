@@ -20,6 +20,7 @@ export type WorkspaceViewProps = {
   effectiveWorkDir?: string;
   themeMode: Theme;
   workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
+  workspaceBridgeNonce: string;
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;

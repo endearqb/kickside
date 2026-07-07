@@ -20,9 +20,19 @@ pub fn open_external_url(app: &AppHandle, url: &str) -> Result<(), String> {
 
     log_manager::append_line(
         app,
-        format!("external-link bridge open url={}", parsed.as_str()),
+        format!(
+            "external-link bridge open url={}",
+            external_url_log_display(&parsed)
+        ),
     );
     open_with_system_browser(parsed.as_str()).map_err(|error| error.to_string())
+}
+
+fn external_url_log_display(url: &Url) -> String {
+    let mut redacted = url.clone();
+    redacted.set_query(None);
+    redacted.set_fragment(None);
+    redacted.to_string()
 }
 
 pub fn open_folder(path: &str) -> Result<(), String> {
@@ -117,4 +127,20 @@ fn open_with_system_browser(url: &str) -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
         "unsupported platform for opening external url"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_url_log_display_strips_query_and_fragment() {
+        let url = Url::parse("https://example.com/oauth/callback?code=secret#token=secret")
+            .expect("valid url");
+
+        assert_eq!(
+            external_url_log_display(&url),
+            "https://example.com/oauth/callback"
+        );
+    }
 }

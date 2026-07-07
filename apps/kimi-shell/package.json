@@ -2,7 +2,7 @@
   "name": "appskimi-shell",
   "description": "Kimi Sidekick desktop shell for Kimi Code Web.",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "packageManager": "pnpm@10.34.4",
   "license": "MIT",
   "repository": {
@@ -19,6 +19,7 @@
     "clean:public-build-artifacts": "powershell -ExecutionPolicy Bypass -File scripts/clean_public_build_artifacts.ps1",
     "preview": "vite preview",
     "test": "vitest run",
+    "verify": "pnpm sync:version && .\\node_modules\\.bin\\tsc.cmd --noEmit && pnpm test && pnpm check:nfr:security",
     "tauri": "pnpm sync:version && tauri",
     "tauri:build:webview:evergreen": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant evergreen",
     "tauri:build:webview:fixed": "powershell -ExecutionPolicy Bypass -File scripts/build_webview_variant.ps1 -Variant fixed",
@@ -27,7 +28,7 @@
     "sync:kimi-web": "powershell -ExecutionPolicy Bypass -File scripts/sync_kimi_cli_web.ps1",
     "check:enhanced-web:i18n": "node scripts/check_enhanced_web_i18n.mjs",
     "check:enhanced-web:compliance": "node scripts/check_enhanced_web_compliance.mjs",
-    "check:nfr:security": "node scripts/check_capabilities.mjs",
+    "check:nfr:security": "node scripts/check_capabilities.mjs && node scripts/check_bundle_resources.mjs && node scripts/check_command_registry.mjs",
     "check:nfr:port-conflict": "powershell -ExecutionPolicy Bypass -File scripts/nfr_port_conflict.ps1",
     "check:nfr:reliability": "powershell -ExecutionPolicy Bypass -File scripts/nfr_reliability.ps1"
   },

@@ -12,6 +12,20 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
+func TestConnectorPruneTargetsAreWhitelisted(t *testing.T) {
+	t.Parallel()
+
+	if !isConnectorPruneTarget("channel_bindings", "connector_id") {
+		t.Fatalf("expected channel_bindings.connector_id to be allowed")
+	}
+	if isConnectorPruneTarget("channel_bindings; DROP TABLE channel_bindings; --", "connector_id") {
+		t.Fatalf("unexpected unsafe table allow")
+	}
+	if isConnectorPruneTarget("channel_bindings", "connector_id OR 1=1") {
+		t.Fatalf("unexpected unsafe column allow")
+	}
+}
+
 func testConnectors() []config.ConnectorConfig {
 	return []config.ConnectorConfig{
 		{ID: "telegram-default", Platform: "telegram", Label: "Telegram", Enabled: true, Mode: "polling"},

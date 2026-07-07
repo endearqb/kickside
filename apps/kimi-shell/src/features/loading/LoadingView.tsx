@@ -6,6 +6,7 @@ type LoadingViewProps = {
   status: AppStatus | null;
   statusText: string;
   remoteUrl: string | null;
+  displayUrl: string | null;
   actionBusy: boolean;
   hotkeyOwnerLabel: string;
   onRetry: () => void;
@@ -19,6 +20,7 @@ export function LoadingView({
   status,
   statusText,
   remoteUrl,
+  displayUrl,
   actionBusy,
   hotkeyOwnerLabel,
   onRetry,
@@ -59,7 +61,7 @@ export function LoadingView({
               className="inline-link-btn"
               onClick={() => onOpenExternalUrl(remoteUrl)}
             >
-              {remoteUrl}
+              {displayUrl ?? remoteUrl}
             </button>
             .
           </p>

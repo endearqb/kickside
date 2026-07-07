@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +12,11 @@ import (
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
+)
+
+const (
+	maxAdminBodyBytes       = 1 << 20
+	maxDebugPromptBodyBytes = 4 << 20
 )
 
 type Service interface {
@@ -102,8 +108,7 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			return
 		}
 		var payload domain.SessionImportRequest
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+		if !decodeAdminJSON(writer, request, &payload, maxAdminBodyBytes) {
 			return
 		}
 		session, err := service.ImportSession(request.Context(), payload)
@@ -128,8 +133,7 @@ func NewHandler(service Service, adminToken string) http.Handler {
 		}
 		if request.Method == http.MethodPatch {
 			var payload domain.BindingUpdate
-			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-				writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+			if !decodeAdminJSON(writer, request, &payload, maxAdminBodyBytes) {
 				return
 			}
 			record, err := service.UpdateBinding(request.Context(), bindingID, payload)
@@ -178,8 +182,7 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			Status                string `json:"status"`
 			ResolutionPayloadJSON string `json:"resolutionPayloadJson,omitempty"`
 		}
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+		if !decodeAdminJSON(writer, request, &payload, maxAdminBodyBytes) {
 			return
 		}
 		if payload.Status == "" {
@@ -214,8 +217,7 @@ func NewHandler(service Service, adminToken string) http.Handler {
 			return
 		}
 		var payload runtime.PromptRequest
-		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
-			writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+		if !decodeAdminJSON(writer, request, &payload, maxDebugPromptBodyBytes) {
 			return
 		}
 		response, err := service.DebugPrompt(request.Context(), payload)
@@ -226,6 +228,20 @@ func NewHandler(service Service, adminToken string) http.Handler {
 		writeAdminData(writer, request, http.StatusOK, response)
 	})
 	return mux
+}
+
+func decodeAdminJSON(writer http.ResponseWriter, request *http.Request, target any, maxBytes int64) bool {
+	request.Body = http.MaxBytesReader(writer, request.Body, maxBytes)
+	if err := json.NewDecoder(request.Body).Decode(target); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeAdminError(writer, request, http.StatusRequestEntityTooLarge, "body_too_large", "request body too large", nil)
+			return false
+		}
+		writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+		return false
+	}
+	return true
 }
 
 func parseNestedAction(path string, prefix string) (string, string, bool) {

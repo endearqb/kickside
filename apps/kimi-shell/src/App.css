@@ -2718,7 +2718,7 @@ input:focus {
 }
 
 .workspace-stage-grid-shell.is-edge-to-edge .workspace-grid-pane {
-  border-radius: 0;
+  border-radius: var(--shell-window-radius);
 }
 
 .workspace-grid-icon-btn {
@@ -9046,7 +9046,22 @@ input:focus {
   box-shadow: none;
 }
 
+.cc-onboarding-steps {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
 .cc-image-card h2 {
+  margin: 0;
+  color: var(--cc-foreground);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.cc-onboarding-steps h2 {
   margin: 0;
   color: var(--cc-foreground);
   font-size: 18px;

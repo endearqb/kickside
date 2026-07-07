@@ -9,6 +9,7 @@ mod bridge_http_client;
 mod bridge_manager;
 mod bridge_settings_store;
 mod command_utils;
+mod commands;
 mod context_menu;
 mod enhanced_web;
 mod feishu_onboarding;
@@ -43,31 +44,19 @@ use std::time::Instant;
 
 use serde::Deserialize;
 use serde_json::json;
-use tauri::{ipc::Channel, AppHandle, Emitter, Manager, RunEvent, State};
+use tauri::{AppHandle, Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::ShortcutState;
+use url::Url;
 
 use app_state::{unix_time_millis, AppState};
 use types::{
-    AppSettings, AppStatus, BackendState, BindingRecord, BridgeApprovalRecord,
-    BridgeApprovalResolveInput, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
-    BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSessionSource,
-    BridgeSettings, BridgeStatus, ContextMenuStatus, DiagnosticsInfo, DiscoveredSkillDetail,
-    FeishuConnectorOnboardingSession, FrontendReadyAck, InstallFlowCatalog,
-    InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent, InstallSessionSnapshot,
-    InstallSettingsView, InstallSource, InstallTaskId, InstalledSkill, KimiCodeAccessConfigInput,
-    KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult, KimiCodeAccessConfigView,
-    KimiCodeAuthResult, KimiDoctorResult, KimiLoginHealthSource, KimiLoginHealthState,
-    MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus, OnboardingStep,
-    PowerShellPreflightSummary, SessionSkillState, ShutdownProgressPayload, SkillApplyResult,
-    SkillApplyScope, SkillDetail, SkillDiscoverySnapshot, SkillFileContent, SkillFileEntry,
-    SkillProjectionRecord, SkillRecommendation, SkillUsageStats,
-    StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput, StartupMonitorReason,
-    StartupMonitorState, StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck,
-    WebviewRuntimeKind, WeixinConnectorOnboardingSession, WorkspaceDiscoveryRoot,
-    WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceImportTarget,
-    WorkspaceImportTargetInput, WorkspaceSkillInventory, WorkspaceSkillProfile,
-    WorkspaceSkillTarget, WorkspaceWebSettingsInput, WorkspaceWebSettingsView,
-    CURRENT_ONBOARDING_VERSION,
+    AppSettings, AppStatus, BackendState, DiagnosticsInfo, FrontendReadyAck,
+    KimiCodeAccessConfigInput, KimiCodeAccessConfigTestInput, KimiCodeAccessConfigTestResult,
+    KimiCodeAccessConfigView, KimiCodeAuthResult, KimiDoctorResult, KimiLoginHealthSource,
+    KimiLoginHealthState, MainWindowCloseBehavior, MainWindowCloseDecisionInput, OnboardingStatus,
+    OnboardingStep, ShutdownProgressPayload, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorStatus, StartupMonitorTargetRoute, SubmitPrefillAck, WebviewRuntimeKind,
+    WorkspaceWebSettingsInput, WorkspaceWebSettingsView, CURRENT_ONBOARDING_VERSION,
 };
 
 const SHUTDOWN_PROGRESS_EVENT: &str = "shutdown-progress";
@@ -170,6 +159,8 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         )
     };
 
+    let workspace_url_redacted = redact_workspace_url(workspace_url.as_deref());
+
     Ok(AppStatus {
         instance_id,
         pid,
@@ -194,7 +185,8 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         runtime_origin,
         server_token_path,
         server_token_redacted,
-        workspace_url,
+        workspace_url: workspace_url_redacted.clone(),
+        workspace_url_redacted,
         startup_attempt_id,
         startup_phase,
         startup_failure_kind,
@@ -255,6 +247,22 @@ fn restart_backend_runtime_only(app: AppHandle) -> Result<(), String> {
 
     backend_manager::restart_backend(app);
     Ok(())
+}
+
+#[tauri::command]
+fn get_workspace_embed_url(app: AppHandle) -> Result<Option<String>, String> {
+    let shared = app.state::<AppState>();
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| "runtime state mutex is poisoned".to_string())?;
+
+    Ok(runtime.workspace_url.clone().or_else(|| {
+        runtime
+            .workspace_port
+            .or(runtime.active_port)
+            .map(|port| format!("http://127.0.0.1:{port}"))
+    }))
 }
 
 #[tauri::command]
@@ -333,25 +341,6 @@ fn get_startup_monitor_status(app: AppHandle) -> Result<StartupMonitorStatus, St
 
     record_startup_monitor_observation(&app, &status, "get_startup_monitor_status_invoke");
     Ok(status)
-}
-
-#[tauri::command]
-fn grid_list_sessions(
-    app: AppHandle,
-) -> Result<Vec<workspace_session::WorkspaceSessionRecord>, String> {
-    workspace_session::list_workspace_sessions_for_grid(&app)
-}
-
-#[tauri::command]
-fn grid_create_session(
-    app: AppHandle,
-    workspace_root: String,
-) -> Result<workspace_session::WorkspaceSessionRecord, String> {
-    let trimmed = workspace_root.trim();
-    if trimmed.is_empty() {
-        return Err("workspace root is required".to_string());
-    }
-    workspace_session::create_workspace_session_for_grid(&app, &PathBuf::from(trimmed))
 }
 
 #[tauri::command]
@@ -507,536 +496,6 @@ fn save_work_dir(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_bridge_settings(app: AppHandle) -> Result<BridgeSettings, String> {
-    bridge_settings_store::load_or_default(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn save_bridge_settings(app: AppHandle, input: BridgeSettings) -> Result<BridgeSettings, String> {
-    let saved = bridge_settings_store::save(&app, &input).map_err(|error| error.to_string())?;
-    sync_idle_bridge_runtime(&app, &saved)?;
-    Ok(saved)
-}
-
-#[tauri::command]
-fn delete_bridge_connector(app: AppHandle, connector_id: String) -> Result<BridgeSettings, String> {
-    let saved = bridge_settings_store::delete_connector(&app, &connector_id)
-        .map_err(|error| error.to_string())?;
-    sync_idle_bridge_runtime(&app, &saved)?;
-    Ok(saved)
-}
-
-#[tauri::command]
-fn save_bridge_onboarding_config(
-    app: AppHandle,
-    input: BridgeOnboardingConfigInput,
-) -> Result<BridgeSettings, String> {
-    let saved = bridge_settings_store::save_onboarding_config(&app, &input)
-        .map_err(|error| error.to_string())?;
-    sync_idle_bridge_runtime(&app, &saved)?;
-    Ok(saved)
-}
-
-#[tauri::command]
-fn get_bridge_status(app: AppHandle) -> Result<BridgeStatus, String> {
-    bridge_manager::get_bridge_status(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        bridge_manager::start_bridge(&app).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join start bridge task: {error}"))?
-}
-
-#[tauri::command]
-async fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        bridge_manager::stop_bridge(&app).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join stop bridge task: {error}"))?
-}
-
-#[tauri::command]
-async fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join restart bridge task: {error}"))?
-}
-
-#[tauri::command]
-fn list_bridge_bindings(app: AppHandle) -> Result<Vec<BindingRecord>, String> {
-    bridge_manager::list_bridge_bindings(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_bridge_sessions(app: AppHandle) -> Result<Vec<BridgeSessionRecord>, String> {
-    let mut sessions =
-        bridge_manager::list_bridge_sessions(&app).map_err(|error| error.to_string())?;
-    let workspace_sessions = workspace_session::list_workspace_sessions_for_bridge(&app)
-        .map_err(|error| error.to_string())?;
-    sessions.extend(
-        workspace_sessions
-            .into_iter()
-            .map(|session| BridgeSessionRecord {
-                source: BridgeSessionSource::ShellWeb,
-                session_id: session.session_id,
-                work_dir: session.work_dir,
-                last_message_at: session.last_updated.clone(),
-                summary: None,
-                session_state: Some(if session.is_running {
-                    "running".to_string()
-                } else {
-                    "available".to_string()
-                }),
-                lease_owner: None,
-                lease_expires_at: None,
-                auto_approve: false,
-                provider_name: Some("kimi-web".to_string()),
-                runtime_metadata_json: None,
-                created_at: None,
-                updated_at: session.last_updated,
-                switchable: false,
-                importable: true,
-            }),
-    );
-    Ok(sessions)
-}
-
-#[tauri::command]
-fn clear_bridge_binding(app: AppHandle, binding_id: String) -> Result<(), String> {
-    bridge_manager::clear_bridge_binding(&app, &binding_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn reset_bridge_binding_session(app: AppHandle, binding_id: String) -> Result<(), String> {
-    bridge_manager::reset_bridge_binding_session(&app, &binding_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn reset_bridge_binding_to_default_work_dir(
-    app: AppHandle,
-    binding_id: String,
-) -> Result<(), String> {
-    bridge_manager::reset_bridge_binding_to_default_work_dir(&app, &binding_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_bridge_approvals(
-    app: AppHandle,
-    status: Option<String>,
-) -> Result<Vec<BridgeApprovalRecord>, String> {
-    bridge_manager::list_bridge_approvals(&app, status.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn resolve_bridge_approval(
-    app: AppHandle,
-    input: BridgeApprovalResolveInput,
-) -> Result<(), String> {
-    bridge_manager::resolve_bridge_approval(&app, &input).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn import_bridge_session(
-    app: AppHandle,
-    input: BridgeSessionImportInput,
-) -> Result<BridgeSessionRecord, String> {
-    let work_dir = if input
-        .work_dir
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-    {
-        let workspace =
-            workspace_session::get_workspace_session_for_bridge(&app, &input.source_session_id)
-                .map_err(|error| error.to_string())?
-                .ok_or_else(|| {
-                    format!("workspace session not found: {}", input.source_session_id)
-                })?;
-        workspace.work_dir.ok_or_else(|| {
-            format!(
-                "workspace session has no work directory: {}",
-                input.source_session_id
-            )
-        })?
-    } else {
-        input.work_dir.clone().unwrap_or_default()
-    };
-
-    bridge_manager::import_bridge_session(
-        &app,
-        &BridgeSessionImportInput {
-            source: input.source,
-            source_session_id: input.source_session_id,
-            work_dir: Some(work_dir),
-            summary: input.summary,
-        },
-    )
-    .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_bridge_log_tail(app: AppHandle, max_lines: Option<usize>) -> Result<Vec<String>, String> {
-    bridge_manager::get_bridge_log_tail(&app, max_lines).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_bridge_secrets_mask_view(app: AppHandle) -> Result<BridgeSecretsMaskView, String> {
-    bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn save_bridge_connector_secrets(
-    app: AppHandle,
-    input: BridgeConnectorSecretsInput,
-) -> Result<BridgeSecretsMaskView, String> {
-    bridge_settings_store::save_connector_secrets(&app, &input)
-        .map_err(|error| error.to_string())?;
-    bridge_manager::get_bridge_secrets_mask_view(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn start_feishu_connector_onboarding(
-    app: AppHandle,
-    input: StartFeishuConnectorOnboardingInput,
-) -> Result<FeishuConnectorOnboardingSession, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        feishu_onboarding::start(&app, &input).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join feishu onboarding start task: {error}"))?
-}
-
-#[tauri::command]
-async fn get_feishu_connector_onboarding_status(
-    app: AppHandle,
-    session_id: String,
-) -> Result<FeishuConnectorOnboardingSession, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        feishu_onboarding::get_status(&app, &session_id).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join feishu onboarding status task: {error}"))?
-}
-
-#[tauri::command]
-fn cancel_feishu_connector_onboarding(
-    app: AppHandle,
-    session_id: String,
-) -> Result<FeishuConnectorOnboardingSession, String> {
-    feishu_onboarding::cancel(&app, &session_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn start_weixin_connector_onboarding(
-    app: AppHandle,
-    input: StartWeixinConnectorOnboardingInput,
-) -> Result<WeixinConnectorOnboardingSession, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        weixin_onboarding::start(&app, &input).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join weixin onboarding start task: {error}"))?
-}
-
-#[tauri::command]
-async fn get_weixin_connector_onboarding_status(
-    app: AppHandle,
-    session_id: String,
-) -> Result<WeixinConnectorOnboardingSession, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        weixin_onboarding::get_status(&app, &session_id).map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("failed to join weixin onboarding status task: {error}"))?
-}
-
-#[tauri::command]
-fn cancel_weixin_connector_onboarding(
-    app: AppHandle,
-    session_id: String,
-) -> Result<WeixinConnectorOnboardingSession, String> {
-    weixin_onboarding::cancel(&app, &session_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn install_skill_from_git(
-    app: AppHandle,
-    repo_url: String,
-    git_ref: Option<String>,
-) -> Result<InstalledSkill, String> {
-    skill_center::install_skill_from_git(&app, &repo_url, git_ref.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn import_skill_from_path(app: AppHandle, path: String) -> Result<InstalledSkill, String> {
-    skill_center::import_skill_from_path(&app, &path).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn scan_discoverable_skills(app: AppHandle) -> Result<SkillDiscoverySnapshot, String> {
-    skill_center::scan_discoverable_skills(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_skill_discovery_workspaces(app: AppHandle) -> Result<Vec<WorkspaceDiscoveryRoot>, String> {
-    skill_center::list_skill_discovery_workspaces(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_workspace_skill_targets(app: AppHandle) -> Result<Vec<WorkspaceSkillTarget>, String> {
-    skill_center::list_workspace_skill_targets(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_workspace_skill_inventory(
-    app: AppHandle,
-    target_id: String,
-) -> Result<WorkspaceSkillInventory, String> {
-    skill_center::get_workspace_skill_inventory(&app, &target_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn add_installed_skill_to_workspace_target(
-    app: AppHandle,
-    target_id: String,
-    container_kind: types::SkillDiscoveryContainerKind,
-    skill_id: String,
-) -> Result<WorkspaceSkillInventory, String> {
-    skill_center::add_installed_skill_to_workspace_target(
-        &app,
-        &target_id,
-        container_kind,
-        &skill_id,
-    )
-    .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn remove_workspace_target_skill(
-    app: AppHandle,
-    target_id: String,
-    container_kind: types::SkillDiscoveryContainerKind,
-    skill_path_or_key: String,
-) -> Result<WorkspaceSkillInventory, String> {
-    skill_center::remove_workspace_target_skill(
-        &app,
-        &target_id,
-        container_kind,
-        &skill_path_or_key,
-    )
-    .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_discovered_skill_detail(
-    app: AppHandle,
-    discovery_id: String,
-) -> Result<DiscoveredSkillDetail, String> {
-    skill_center::get_discovered_skill_detail(&app, &discovery_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn import_discovered_skill(app: AppHandle, discovery_id: String) -> Result<InstalledSkill, String> {
-    skill_center::import_discovered_skill(&app, &discovery_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_installed_skills(app: AppHandle) -> Result<Vec<InstalledSkill>, String> {
-    skill_center::list_installed_skills(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_skill_detail(app: AppHandle, skill_id: String) -> Result<SkillDetail, String> {
-    skill_center::get_skill_detail(&app, &skill_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_skill_file_entries(
-    app: AppHandle,
-    skill_id: String,
-) -> Result<Vec<SkillFileEntry>, String> {
-    skill_center::list_skill_file_entries(&app, &skill_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn read_skill_file(
-    app: AppHandle,
-    skill_id: String,
-    rel_path: String,
-) -> Result<SkillFileContent, String> {
-    skill_center::read_skill_file(&app, &skill_id, &rel_path).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_skill_usage_stats(
-    app: AppHandle,
-    skill_ids: Option<Vec<String>>,
-) -> Result<Vec<SkillUsageStats>, String> {
-    skill_center::get_skill_usage_stats(&app, skill_ids).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_discovered_skill_file_entries(
-    app: AppHandle,
-    discovery_id: String,
-) -> Result<Vec<SkillFileEntry>, String> {
-    skill_center::list_discovered_skill_file_entries(&app, &discovery_id)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn read_discovered_skill_file(
-    app: AppHandle,
-    discovery_id: String,
-    rel_path: String,
-) -> Result<SkillFileContent, String> {
-    skill_center::read_discovered_skill_file(&app, &discovery_id, &rel_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn set_skill_trust(app: AppHandle, skill_id: String, trusted: bool) -> Result<(), String> {
-    skill_center::set_skill_trust(&app, &skill_id, trusted).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn apply_skill(
-    app: AppHandle,
-    skill_id: String,
-    scope: SkillApplyScope,
-) -> Result<SkillApplyResult, String> {
-    skill_center::apply_skill(&app, &skill_id, scope).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn remove_skill(
-    app: AppHandle,
-    skill_id: String,
-    scope: SkillApplyScope,
-) -> Result<SkillApplyResult, String> {
-    skill_center::remove_skill(&app, &skill_id, scope).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_active_session_skills(app: AppHandle) -> Result<SessionSkillState, String> {
-    skill_center::list_active_session_skills(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_global_skills(app: AppHandle) -> Result<Vec<SkillProjectionRecord>, String> {
-    skill_center::list_global_skills(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn list_workspace_recent_skills(
-    app: AppHandle,
-    workspace_key: Option<String>,
-) -> Result<Vec<String>, String> {
-    skill_center::list_workspace_recent_skills(&app, workspace_key.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_workspace_skill_profile(
-    app: AppHandle,
-    workspace_key: Option<String>,
-) -> Result<Option<WorkspaceSkillProfile>, String> {
-    skill_center::get_workspace_skill_profile(&app, workspace_key.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn set_workspace_skill_pin(
-    app: AppHandle,
-    skill_id: String,
-    pinned: bool,
-    workspace_key: Option<String>,
-) -> Result<WorkspaceSkillProfile, String> {
-    skill_center::set_workspace_skill_pin(&app, &skill_id, pinned, workspace_key.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_workspace_skill_recommendations(
-    app: AppHandle,
-    workspace_key: Option<String>,
-) -> Result<Vec<SkillRecommendation>, String> {
-    skill_center::get_workspace_skill_recommendations(&app, workspace_key.as_deref())
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn update_skill(app: AppHandle, skill_id: String) -> Result<InstalledSkill, String> {
-    skill_center::update_skill(&app, &skill_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn uninstall_skill(app: AppHandle, skill_id: String) -> Result<(), String> {
-    skill_center::uninstall_skill(&app, &skill_id).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn cleanup_session_skill_projections(app: AppHandle, session_id: String) -> Result<(), String> {
-    skill_center::cleanup_session_skill_projections(&app, &session_id)
-        .map_err(|error| error.to_string())
-}
-
-fn sync_idle_bridge_runtime(app: &AppHandle, saved: &BridgeSettings) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let mut runtime = state
-        .bridge_runtime
-        .lock()
-        .map_err(|_| "bridge runtime mutex is poisoned".to_string())?;
-    if !matches!(
-        runtime.state,
-        crate::types::BridgeRuntimeState::Running
-            | crate::types::BridgeRuntimeState::Starting
-            | crate::types::BridgeRuntimeState::Degraded
-    ) {
-        runtime.admin_port = saved.admin_port;
-        runtime.channels = saved
-            .connectors
-            .iter()
-            .map(|connector| crate::types::BridgeChannelStatus {
-                connector_id: connector.id.clone(),
-                connector_label: connector.label.clone(),
-                platform: connector.platform,
-                enabled: connector.enabled,
-                state: crate::types::BridgeChannelState::Idle,
-                last_heartbeat_at: None,
-                last_inbound_at: None,
-                last_outbound_at: None,
-                last_offset: None,
-                last_error_code: None,
-                last_error: None,
-                last_ready_at: None,
-                last_failure_at: None,
-                last_failure_operation: None,
-                last_failure_retryable: None,
-                consecutive_failures: None,
-                next_retry_at: None,
-                last_recovery_at: None,
-                recovery_hint: None,
-            })
-            .collect();
-    }
-    Ok(())
-}
-
-#[tauri::command]
 fn open_logs_folder(app: AppHandle) -> Result<(), String> {
     backend_manager::open_logs_folder(&app)
 }
@@ -1086,122 +545,6 @@ async fn test_kimi_code_access_config(
     input: KimiCodeAccessConfigTestInput,
 ) -> Result<KimiCodeAccessConfigTestResult, String> {
     backend_manager::test_kimi_code_access_config(input).await
-}
-
-#[tauri::command]
-fn register_install_session_channel(
-    state: State<install_manager::InstallManager>,
-    channel: Channel<InstallSessionEvent>,
-) -> Result<InstallSessionSnapshot, String> {
-    state.register_channel(channel)
-}
-
-#[tauri::command]
-fn get_install_flow_catalog(app: AppHandle) -> InstallFlowCatalog {
-    install_manager::build_install_flow_catalog(&app)
-}
-
-#[tauri::command]
-fn get_install_session_snapshot(
-    state: State<install_manager::InstallManager>,
-) -> Result<InstallSessionSnapshot, String> {
-    state.snapshot()
-}
-
-#[tauri::command]
-fn start_install_task(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-    task_id: InstallTaskId,
-    source: InstallSource,
-) -> Result<InstallSessionSnapshot, String> {
-    state.start_task(&app, task_id, source)
-}
-
-#[tauri::command]
-fn cancel_install_task(
-    state: State<install_manager::InstallManager>,
-) -> Result<InstallSessionSnapshot, String> {
-    state.cancel_task()
-}
-
-#[tauri::command]
-fn install_kimi_dependencies(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-    source: InstallSource,
-) -> Result<String, String> {
-    install_manager::start_compat_task(&app, &state, InstallTaskId::QuickInstallCore, source)
-}
-
-#[tauri::command]
-fn install_kimi_code(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-    source: InstallSource,
-) -> Result<String, String> {
-    install_manager::start_compat_task(&app, &state, InstallTaskId::InstallKimi, source)
-}
-
-#[tauri::command]
-fn upgrade_kimi_code(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-    source: InstallSource,
-) -> Result<String, String> {
-    install_manager::start_compat_task(&app, &state, InstallTaskId::UpgradeKimi, source)
-}
-
-#[tauri::command]
-fn uninstall_kimi_code(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-    source: InstallSource,
-) -> Result<String, String> {
-    install_manager::start_compat_task(&app, &state, InstallTaskId::UninstallKimi, source)
-}
-
-#[tauri::command]
-fn install_nodejs(
-    app: AppHandle,
-    state: State<install_manager::InstallManager>,
-) -> Result<String, String> {
-    install_manager::start_compat_task(
-        &app,
-        &state,
-        InstallTaskId::InstallNodejs,
-        InstallSource::Official,
-    )
-}
-
-#[tauri::command]
-fn get_install_probe_status(app: AppHandle) -> InstallProbeStatus {
-    install_manager::get_install_probe_status(&app)
-}
-
-#[tauri::command]
-fn get_install_settings(app: AppHandle) -> InstallSettingsView {
-    install_manager::get_install_settings(&app)
-}
-
-#[tauri::command]
-fn save_install_settings(
-    app: AppHandle,
-    input: InstallSettingsView,
-) -> Result<InstallSettingsView, String> {
-    install_manager::save_install_settings(&app, input)
-}
-
-#[tauri::command]
-fn get_install_mirror_health_report(
-    input: InstallSettingsView,
-) -> Result<InstallMirrorHealthReport, String> {
-    install_manager::get_install_mirror_health_report(input)
-}
-
-#[tauri::command]
-fn get_powershell_preflight() -> PowerShellPreflightSummary {
-    install_manager::get_powershell_preflight()
 }
 
 #[tauri::command]
@@ -1335,6 +678,8 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         ),
     };
 
+    let workspace_url_redacted = redact_workspace_url(workspace_url.as_deref());
+
     Ok(DiagnosticsInfo {
         instance_id,
         pid,
@@ -1356,7 +701,8 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         runtime_origin,
         server_token_path,
         server_token_redacted,
-        workspace_url,
+        workspace_url: workspace_url_redacted.clone(),
+        workspace_url_redacted,
         kimi_version,
         version_error,
         last_error,
@@ -1391,47 +737,6 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         log_tail: log_manager::read_log_tail(&backend_log_path, 80),
         logs_dir: logs_dir.to_string_lossy().to_string(),
     })
-}
-
-#[tauri::command]
-fn get_context_menu_status(app: AppHandle) -> ContextMenuStatus {
-    context_menu::status(&app)
-}
-
-#[tauri::command]
-fn enable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
-    context_menu::enable(&app)?;
-    Ok(context_menu::status(&app))
-}
-
-#[tauri::command]
-fn disable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
-    context_menu::disable(&app)?;
-    Ok(context_menu::status(&app))
-}
-
-#[tauri::command]
-fn list_workspace_import_targets(app: AppHandle) -> Result<Vec<WorkspaceImportTarget>, String> {
-    workspace_import::list_workspace_import_targets(&app).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn get_active_workspace_import_request() -> Option<WorkspaceImportRequestPayload> {
-    workspace_import::get_active_workspace_import_request()
-}
-
-#[tauri::command]
-fn complete_workspace_import_request(
-    app: AppHandle,
-    request_id: String,
-    input: WorkspaceImportTargetInput,
-) -> Result<WorkspaceImportResult, String> {
-    workspace_import::complete_workspace_import_request(&app, &request_id, &input)
-}
-
-#[tauri::command]
-fn cancel_workspace_import_request(app: AppHandle, request_id: String) -> Result<(), String> {
-    workspace_import::cancel_workspace_import_request(&app, &request_id)
 }
 
 #[tauri::command]
@@ -1757,139 +1062,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            get_app_status,
-            grid_list_sessions,
-            grid_create_session,
-            retry_start_backend,
-            restart_backend_runtime_only,
-            report_loading_rendered,
-            notify_frontend_ready,
-            get_startup_monitor_status,
-            complete_startup_monitor_route,
-            submit_prefill,
-            recover_main_window_boot,
-            quit_app_gracefully,
-            get_main_window_close_behavior,
-            save_main_window_close_behavior,
-            get_workspace_web_settings,
-            save_workspace_web_settings,
-            fallback_workspace_web_to_official,
-            mark_enhanced_web_ready,
-            submit_main_window_close_decision,
-            save_kimi_path,
-            save_work_dir,
-            get_bridge_settings,
-            save_bridge_settings,
-            delete_bridge_connector,
-            save_bridge_onboarding_config,
-            get_bridge_status,
-            start_bridge,
-            stop_bridge,
-            restart_bridge,
-            list_bridge_bindings,
-            list_bridge_sessions,
-            clear_bridge_binding,
-            reset_bridge_binding_session,
-            reset_bridge_binding_to_default_work_dir,
-            list_bridge_approvals,
-            resolve_bridge_approval,
-            import_bridge_session,
-            get_bridge_log_tail,
-            get_bridge_secrets_mask_view,
-            save_bridge_connector_secrets,
-            start_feishu_connector_onboarding,
-            get_feishu_connector_onboarding_status,
-            cancel_feishu_connector_onboarding,
-            start_weixin_connector_onboarding,
-            get_weixin_connector_onboarding_status,
-            cancel_weixin_connector_onboarding,
-            install_skill_from_git,
-            import_skill_from_path,
-            scan_discoverable_skills,
-            list_skill_discovery_workspaces,
-            list_workspace_skill_targets,
-            get_workspace_skill_inventory,
-            add_installed_skill_to_workspace_target,
-            remove_workspace_target_skill,
-            get_discovered_skill_detail,
-            import_discovered_skill,
-            list_installed_skills,
-            get_skill_detail,
-            list_skill_file_entries,
-            read_skill_file,
-            get_skill_usage_stats,
-            list_discovered_skill_file_entries,
-            read_discovered_skill_file,
-            set_skill_trust,
-            apply_skill,
-            remove_skill,
-            list_active_session_skills,
-            list_global_skills,
-            list_workspace_recent_skills,
-            get_workspace_skill_profile,
-            set_workspace_skill_pin,
-            get_workspace_skill_recommendations,
-            update_skill,
-            uninstall_skill,
-            cleanup_session_skill_projections,
-            workspaces::workspace_list,
-            workspaces::workspace_register,
-            workspaces::workspace_register_many,
-            workspaces::workspace_mark_opened,
-            workspaces::workspace_remove,
-            harness::harness_list,
-            harness::harness_get,
-            harness::harness_dry_run,
-            harness::list_harness_file_entries,
-            harness::read_harness_file,
-            harness::harness_create,
-            scheduler::schedule_list,
-            scheduler::schedule_set_heartbeat,
-            scheduler::schedule_create_task,
-            scheduler::schedule_update_task,
-            scheduler::schedule_delete_task,
-            scheduler::schedule_run_now,
-            scheduler::schedule_list_runs,
-            get_diagnostics,
-            open_logs_folder,
-            open_external_url,
-            open_folder,
-            open_kimi_config_dir,
-            load_kimi_code_access_config,
-            save_kimi_code_access_config,
-            test_kimi_code_access_config,
-            register_install_session_channel,
-            get_install_flow_catalog,
-            get_install_session_snapshot,
-            start_install_task,
-            cancel_install_task,
-            install_kimi_dependencies,
-            install_kimi_code,
-            upgrade_kimi_code,
-            uninstall_kimi_code,
-            install_nodejs,
-            get_install_probe_status,
-            get_install_settings,
-            save_install_settings,
-            get_install_mirror_health_report,
-            get_powershell_preflight,
-            get_context_menu_status,
-            enable_context_menu,
-            disable_context_menu,
-            list_workspace_import_targets,
-            get_active_workspace_import_request,
-            complete_workspace_import_request,
-            cancel_workspace_import_request,
-            get_onboarding_status,
-            complete_onboarding,
-            skip_onboarding,
-            ack_api_config_step,
-            start_kimi_code_auth,
-            refresh_kimi_code_auth,
-            run_kimi_doctor,
-            logout_kimi_code_auth
-        ])
+        .invoke_handler(commands::invoke_handler())
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
@@ -2380,6 +1553,24 @@ fn redact_and_limit_doctor_output(output: &str, secrets: &[String]) -> String {
     format!("{truncated}\n...[truncated]")
 }
 
+fn redact_workspace_url(url: Option<&str>) -> Option<String> {
+    let raw = url?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    if let Ok(mut parsed) = Url::parse(raw) {
+        if parsed.fragment().is_some() {
+            parsed.set_fragment(Some("token=[REDACTED]"));
+        }
+        return Some(parsed.to_string());
+    }
+
+    raw.find('#')
+        .map(|index| format!("{}#[REDACTED]", &raw[..index]))
+        .or_else(|| Some(raw.to_string()))
+}
+
 fn query_kimi_version(kimi_path: &str) -> Result<String, String> {
     let mut process = Command::new(kimi_path);
     command_utils::configure_kimi_query_command(&mut process);
@@ -2629,6 +1820,18 @@ fn auto_repair_context_menu(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redact_workspace_url_hides_token_fragment() {
+        assert_eq!(
+            redact_workspace_url(Some("http://127.0.0.1:55000/#token=secret")),
+            Some("http://127.0.0.1:55000/#token=[REDACTED]".to_string())
+        );
+        assert_eq!(
+            redact_workspace_url(Some("http://127.0.0.1:55000")),
+            Some("http://127.0.0.1:55000/".to_string())
+        );
+    }
 
     #[test]
     fn onboarding_is_shown_for_missing_kimi_even_if_completed() {

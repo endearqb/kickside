@@ -433,6 +433,14 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   let observedLocationTemplate = "";
   let brandScheduled = false;
 
+  function getBridgeNonce() {{
+    try {{
+      return String(window.name || "");
+    }} catch (_) {{
+      return "";
+    }}
+  }}
+
   function getAppBrandName() {{
     const languages = Array.isArray(navigator.languages) && navigator.languages.length
       ? navigator.languages
@@ -574,6 +582,7 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
         {{
           source: EXTERNAL_LINK_SOURCE,
           url: url,
+          bridgeNonce: getBridgeNonce(),
           reason: reason || "unknown"
         }},
         "*"
@@ -1116,5 +1125,12 @@ mod tests {
         assert!(script.contains(r#"APP_BRAND_EN = "kimi sidekick""#));
         assert!(script.contains(r#"normalized === "Kimi Code""#));
         assert!(script.contains("applyWorkspaceBrand"));
+    }
+
+    #[test]
+    fn theme_bridge_script_attaches_external_link_nonce() {
+        let script = theme_bridge_script_tag(57999);
+        assert!(script.contains("function getBridgeNonce()"));
+        assert!(script.contains("bridgeNonce: getBridgeNonce()"));
     }
 }

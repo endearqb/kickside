@@ -12,7 +12,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
-  isKnownWorkspaceIframeSource,
+  isExpectedWorkspaceBridgeNonce,
+  isTrustedWorkspaceIframeSource,
   normalizeExternalOpenUrl,
 } from "@/app/linkBridge";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
@@ -20,13 +21,8 @@ import {
   cloneKimiCodeAccessInput,
   createBridgeOnboardingValidation,
   createDefaultBridgeOnboardingConfigInput,
-  createDefaultBridgeSecretsMaskView,
-  createDefaultBridgeSettings,
-  createDefaultBridgeStatus,
   createDefaultWorkspaceWebSettings,
   createEmptyKimiCodeAccessInput,
-  createEmptySessionSkillState,
-  createEmptyWorkspaceSkillProfile,
   buildSkillUninstallConfirmMessage,
   deriveKimiCodeAccessSummary,
   formatBridgeErrorEntry,
@@ -59,9 +55,6 @@ import {
 import type {
   ActionableOnboardingStep,
   AppStatus,
-  BindingRecord,
-  DiscoveredSkillDetail,
-  BridgeApprovalRecord,
   BridgeConnectorSecretsInput,
   FeishuConnectorOnboardingSession,
   WeixinConnectorOnboardingSession,
@@ -78,7 +71,6 @@ import type {
   ControlSectionId,
   DiagnosticsInfo,
   FrontendReadyAck,
-  InstalledSkill,
   KimiCodeAccessConfigInput,
   KimiCodeAccessConfigTestResult,
   KimiCodeAccessConfigView,
@@ -94,26 +86,15 @@ import type {
   RuntimePanelId,
   Screen,
   ShellRoutePayload,
-  SkillDiscoverySnapshot,
   SkillCenterSectionId,
   StartFeishuConnectorOnboardingInput,
   StartWeixinConnectorOnboardingInput,
   Theme,
-  SessionSkillState,
   SkillApplyScope,
-  SkillCenterFilter,
-  SkillDetail,
-  SkillProjectionRecord,
-  SkillRecommendation,
   SkillDiscoveryContainerKind,
-  WorkspaceDiscoveryRoot,
   WorkspaceImportRequestPayload,
   WorkspaceImportResult,
-  WorkspaceImportTarget,
-  WorkspaceSkillInventory,
-  WorkspaceSkillProfile,
   WorkspaceSkillRestoreResult,
-  WorkspaceSkillTarget,
   WorkspaceSessionBridgePayload,
   WorkspaceEmbedState,
   WorkspaceLayoutMode,
@@ -123,40 +104,27 @@ import type {
   WorkspaceWebSettingsView,
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
+import { useBridgeRuntimeController } from "@/app/useBridgeRuntimeController";
 import { useInstallController } from "@/app/useInstallController";
+import { useSkillCenterController } from "@/app/useSkillCenterController";
+import { useShellPollingController } from "@/app/useShellPollingController";
+import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
+import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import {
   applySkill,
   addInstalledSkillToWorkspaceTarget,
-  getDiscoveredSkillDetail,
-  getWorkspaceSkillProfile,
-  getWorkspaceSkillInventory,
-  getWorkspaceSkillRecommendations,
-  getSkillDetail,
   importDiscoveredSkill,
   importSkillFromPath,
   installSkillFromGit,
-  listActiveSessionSkills,
-  listSkillDiscoveryWorkspaces,
-  listGlobalSkills,
-  listInstalledSkills,
-  listWorkspaceSkillTargets,
   removeSkill,
   removeWorkspaceTargetSkill,
-  scanDiscoverableSkills,
   setWorkspaceSkillPin,
   setSkillTrust,
   uninstallSkill,
   updateSkill,
 } from "@/services/skillCenterService";
-import {
-  cancelWorkspaceImportRequest,
-  completeWorkspaceImportRequest,
-  getActiveWorkspaceImportRequest,
-  listWorkspaceImportTargets,
-} from "@/services/workspaceImportService";
 
-const POLL_MS = 1000;
 const SHELL_ROUTE_EVENT = "shell-route";
 const PREFILL_CHAT_EVENT = "prefill-chat";
 const SHUTDOWN_PROGRESS_EVENT = "shutdown-progress";
@@ -173,13 +141,12 @@ const SESSION_NAVIGATE_TIMEOUT_MS = 6000;
 const WORKSPACE_PANE_TIMEOUT_MS = 8_000;
 const KIMI_CHAT_REMOTE_URL = "https://www.kimi.com/";
 const ENHANCED_WEB_READY_SOURCE = "kimi-app-enhanced-web-ready";
-let frontendReadyHandshakeSent = false;
 
 type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 type BootHint = Pick<
   FrontendReadyAck,
-  "backendState" | "workspaceUrl" | "startCycleId"
+  "backendState" | "startCycleId"
 >;
 
 export function useShellController() {
@@ -192,14 +159,6 @@ export function useShellController() {
   const [kimiDoctorBusy, setKimiDoctorBusy] = useState(false);
   const [contextMenuBusy, setContextMenuBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [workspaceImportBusy, setWorkspaceImportBusy] = useState(false);
-  const [workspaceImportTargets, setWorkspaceImportTargets] = useState<
-    WorkspaceImportTarget[]
-  >([]);
-  const [workspaceImportRequest, setWorkspaceImportRequest] =
-    useState<WorkspaceImportRequestPayload | null>(null);
-  const [workspaceImportResult, setWorkspaceImportResult] =
-    useState<WorkspaceImportResult | null>(null);
   const [contextMenuStatus, setContextMenuStatus] =
     useState<ContextMenuStatus | null>(null);
   const [kimiDoctorResult, setKimiDoctorResult] =
@@ -219,65 +178,79 @@ export function useShellController() {
     useState<KimiCodeAccessConfigTestResult | null>(null);
   const [workspaceWebSettings, setWorkspaceWebSettings] =
     useState<WorkspaceWebSettingsView>(() => createDefaultWorkspaceWebSettings());
-  const [bridgeSettings, setBridgeSettings] = useState<BridgeSettings>(
-    () => createDefaultBridgeSettings(),
-  );
-  const [bridgeSettingsSnapshot, setBridgeSettingsSnapshot] = useState<BridgeSettings>(
-    () => createDefaultBridgeSettings(),
-  );
-  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>(
-    () => createDefaultBridgeStatus(),
-  );
-  const [bridgeSessions, setBridgeSessions] = useState<BridgeSessionRecord[]>([]);
-  const [bridgeBindings, setBridgeBindings] = useState<BindingRecord[]>([]);
-  const [bridgeApprovals, setBridgeApprovals] = useState<BridgeApprovalRecord[]>([]);
-  const [bridgeLogTail, setBridgeLogTail] = useState<string[]>([]);
-  const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
-  const [skillCenterBusy, setSkillCenterBusy] = useState(false);
-  const [skillCenterSearch, setSkillCenterSearch] = useState("");
-  const [skillCenterFilter, setSkillCenterFilter] = useState<SkillCenterFilter>("all");
-  const [skillCenterSection, setSkillCenterSection] =
-    useState<SkillCenterSectionId>("manage");
-  const [skillCenterGitRepoUrl, setSkillCenterGitRepoUrl] = useState("");
-  const [skillCenterGitRef, setSkillCenterGitRef] = useState("");
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
-  const [selectedSkillDetail, setSelectedSkillDetail] = useState<SkillDetail | null>(
-    null,
-  );
-  const [globalSkillProjections, setGlobalSkillProjections] = useState<
-    SkillProjectionRecord[]
-  >([]);
-  const [activeSessionSkillState, setActiveSessionSkillState] =
-    useState<SessionSkillState>(() => createEmptySessionSkillState());
-  const [workspaceSkillProfile, setWorkspaceSkillProfile] =
-    useState<WorkspaceSkillProfile | null>(() => createEmptyWorkspaceSkillProfile());
-  const [workspaceRecentSkillIds, setWorkspaceRecentSkillIds] = useState<string[]>([]);
-  const [workspaceSkillRecommendations, setWorkspaceSkillRecommendations] = useState<
-    SkillRecommendation[]
-  >([]);
-  const [workspaceSkillRestoreResults, setWorkspaceSkillRestoreResults] = useState<
-    WorkspaceSkillRestoreResult[]
-  >([]);
-  const [skillDiscoverySnapshot, setSkillDiscoverySnapshot] =
-    useState<SkillDiscoverySnapshot | null>(null);
-  const [skillDiscoveryWorkspaces, setSkillDiscoveryWorkspaces] = useState<
-    WorkspaceDiscoveryRoot[]
-  >([]);
-  const [selectedDiscoveryId, setSelectedDiscoveryId] = useState<string | null>(null);
-  const [selectedDiscoveryDetail, setSelectedDiscoveryDetail] =
-    useState<DiscoveredSkillDetail | null>(null);
-  const [workspaceSkillTargets, setWorkspaceSkillTargets] = useState<WorkspaceSkillTarget[]>([]);
-  const [selectedWorkspaceSkillTargetId, setSelectedWorkspaceSkillTargetId] = useState<
-    string | null
-  >(null);
-  const [workspaceSkillInventory, setWorkspaceSkillInventory] =
-    useState<WorkspaceSkillInventory | null>(null);
-  const [selectedWorkspaceSkillContainerKind, setSelectedWorkspaceSkillContainerKind] =
-    useState<SkillDiscoveryContainerKind>("agents");
+  const {
+    bridgeSettings,
+    setBridgeSettings,
+    bridgeSettingsSnapshot,
+    setBridgeSettingsSnapshot,
+    bridgeStatus,
+    setBridgeStatus,
+    bridgeSessions,
+    setBridgeSessions,
+    bridgeBindings,
+    setBridgeBindings,
+    bridgeApprovals,
+    setBridgeApprovals,
+    bridgeLogTail,
+    bridgeSecretsMask,
+    setBridgeSecretsMask,
+    refreshBridgeSettings,
+    refreshBridgeStatus,
+    refreshBridgeSessions,
+    refreshBridgeBindings,
+    refreshBridgeApprovals,
+    refreshBridgeLogTail,
+    refreshBridgeSecretsMask,
+  } = useBridgeRuntimeController({ setActionError });
+  const {
+    installedSkills,
+    skillCenterBusy,
+    setSkillCenterBusy,
+    skillCenterSearch,
+    setSkillCenterSearch,
+    skillCenterFilter,
+    setSkillCenterFilter,
+    skillCenterSection,
+    setSkillCenterSection,
+    skillCenterGitRepoUrl,
+    setSkillCenterGitRepoUrl,
+    skillCenterGitRef,
+    setSkillCenterGitRef,
+    selectedSkillId,
+    setSelectedSkillId,
+    selectedSkillDetail,
+    setSelectedSkillDetail,
+    globalSkillProjections,
+    activeSessionSkillState,
+    workspaceSkillProfile,
+    setWorkspaceSkillProfile,
+    workspaceRecentSkillIds,
+    setWorkspaceRecentSkillIds,
+    workspaceSkillRecommendations,
+    workspaceSkillRestoreResults,
+    setWorkspaceSkillRestoreResults,
+    skillDiscoverySnapshot,
+    skillDiscoveryWorkspaces,
+    selectedDiscoveryId,
+    setSelectedDiscoveryId,
+    selectedDiscoveryDetail,
+    setSelectedDiscoveryDetail,
+    workspaceSkillTargets,
+    selectedWorkspaceSkillTargetId,
+    setSelectedWorkspaceSkillTargetId,
+    workspaceSkillInventory,
+    selectedWorkspaceSkillContainerKind,
+    setSelectedWorkspaceSkillContainerKind,
+    refreshActiveSessionSkills,
+    refreshSkillCenterState,
+    refreshSkillDiscoveryState,
+    refreshWorkspaceSkillManagementState,
+    refreshSelectedSkillDetail,
+    refreshSelectedDiscoveryDetail,
+    refreshWorkspaceSkillRecommendationsState,
+    refreshWorkspaceSkillInventoryState,
+  } = useSkillCenterController({ setActionError });
   const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
-  const [bridgeSecretsMask, setBridgeSecretsMask] = useState<BridgeSecretsMaskView>(
-    () => createDefaultBridgeSecretsMaskView(),
-  );
   const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
     useState<FeishuConnectorOnboardingSession | null>(null);
   const [feishuConnectorOnboardingBusy, setFeishuConnectorOnboardingBusy] =
@@ -349,6 +322,9 @@ export function useShellController() {
   const configureWorkspaceGridPane = useWorkspaceGridStore(
     (state) => state.configurePane,
   );
+  const setWorkspaceGridPaneWorkDir = useWorkspaceGridStore(
+    (state) => state.setPaneWorkDir,
+  );
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
@@ -359,13 +335,13 @@ export function useShellController() {
     installSettingsBusy,
     powershellPreflight,
     installBusy,
-    installAction,
     installMessage,
     installFlowCatalog,
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,
     installCommandsOpen,
+    installCommandsBusy,
     installCommandCatalog,
     refreshInstallProbe,
     refreshInstallSettings,
@@ -379,6 +355,7 @@ export function useShellController() {
     handleInstallNodejs,
     handleStartInstallTask,
     handleCancelInstallTask,
+    handleOpenInstallCommands,
     handleCloseInstallCommands,
   } = useInstallController({
     tauriRuntime,
@@ -404,7 +381,16 @@ export function useShellController() {
   const shutdownElapsedBaseRef = useRef<number>(0);
   const shutdownElapsedStartedAtRef = useRef<number>(0);
   const shutdownElapsedTimerRef = useRef<number | null>(null);
+  const frontendReadyHandshakeSentRef = useRef(false);
   const workspaceFrameLoadIdentityRef = useRef<string | null>(null);
+  const {
+    hasWorkspaceEmbedUrl,
+    remoteUrl,
+    workspaceBridgeNonce,
+    workspaceDisplayUrl,
+    setWorkspaceEmbedUrl,
+    refreshWorkspaceEmbedUrlForStatus,
+  } = useWorkspaceEmbedUrl(status);
   const chatRemoteUrlRef = useRef<string | null>(null);
   const hashRoute = parseHashRoute(routeHash);
   const isWorkspaceImportPickerRoute = hashRoute === "workspace-import-picker";
@@ -412,7 +398,7 @@ export function useShellController() {
     hashRoute === "loading" &&
     !status &&
     bootHint?.backendState === "running" &&
-    Boolean(bootHint.workspaceUrl?.trim());
+    hasWorkspaceEmbedUrl;
   const keepControlCenterForUpgrade =
     installSessionSnapshot.taskId === "upgrade_kimi" &&
     installSessionSnapshot.status !== "idle" &&
@@ -453,15 +439,6 @@ export function useShellController() {
     return "loading";
   }, [hashRoute, keepControlCenterForUpgrade, onboarding, status, useBootHintWorkspace]);
 
-  const workspacePort = status?.workspacePort ?? status?.activePort;
-  const remoteUrl =
-    useBootHintWorkspace && bootHint?.workspaceUrl?.trim()
-      ? bootHint.workspaceUrl.trim()
-      : status?.workspaceUrl?.trim()
-        ? status.workspaceUrl.trim()
-        : workspacePort
-        ? `http://127.0.0.1:${workspacePort}`
-        : null;
   const workspaceFrameKey = remoteUrl
     ? `${remoteUrl}::${workspaceWebSettings.mode}::${workspaceFrameReloadToken}`
     : "workspace-empty";
@@ -482,6 +459,28 @@ export function useShellController() {
       return null;
     }
   }, [remoteUrl]);
+
+  const {
+    workspaceImportBusy,
+    workspaceImportTargets,
+    workspaceImportRequest,
+    workspaceImportResult,
+    refreshWorkspaceImportTargets,
+    refreshActiveWorkspaceImportRequest,
+    handleWorkspaceImportRequest,
+    handleWorkspaceImportResult,
+    handleSelectWorkspaceImportTarget,
+    handleImportToBrowsedWorkspace,
+    handleCancelWorkspaceImportPicker,
+    handleDismissWorkspaceImportResult,
+  } = useWorkspaceImportController({
+    tauriRuntime,
+    listenersReady,
+    isWorkspaceImportPickerRoute,
+    setActionError,
+    refreshStatus,
+    handleCloseWindow,
+  });
 
   useEffect(() => {
     const handleHashChange = () => setRouteHash(window.location.hash);
@@ -657,6 +656,24 @@ export function useShellController() {
       workspaceGridActivePaneId,
       workspaceGridPanes,
     ],
+  );
+
+  const syncActiveCodePaneWorkDir = useCallback(
+    (workDir?: string) => {
+      const nextWorkDir = workDir?.trim();
+      if (!nextWorkDir) {
+        return;
+      }
+
+      const { activePaneId, panes } = useWorkspaceGridStore.getState();
+      const activePane = panes.find((pane) => pane.id === activePaneId);
+      if (activePane?.kind !== "code") {
+        return;
+      }
+
+      setWorkspaceGridPaneWorkDir(activePane.id, nextWorkDir);
+    },
+    [setWorkspaceGridPaneWorkDir],
   );
 
   function clearShutdownElapsedTimer(resetValue: boolean) {
@@ -1007,6 +1024,7 @@ export function useShellController() {
       const data = await invoke<AppStatus>("get_app_status");
       setStatus(data);
       setBootHint(null);
+      void refreshWorkspaceEmbedUrlForStatus(data);
       if (data.state !== "stopping") {
         setShutdownProgress(null);
         clearShutdownElapsedTimer(true);
@@ -1067,290 +1085,6 @@ export function useShellController() {
     } catch (error) {
       setActionError(String(error));
     }
-  }
-
-  async function refreshWorkspaceImportTargets() {
-    try {
-      const targets = await listWorkspaceImportTargets();
-      setWorkspaceImportTargets(targets);
-      return targets;
-    } catch (error) {
-      setActionError(String(error));
-      return [];
-    }
-  }
-
-  async function refreshActiveWorkspaceImportRequest() {
-    try {
-      const request = await getActiveWorkspaceImportRequest();
-      setWorkspaceImportRequest(request);
-      return request;
-    } catch (error) {
-      setActionError(String(error));
-      return null;
-    }
-  }
-
-  async function refreshBridgeSettings() {
-    try {
-      const data = await invoke<BridgeSettings>("get_bridge_settings");
-      setBridgeSettings(data);
-      setBridgeSettingsSnapshot(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      return bridgeSettings;
-    }
-  }
-
-  async function refreshBridgeStatus() {
-    try {
-      const data = await invoke<BridgeStatus>("get_bridge_status");
-      setBridgeStatus(data);
-      setActionError(null);
-      return data;
-    } catch (error) {
-      const message = String(error);
-      setBridgeStatus((current) => ({
-        ...current,
-        lastError: message,
-      }));
-      setActionError(message);
-      return bridgeStatus;
-    }
-  }
-
-  async function refreshBridgeBindings() {
-    try {
-      const data = await invoke<BindingRecord[]>("list_bridge_bindings");
-      setBridgeBindings(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      return bridgeBindings;
-    }
-  }
-
-  async function refreshBridgeSessions(options?: { silent?: boolean }) {
-    try {
-      const data = await invoke<BridgeSessionRecord[]>("list_bridge_sessions");
-      setBridgeSessions(data);
-      return data;
-    } catch (error) {
-      if (!options?.silent) {
-        setActionError(String(error));
-      }
-      return bridgeSessions;
-    }
-  }
-
-  async function refreshBridgeApprovals(status = "pending") {
-    try {
-      const data = await invoke<BridgeApprovalRecord[]>("list_bridge_approvals", {
-        status,
-      });
-      setBridgeApprovals(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      return bridgeApprovals;
-    }
-  }
-
-  async function refreshBridgeLogTail(maxLines = 80) {
-    try {
-      const data = await invoke<string[]>("get_bridge_log_tail", {
-        maxLines,
-      });
-      setBridgeLogTail(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      return bridgeLogTail;
-    }
-  }
-
-  async function refreshBridgeSecretsMask() {
-    try {
-      const data = await invoke<BridgeSecretsMaskView>("get_bridge_secrets_mask_view");
-      setBridgeSecretsMask(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      return bridgeSecretsMask;
-    }
-  }
-
-  async function refreshInstalledSkills(preferredSkillId?: string | null) {
-    const data = await listInstalledSkills();
-    setInstalledSkills(data);
-    const nextSelectedId =
-      preferredSkillId && data.some((skill) => skill.id === preferredSkillId)
-        ? preferredSkillId
-        : data[0]?.id ?? null;
-    setSelectedSkillId(nextSelectedId);
-    return { skills: data, selectedSkillId: nextSelectedId };
-  }
-
-  async function refreshSelectedSkillDetail(skillId?: string | null) {
-    if (!skillId?.trim()) {
-      setSelectedSkillDetail(null);
-      return null;
-    }
-    const detail = await getSkillDetail(skillId);
-    setSelectedSkillDetail(detail);
-    return detail;
-  }
-
-  async function refreshActiveSessionSkills() {
-    try {
-      const data = await listActiveSessionSkills();
-      setActiveSessionSkillState(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      const empty = createEmptySessionSkillState();
-      setActiveSessionSkillState(empty);
-      return empty;
-    }
-  }
-
-  async function refreshGlobalSkillProjections() {
-    try {
-      const data = await listGlobalSkills();
-      setGlobalSkillProjections(data);
-      return data;
-    } catch (error) {
-      setActionError(String(error));
-      setGlobalSkillProjections([]);
-      return [];
-    }
-  }
-
-  async function refreshWorkspaceSkillProfileState(workspaceKey?: string) {
-    try {
-      const profile = await getWorkspaceSkillProfile(workspaceKey);
-      setWorkspaceSkillProfile(profile);
-      setWorkspaceRecentSkillIds(profile?.recentSkillIds ?? []);
-      return profile;
-    } catch (error) {
-      setActionError(String(error));
-      setWorkspaceSkillProfile(null);
-      setWorkspaceRecentSkillIds([]);
-      return null;
-    }
-  }
-
-  async function refreshWorkspaceSkillRecommendationsState(workspaceKey?: string) {
-    try {
-      const recommendations = await getWorkspaceSkillRecommendations(workspaceKey);
-      setWorkspaceSkillRecommendations(recommendations);
-      return recommendations;
-    } catch (error) {
-      setActionError(String(error));
-      setWorkspaceSkillRecommendations([]);
-      return [];
-    }
-  }
-
-  async function refreshSkillDiscoveryWorkspaces() {
-    try {
-      const workspaces = await listSkillDiscoveryWorkspaces();
-      setSkillDiscoveryWorkspaces(workspaces);
-      return workspaces;
-    } catch (error) {
-      setActionError(String(error));
-      setSkillDiscoveryWorkspaces([]);
-      return [];
-    }
-  }
-
-  async function refreshSelectedDiscoveryDetail(discoveryId?: string | null) {
-    if (!discoveryId?.trim()) {
-      setSelectedDiscoveryDetail(null);
-      return null;
-    }
-    const detail = await getDiscoveredSkillDetail(discoveryId);
-    setSelectedDiscoveryDetail(detail);
-    return detail;
-  }
-
-  async function refreshSkillDiscoveryState(preferredDiscoveryId?: string | null) {
-    try {
-      const [workspaces, snapshot] = await Promise.all([
-        refreshSkillDiscoveryWorkspaces(),
-        scanDiscoverableSkills(),
-      ]);
-      setSkillDiscoverySnapshot(snapshot);
-      const nextSelectedId =
-        preferredDiscoveryId &&
-        snapshot.records.some((record) => record.discoveryId === preferredDiscoveryId)
-          ? preferredDiscoveryId
-          : snapshot.records[0]?.discoveryId ?? null;
-      setSelectedDiscoveryId(nextSelectedId);
-      setSkillDiscoveryWorkspaces(snapshot.workspaces.length > 0 ? snapshot.workspaces : workspaces);
-      await refreshSelectedDiscoveryDetail(nextSelectedId);
-      return {
-        snapshot,
-        workspaces: snapshot.workspaces.length > 0 ? snapshot.workspaces : workspaces,
-        selectedDiscoveryId: nextSelectedId,
-      };
-    } catch (error) {
-      setActionError(String(error));
-      setSkillDiscoverySnapshot(null);
-      setSkillDiscoveryWorkspaces([]);
-      setSelectedDiscoveryId(null);
-      setSelectedDiscoveryDetail(null);
-      throw error;
-    }
-  }
-
-  async function refreshWorkspaceSkillTargetsState(preferredTargetId?: string | null) {
-    try {
-      const targets = await listWorkspaceSkillTargets();
-      setWorkspaceSkillTargets(targets);
-      const nextSelectedTargetId =
-        preferredTargetId &&
-        targets.some((target) => target.id === preferredTargetId)
-          ? preferredTargetId
-          : targets[0]?.id ?? null;
-      setSelectedWorkspaceSkillTargetId(nextSelectedTargetId);
-      return { targets, selectedWorkspaceSkillTargetId: nextSelectedTargetId };
-    } catch (error) {
-      setActionError(String(error));
-      setWorkspaceSkillTargets([]);
-      setSelectedWorkspaceSkillTargetId(null);
-      throw error;
-    }
-  }
-
-  async function refreshWorkspaceSkillInventoryState(targetId?: string | null) {
-    if (!targetId?.trim()) {
-      setWorkspaceSkillInventory(null);
-      return null;
-    }
-    try {
-      const inventory = await getWorkspaceSkillInventory(targetId);
-      setWorkspaceSkillInventory(inventory);
-      const availableContainerKinds = inventory.containers.map((container) => container.containerKind);
-      setSelectedWorkspaceSkillContainerKind((current) =>
-        availableContainerKinds.includes(current)
-          ? current
-          : availableContainerKinds[0] ?? "agents",
-      );
-      return inventory;
-    } catch (error) {
-      setActionError(String(error));
-      setWorkspaceSkillInventory(null);
-      throw error;
-    }
-  }
-
-  async function refreshWorkspaceSkillManagementState(preferredTargetId?: string | null) {
-    const { selectedWorkspaceSkillTargetId: nextTargetId } =
-      await refreshWorkspaceSkillTargetsState(preferredTargetId ?? selectedWorkspaceSkillTargetId);
-    await refreshWorkspaceSkillInventoryState(nextTargetId);
-    return nextTargetId;
   }
 
   async function handleSaveBridgeConnectorSecrets(input: BridgeConnectorSecretsInput) {
@@ -1500,30 +1234,6 @@ export function useShellController() {
     }
   }
 
-  async function refreshSkillCenterState(preferredSkillId?: string | null) {
-    try {
-      const [{ selectedSkillId: nextSelectedId }, globalState, sessionState] =
-        await Promise.all([
-          refreshInstalledSkills(preferredSkillId ?? selectedSkillId),
-          refreshGlobalSkillProjections(),
-          refreshActiveSessionSkills(),
-        ]);
-      await Promise.all([
-        refreshSelectedSkillDetail(nextSelectedId),
-        refreshWorkspaceSkillProfileState(),
-        refreshWorkspaceSkillRecommendationsState(),
-      ]);
-      return {
-        selectedSkillId: nextSelectedId,
-        globalState,
-        sessionState,
-      };
-    } catch (error) {
-      setActionError(String(error));
-      throw error;
-    }
-  }
-
   async function refreshCoreState() {
     return Promise.all([refreshStatus(), refreshOnboarding()]);
   }
@@ -1642,23 +1352,13 @@ export function useShellController() {
           currentWebviewWindow.listen<WorkspaceImportRequestPayload>(
             WORKSPACE_IMPORT_REQUEST_EVENT,
             (event) => {
-              setActionError(null);
-              setWorkspaceImportResult(null);
-              setWorkspaceImportBusy(false);
-              void refreshWorkspaceImportTargets();
-              setWorkspaceImportRequest(event.payload);
+              handleWorkspaceImportRequest(event.payload);
             },
           ),
           currentWebviewWindow.listen<WorkspaceImportResult>(
             WORKSPACE_IMPORT_RESULT_EVENT,
             (event) => {
-              setActionError(null);
-              setWorkspaceImportBusy(false);
-              setWorkspaceImportRequest((current) =>
-                current?.requestId === event.payload.requestId ? null : current,
-              );
-              setWorkspaceImportResult(event.payload);
-              void refreshWorkspaceImportTargets();
+              handleWorkspaceImportResult(event.payload);
             },
           ),
           currentWebviewWindow.listen<WorkspaceSessionBridgePayload>(
@@ -1682,6 +1382,7 @@ export function useShellController() {
                     sessionSource: payload.source?.trim() || current.sessionSource,
                   };
                 });
+                syncActiveCodePaneWorkDir(payload.workDir);
               }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
@@ -1710,6 +1411,7 @@ export function useShellController() {
                     sessionSource: payload.source?.trim() || current.sessionSource,
                   };
                 });
+                syncActiveCodePaneWorkDir(payload.workDir);
               }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
@@ -1786,10 +1488,17 @@ export function useShellController() {
         unlistenMainCloseDecisionRequest();
       }
     };
-  }, [dispatchPendingSessionBridge, enqueuePrefillPayload, tauriRuntime]);
+  }, [
+    dispatchPendingSessionBridge,
+    enqueuePrefillPayload,
+    handleWorkspaceImportRequest,
+    handleWorkspaceImportResult,
+    syncActiveCodePaneWorkDir,
+    tauriRuntime,
+  ]);
 
   useEffect(() => {
-    if (!tauriRuntime || !listenersReady || frontendReadyHandshakeSent) {
+    if (!tauriRuntime || !listenersReady || frontendReadyHandshakeSentRef.current) {
       return;
     }
     if (isWorkspaceImportPickerRoute) {
@@ -1797,13 +1506,13 @@ export function useShellController() {
       return;
     }
 
-    frontendReadyHandshakeSent = true;
+    frontendReadyHandshakeSentRef.current = true;
     void invoke<FrontendReadyAck>("notify_frontend_ready")
       .then((ack) => {
         if (ack.backendState === "running" && ack.workspaceUrl?.trim()) {
+          setWorkspaceEmbedUrl(ack.workspaceUrl, ack.startCycleId);
           setBootHint({
             backendState: ack.backendState,
-            workspaceUrl: ack.workspaceUrl.trim(),
             startCycleId: ack.startCycleId,
           });
         }
@@ -1844,6 +1553,7 @@ export function useShellController() {
             source?: string;
             action?: string;
             url?: string;
+            bridgeNonce?: string;
             routeTemplate?: string;
             sessionId?: string;
           })
@@ -1866,15 +1576,20 @@ export function useShellController() {
       }
 
       if (payload.source === EXTERNAL_LINK_BRIDGE_SOURCE) {
+        if (
+          !workspaceOrigin ||
+          event.origin !== workspaceOrigin ||
+          !isTrustedWorkspaceIframeSource(event.source, workspaceIframeRef.current) ||
+          !isExpectedWorkspaceBridgeNonce(
+            payload.bridgeNonce,
+            workspaceBridgeNonce,
+          )
+        ) {
+          return;
+        }
         const externalUrl = normalizeExternalOpenUrl(payload.url ?? "");
         if (!externalUrl) {
           console.debug("Ignored unsafe workspace external URL bridge payload.");
-          return;
-        }
-        if (
-          (!workspaceOrigin || event.origin !== workspaceOrigin) &&
-          !isKnownWorkspaceIframeSource(event.source)
-        ) {
           return;
         }
         void handleOpenExternalUrl(externalUrl);
@@ -1968,7 +1683,13 @@ export function useShellController() {
 
     window.addEventListener("message", handleWorkspaceBridgeMessage);
     return () => window.removeEventListener("message", handleWorkspaceBridgeMessage);
-  }, [chatOrigin, tauriRuntime, workspaceOrigin, workspaceWebSettings.mode]);
+  }, [
+    chatOrigin,
+    tauriRuntime,
+    workspaceBridgeNonce,
+    workspaceOrigin,
+    workspaceWebSettings.mode,
+  ]);
 
   useEffect(() => {
     if (!pendingPrefill) {
@@ -2073,22 +1794,26 @@ export function useShellController() {
     }
   }
 
-  useEffect(() => {
-    if (!tauriRuntime) {
-      void refreshStatus();
-    }
-    void refreshOnboarding();
-    void refreshInstallSettings();
-    void refreshWorkspaceWebSettings();
-    void refreshPowerShellPreflight();
-    void refreshBridgeSettings();
-    void refreshBridgeStatus();
-    void refreshMainWindowCloseBehavior();
-    const timer = window.setInterval(() => {
-      void refreshStatus();
-    }, POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [tauriRuntime]);
+  useShellPollingController({
+    tauriRuntime,
+    screen,
+    controlCenterModalOpen,
+    activeControlSection,
+    activeRuntimePanel,
+    bridgeState: bridgeStatus.state,
+    refreshStatus,
+    refreshOnboarding,
+    refreshInstallSettings,
+    refreshWorkspaceWebSettings,
+    refreshPowerShellPreflight,
+    refreshBridgeSettings,
+    refreshBridgeStatus,
+    refreshBridgeSecretsMask,
+    refreshBridgeBindings,
+    refreshBridgeApprovals,
+    refreshBridgeLogTail,
+    refreshMainWindowCloseBehavior,
+  });
 
   useEffect(() => {
     if (!status) return;
@@ -2146,66 +1871,6 @@ export function useShellController() {
     setBridgeOnboardingDraft(createDefaultBridgeOnboardingConfigInput(bridgeSettings));
     setBridgeOnboardingDraftTouched(false);
   }, [bridgeOnboardingDirty, bridgeOnboardingDraftTouched, bridgeSettings]);
-
-  useEffect(() => {
-    const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
-    const bridgeControlsVisible =
-      controlCenterVisible &&
-      (activeControlSection === "bridge_center" ||
-        activeControlSection === "onboarding" ||
-        (activeControlSection === "runtime_center" &&
-          activeRuntimePanel === "bridge"));
-    const bridgePanelVisible =
-      controlCenterVisible &&
-      (activeControlSection === "bridge_center" ||
-        (activeControlSection === "runtime_center" &&
-          activeRuntimePanel === "bridge"));
-
-    if (bridgeControlsVisible) {
-      void refreshBridgeSettings();
-      void refreshBridgeStatus();
-      void refreshBridgeSecretsMask();
-    }
-    if (bridgePanelVisible) {
-      void refreshBridgeBindings();
-      void refreshBridgeApprovals();
-      void refreshBridgeLogTail();
-    }
-  }, [
-    activeControlSection,
-    activeRuntimePanel,
-    controlCenterModalOpen,
-    screen,
-  ]);
-
-  useEffect(() => {
-    const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
-    if (!controlCenterVisible && bridgeStatus.state === "stopped") {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      void refreshBridgeStatus();
-      if (
-        controlCenterVisible &&
-        (activeControlSection === "bridge_center" ||
-          (activeControlSection === "runtime_center" &&
-            activeRuntimePanel === "bridge"))
-      ) {
-        void refreshBridgeBindings();
-        void refreshBridgeApprovals();
-        void refreshBridgeLogTail();
-      }
-    }, 1500);
-
-    return () => window.clearInterval(timer);
-  }, [
-    activeControlSection,
-    activeRuntimePanel,
-    bridgeStatus.state,
-    controlCenterModalOpen,
-    screen,
-  ]);
 
   useEffect(() => {
     void refreshActiveSessionSkills();
@@ -2416,15 +2081,6 @@ export function useShellController() {
       }
     };
   }, [tauriRuntime]);
-
-  useEffect(() => {
-    if (!tauriRuntime || !listenersReady || !isWorkspaceImportPickerRoute) {
-      return;
-    }
-
-    void refreshWorkspaceImportTargets();
-    void refreshActiveWorkspaceImportRequest();
-  }, [isWorkspaceImportPickerRoute, listenersReady, tauriRuntime]);
 
   useEffect(() => {
     if (screen !== "control_center") return;
@@ -2704,101 +2360,6 @@ export function useShellController() {
       setActionError(String(error));
       return null;
     }
-  }
-
-  async function handleBrowseWorkspaceImportTarget() {
-    try {
-      const selected = await open({
-        title: "选择目标工作区目录",
-        multiple: false,
-        directory: true,
-      });
-      if (typeof selected === "string") {
-        return selected;
-      }
-      return null;
-    } catch (error) {
-      setActionError(String(error));
-      return null;
-    }
-  }
-
-  async function handleSelectWorkspaceImportTarget(target: WorkspaceImportTarget) {
-    if (!workspaceImportRequest?.requestId?.trim()) {
-      return null;
-    }
-
-    setWorkspaceImportBusy(true);
-    setActionError(null);
-    try {
-      const result = await completeWorkspaceImportRequest(workspaceImportRequest.requestId, {
-        rootPath: target.rootPath,
-        label: target.label,
-      });
-      setWorkspaceImportRequest(null);
-      setWorkspaceImportResult(result);
-      await refreshStatus();
-      return result;
-    } catch (error) {
-      setActionError(String(error));
-      return null;
-    } finally {
-      setWorkspaceImportBusy(false);
-    }
-  }
-
-  async function handleImportToBrowsedWorkspace() {
-    if (!workspaceImportRequest?.requestId?.trim()) {
-      return null;
-    }
-
-    const selected = await handleBrowseWorkspaceImportTarget();
-    if (!selected?.trim()) {
-      return null;
-    }
-
-    setWorkspaceImportBusy(true);
-    setActionError(null);
-    try {
-      const result = await completeWorkspaceImportRequest(workspaceImportRequest.requestId, {
-        rootPath: selected.trim(),
-        label: "手动选择的工作区",
-      });
-      setWorkspaceImportRequest(null);
-      setWorkspaceImportResult(result);
-      await refreshStatus();
-      return result;
-    } catch (error) {
-      setActionError(String(error));
-      return null;
-    } finally {
-      setWorkspaceImportBusy(false);
-    }
-  }
-
-  async function handleCancelWorkspaceImportPicker() {
-    if (!workspaceImportRequest?.requestId?.trim()) {
-      setWorkspaceImportRequest(null);
-      if (isWorkspaceImportPickerRoute) {
-        await handleCloseWindow();
-      }
-      return;
-    }
-
-    setWorkspaceImportBusy(true);
-    setActionError(null);
-    try {
-      await cancelWorkspaceImportRequest(workspaceImportRequest.requestId);
-      setWorkspaceImportRequest(null);
-    } catch (error) {
-      setActionError(String(error));
-    } finally {
-      setWorkspaceImportBusy(false);
-    }
-  }
-
-  function handleDismissWorkspaceImportResult() {
-    setWorkspaceImportResult(null);
   }
 
   async function handleSaveWorkDirAndRestart() {
@@ -4039,7 +3600,9 @@ export function useShellController() {
     hotkeyOwnerLabel,
     canOpenWorkspace,
     remoteUrl,
+    workspaceDisplayUrl,
     workspaceFrameKey,
+    workspaceBridgeNonce,
     workspaceIframeRef,
     stepCompletion,
     kimiCodeAccessSummary,
@@ -4055,14 +3618,13 @@ export function useShellController() {
     installSettingsBusy,
     powershellPreflight,
     installBusy,
-    installAction,
     installMessage,
     installFlowCatalog,
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,
     installCommandsOpen,
-    installCommandsBusy: false,
+    installCommandsBusy,
     installCommandCatalog,
     refreshCoreState: async () => {
       await refreshCoreState();
@@ -4146,6 +3708,7 @@ export function useShellController() {
     handleInstallNodejs,
     handleStartInstallTask,
     handleCancelInstallTask,
+    handleOpenInstallCommands,
     handleEnableContextMenu,
     handleDisableContextMenu,
     handleSelectSkill,

@@ -182,6 +182,9 @@ func deleteRowsOutsideConnectorSet(
 	column string,
 	keepIDs []string,
 ) error {
+	if !isConnectorPruneTarget(table, column) {
+		return fmt.Errorf("unsupported connector prune target %s.%s", table, column)
+	}
 	query := fmt.Sprintf("DELETE FROM %s WHERE trim(%s) <> ''", table, column)
 	args := make([]any, 0, len(keepIDs))
 	if len(keepIDs) > 0 {
@@ -196,6 +199,22 @@ func deleteRowsOutsideConnectorSet(
 		return fmt.Errorf("failed to prune stale connector rows from %s: %w", table, err)
 	}
 	return nil
+}
+
+func isConnectorPruneTarget(table string, column string) bool {
+	switch table + "." + column {
+	case "bridge_channels.channel_id",
+		"channel_bindings.connector_id",
+		"approval_requests.connector_id",
+		"delivery_events.connector_id",
+		"pending_inbound_attachments.connector_id",
+		"bridge_turns.connector_id",
+		"turn_events.connector_id",
+		"channel_checkpoints.channel_id":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Store) ListChannelStatuses(ctx context.Context) ([]domain.ChannelStatus, error) {

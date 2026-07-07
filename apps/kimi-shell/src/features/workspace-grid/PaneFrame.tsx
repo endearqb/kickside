@@ -45,6 +45,7 @@ interface PaneFrameProps {
   codeFrameKey: string;
   chatRemoteUrl: string;
   workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
+  workspaceBridgeNonce: string;
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
@@ -84,6 +85,7 @@ export function PaneFrame({
   codeFrameKey,
   chatRemoteUrl,
   workspaceIframeRef,
+  workspaceBridgeNonce,
   chatIframeRef,
   codePaneState,
   chatPaneState,
@@ -142,6 +144,7 @@ export function PaneFrame({
     codeFrameKey,
     chatRemoteUrl,
     workspaceIframeRef,
+    workspaceBridgeNonce,
     chatIframeRef,
     codePaneState,
     chatPaneState,
@@ -378,31 +381,62 @@ function PaneContent({
       return;
     }
 
-    const sync = () => {
+    let disposed = false;
+    let frameId: number | null = null;
+    let inFlight = false;
+    let pending = false;
+    let scheduleSync = () => undefined;
+
+    const runSync = () => {
       const nextHost = embedHostRef.current;
       const nextController = embeddedControllerRef.current;
       if (!nextHost || !nextController) {
         return;
       }
+      inFlight = true;
       void nextController
         .sync(rectToEmbeddedBounds(nextHost.getBoundingClientRect()))
         .catch((error) => {
-          setEmbeddedStatus("failed");
           setEmbeddedError(`嵌入式 Webview 同步失败：${formatError(error)}`);
+        })
+        .finally(() => {
+          inFlight = false;
+          if (pending && !disposed) {
+            pending = false;
+            scheduleSync();
+          }
         });
     };
 
-    sync();
+    scheduleSync = () => {
+      if (disposed || frameId !== null) {
+        return;
+      }
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        if (inFlight) {
+          pending = true;
+          return;
+        }
+        runSync();
+      });
+    };
+
+    scheduleSync();
     const resizeObserver =
-      typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(scheduleSync) : null;
     resizeObserver?.observe(host);
-    window.addEventListener("resize", sync);
-    window.addEventListener("scroll", sync, true);
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("scroll", scheduleSync, true);
 
     return () => {
+      disposed = true;
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", sync);
-      window.removeEventListener("scroll", sync, true);
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("scroll", scheduleSync, true);
     };
   }, [embeddedStatus, pane.id, sourceUrl]);
 
@@ -539,7 +573,14 @@ function PaneContent({
             }}
             src={source.url}
             title={source.title}
+            name={source.frameName}
             className="workspace-iframe"
+            sandbox={
+              pane.kind === "external"
+                ? "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                : undefined
+            }
+            referrerPolicy={pane.kind === "external" ? "no-referrer" : undefined}
             onLoad={() => {
               postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
               if (pane.kind === "external") {
@@ -685,6 +726,7 @@ interface PaneSourceInput {
   codeFrameKey: string;
   chatRemoteUrl: string;
   workspaceIframeRef: RefObject<HTMLIFrameElement | null>;
+  workspaceBridgeNonce: string;
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
@@ -698,6 +740,7 @@ interface PaneSource {
   url: string | null;
   title: string;
   frameKey: string;
+  frameName?: string;
   iframeRef?: RefObject<HTMLIFrameElement | null>;
   loadState: WorkspacePaneState;
   onLoad: () => void;
@@ -710,6 +753,7 @@ function resolvePaneSource({
   codeFrameKey,
   chatRemoteUrl,
   workspaceIframeRef,
+  workspaceBridgeNonce,
   chatIframeRef,
   codePaneState,
   chatPaneState,
@@ -727,6 +771,7 @@ function resolvePaneSource({
       url: sessionUrl ?? codeRemoteUrl,
       title: getKimiAssistantDisplayName(),
       frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
+      frameName: pane.id === "pane-code" ? workspaceBridgeNonce : undefined,
       iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
       loadState: codePaneState,
       onLoad: onCodeFrameLoad,

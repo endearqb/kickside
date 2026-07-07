@@ -19,13 +19,6 @@ import type {
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
 
-type InstallAction =
-  | "dependencies"
-  | "kimi"
-  | "upgrade_kimi"
-  | "uninstall_kimi"
-  | "nodejs";
-
 type UseInstallControllerOptions = {
   tauriRuntime: boolean;
   refreshOnboarding: () => Promise<unknown>;
@@ -57,7 +50,6 @@ export function useInstallController({
   const [installSettingsBusy, setInstallSettingsBusy] = useState(false);
   const [powershellPreflight, setPowershellPreflight] =
     useState<PowerShellPreflightSummary | null>(null);
-  const [installAction] = useState<InstallAction | null>(null);
   const [installMessage, setInstallMessage] = useState("");
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
   const [installFlowCatalog, setInstallFlowCatalog] =
@@ -320,7 +312,6 @@ export function useInstallController({
       installSessionSnapshot.status === "starting" ||
       installSessionSnapshot.status === "running" ||
       installSessionSnapshot.status === "cancelling",
-    installAction,
     installMessage,
     installFlowCatalog,
     installSessionSnapshot,

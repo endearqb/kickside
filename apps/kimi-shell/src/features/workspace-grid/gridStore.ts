@@ -42,6 +42,7 @@ export interface WorkspaceGridActions {
     mountPolicy: WorkspacePane["mountPolicy"],
   ) => void;
   setPaneTheme: (paneId: string, theme: WorkspacePaneTheme | undefined) => void;
+  setPaneWorkDir: (paneId: string, workDir: string | undefined) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
   setGridTrackSizes: (trackSizes: WorkspaceGridTrackSizes) => void;
@@ -384,6 +385,21 @@ function createWorkspaceGridSlice(
         updatedAt: Date.now(),
       }));
     },
+    setPaneWorkDir(paneId, workDir) {
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((pane) =>
+          pane.id === paneId
+            ? {
+                ...pane,
+                workDir: sanitizeWorkDir(workDir),
+                updatedAt: Date.now(),
+              }
+            : pane,
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
     changePaneKind(paneId, kind) {
       update(set, storage, (state) => ({
         ...state,
@@ -420,6 +436,7 @@ function createWorkspaceGridSlice(
                 workDir: sanitizeWorkDir(input.workDir),
                 theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
                 storageNamespace:
+                  sanitizeStorageNamespace(input.storageNamespace) ??
                   sanitizeStorageNamespace(pane.storageNamespace) ??
                   createPaneStorageNamespace(pane.id),
                 updatedAt: Date.now(),

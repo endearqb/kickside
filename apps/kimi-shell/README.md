@@ -5,7 +5,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 ## 项目简介
 
 - 应用名称：`kimi小助手` / `kimi sidekick`
-- 当前版本：`0.0.43`
+- 当前版本：以 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 为准
 - 目标平台：Windows（当前发布产物为 MSI / NSIS）
 - 核心目标：把 `kimi server run` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
 
@@ -60,9 +60,17 @@ pnpm check:nfr:reliability
 
 ## 代码组织
 
-- `src/app/useShellController.ts` 保留窗口、workspace、prefill、skill 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
+- `src/app/useShellController.ts` 保留窗口、workspace、prefill、Skill 动作 handler 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，轮询放在 `src/app/useShellPollingController.ts`，Bridge 运行态刷新放在 `src/app/useBridgeRuntimeController.ts`，Skill Center 状态和刷新放在 `src/app/useSkillCenterController.ts`，workspace embed URL 与 import picker 状态分别放在 `src/app/useWorkspaceEmbedUrl.ts`、`src/app/useWorkspaceImportController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`。
+- `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/bridge.rs`、`src-tauri/src/commands/install.rs`、`src-tauri/src/commands/skills.rs`、`src-tauri/src/commands/workspace_grid.rs`、`src-tauri/src/commands/context_menu.rs` 和 `src-tauri/src/commands/workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
+
+## 安全约定
+
+- Tauri CSP、capability 分层、打包资源 allowlist 与 command registry 由 `pnpm check:nfr:security` 守护。
+- `main` 窗口保留 webview 创建权限；`prefill` 与 `workspace-import-picker` 不共享这组权限。
+- 外部 iframe 只允许内置 Kimi origin 和 `VITE_KIMI_EXTERNAL_FRAME_ALLOWLIST` 中的精确 origin；任意外部 URL 应通过显式“在浏览器打开”或“在应用窗口打开”动作承载。
+- `workspaceUrl` 展示面只能使用 redacted 值；带 `#token=` 的 URL 只用于 iframe/embed 导航，不进入诊断、日志或可见文本。
 
 ## 打包命令
 
@@ -90,7 +98,7 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 
 ## 发布资料
 
-- 发布说明：`docs/release-notes-0.0.17.md`
+- 发布说明：`docs/release-notes-*.md`
 - 设计文档：`docs/startup-dual-window-handoff.md`
 
 ## 常见问题

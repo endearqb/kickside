@@ -229,7 +229,11 @@ type wsCursor struct {
 	Epoch string `json:"epoch,omitempty"`
 }
 
-const wsBearerProtocolPrefix = "kimi-code.bearer."
+const (
+	wsBearerProtocolPrefix = "kimi-code.bearer."
+	wsHelloTimeout         = 15 * time.Second
+	wsReadIdleTimeout      = 2 * time.Minute
+)
 
 func (a *KimiCodeServerAdapter) streamPromptEvents(
 	ctx context.Context,
@@ -278,6 +282,9 @@ func (a *KimiCodeServerAdapter) streamPromptEvents(
 	}
 
 	for {
+		if err := conn.SetReadDeadline(time.Now().Add(wsReadIdleTimeout)); err != nil {
+			return "", fmt.Errorf("set kimi-code websocket read deadline: %w", err)
+		}
 		var frame wsFrame
 		if err := conn.ReadJSON(&frame); err != nil {
 			if ctx.Err() != nil {
@@ -297,6 +304,9 @@ func (a *KimiCodeServerAdapter) streamPromptEvents(
 
 func (a *KimiCodeServerAdapter) waitForServerHelloAndSubscribe(conn *websocket.Conn, sessionID string, cursor int) error {
 	for {
+		if err := conn.SetReadDeadline(time.Now().Add(wsHelloTimeout)); err != nil {
+			return fmt.Errorf("set kimi-code websocket hello deadline: %w", err)
+		}
 		var frame wsFrame
 		if err := conn.ReadJSON(&frame); err != nil {
 			return fmt.Errorf("read kimi-code websocket hello: %w", err)

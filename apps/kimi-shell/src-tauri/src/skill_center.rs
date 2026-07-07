@@ -238,7 +238,7 @@ pub(crate) fn list_safe_file_entries(root: &Path) -> anyhow::Result<Vec<SkillFil
 
     let mut entries = Vec::new();
     collect_safe_file_entries(&root, &root, &mut entries)?;
-    entries.sort_by(|left, right| file_entry_sort_key(left).cmp(&file_entry_sort_key(right)));
+    entries.sort_by_key(file_entry_sort_key);
     Ok(entries)
 }
 

@@ -170,7 +170,6 @@ function App() {
     activeTask: shell.activeControlTask,
     activeTaskPayload: shell.activeControlTaskPayload,
     installBusy: shell.installBusy,
-    installAction: shell.installAction,
     installMessage: shell.installMessage,
     onClose: shell.dismissControlCenter,
     onRefreshCoreState: shell.refreshCoreState,
@@ -316,6 +315,7 @@ function App() {
             isSplitDragging={shell.isWorkspaceSplitDragging}
             codeRemoteUrl={shell.remoteUrl}
             codeFrameKey={shell.workspaceFrameKey}
+            workspaceBridgeNonce={shell.workspaceBridgeNonce}
             chatRemoteUrl={shell.chatRemoteUrl}
             effectiveWorkDir={shell.status?.effectiveWorkDir}
             themeMode={shell.themeMode}
@@ -345,6 +345,7 @@ function App() {
               status={shell.status}
               statusText={shell.statusText}
               remoteUrl={shell.remoteUrl}
+              displayUrl={shell.workspaceDisplayUrl}
               actionBusy={shell.actionBusy}
               hotkeyOwnerLabel={shell.hotkeyOwnerLabel}
               onRetry={shell.handleRuntimeOnlyRetry}

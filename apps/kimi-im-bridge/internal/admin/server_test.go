@@ -374,6 +374,33 @@ func TestPatchBindingAndImportSessionEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminJSONBodyLimit(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(NewHandler(&fakeService{}, "token-1"))
+	defer server.Close()
+
+	body := `{"source":"shell-web","sourceSessionId":"web-1","workDir":"` +
+		strings.Repeat("x", maxAdminBodyBytes) +
+		`"}`
+	request, _ := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/api/v1/sessions/import",
+		strings.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Bridge-Admin-Token", "token-1")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("large body request returned error: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d", response.StatusCode)
+	}
+}
+
 func TestApprovalsAndRuntimeStopEndpoints(t *testing.T) {
 	t.Parallel()
 

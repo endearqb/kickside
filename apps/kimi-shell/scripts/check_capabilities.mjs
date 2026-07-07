@@ -13,6 +13,14 @@ const capabilityList = Array.isArray(raw)
 
 const capability = capabilityList.find((item) => item.identifier === "default");
 const errors = [];
+const dangerousMainOnlyPermissions = new Set([
+  "core:webview:allow-create-webview",
+  "core:webview:allow-create-webview-window",
+  "core:webview:allow-set-webview-focus",
+  "core:webview:allow-set-webview-position",
+  "core:webview:allow-set-webview-size",
+  "core:webview:allow-webview-close",
+]);
 
 if (!capability) {
   errors.push("missing default capability");
@@ -22,6 +30,9 @@ if (!capability) {
   }
   if (capability.remote != null) {
     errors.push("default capability must not allow remote URLs");
+  }
+  if (JSON.stringify(capability.windows ?? []) !== JSON.stringify(["main"])) {
+    errors.push("default capability must only target the main window");
   }
 
   const permissions = capability.permissions ?? [];
@@ -37,6 +48,23 @@ if (!capability) {
     if (typeof permission !== "string") continue;
     if (forbiddenPrefixes.some((prefix) => permission.startsWith(prefix))) {
       errors.push(`forbidden permission found: ${permission}`);
+    }
+  }
+}
+
+for (const item of capabilityList) {
+  if (item?.local !== true) {
+    errors.push(`capability ${item?.identifier ?? "<unknown>"} must set local=true`);
+  }
+  if (item?.remote != null) {
+    errors.push(`capability ${item?.identifier ?? "<unknown>"} must not allow remote URLs`);
+  }
+  const permissions = item?.permissions ?? [];
+  if (item?.identifier !== "default") {
+    for (const permission of permissions) {
+      if (dangerousMainOnlyPermissions.has(permission)) {
+        errors.push(`${permission} must stay scoped to the main window capability`);
+      }
     }
   }
 }

@@ -215,6 +215,42 @@ describe("workspace grid store", () => {
     });
   });
 
+  it("updates only the pane work directory", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "ses_123",
+      url: "https://kimi.com/path#token=secret",
+      workDir: "D:/old",
+      theme: "dark",
+    });
+    const before = store.getState().panes.find((item) => item.id === "pane-code");
+
+    store.getState().setPaneWorkDir("pane-code", " D:/new ");
+    const updated = store.getState().panes.find((item) => item.id === "pane-code");
+
+    expect(updated).toMatchObject({
+      kind: "code",
+      sessionId: "ses_123",
+      url: "https://kimi.com/path",
+      workDir: "D:/new",
+      theme: "dark",
+      storageNamespace: before?.storageNamespace,
+    });
+
+    store.getState().setPaneWorkDir("pane-code", " ");
+    const cleared = store.getState().panes.find((item) => item.id === "pane-code");
+
+    expect(cleared).toMatchObject({
+      kind: "code",
+      sessionId: "ses_123",
+      url: "https://kimi.com/path",
+      workDir: undefined,
+      theme: "dark",
+      storageNamespace: before?.storageNamespace,
+    });
+  });
+
   it("does not persist URL fragments", () => {
     const store = createWorkspaceGridStore(undefined, null);
     const paneId = store.getState().addPane({
@@ -334,6 +370,20 @@ describe("workspace grid store", () => {
     expect(pane?.url).toBeUndefined();
   });
 
+  it("uses a new storage namespace when reconfiguring panes", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    store.getState().configurePane("pane-chat", {
+      kind: "external",
+      title: "Docs",
+      url: "https://example.com/docs",
+      storageNamespace: " docs namespace ",
+    });
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-chat");
+    expect(pane?.storageNamespace).toBe("docs-namespace");
+  });
+
   it("saves and restores named layouts without URL fragments", () => {
     const storage = writableStorage();
     const store = createWorkspaceGridStore(undefined, null);
@@ -342,7 +392,7 @@ describe("workspace grid store", () => {
     store.getState().addPane({
       kind: "external",
       title: "Docs",
-      url: "https://example.com/docs#token=secret",
+      url: "https://kimi.com/docs#token=secret",
     });
     const layouts = upsertWorkspaceGridSavedLayout(
       [],
@@ -356,7 +406,7 @@ describe("workspace grid store", () => {
     const savedPanes = saved[0]?.state.panes ?? [];
     expect(saved).toHaveLength(1);
     expect(saved[0]?.state.maximizedPaneId).toBeNull();
-    expect(savedPanes[savedPanes.length - 1]?.url).toBe("https://example.com/docs");
+    expect(savedPanes[savedPanes.length - 1]?.url).toBe("https://kimi.com/docs");
 
     store.getState().setPreset("single");
     store.getState().restoreGridState(saved[0]!.state);
@@ -436,10 +486,14 @@ describe("pane URL helpers", () => {
 });
 
 describe("URL safety", () => {
-  it("allows only http URLs and strips fragments", () => {
+  it("allows only allowlisted http URLs and strips fragments", () => {
     expect(normalizeEmbeddableUrl("https://kimi.com/#token=secret")).toEqual({
       ok: true,
       url: "https://kimi.com/",
+    });
+    expect(normalizeEmbeddableUrl("https://example.com/")).toEqual({
+      ok: false,
+      reason: "origin_not_allowed",
     });
     expect(normalizeEmbeddableUrl("javascript:alert(1)")).toEqual({
       ok: false,

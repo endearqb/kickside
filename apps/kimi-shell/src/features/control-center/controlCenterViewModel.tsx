@@ -118,13 +118,6 @@ export type ControlCenterViewProps = {
   contextMenuBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
-  installAction:
-    | "dependencies"
-    | "kimi"
-    | "upgrade_kimi"
-    | "uninstall_kimi"
-    | "nodejs"
-    | null;
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;

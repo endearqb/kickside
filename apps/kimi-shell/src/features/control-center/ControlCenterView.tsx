@@ -87,7 +87,6 @@ export function ControlCenterView({
   kimiDoctorBusy,
   contextMenuBusy,
   installBusy,
-  installAction,
   bridgeSettings,
   bridgeStatus,
   bridgeOnboardingDraft,
@@ -260,7 +259,6 @@ export function ControlCenterView({
   const [workspaceHubFocusPath, setWorkspaceHubFocusPath] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
-  void installAction;
   void bridgeOnboardingDraft;
   void bridgeOnboardingValidation;
   void onBridgeOnboardingDraftChange;
@@ -1155,6 +1153,11 @@ export function ControlCenterView({
   const activeOnboardingCard = expandedOnboardingCard ?? recommendedOnboardingCard;
   const activeOnboardingStep =
     onboardingSteps.find((step) => step.id === activeOnboardingCard) ?? onboardingSteps[0];
+  const showStartupFailureDiagnostics = Boolean(
+    status?.startupPhase === "failed" ||
+      status?.startupFailureDetail ||
+      diagnostics?.startupFailureDetail,
+  );
   const runtimeIssues = [
     diagnostics?.lastError ? `最近错误：${diagnostics.lastError}` : null,
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
@@ -1240,7 +1243,7 @@ export function ControlCenterView({
           </div>
         </div>
 
-        <section className="cc-image-card">
+        <section className="cc-onboarding-steps">
           <h2>引导步骤</h2>
           <ul className="cc-image-row-list">
             {onboardingSteps.map((step) => (
@@ -1441,34 +1444,6 @@ export function ControlCenterView({
               <pre>{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
             </div>
           ) : null}
-        </section>
-
-        <section
-          id={focusDomId("runtime:paths")}
-          className={`cc-image-card ${activeFocusId === "runtime:paths" ? "is-focus" : ""}`}
-        >
-          <h2>路径与菜单</h2>
-          <div className="cc-image-row-list">
-            <div className="cc-image-row">
-              <div>
-                <div className="cc-image-row-title"><span className={`cc-dot ${contextMenuStatusTone}`} />右键菜单</div>
-                <div className="cc-image-row-desc">{contextMenuStatus?.message ?? contextMenuStatusLabel}</div>
-              </div>
-              <div className="cc-image-row-actions">
-                <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onEnableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>启用</Button>
-                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => void onDisableContextMenu()} disabled={contextMenuBusy || !runtimeContextMenuSupported}>禁用</Button>
-              </div>
-            </div>
-          </div>
-          <ControlCenterDescList
-            columns={3}
-            className="cc-image-meta-grid compact"
-            items={[
-              { label: "Kimi path", value: diagnostics?.detectedKimiPath ?? diagnostics?.configuredKimiPath ?? "-" },
-              { label: "Work dir", value: diagnostics?.effectiveWorkDir ?? diagnostics?.configuredWorkDir ?? "-" },
-              { label: "Logs dir", value: diagnostics?.logsDir ?? "-" },
-            ]}
-          />
         </section>
 
         <section
@@ -2862,7 +2837,7 @@ export function ControlCenterView({
                 {isAssistantSettingsSection ? (
                   <>
                     {renderOnboardingSection()}
-                    {renderRuntimeSection()}
+                    {showStartupFailureDiagnostics ? renderRuntimeSection() : null}
                   </>
                 ) : null}
                 {activeControlSection === "bridge_center" ? renderBridgeSection() : null}

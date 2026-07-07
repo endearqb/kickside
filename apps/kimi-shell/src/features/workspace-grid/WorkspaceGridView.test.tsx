@@ -42,6 +42,7 @@ const props: WorkspaceViewProps = {
   effectiveWorkDir: "D:/work",
   themeMode: "light",
   workspaceIframeRef: createRef<HTMLIFrameElement>(),
+  workspaceBridgeNonce: "test-workspace-bridge-nonce",
   chatIframeRef: createRef<HTMLIFrameElement>(),
   codePaneState: "ready",
   chatPaneState: "ready",
@@ -265,8 +266,9 @@ describe("WorkspaceGridView", () => {
     expect(screen.queryByRole("combobox", { name: "保存的工作区布局" })).toBeNull();
   });
 
-  it("persists column resize from a drag handle", () => {
+  it("persists column resize only when dragging ends", () => {
     useWorkspaceGridStore.getState().setPreset("1x3");
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
     render(<WorkspaceGridView {...props} />);
     const canvas = document.querySelector(".workspace-grid-canvas") as HTMLDivElement;
     Object.defineProperty(canvas, "getBoundingClientRect", {
@@ -289,6 +291,9 @@ describe("WorkspaceGridView", () => {
       pointerEvent("pointerdown", 300),
     );
     fireEvent(canvas, pointerEvent("pointermove", 450));
+    expect(useWorkspaceGridStore.getState().trackSizes).toBeUndefined();
+    expect(setItemSpy).not.toHaveBeenCalled();
+
     fireEvent(canvas, pointerEvent("pointerup", 450));
 
     expect(useWorkspaceGridStore.getState().trackSizes?.columns).toEqual([
@@ -308,8 +313,8 @@ describe("WorkspaceGridView", () => {
     fireEvent.click(screen.getByRole("button", { name: "在应用窗口打开" }));
 
     expect(openExternalWebviewWindow).toHaveBeenCalledWith({
-      url: "https://example.com/path",
-      title: "example.com",
+      url: "https://kimi.com/path",
+      title: "kimi.com",
       storageNamespace: externalPane?.storageNamespace,
     });
   });
@@ -344,8 +349,8 @@ describe("WorkspaceGridView", () => {
     });
 
     expect(createEmbeddedExternalWebview).toHaveBeenCalledWith({
-      url: "https://example.com/path",
-      title: "example.com",
+      url: "https://kimi.com/path",
+      title: "kimi.com",
       storageNamespace: externalPane?.storageNamespace,
       bounds: {
         x: 10,
@@ -354,9 +359,9 @@ describe("WorkspaceGridView", () => {
         height: 240,
       },
     });
-    expect(screen.getByText("example.com 已由嵌入式 Webview 承载")).toBeTruthy();
+    expect(screen.getByText("kimi.com 已由嵌入式 Webview 承载")).toBeTruthy();
     expect(
-      document.querySelector('iframe[src="https://example.com/path"]'),
+      document.querySelector('iframe[src="https://kimi.com/path"]'),
     ).toBeNull();
   });
 });
@@ -396,8 +401,8 @@ function addExternalPaneToGrid() {
   store.setPreset("1x3");
   const paneId = store.addPane({
     kind: "external",
-    title: "example.com",
-    url: "https://example.com/path",
+    title: "kimi.com",
+    url: "https://kimi.com/path",
   });
   const pane = useWorkspaceGridStore
     .getState()

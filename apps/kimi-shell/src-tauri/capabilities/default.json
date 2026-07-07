@@ -5,7 +5,7 @@
       "identifier": "default",
       "description": "Capability for the main window",
       "local": true,
-      "windows": ["main", "prefill", "workspace-import-picker"],
+      "windows": ["main"],
       "permissions": [
         "core:default",
         "core:webview:allow-create-webview",
@@ -16,6 +16,20 @@
         "core:webview:allow-webview-close",
         "dialog:allow-open"
       ]
+    },
+    {
+      "identifier": "prefill",
+      "description": "Capability for the prefill window",
+      "local": true,
+      "windows": ["prefill"],
+      "permissions": ["core:default"]
+    },
+    {
+      "identifier": "workspace-import-picker",
+      "description": "Capability for the workspace import picker window",
+      "local": true,
+      "windows": ["workspace-import-picker"],
+      "permissions": ["core:default"]
     },
     {
       "identifier": "frameless-window-controls",

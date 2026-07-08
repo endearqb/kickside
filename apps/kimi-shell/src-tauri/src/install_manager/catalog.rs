@@ -3,7 +3,7 @@ use crate::types::{
     InstallTaskStep,
 };
 
-use super::{ps_quote, ResolvedMirrorConfig, KIMI_CODE_INSTALL_SCRIPT_URL, KIMI_CODE_NPM_PACKAGE};
+use super::{ps_quote, ResolvedMirrorConfig, KIMI_CODE_NPM_PACKAGE};
 
 pub(super) fn build_install_flow_catalog_with_mirror_config(
     mirror_config: &ResolvedMirrorConfig,
@@ -13,7 +13,7 @@ pub(super) fn build_install_flow_catalog_with_mirror_config(
             task(
                 InstallTaskId::QuickInstallCore,
                 "Quick Core Install",
-                "Install Kimi Code from the official installer.",
+                "Install Kimi Code with npm after prerequisite checks.",
                 InstallTaskGroup::Core,
                 true,
                 false,
@@ -267,7 +267,7 @@ fn step_kimi_official() -> InstallTaskStep {
     step(
         "install_kimi",
         "Install Kimi Code",
-        "Install Kimi Code with the official Windows installer.",
+        "Install Kimi Code with npm.",
         &kimi_install_command(None),
     )
 }
@@ -276,7 +276,7 @@ fn step_kimi_mirror(_config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "install_kimi",
         "Install Kimi Code",
-        "Install Kimi Code. Mirror source does not change the official Kimi installer.",
+        "Install Kimi Code. Mirror source does not change the npm package.",
         &kimi_install_command(None),
     )
 }
@@ -285,7 +285,7 @@ fn step_upgrade_official() -> InstallTaskStep {
     step(
         "upgrade_kimi",
         "Upgrade Kimi Code",
-        "Upgrade Kimi Code from the official source.",
+        "Upgrade Kimi Code with npm.",
         &kimi_upgrade_command(None),
     )
 }
@@ -294,7 +294,7 @@ fn step_upgrade_mirror(config: &ResolvedMirrorConfig) -> InstallTaskStep {
     step(
         "upgrade_kimi",
         "Upgrade Kimi Code",
-        "Upgrade Kimi Code. Mirror source does not change the official Kimi upgrade command.",
+        "Upgrade Kimi Code. Mirror source does not change the npm package.",
         &kimi_upgrade_command(Some(&ps_array(&config.pypi_index_urls))),
     )
 }
@@ -312,27 +312,27 @@ pub(super) fn kimi_install_command(indexes_expr: Option<&str>) -> String {
     let _ = indexes_expr;
     r#"
 Ensure-KimiShellPath
-Invoke-RestMethod -Uri '__KIMI_CODE_INSTALL_SCRIPT_URL__' | Invoke-Expression
+Invoke-KimiShellNodePrerequisites
+& $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__
+if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE." }
 Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
 "#
-    .replace(
-        "__KIMI_CODE_INSTALL_SCRIPT_URL__",
-        KIMI_CODE_INSTALL_SCRIPT_URL,
-    )
     .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
+    .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
 }
 
 pub(super) fn kimi_upgrade_command(indexes_expr: Option<&str>) -> String {
     let _ = indexes_expr;
     r#"
 Ensure-KimiShellPath
+Invoke-KimiShellNodePrerequisites
 Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
-$kimi = Ensure-KimiShellCommandPath 'kimi' __KIMI_CANDIDATE_PATHS__
-& $kimi upgrade
-if ($LASTEXITCODE -ne 0) { throw "kimi upgrade failed with exit code $LASTEXITCODE." }
+& $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__@latest
+if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed with exit code $LASTEXITCODE." }
 Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
 "#
     .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
+    .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
 }
 
 fn kimi_uninstall_command() -> String {

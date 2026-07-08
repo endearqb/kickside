@@ -141,6 +141,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         context_menu::get_context_menu_status,
         context_menu::enable_context_menu,
         context_menu::disable_context_menu,
+        context_menu::save_context_menu_labels,
         // workspace import
         workspace_import::list_workspace_import_targets,
         workspace_import::get_active_workspace_import_request,

@@ -65,6 +65,7 @@ import type {
   BridgeSecretsMaskView,
   BridgeSettings,
   BridgeStatus,
+  ContextMenuLabelsInput,
   ContextMenuStatus,
   ControlCenterTaskId,
   ControlCenterTaskPayload,
@@ -2809,6 +2810,21 @@ export function useShellController() {
     }
   }
 
+  async function handleSaveContextMenuLabels(input: ContextMenuLabelsInput) {
+    setContextMenuBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<ContextMenuStatus>("save_context_menu_labels", { input });
+      setContextMenuStatus(data);
+      await refreshOnboarding();
+    } catch (error) {
+      setActionError(String(error));
+      throw error;
+    } finally {
+      setContextMenuBusy(false);
+    }
+  }
+
   async function handleCompleteOnboarding() {
     setActionBusy(true);
     setActionError(null);
@@ -3711,6 +3727,7 @@ export function useShellController() {
     handleOpenInstallCommands,
     handleEnableContextMenu,
     handleDisableContextMenu,
+    handleSaveContextMenuLabels,
     handleSelectSkill,
     handleClearSkillSelection,
     handleOpenSkillFromInsights,

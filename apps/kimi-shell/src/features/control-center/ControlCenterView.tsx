@@ -17,13 +17,13 @@ import type {
   BridgePlatform,
   BridgeSettings,
   ControlSectionId,
+  ContextMenuLabelsInput,
   InstallTaskId,
   RuntimePanelId,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
-import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
@@ -62,6 +62,7 @@ import {
   formatWeixinOnboardingTone,
   generateUniqueBridgeConnectorId,
   getBridgeDisplayName,
+  getKimiInstallPrerequisiteIssues,
   hasBridgeConnectorSecretsConfigured,
   isFeishuOnboardingActive,
   isWeixinOnboardingActive,
@@ -70,6 +71,29 @@ import {
   type ControlCenterViewProps,
   type OnboardingCardId,
 } from "@/features/control-center/controlCenterViewModel";
+
+const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
+  openDirBackground: "Open Kimi Web Shell here",
+  openDir: "Open in Kimi Web Shell",
+  openFile: "Open in Kimi Web Shell (Copy to Workspace)",
+  openFilesystemObject: "Open in Kimi Web Shell",
+  moveToWorkspace: "移动到工作区",
+  importToDefaultWorkspace: "导入到默认工作区",
+  importWithWorkspacePicker: "选择其他工作区",
+};
+
+const CONTEXT_MENU_LABEL_FIELDS: Array<{
+  key: keyof ContextMenuLabelsInput;
+  label: string;
+}> = [
+  { key: "openDirBackground", label: "目录空白处" },
+  { key: "openDir", label: "文件夹" },
+  { key: "openFile", label: "文件" },
+  { key: "openFilesystemObject", label: "所有文件系统对象" },
+  { key: "moveToWorkspace", label: "移动父菜单" },
+  { key: "importToDefaultWorkspace", label: "导入默认工作区" },
+  { key: "importWithWorkspacePicker", label: "选择其他工作区" },
+];
 
 
 export function ControlCenterView({
@@ -181,6 +205,7 @@ export function ControlCenterView({
   onSavePathAndRetry,
   onEnableContextMenu,
   onDisableContextMenu,
+  onSaveContextMenuLabels,
   onPickWorkDir,
   onSaveWorkDirAndRestart,
   onClearWorkDir,
@@ -233,7 +258,6 @@ export function ControlCenterView({
   onInstallNodejs,
   onStartInstallTask,
   onCancelInstallTask,
-  onSkipOnboarding,
   onOpenExternalUrl,
   installMessage,
 }: ControlCenterViewProps) {
@@ -252,6 +276,8 @@ export function ControlCenterView({
     useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
     useState<OnboardingCardId | null>(null);
+  const [contextMenuLabelsDraft, setContextMenuLabelsDraft] =
+    useState<ContextMenuLabelsInput>(DEFAULT_CONTEXT_MENU_LABELS);
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
@@ -456,8 +482,14 @@ export function ControlCenterView({
     setBridgeConnectorTaskError(null);
   }, [activeTask, effectiveSelectedBridgeConnectorId]);
 
+  useEffect(() => {
+    setContextMenuLabelsDraft(contextMenuStatus?.labels ?? DEFAULT_CONTEXT_MENU_LABELS);
+  }, [contextMenuStatus?.labels]);
+
   const contextMenuReady = !runtimeContextMenuSupported || runtimeContextMenuEnabled;
   const installReady = onboarding?.kimiInstalled ?? stepCompletion.install_kimi;
+  const installPrerequisiteIssues = getKimiInstallPrerequisiteIssues(installProbe);
+  const installPrerequisitesReady = installPrerequisiteIssues.length === 0;
   const workDirReady = Boolean(effectiveWorkDir);
   const providerApiStatusLabel = !providerApiConfigured
     ? "未配置"
@@ -473,25 +505,15 @@ export function ControlCenterView({
       : providerApiHealth?.state === "auth_required"
         ? "warning"
         : "success";
-  const recommendedOnboardingCard: OnboardingCardId = !installReady
-    ? "install"
-    : !contextMenuReady
-      ? "context_menu"
-      : "work_dir";
-  const defaultOnboardingCard: OnboardingCardId =
-    installSessionSnapshot.taskId === "upgrade_kimi" && installSessionSnapshot.status !== "idle"
-      ? "install"
-      : recommendedOnboardingCard;
-
   useEffect(() => {
     if (activeControlSection !== "onboarding") {
       setExpandedOnboardingCard(null);
       return;
     }
-    if (!expandedOnboardingCard) {
-      setExpandedOnboardingCard(defaultOnboardingCard);
+    if (installSessionSnapshot.status !== "idle" && !expandedOnboardingCard) {
+      setExpandedOnboardingCard("install");
     }
-  }, [activeControlSection, defaultOnboardingCard, expandedOnboardingCard]);
+  }, [activeControlSection, expandedOnboardingCard, installSessionSnapshot.status]);
 
   useEffect(() => {
     if (
@@ -544,13 +566,21 @@ export function ControlCenterView({
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
   const installPrimaryActionLabel = installReady ? "升级 Kimi" : "一键安装 Kimi Code";
+  async function handleStartOnboardingInstallTask(taskId: InstallTaskId) {
+    setExpandedOnboardingCard("install");
+    if (!installPrerequisitesReady && (taskId === "quick_install_core" || taskId === "upgrade_kimi")) {
+      return;
+    }
+    await onStartInstallTask(taskId);
+  }
   const installPrimaryAction = (
     <Button
       type="button"
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
-      onClick={() => void onStartInstallTask(installPrimaryTaskId)}
-      disabled={installBusy}
+      onClick={() => void handleStartOnboardingInstallTask(installPrimaryTaskId)}
+      disabled={installBusy || !installPrerequisitesReady}
+      title={installPrerequisiteIssues.join("；") || undefined}
     >
       {installPrimaryActionLabel}
     </Button>
@@ -743,13 +773,6 @@ export function ControlCenterView({
     },
     [],
   );
-
-  async function handleStartInstallFlowTask(taskId: InstallTaskId) {
-    if (taskId === "upgrade_kimi") {
-      setExpandedOnboardingCard("install");
-    }
-    await onStartInstallTask(taskId);
-  }
 
   function updateBridgeConnector(
     connectorId: string,
@@ -1030,6 +1053,16 @@ export function ControlCenterView({
           <Button
             type="button"
             variant="outline"
+            icon={<Check size={15} />}
+            className="cc-action-btn"
+            onClick={() => void onSaveContextMenuLabels(contextMenuLabelsDraft)}
+            disabled={contextMenuBusy || !runtimeContextMenuSupported}
+          >
+            保存菜单名称
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
             icon={<RefreshCcw size={15} />}
             className="cc-action-btn"
             onClick={() => void onRefreshContextMenuStatus()}
@@ -1044,6 +1077,34 @@ export function ControlCenterView({
         {contextMenuStatus?.message && contextMenuStatus.message !== onboarding?.contextMenuMessage ? (
           <p className="hint cc-step-meta">{contextMenuStatus.message}</p>
         ) : null}
+        <div className="cc-context-menu-label-grid">
+          {CONTEXT_MENU_LABEL_FIELDS.map((field) => (
+            <label key={field.key} className="cc-context-menu-label-field">
+              <span>{field.label}</span>
+              <Input
+                value={contextMenuLabelsDraft[field.key]}
+                onChange={(event) =>
+                  setContextMenuLabelsDraft((current) => ({
+                    ...current,
+                    [field.key]: event.currentTarget.value,
+                  }))
+                }
+                disabled={contextMenuBusy || !runtimeContextMenuSupported}
+              />
+            </label>
+          ))}
+        </div>
+        <div className="cc-context-menu-preview-list">
+          {(contextMenuStatus?.items ?? []).map((item) => (
+            <article key={item.id} className="cc-context-menu-preview-item">
+              <div>
+                <strong>{contextMenuLabelsDraft[item.labelKey] ?? item.label}</strong>
+                <span>{item.scope}</span>
+              </div>
+              <code>{item.command || item.registryKey}</code>
+            </article>
+          ))}
+        </div>
       </div>
     );
   }
@@ -1150,9 +1211,6 @@ export function ControlCenterView({
       primaryAction: workDirPrimaryAction,
     },
   ];
-  const activeOnboardingCard = expandedOnboardingCard ?? recommendedOnboardingCard;
-  const activeOnboardingStep =
-    onboardingSteps.find((step) => step.id === activeOnboardingCard) ?? onboardingSteps[0];
   const showStartupFailureDiagnostics = Boolean(
     status?.startupPhase === "failed" ||
       status?.startupFailureDetail ||
@@ -1201,172 +1259,146 @@ export function ControlCenterView({
   ]);
 
   function renderOnboardingSection() {
-    return (
-      <section className="cc-image-detail-page">
-        <div
-          id={focusDomId("onboarding")}
-          className={`cc-image-detail-top ${activeFocusId === "onboarding" ? "is-focus" : ""}`}
-        >
-          <div>
-            <h1>快速设置</h1>
-          </div>
-          <div className="cc-image-top-controls">
-            <Button type="button" className="cc-action-btn" onClick={() => void onSavePathAndRetry()} disabled={actionBusy}>
-              保存并重试
-            </Button>
-            <ControlCenterActionMenu
-              items={[
-                {
-                  label: "刷新状态",
-                  icon: <RefreshCw size={15} />,
-                  onSelect: () => {
-                    void onRefreshOnboarding();
-                    void onRefreshDiagnostics();
-                    void onRefreshContextMenuStatus();
-                    void onRefreshBridgeSettings();
-                    void onRefreshBridgeStatus();
-                    void onRefreshBridgeSecretsMask();
-                  },
-                },
-                {
-                  label: "重启后端",
-                  icon: <RefreshCcw size={15} />,
-                  onSelect: () => void onRetry(),
-                },
-                {
-                  label: "暂时跳过",
-                  icon: <ChevronRight size={15} />,
-                  onSelect: () => void onSkipOnboarding(),
-                },
-              ]}
+    function renderStepDetail(stepId: OnboardingCardId) {
+      if (stepId === "install") {
+        return (
+          <div className="cc-onboarding-install-stack">
+            <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
+            {installPrerequisiteIssues.length ? (
+              <ul className="cc-install-blocker-list cc-settings-inline-blockers">
+                {installPrerequisiteIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            ) : null}
+            <InstallFlowTaskContent
+              catalog={installFlowCatalog}
+              session={installSessionSnapshot}
+              probe={installProbe}
+              backendState={status?.state ?? null}
+              installSource={installSource}
+              installSettings={installSettings}
+              installSettingsBusy={installSettingsBusy}
+              installMirrorHealthReport={installMirrorHealthReport}
+              installMirrorHealthBusy={installMirrorHealthBusy}
+              powershellPreflight={powershellPreflight}
+              kimiPathInput={kimiPathInput}
+              detectedKimiPath={installPathDisplay}
+              onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+              onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
+              onSourceChange={onInstallSourceChange}
+              onSaveInstallSettings={onSaveInstallSettings}
+              onStartTask={handleStartOnboardingInstallTask}
+              onRestartBackend={onRetry}
+              onPickKimiPath={onPickKimiPath}
+              onSavePathAndRetry={onSavePathAndRetry}
+              restartBusy={actionBusy}
             />
+            {recentInstallSummary || installMessage ? (
+              <div className="cc-onboarding-install-meta">
+                {recentInstallSummary ? <p className="hint cc-step-meta">{recentInstallSummary}</p> : null}
+                {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
+              </div>
+            ) : null}
           </div>
-        </div>
-
-        <section className="cc-onboarding-steps">
-          <h2>引导步骤</h2>
-          <ul className="cc-image-row-list">
-            {onboardingSteps.map((step) => (
-              <li
-                key={step.id}
-                id={focusDomId(`onboarding:${step.id}`)}
-                className={`cc-image-row ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
-              >
-                <div>
-                  <div className="cc-image-row-title">
-                    <span className={`cc-dot ${step.statusTone}`} />
-                    {step.title}
-                  </div>
-                  <div className="cc-image-row-desc">{step.actionLabel}</div>
-                </div>
-                <div className="cc-image-row-actions">
-                  <ControlCenterStatusBadge tone={step.statusTone}>{step.statusLabel}</ControlCenterStatusBadge>
-                  {step.primaryAction}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="cc-image-card">
-          <h2>{activeOnboardingStep.title}</h2>
-          <div className="cc-step-body cc-step-body-single cc-step-detail-scroll">
-            <div className="cc-step-main">
-              {activeOnboardingStep.id === "install" ? (
-                <div className="cc-onboarding-install-stack">
-                  <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-                  <InstallFlowTaskContent
-                    catalog={installFlowCatalog}
-                    session={installSessionSnapshot}
-                    probe={installProbe}
-                    backendState={status?.state ?? null}
-                    installSource={installSource}
-                    installSettings={installSettings}
-                    installSettingsBusy={installSettingsBusy}
-                    installMirrorHealthReport={installMirrorHealthReport}
-                    installMirrorHealthBusy={installMirrorHealthBusy}
-                    powershellPreflight={powershellPreflight}
-                    kimiPathInput={kimiPathInput}
-                    detectedKimiPath={installPathDisplay}
-                    onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
-                    onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
-                    onSourceChange={onInstallSourceChange}
-                    onSaveInstallSettings={onSaveInstallSettings}
-                    onStartTask={handleStartInstallFlowTask}
-                    onRestartBackend={onRetry}
-                    onPickKimiPath={onPickKimiPath}
-                    onSavePathAndRetry={onSavePathAndRetry}
-                    restartBusy={actionBusy}
-                  />
-                  {recentInstallSummary || installMessage ? (
-                    <div className="cc-onboarding-install-meta">
-                      {recentInstallSummary ? <p className="hint cc-step-meta">{recentInstallSummary}</p> : null}
-                      {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {activeOnboardingStep.id === "context_menu" ? renderContextMenuStepContent() : null}
-
-              {activeOnboardingStep.id === "auth" ? (
-                <div className="cc-auth-panel">
-                  <div className="cc-brief-list">
-                    <article className="cc-brief-item">
-                      <strong>Provider API</strong>
-                      <ControlCenterStatusBadge tone={providerApiStatusTone}>
-                        {providerApiStatusLabel}
-                      </ControlCenterStatusBadge>
-                    </article>
-                    <article className="cc-brief-item">
-                      <strong>配置文件</strong>
-                      <span>
-                        {kimiCodeAccessSummary?.configPath ||
-                          kimiCodeAccessView?.configPath ||
-                          "~/.kimi-code/config.toml"}
-                      </span>
-                    </article>
-                  </div>
-                  <div className="cc-api-inline-actions">
-                    <Button type="button" variant="outline" icon={<SlidersHorizontal size={14} />} className="cc-action-btn" onClick={() => void onOpenTask("kimi_code_access")} disabled={kimiCodeAccessBusy}>
-                      打开 API 配置
-                    </Button>
-                    <Button type="button" variant="outline" icon={<FolderOpen size={14} />} className="cc-action-btn" onClick={() => void onOpenKimiConfigDir()}>
-                      打开配置目录
-                    </Button>
-                  </div>
-                  {kimiCodeAccessDirty ? (
-                    <p className="hint cc-step-meta">
-                      API 配置存在未保存修改；这不会阻塞继续使用控制中心。
-                    </p>
-                  ) : null}
-                  {kimiCodeAccessView?.warnings?.length ? (
-                    <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {activeOnboardingStep.id === "work_dir" ? renderWorkDirStepContent() : null}
+        );
+      }
+      if (stepId === "context_menu") {
+        return renderContextMenuStepContent();
+      }
+      if (stepId === "auth") {
+        return (
+          <div className="cc-auth-panel">
+            <div className="cc-brief-list">
+              <article className="cc-brief-item">
+                <strong>Provider API</strong>
+                <ControlCenterStatusBadge tone={providerApiStatusTone}>
+                  {providerApiStatusLabel}
+                </ControlCenterStatusBadge>
+              </article>
+              <article className="cc-brief-item">
+                <strong>配置文件</strong>
+                <span>
+                  {kimiCodeAccessSummary?.configPath ||
+                    kimiCodeAccessView?.configPath ||
+                    "~/.kimi-code/config.toml"}
+                </span>
+              </article>
             </div>
+            <div className="cc-api-inline-actions">
+              <Button type="button" variant="outline" icon={<SlidersHorizontal size={14} />} className="cc-action-btn" onClick={() => void onOpenTask("kimi_code_access")} disabled={kimiCodeAccessBusy}>
+                打开 API 配置
+              </Button>
+              <Button type="button" variant="outline" icon={<FolderOpen size={14} />} className="cc-action-btn" onClick={() => void onOpenKimiConfigDir()}>
+                打开配置目录
+              </Button>
+            </div>
+            {kimiCodeAccessDirty ? (
+              <p className="hint cc-step-meta">
+                API 配置存在未保存修改；这不会阻塞继续使用控制中心。
+              </p>
+            ) : null}
+            {kimiCodeAccessView?.warnings?.length ? (
+              <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
+            ) : null}
           </div>
-        </section>
+        );
+      }
+      return renderWorkDirStepContent();
+    }
 
-        <section className="cc-image-card">
-          <h2>安装源与镜像健康</h2>
-          <ControlCenterDescList
-            columns={3}
-            className="cc-image-meta-grid compact"
-            items={[
-              { label: "Install source", value: installSource },
-              { label: "PowerShell preflight", value: powershellPreflight?.kind ?? "unchecked" },
-              {
-                label: "Mirror health",
-                value: installMirrorHealthReport
-                  ? `${installMirrorHealthReport.entries.filter((entry) => entry.healthy).length}/${installMirrorHealthReport.entries.length} ready`
-                  : "unchecked",
-              },
-            ]}
-          />
+    return (
+      <section
+        id={focusDomId("onboarding")}
+        className={`cc-image-detail-page cc-settings-page ${activeFocusId === "onboarding" ? "is-focus" : ""}`}
+      >
+        <section className="cc-onboarding-steps cc-settings-bars">
+          <ul className="cc-image-row-list">
+            {onboardingSteps.map((step) => {
+              const expanded = expandedOnboardingCard === step.id;
+              return (
+                <li
+                  key={step.id}
+                  id={focusDomId(`onboarding:${step.id}`)}
+                  className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
+                >
+                  <div className="cc-settings-bar-head">
+                    <button
+                      type="button"
+                      className="cc-settings-bar-toggle"
+                      onClick={() =>
+                        setExpandedOnboardingCard((current) =>
+                          current === step.id ? null : step.id,
+                        )
+                      }
+                      aria-expanded={expanded}
+                    >
+                      <div>
+                        <div className="cc-image-row-title">
+                          <span className={`cc-dot ${step.statusTone}`} />
+                          {step.title}
+                        </div>
+                        <div className="cc-image-row-desc">{step.actionLabel}</div>
+                      </div>
+                      <ChevronRight
+                        size={16}
+                        className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
+                      />
+                    </button>
+                    <div className="cc-image-row-actions">
+                      <ControlCenterStatusBadge tone={step.statusTone}>
+                        {step.statusLabel}
+                      </ControlCenterStatusBadge>
+                      {step.primaryAction}
+                    </div>
+                  </div>
+                  {expanded ? (
+                    <div className="cc-settings-bar-detail">{renderStepDetail(step.id)}</div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </section>
       </section>
     );
@@ -2790,6 +2822,36 @@ export function ControlCenterView({
     return null;
   }
 
+  function renderUnifiedRailFooter() {
+    const installConsoleText =
+      installSessionSnapshot.logs.slice(-6).join("\n").trim() ||
+      installSessionSnapshot.message?.trim() ||
+      installMessage.trim() ||
+      "还没有安装输出。";
+    return (
+      <div className="cc-unified-rail-footer-stack">
+        {isAssistantSettingsSection && expandedOnboardingCard === "install" ? (
+          <div className="cc-rail-install-terminal">
+            <div className="cc-rail-install-terminal-head">
+              <strong>内置终端</strong>
+              <span>{installSessionSnapshot.status}</span>
+            </div>
+            <pre>{installConsoleText}</pre>
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          className="cc-rail-restart-btn"
+          icon={<RefreshCcw size={15} />}
+          onClick={() => void onRetry()}
+          disabled={actionBusy}
+        >
+          重启后端
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <section
       className={`control-center-shell ${surface === "modal" ? "control-center-shell-modal" : ""}`}
@@ -2801,6 +2863,7 @@ export function ControlCenterView({
         onToggleGroup={handleToggleUnifiedRailGroup}
         onExit={onClose}
         onItemActivate={handleRailItemActivate}
+        footer={renderUnifiedRailFooter()}
       />
 
       <div className="cc-control-stage cc-control-stage-no-topbar">

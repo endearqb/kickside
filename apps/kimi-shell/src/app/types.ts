@@ -886,6 +886,27 @@ export interface ContextMenuStatus {
   supported: boolean;
   enabled: boolean;
   message?: string;
+  labels: ContextMenuLabelsInput;
+  items: ContextMenuItemView[];
+}
+
+export interface ContextMenuLabelsInput {
+  openDirBackground: string;
+  openDir: string;
+  openFile: string;
+  openFilesystemObject: string;
+  moveToWorkspace: string;
+  importToDefaultWorkspace: string;
+  importWithWorkspacePicker: string;
+}
+
+export interface ContextMenuItemView {
+  id: string;
+  labelKey: keyof ContextMenuLabelsInput;
+  label: string;
+  scope: string;
+  registryKey: string;
+  command: string;
 }
 
 export interface OnboardingStatus {

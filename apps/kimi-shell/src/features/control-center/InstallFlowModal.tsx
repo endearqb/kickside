@@ -15,6 +15,7 @@ import type {
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { getKimiInstallPrerequisiteIssues } from "@/features/control-center/controlCenterViewModel";
 
 type InstallFlowTaskContentProps = {
   catalog: InstallFlowCatalog | null;
@@ -232,6 +233,12 @@ function getTaskAvailability(
 
   switch (taskId) {
     case "quick_install_core":
+      {
+        const issues = getKimiInstallPrerequisiteIssues(probe);
+        if (issues.length) {
+          return { disabled: true, reason: issues.join("；") };
+        }
+      }
       return probe.coreReady
         ? { disabled: true, reason: "基础环境已就绪" }
         : { disabled: false };
@@ -240,8 +247,20 @@ function getTaskAvailability(
     case "install_python313":
       return probe.python313Ready ? { disabled: true, reason: "已安装" } : { disabled: false };
     case "install_kimi":
+      {
+        const issues = getKimiInstallPrerequisiteIssues(probe);
+        if (issues.length) {
+          return { disabled: true, reason: issues.join("；") };
+        }
+      }
       return probe.kimiReady ? { disabled: true, reason: "已安装" } : { disabled: false };
     case "upgrade_kimi":
+      {
+        const issues = getKimiInstallPrerequisiteIssues(probe);
+        if (issues.length) {
+          return { disabled: true, reason: issues.join("；") };
+        }
+      }
       return probe.kimiReady
         ? { disabled: false }
         : { disabled: true, reason: "需先安装 Kimi Code" };
@@ -369,6 +388,7 @@ export function InstallFlowTaskContent({
   const sessionStatusLabel = formatInstallSessionStatus(session.status);
   const sessionTone = formatInstallSessionTone(session.status);
   const sessionStageLabel = formatInstallStage(session.stage);
+  const prerequisiteIssues = probe ? getKimiInstallPrerequisiteIssues(probe) : [];
   const showRestartAction =
     session.taskId === "upgrade_kimi" &&
     !isBusy &&
@@ -379,6 +399,7 @@ export function InstallFlowTaskContent({
     session.status === "failed" ? session.failureSummary?.trim() || session.message?.trim() : "";
   const blockingMessages = [
     !probe ? "等待环境检测完成后再执行操作。" : "",
+    ...prerequisiteIssues,
     activePreflight && !activePreflight.smokeTestOk
       ? "PowerShell 预检未通过，建议先处理执行策略。"
       : "",
@@ -465,14 +486,19 @@ export function InstallFlowTaskContent({
             <small>{formatSourceSummary(installSource, mirrorHealthSummary, installMirrorHealthBusy)}</small>
           </article>
           <article className="cc-install-overview-card">
+            <span>Node.js</span>
+            <strong>{probe?.nodeReady ? "已就绪" : "缺失"}</strong>
+            <small>需要 22.19.0 或更新版本</small>
+          </article>
+          <article className="cc-install-overview-card">
+            <span>Git Bash</span>
+            <strong>{probe?.gitBashReady ? "已配置" : "缺失"}</strong>
+            <small>{probe?.kimiShellPath || "需要 Git for Windows"}</small>
+          </article>
+          <article className="cc-install-overview-card">
             <span>Kimi Code</span>
             <strong>{statusLabel(probe?.kimiReady)}</strong>
             <small>{detectedKimiPath || "尚未探测到可用路径"}</small>
-          </article>
-          <article className="cc-install-overview-card">
-            <span>KIMI_SHELL_PATH</span>
-            <strong>{probe?.gitBashReady ? "已配置" : "未配置"}</strong>
-            <small>{probe?.kimiShellPath || "使用 Kimi Code 默认定位"}</small>
           </article>
         </div>
 

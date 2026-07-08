@@ -33,8 +33,8 @@ const FALLBACK_REPROBE_INTERVAL_MS: u64 = 2_000;
 const FALLBACK_REPROBE_TIMEOUT_MS: u64 = 120_000;
 const EXECUTION_POLICY_SUGGESTION: &str =
     "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned";
-const KIMI_CODE_INSTALL_SCRIPT_URL: &str = "https://code.kimi.com/kimi-code/install.ps1";
 const KIMI_CODE_NPM_PACKAGE: &str = "@moonshot-ai/kimi-code";
+const MIN_NODE_VERSION: (u32, u32, u32) = (22, 19, 0);
 const DEFAULT_GIT_MIRROR_RELEASE_PAGES: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/",
     "https://mirrors.ustc.edu.cn/github-release/git-for-windows/git/LatestRelease/",
@@ -1223,6 +1223,29 @@ function Ensure-KimiShellCommandPath([string]$CommandName, [string[]]$CandidateP
   }}
   return $resolved
 }}
+function Invoke-KimiShellNodePrerequisites {{
+  Ensure-KimiShellPath
+  $node = Ensure-KimiShellCommandPath 'node' @((Join-Path $env:ProgramFiles 'nodejs\node.exe'), (Join-Path ${{env:ProgramFiles(x86)}} 'nodejs\node.exe'))
+  $npm = Ensure-KimiShellCommandPath 'npm' @((Join-Path $env:ProgramFiles 'nodejs\npm.cmd'), (Join-Path ${{env:ProgramFiles(x86)}} 'nodejs\npm.cmd'), (Join-Path $env:APPDATA 'npm\npm.cmd'))
+  $versionText = (& $node --version).Trim().TrimStart('v')
+  try {{
+    $nodeVersion = [version]$versionText
+  }} catch {{
+    throw "Unable to parse Node.js version: $versionText"
+  }}
+  if ($nodeVersion -lt [version]'22.19.0') {{
+    throw "Node.js 22.19.0 or later is required. Current version: $versionText"
+  }}
+  $gitBash = @(
+    $env:KIMI_SHELL_PATH,
+    (Join-Path $env:ProgramFiles 'Git\bin\bash.exe'),
+    (Join-Path ${{env:ProgramFiles(x86)}} 'Git\bin\bash.exe')
+  ) | Where-Object {{ $_ -and (Test-Path $_) }} | Select-Object -First 1
+  if (-not $gitBash) {{
+    throw 'Git for Windows (Git Bash) is required before installing Kimi Code.'
+  }}
+  $script:KimiShellNpm = $npm
+}}
 function Invoke-KimiShellVersionCheck([string]$CommandName, [string[]]$CandidatePaths, [string[]]$Arguments) {{
   $resolved = Ensure-KimiShellCommandPath $CommandName $CandidatePaths
   & $resolved @Arguments
@@ -1404,10 +1427,10 @@ fn uv_ready() -> bool {
 }
 
 fn node_ready() -> bool {
-    command_succeeds("node", &["-v"])
+    command_node_version_at_least("node")
         || node_candidate_paths()
             .iter()
-            .any(|path| command_succeeds_path(path, &["-v"]))
+            .any(|path| command_node_version_at_least_path(path))
 }
 
 fn python313_ready() -> bool {
@@ -1506,6 +1529,61 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn command_node_version_at_least(program: &str) -> bool {
+    let mut command = Command::new(program);
+    command_utils::configure_system_command(&mut command);
+    command
+        .args(["-v"])
+        .stderr(Stdio::null())
+        .stdin(Stdio::null());
+    command
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| decode_stream_bytes(&output.stdout))
+        .and_then(|stdout| parse_node_version(stdout.trim()))
+        .map(|version| version >= MIN_NODE_VERSION)
+        .unwrap_or(false)
+}
+
+fn command_node_version_at_least_path(path: &Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let mut command = Command::new(path);
+    command_utils::configure_system_command(&mut command);
+    command
+        .args(["-v"])
+        .stderr(Stdio::null())
+        .stdin(Stdio::null());
+    command
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| decode_stream_bytes(&output.stdout))
+        .and_then(|stdout| parse_node_version(stdout.trim()))
+        .map(|version| version >= MIN_NODE_VERSION)
+        .unwrap_or(false)
+}
+
+fn parse_node_version(value: &str) -> Option<(u32, u32, u32)> {
+    let value = value.trim().trim_start_matches('v');
+    let mut parts = value.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch_text = parts.next().unwrap_or("0");
+    let patch_digits = patch_text
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    let patch = if patch_digits.is_empty() {
+        0
+    } else {
+        patch_digits.parse().ok()?
+    };
+    Some((major, minor, patch))
 }
 
 #[cfg(windows)]
@@ -1906,7 +1984,7 @@ mod tests {
     use crate::types::InstallTaskGroup;
 
     #[test]
-    fn quick_core_has_three_steps() {
+    fn quick_core_uses_single_npm_kimi_step() {
         let task = catalog::build_install_flow_catalog_with_mirror_config(
             &resolved_mirror_config_from_settings(&AppSettings::default()),
         )
@@ -1914,8 +1992,9 @@ mod tests {
         .into_iter()
         .find(|task| task.id == InstallTaskId::QuickInstallCore)
         .expect("quick core task should exist");
-        assert_eq!(task.official_steps.len(), 3);
-        assert_eq!(task.mirror_steps.len(), 3);
+        assert_eq!(task.official_steps.len(), 1);
+        assert_eq!(task.mirror_steps.len(), 1);
+        assert!(task.official_steps[0].command.contains("install -g"));
     }
 
     #[test]
@@ -1970,23 +2049,30 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_command_uses_kimi_upgrade() {
+    fn upgrade_command_uses_npm_latest() {
         let command = catalog::kimi_upgrade_command(None);
-        assert!(command.contains("& $kimi upgrade"));
+        assert!(command.contains("install -g"));
+        assert!(command.contains("@moonshot-ai/kimi-code@latest"));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(command.contains("Invoke-KimiShellNodePrerequisites"));
+        assert!(!command.contains("& $kimi upgrade"));
         assert!(!command.contains("uv tool upgrade kimi-cli"));
         assert!(!command.contains("uv python install 3.13"));
         assert!(!command.contains("uv tool install kimi-cli --python 3.13 --upgrade"));
     }
 
     #[test]
-    fn install_command_uses_official_kimi_code_installer() {
+    fn install_command_uses_npm_kimi_code_package() {
         let command = catalog::kimi_install_command(None);
-        assert!(command.contains(KIMI_CODE_INSTALL_SCRIPT_URL));
+        assert!(command.contains("install -g"));
+        assert!(command.contains("@moonshot-ai/kimi-code"));
+        assert!(!command.contains("@moonshot-ai/kimi-code@latest"));
         assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(command.contains("Invoke-KimiShellNodePrerequisites"));
         assert!(!command.contains("uv tool install kimi-cli"));
         assert!(!command.contains("uv python install 3.13"));
         assert!(!command.contains("kimi -v"));
+        assert!(!command.contains("install.ps1"));
     }
 
     #[test]
@@ -2076,9 +2162,22 @@ mod tests {
         assert!(script.contains("Format-KimiShellError"));
         assert!(script.contains("Resolve-KimiShellCommandPath"));
         assert!(script.contains("Invoke-KimiShellVersionCheck"));
+        assert!(script.contains("Invoke-KimiShellNodePrerequisites"));
+        assert!(script.contains("Node.js 22.19.0 or later is required"));
+        assert!(script.contains("Git for Windows (Git Bash) is required"));
         assert!(script.contains("Invoke-KimiShellPython313Check"));
         assert!(script.contains("py -3.13 --version"));
         assert!(script.contains("run --python 3.13 python --version"));
+    }
+
+    #[test]
+    fn node_version_parser_enforces_minimum() {
+        assert_eq!(parse_node_version("v22.19.0"), Some((22, 19, 0)));
+        assert_eq!(parse_node_version("22.20.1\r\n"), Some((22, 20, 1)));
+        assert_eq!(parse_node_version("v22.19.0-nightly"), Some((22, 19, 0)));
+        assert!(parse_node_version("v22.18.9").unwrap() < MIN_NODE_VERSION);
+        assert!(parse_node_version("v22.19.0").unwrap() >= MIN_NODE_VERSION);
+        assert!(parse_node_version("not-node").is_none());
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -414,6 +414,7 @@ pub struct AppSettings {
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
     pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
+    pub context_menu_labels: ContextMenuLabelsInput,
 }
 
 impl Default for AppSettings {
@@ -440,6 +441,7 @@ impl Default for AppSettings {
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),
             kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
+            context_menu_labels: ContextMenuLabelsInput::default(),
         }
     }
 }
@@ -1289,6 +1291,45 @@ pub struct ContextMenuStatus {
     pub supported: bool,
     pub enabled: bool,
     pub message: Option<String>,
+    pub labels: ContextMenuLabelsInput,
+    pub items: Vec<ContextMenuItemView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ContextMenuLabelsInput {
+    pub open_dir_background: String,
+    pub open_dir: String,
+    pub open_file: String,
+    pub open_filesystem_object: String,
+    pub move_to_workspace: String,
+    pub import_to_default_workspace: String,
+    pub import_with_workspace_picker: String,
+}
+
+impl Default for ContextMenuLabelsInput {
+    fn default() -> Self {
+        Self {
+            open_dir_background: "Open Kimi Web Shell here".to_string(),
+            open_dir: "Open in Kimi Web Shell".to_string(),
+            open_file: "Open in Kimi Web Shell (Copy to Workspace)".to_string(),
+            open_filesystem_object: "Open in Kimi Web Shell".to_string(),
+            move_to_workspace: "移动到工作区".to_string(),
+            import_to_default_workspace: "导入到默认工作区".to_string(),
+            import_with_workspace_picker: "选择其他工作区".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMenuItemView {
+    pub id: String,
+    pub label_key: String,
+    pub label: String,
+    pub scope: String,
+    pub registry_key: String,
+    pub command: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

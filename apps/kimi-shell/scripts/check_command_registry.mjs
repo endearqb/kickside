@@ -161,6 +161,7 @@ const commandRegistry = {
     "context_menu::get_context_menu_status",
     "context_menu::enable_context_menu",
     "context_menu::disable_context_menu",
+    "context_menu::save_context_menu_labels",
   ],
   workspace_import: [
     "workspace_import::list_workspace_import_targets",
@@ -233,7 +234,7 @@ const commandDomainMetadata = {
   context_menu: {
     owner: "context-menu",
     windowCapability: "main",
-    purpose: "Windows Explorer context-menu status and registration controls",
+    purpose: "Windows Explorer context-menu status, labels, and registration controls",
   },
   workspace_import: {
     owner: "workspace-import",

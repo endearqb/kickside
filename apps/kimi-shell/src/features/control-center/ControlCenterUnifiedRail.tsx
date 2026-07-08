@@ -33,6 +33,7 @@ type ControlCenterUnifiedRailProps = {
   onToggleGroup: (groupId: string) => void;
   onExit?: () => void;
   onItemActivate?: (itemId: string, groupId: string) => void;
+  footer?: ReactNode;
 };
 
 export function ControlCenterUnifiedRail({
@@ -42,6 +43,7 @@ export function ControlCenterUnifiedRail({
   onToggleGroup,
   onExit,
   onItemActivate,
+  footer,
 }: ControlCenterUnifiedRailProps) {
   return (
     <aside className="cc-unified-rail" aria-label="控制中心导航与对象列表">
@@ -116,6 +118,7 @@ export function ControlCenterUnifiedRail({
           );
         })}
       </div>
+      {footer ? <div className="cc-unified-rail-footer">{footer}</div> : null}
     </aside>
   );
 }

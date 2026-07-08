@@ -1,20 +1,15 @@
 use tauri::AppHandle;
 
-use crate::types::ContextMenuStatus;
+use crate::{
+    settings_store,
+    types::{ContextMenuItemView, ContextMenuLabelsInput, ContextMenuStatus},
+};
 
 const VERB_KEY_NAME: &str = "KimiWebShell";
 const MOVE_TO_WORKSPACE_VERB_KEY_NAME: &str = "MoveToWorkspace";
 const IMPORT_DEFAULT_VERB_KEY_NAME: &str = "ImportToDefaultWorkspace";
 const IMPORT_PICKER_VERB_KEY_NAME: &str = "ImportWithWorkspacePicker";
 
-const DIR_BACKGROUND_MUIVERB: &str = "Open Kimi Web Shell here";
-const DIR_MUIVERB: &str = "Open in Kimi Web Shell";
-const FILE_MUIVERB: &str = "Open in Kimi Web Shell (Copy to Workspace)";
-const ALL_FILESYSTEM_OBJECTS_MUIVERB: &str = "Open in Kimi Web Shell";
-
-const MOVE_TO_WORKSPACE_MUIVERB: &str = "移动到工作区";
-const IMPORT_DEFAULT_MUIVERB: &str = "导入到默认工作区";
-const IMPORT_PICKER_MUIVERB: &str = "选择其他工作区";
 const MULTI_SELECT_MODEL_PLAYER: &str = "Player";
 const EMPTY_SUBCOMMANDS_VALUE: &str = "";
 
@@ -158,6 +153,222 @@ fn build_expected_commands(executable: &str) -> ExpectedContextMenuCommands {
     }
 }
 
+fn load_context_menu_labels(app: &AppHandle) -> ContextMenuLabelsInput {
+    settings_store::load_or_default(app)
+        .map(|settings| settings.context_menu_labels)
+        .unwrap_or_default()
+}
+
+fn status_view(
+    app: &AppHandle,
+    supported: bool,
+    enabled: bool,
+    message: Option<String>,
+) -> ContextMenuStatus {
+    let labels = load_context_menu_labels(app);
+    let items = context_menu_item_views(&labels).unwrap_or_default();
+    ContextMenuStatus {
+        supported,
+        enabled,
+        message,
+        labels,
+        items,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn context_menu_item_views(
+    labels: &ContextMenuLabelsInput,
+) -> Result<Vec<ContextMenuItemView>, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("failed to resolve executable path: {error}"))?;
+    let executable = executable.to_string_lossy();
+    let expected = build_expected_commands(executable.as_ref());
+    Ok(vec![
+        item_view(
+            "dir_background_open",
+            "openDirBackground",
+            &labels.open_dir_background,
+            "目录空白处",
+            DIR_BACKGROUND_KEY,
+            &expected.open_dir_background_command,
+        ),
+        item_view(
+            "dir_open",
+            "openDir",
+            &labels.open_dir,
+            "文件夹",
+            DIR_KEY,
+            &expected.open_dir_command,
+        ),
+        item_view(
+            "file_open",
+            "openFile",
+            &labels.open_file,
+            "文件",
+            FILE_KEY,
+            &expected.open_files_command,
+        ),
+        item_view(
+            "all_filesystem_open",
+            "openFilesystemObject",
+            &labels.open_filesystem_object,
+            "所有文件系统对象",
+            ALL_FILESYSTEM_OBJECTS_KEY,
+            &expected.open_files_command,
+        ),
+        item_view(
+            "dir_move_parent",
+            "moveToWorkspace",
+            &labels.move_to_workspace,
+            "文件夹父菜单",
+            DIR_MOVE_TO_WORKSPACE_KEY,
+            "",
+        ),
+        item_view(
+            "dir_import_default",
+            "importToDefaultWorkspace",
+            &labels.import_to_default_workspace,
+            "文件夹子菜单",
+            DIR_IMPORT_DEFAULT_KEY,
+            &expected.import_default_command,
+        ),
+        item_view(
+            "dir_import_picker",
+            "importWithWorkspacePicker",
+            &labels.import_with_workspace_picker,
+            "文件夹子菜单",
+            DIR_IMPORT_PICKER_KEY,
+            &expected.import_picker_command,
+        ),
+        item_view(
+            "file_move_parent",
+            "moveToWorkspace",
+            &labels.move_to_workspace,
+            "文件父菜单",
+            FILE_MOVE_TO_WORKSPACE_KEY,
+            "",
+        ),
+        item_view(
+            "file_import_default",
+            "importToDefaultWorkspace",
+            &labels.import_to_default_workspace,
+            "文件子菜单",
+            FILE_IMPORT_DEFAULT_KEY,
+            &expected.import_default_command,
+        ),
+        item_view(
+            "file_import_picker",
+            "importWithWorkspacePicker",
+            &labels.import_with_workspace_picker,
+            "文件子菜单",
+            FILE_IMPORT_PICKER_KEY,
+            &expected.import_picker_command,
+        ),
+        item_view(
+            "all_move_parent",
+            "moveToWorkspace",
+            &labels.move_to_workspace,
+            "所有对象父菜单",
+            ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
+            "",
+        ),
+        item_view(
+            "all_import_default",
+            "importToDefaultWorkspace",
+            &labels.import_to_default_workspace,
+            "所有对象子菜单",
+            ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY,
+            &expected.import_default_command,
+        ),
+        item_view(
+            "all_import_picker",
+            "importWithWorkspacePicker",
+            &labels.import_with_workspace_picker,
+            "所有对象子菜单",
+            ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY,
+            &expected.import_picker_command,
+        ),
+    ])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn context_menu_item_views(
+    _labels: &ContextMenuLabelsInput,
+) -> Result<Vec<ContextMenuItemView>, String> {
+    Ok(Vec::new())
+}
+
+#[cfg(target_os = "windows")]
+fn item_view(
+    id: &str,
+    label_key: &str,
+    label: &str,
+    scope: &str,
+    registry_key: &str,
+    command: &str,
+) -> ContextMenuItemView {
+    ContextMenuItemView {
+        id: id.to_string(),
+        label_key: label_key.to_string(),
+        label: label.to_string(),
+        scope: scope.to_string(),
+        registry_key: registry_key.to_string(),
+        command: command.to_string(),
+    }
+}
+
+pub fn save_labels(
+    app: &AppHandle,
+    input: ContextMenuLabelsInput,
+) -> Result<ContextMenuStatus, String> {
+    let labels = validate_context_menu_labels(input)?;
+    let was_enabled = status(app).enabled;
+    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    settings.context_menu_labels = labels;
+    settings_store::save(app, &settings).map_err(|error| error.to_string())?;
+    if was_enabled {
+        enable(app)?;
+    }
+    Ok(status(app))
+}
+
+fn validate_context_menu_labels(
+    labels: ContextMenuLabelsInput,
+) -> Result<ContextMenuLabelsInput, String> {
+    fn clean(value: String, label: &str) -> Result<String, String> {
+        let value = value.trim().to_string();
+        if value.is_empty() {
+            return Err(format!("{label} cannot be empty."));
+        }
+        if value.chars().count() > 80 {
+            return Err(format!("{label} must be 80 characters or fewer."));
+        }
+        if value.chars().any(|ch| ch.is_control()) {
+            return Err(format!(
+                "{label} cannot contain line breaks or control characters."
+            ));
+        }
+        Ok(value)
+    }
+
+    Ok(ContextMenuLabelsInput {
+        open_dir_background: clean(labels.open_dir_background, "Directory background label")?,
+        open_dir: clean(labels.open_dir, "Directory label")?,
+        open_file: clean(labels.open_file, "File label")?,
+        open_filesystem_object: clean(labels.open_filesystem_object, "Filesystem object label")?,
+        move_to_workspace: clean(labels.move_to_workspace, "Move-to-workspace label")?,
+        import_to_default_workspace: clean(
+            labels.import_to_default_workspace,
+            "Import-to-default-workspace label",
+        )?,
+        import_with_workspace_picker: clean(
+            labels.import_with_workspace_picker,
+            "Import-with-workspace-picker label",
+        )?,
+    })
+}
+
 fn command_matches_expected(actual: &str, expected: &str) -> bool {
     actual.trim() == expected.trim()
 }
@@ -173,29 +384,31 @@ fn truncate_for_status_message(value: &str, max_chars: usize) -> String {
 pub fn status(_app: &AppHandle) -> ContextMenuStatus {
     #[cfg(target_os = "windows")]
     {
-        match inspect_windows_context_menu_state() {
+        match inspect_windows_context_menu_state(_app) {
             Ok(report) => report,
-            Err(error) => ContextMenuStatus {
-                supported: true,
-                enabled: false,
-                message: Some(format!(
+            Err(error) => status_view(
+                _app,
+                true,
+                false,
+                Some(format!(
                     "无法读取 Explorer 右键菜单状态，请点击“启用”重写配置。详情：{error}"
                 )),
-            },
+            ),
         }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        ContextMenuStatus {
-            supported: false,
-            enabled: false,
-            message: Some("Explorer context menu integration is only supported on Windows.".into()),
-        }
+        status_view(
+            _app,
+            false,
+            false,
+            Some("Explorer context menu integration is only supported on Windows.".into()),
+        )
     }
 }
 
-pub fn enable(_app: &AppHandle) -> Result<(), String> {
+pub fn enable(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::env;
@@ -205,13 +418,14 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             .map_err(|error| format!("failed to resolve executable path: {error}"))?;
         let executable = executable.to_string_lossy();
         let expected = build_expected_commands(executable.as_ref());
+        let labels = load_context_menu_labels(app);
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
         write_simple_verb(
             &hkcu,
             DIR_BACKGROUND_KEY,
             DIR_BACKGROUND_COMMAND_KEY,
-            DIR_BACKGROUND_MUIVERB,
+            &labels.open_dir_background,
             &expected.icon_value,
             None,
             &expected.open_dir_background_command,
@@ -220,7 +434,7 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             &hkcu,
             DIR_KEY,
             DIR_COMMAND_KEY,
-            DIR_MUIVERB,
+            &labels.open_dir,
             &expected.icon_value,
             None,
             &expected.open_dir_command,
@@ -229,7 +443,7 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             &hkcu,
             FILE_KEY,
             FILE_COMMAND_KEY,
-            FILE_MUIVERB,
+            &labels.open_file,
             &expected.icon_value,
             Some(MULTI_SELECT_MODEL_PLAYER),
             &expected.open_files_command,
@@ -238,14 +452,14 @@ pub fn enable(_app: &AppHandle) -> Result<(), String> {
             &hkcu,
             ALL_FILESYSTEM_OBJECTS_KEY,
             ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
-            ALL_FILESYSTEM_OBJECTS_MUIVERB,
+            &labels.open_filesystem_object,
             &expected.icon_value,
             Some(MULTI_SELECT_MODEL_PLAYER),
             &expected.open_files_command,
         )?;
 
         for keyset in CASCADING_MENU_KEYSETS {
-            write_cascading_menu(&hkcu, keyset, &expected)?;
+            write_cascading_menu(&hkcu, keyset, &expected, &labels)?;
         }
 
         Ok(())
@@ -293,7 +507,7 @@ pub fn disable(_app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
+fn inspect_windows_context_menu_state(app: &AppHandle) -> Result<ContextMenuStatus, String> {
     use std::env;
     use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
@@ -301,6 +515,7 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
         .map_err(|error| format!("failed to resolve executable path: {error}"))?;
     let executable = executable.to_string_lossy();
     let expected = build_expected_commands(executable.as_ref());
+    let labels = load_context_menu_labels(app);
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let legacy_required_keys = [
@@ -316,10 +531,13 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
     validate_required_keys(&hkcu, &legacy_required_keys, "旧入口")?;
 
     let legacy_verb_checks = [
-        (DIR_BACKGROUND_KEY, DIR_BACKGROUND_MUIVERB),
-        (DIR_KEY, DIR_MUIVERB),
-        (FILE_KEY, FILE_MUIVERB),
-        (ALL_FILESYSTEM_OBJECTS_KEY, ALL_FILESYSTEM_OBJECTS_MUIVERB),
+        (DIR_BACKGROUND_KEY, labels.open_dir_background.as_str()),
+        (DIR_KEY, labels.open_dir.as_str()),
+        (FILE_KEY, labels.open_file.as_str()),
+        (
+            ALL_FILESYSTEM_OBJECTS_KEY,
+            labels.open_filesystem_object.as_str(),
+        ),
     ];
     validate_mui_verbs(&hkcu, &legacy_verb_checks, "旧入口")?;
 
@@ -355,9 +573,15 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
         validate_mui_verbs(
             &hkcu,
             &[
-                (keyset.parent_key, MOVE_TO_WORKSPACE_MUIVERB),
-                (keyset.import_default_key, IMPORT_DEFAULT_MUIVERB),
-                (keyset.import_picker_key, IMPORT_PICKER_MUIVERB),
+                (keyset.parent_key, labels.move_to_workspace.as_str()),
+                (
+                    keyset.import_default_key,
+                    labels.import_to_default_workspace.as_str(),
+                ),
+                (
+                    keyset.import_picker_key,
+                    labels.import_with_workspace_picker.as_str(),
+                ),
             ],
             "移动到工作区子菜单",
         )?;
@@ -399,11 +623,7 @@ fn inspect_windows_context_menu_state() -> Result<ContextMenuStatus, String> {
         validate_multi_select_model(&hkcu, keyset.import_picker_key, "移动到工作区选择器子项")?;
     }
 
-    Ok(ContextMenuStatus {
-        supported: true,
-        enabled: true,
-        message: None,
-    })
+    Ok(status_view(app, true, true, None))
 }
 
 #[cfg(target_os = "windows")]
@@ -447,12 +667,13 @@ fn write_cascading_menu(
     hkcu: &winreg::RegKey,
     keyset: CascadingMenuKeySet,
     expected: &ExpectedContextMenuCommands,
+    labels: &ContextMenuLabelsInput,
 ) -> Result<(), String> {
     let (parent_key, _) = hkcu
         .create_subkey(keyset.parent_key)
         .map_err(|error| format!("failed to create `{}`: {error}", keyset.parent_key))?;
     parent_key
-        .set_value("MUIVerb", &MOVE_TO_WORKSPACE_MUIVERB)
+        .set_value("MUIVerb", &labels.move_to_workspace)
         .map_err(|error| {
             format!(
                 "failed to write MUIVerb for `{}`: {error}",
@@ -486,7 +707,7 @@ fn write_cascading_menu(
         hkcu,
         keyset.import_default_key,
         keyset.import_default_command_key,
-        IMPORT_DEFAULT_MUIVERB,
+        &labels.import_to_default_workspace,
         &expected.icon_value,
         Some(MULTI_SELECT_MODEL_PLAYER),
         &expected.import_default_command,
@@ -495,7 +716,7 @@ fn write_cascading_menu(
         hkcu,
         keyset.import_picker_key,
         keyset.import_picker_command_key,
-        IMPORT_PICKER_MUIVERB,
+        &labels.import_with_workspace_picker,
         &expected.icon_value,
         Some(MULTI_SELECT_MODEL_PLAYER),
         &expected.import_picker_command,
@@ -694,5 +915,48 @@ mod tests {
             "\"C:\\kimi-shell.exe\" --open-files -- \"%1\"",
             "\"C:\\kimi-shell.exe\" --open-files \"%1\""
         ));
+    }
+
+    #[test]
+    fn validate_context_menu_labels_trims_and_rejects_invalid_values() {
+        let labels = validate_context_menu_labels(ContextMenuLabelsInput {
+            open_dir: "  在 Kimi 中打开  ".to_string(),
+            ..ContextMenuLabelsInput::default()
+        })
+        .expect("valid labels");
+        assert_eq!(labels.open_dir, "在 Kimi 中打开");
+
+        assert!(validate_context_menu_labels(ContextMenuLabelsInput {
+            open_file: " ".to_string(),
+            ..ContextMenuLabelsInput::default()
+        })
+        .is_err());
+        assert!(validate_context_menu_labels(ContextMenuLabelsInput {
+            open_file: "bad\nlabel".to_string(),
+            ..ContextMenuLabelsInput::default()
+        })
+        .is_err());
+        assert!(validate_context_menu_labels(ContextMenuLabelsInput {
+            open_file: "x".repeat(81),
+            ..ContextMenuLabelsInput::default()
+        })
+        .is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn context_menu_item_views_include_custom_labels() {
+        let labels = ContextMenuLabelsInput {
+            open_dir: "打开目录".to_string(),
+            move_to_workspace: "移动项目".to_string(),
+            ..ContextMenuLabelsInput::default()
+        };
+        let items = context_menu_item_views(&labels).expect("item views");
+        assert!(items
+            .iter()
+            .any(|item| item.label_key == "openDir" && item.label == "打开目录"));
+        assert!(items
+            .iter()
+            .any(|item| item.label_key == "moveToWorkspace" && item.label == "移动项目"));
     }
 }

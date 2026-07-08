@@ -16,8 +16,8 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 
 - Persistent desktop shell for `Kimi Code Web` and `Kimi Chat`, with Workspace Grid presets, resizable saved layouts, embedded external Webview panes, WebviewWindow fallback, and view switching
 - Windows Explorer context-menu launch for folders, single files, and multi-file selections, with folder handoff and file-to-workspace import
-- Guided Quick Setup flow for first-run onboarding and everyday recovery tasks
-- Built-in install and upgrade center with PowerShell preflight checks and dependency status
+- Compact assistant settings with four expandable setup bars for install/upgrade, Explorer context menu, Provider API, and default work directory
+- Built-in npm-based Kimi Code install and upgrade center with PowerShell preflight checks and dependency status
 - Unified Control Center for overview, quick setup, runtime diagnostics, and IM Bridge operations
 - IM Bridge workspace with Feishu-focused controls for channel status, work directory, approvals, and session switching
 - Windows-native tray behavior, close-to-tray flow, diagnostics access, and NSIS/MSI installer outputs
@@ -39,7 +39,7 @@ Main workspace with the persistent Code/Chat shell and desktop-level navigation:
 
 ![Kimi Sidekick workspace](apps/kimi-shell/public/home.png)
 
-Quick Setup guides first-run tasks and common environment fixes from a focused onboarding flow:
+Assistant settings groups first-run tasks and common environment fixes into focused expandable bars:
 
 ![Kimi Sidekick quick setup](apps/kimi-shell/public/quick_setup.png)
 

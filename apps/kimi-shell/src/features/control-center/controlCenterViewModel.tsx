@@ -21,6 +21,7 @@ import type {
   ControlCenterTaskPayload,
   ControlCenterSurface,
   ContextMenuStatus,
+  ContextMenuLabelsInput,
   ControlSectionId,
   DiagnosticsInfo,
   KimiDoctorResult,
@@ -226,6 +227,7 @@ export type ControlCenterViewProps = {
   onSavePathAndRetry: () => Promise<void>;
   onEnableContextMenu: () => Promise<void>;
   onDisableContextMenu: () => Promise<void>;
+  onSaveContextMenuLabels: (input: ContextMenuLabelsInput) => Promise<void>;
   onPickWorkDir: () => Promise<void>;
   onPickBridgeConnectorDefaultWorkDir: (connectorId: string) => Promise<string | null>;
   onSaveWorkDirAndRestart: () => Promise<void>;
@@ -368,6 +370,18 @@ export function createEmptyBridgeConnectorSecretDraft(): BridgeConnectorSecretDr
     weixinAccountId: "",
     weixinOwnerUserId: "",
   };
+}
+
+export function getKimiInstallPrerequisiteIssues(
+  probe: InstallProbeStatus | null,
+): string[] {
+  if (!probe) {
+    return ["等待环境检测"];
+  }
+  return [
+    probe.nodeReady ? null : "需要 Node.js 22.19+",
+    probe.gitBashReady ? null : "需要 Git for Windows / Git Bash",
+  ].filter((item): item is string => Boolean(item));
 }
 
 export function bridgePlatformLabel(platform: BridgePlatform): string {

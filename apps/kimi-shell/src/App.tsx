@@ -208,6 +208,7 @@ function App() {
     onSavePathAndRetry: shell.handleSavePathAndRetry,
     onEnableContextMenu: shell.handleEnableContextMenu,
     onDisableContextMenu: shell.handleDisableContextMenu,
+    onSaveContextMenuLabels: shell.handleSaveContextMenuLabels,
     onPickWorkDir: shell.handlePickWorkDir,
     onPickBridgeConnectorDefaultWorkDir: shell.handlePickBridgeConnectorDefaultWorkDir,
     onSaveWorkDirAndRestart: shell.handleSaveWorkDirAndRestart,

@@ -7515,7 +7515,7 @@ input:focus {
 .cc-unified-rail {
   min-width: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   border-right: 1px solid var(--cc-border);
   background: rgba(248, 248, 246, 0.92);
   overflow: hidden;
@@ -7682,6 +7682,57 @@ input:focus {
 
 .cc-unified-rail-status.tone-danger::before {
   background: var(--cc-danger);
+}
+
+.cc-unified-rail-footer {
+  border-top: 1px solid var(--cc-border);
+  padding: 10px 8px;
+  background: rgba(248, 248, 246, 0.96);
+}
+
+.cc-unified-rail-footer-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-rail-restart-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.cc-rail-install-terminal {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid var(--cc-border);
+  border-radius: 10px;
+  background: var(--cc-code-bg);
+}
+
+.cc-rail-install-terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--cc-muted);
+  font-size: 11px;
+}
+
+.cc-rail-install-terminal-head strong {
+  color: var(--cc-foreground);
+  font-size: 12px;
+}
+
+.cc-rail-install-terminal pre {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  color: var(--cc-foreground);
+  font-family: "JetBrains Mono", SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .cc-control-stage {
@@ -9088,6 +9139,134 @@ input:focus {
   border: 1px solid var(--cc-border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--cc-surface) 82%, var(--cc-background));
+}
+
+.cc-settings-page {
+  gap: 12px;
+}
+
+.cc-settings-bars {
+  max-width: 1120px;
+}
+
+.cc-settings-bar {
+  display: grid;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.cc-settings-bar-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 16px;
+}
+
+.cc-settings-bar-toggle {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.cc-settings-bar-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cc-accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.cc-settings-bar-chevron {
+  flex: 0 0 auto;
+  color: var(--cc-soft);
+  transition: transform 140ms ease;
+}
+
+.cc-settings-bar-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.cc-settings-bar-detail {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  padding: 0 16px 16px;
+  border-top: 1px solid color-mix(in srgb, var(--cc-border) 72%, transparent);
+}
+
+.cc-settings-inline-blockers {
+  margin-top: 2px;
+}
+
+.cc-context-menu-label-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cc-context-menu-label-field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.cc-context-menu-label-field span {
+  color: var(--cc-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.cc-context-menu-preview-list {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-context-menu-preview-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.42fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in srgb, var(--cc-border) 72%, transparent);
+}
+
+.cc-context-menu-preview-item div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.cc-context-menu-preview-item strong {
+  min-width: 0;
+  color: var(--cc-foreground);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.cc-context-menu-preview-item span {
+  color: var(--cc-muted);
+  font-size: 12px;
+}
+
+.cc-context-menu-preview-item code {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: var(--cc-code-bg);
+  color: var(--cc-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .cc-image-row-title {

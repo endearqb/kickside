@@ -24,7 +24,6 @@ import {
   createDefaultWorkspaceWebSettings,
   createEmptyKimiCodeAccessInput,
   buildSkillUninstallConfirmMessage,
-  deriveKimiCodeAccessSummary,
   formatBridgeErrorEntry,
   getBridgeChannelEnabled,
   hasBridgeDraftSecretValue,
@@ -331,13 +330,13 @@ export function useShellController() {
   const tauriRuntime = useMemo(() => isTauri(), []);
   const {
     installProbe,
+    installProbeBusy,
     installSource,
     installSettings,
     installSettingsBusy,
     powershellPreflight,
     installBusy,
     installMessage,
-    installFlowCatalog,
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,
@@ -730,13 +729,6 @@ export function useShellController() {
   }
 
   function closeActiveControlTask() {
-    if (activeControlTask === "kimi_code_access" && kimiCodeAccessDirty) {
-      const confirmed = window.confirm("控制中心存在未保存更改，确定离开当前任务吗？");
-      if (!confirmed) {
-        return false;
-      }
-    }
-
     if (
       (activeControlTask === "skill_git_import" || activeControlTask === "skill_import") &&
       skillCenterBusy
@@ -749,6 +741,9 @@ export function useShellController() {
   }
 
   function requestCloseControlCenter() {
+    if (kimiCodeAccessDirty && !window.confirm("API 配置存在未保存更改，确定关闭控制中心吗？")) {
+      return false;
+    }
     if (activeControlTask) {
       return closeActiveControlTask();
     }
@@ -766,8 +761,8 @@ export function useShellController() {
   }
 
   function dismissControlCenter() {
-    if (activeControlTask === "kimi_code_access" && kimiCodeAccessDirty) {
-      const confirmed = window.confirm("控制中心存在未保存更改，确定关闭控制中心吗？");
+    if (kimiCodeAccessDirty) {
+      const confirmed = window.confirm("API 配置存在未保存更改，确定关闭控制中心吗？");
       if (!confirmed) {
         return false;
       }
@@ -1800,6 +1795,7 @@ export function useShellController() {
     screen,
     controlCenterModalOpen,
     activeControlSection,
+    activeControlTask,
     activeRuntimePanel,
     bridgeState: bridgeStatus.state,
     refreshStatus,
@@ -2245,7 +2241,6 @@ export function useShellController() {
     setKimiCodeAccessBusy(true);
     try {
       await loadKimiCodeAccessConfig();
-      setControlCenterTask("kimi_code_access");
     } catch (error) {
       setActionError(String(error));
     } finally {
@@ -2255,10 +2250,6 @@ export function useShellController() {
 
   function handleKimiCodeAccessDraftChange(next: KimiCodeAccessConfigInput) {
     setKimiCodeAccessDraft(next);
-  }
-
-  function handleResetKimiCodeAccessDraft() {
-    setKimiCodeAccessDraft(cloneKimiCodeAccessInput(kimiCodeAccessSnapshot));
   }
 
   async function handleSaveKimiCodeAccessConfig() {
@@ -2964,9 +2955,6 @@ export function useShellController() {
     payload: ControlCenterTaskPayload | null = null,
   ) {
     switch (task) {
-      case "kimi_code_access":
-        await handleOpenKimiCodeAccessPanel();
-        return;
       case "skill_git_import":
         await handleInstallSkillFromGit();
         return;
@@ -3436,11 +3424,6 @@ export function useShellController() {
       JSON.stringify(kimiCodeAccessDraft) !== JSON.stringify(kimiCodeAccessSnapshot),
     [kimiCodeAccessDraft, kimiCodeAccessSnapshot],
   );
-  const kimiCodeAccessSummary = useMemo(
-    () => deriveKimiCodeAccessSummary(kimiCodeAccessView),
-    [kimiCodeAccessView],
-  );
-
   const bridgeRecentErrors = useMemo(() => {
     const items: string[] = [];
     const seen = new Set<string>();
@@ -3621,7 +3604,6 @@ export function useShellController() {
     workspaceBridgeNonce,
     workspaceIframeRef,
     stepCompletion,
-    kimiCodeAccessSummary,
     kimiCodeAccessView,
     kimiCodeAccessDraft,
     kimiCodeAccessBusy,
@@ -3629,13 +3611,13 @@ export function useShellController() {
     kimiCodeAccessTesting,
     kimiCodeAccessTestResult,
     installProbe,
+    installProbeBusy,
     installSource,
     installSettings,
     installSettingsBusy,
     powershellPreflight,
     installBusy,
     installMessage,
-    installFlowCatalog,
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,
@@ -3676,10 +3658,10 @@ export function useShellController() {
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenKimiConfigDir,
+    handleOpenKimiCodeAccessPanel,
     handleOpenControlTask,
     handleCloseControlTask,
     handleKimiCodeAccessDraftChange,
-    handleResetKimiCodeAccessDraft,
     handleSaveKimiCodeAccessConfig,
     handleTestKimiCodeAccessConfig,
     handlePickKimiPath,

@@ -28,8 +28,6 @@ import { ControlCenterStatusBadge } from "@/components/control-center/ControlCen
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import {
-  buildBlockingErrors,
-  buildWarnings,
   KimiCodeAccessTaskContent,
 } from "@/features/control-center/KimiCodeAccessPanel";
 import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
@@ -61,7 +59,6 @@ import {
   formatWeixinOnboardingStateLabel,
   formatWeixinOnboardingTone,
   generateUniqueBridgeConnectorId,
-  getBridgeDisplayName,
   getKimiInstallPrerequisiteIssues,
   hasBridgeConnectorSecretsConfigured,
   isFeishuOnboardingActive,
@@ -73,11 +70,11 @@ import {
 } from "@/features/control-center/controlCenterViewModel";
 
 const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
-  openDirBackground: "Open Kimi Web Shell here",
-  openDir: "Open in Kimi Web Shell",
-  openFile: "Open in Kimi Web Shell (Copy to Workspace)",
-  openFilesystemObject: "Open in Kimi Web Shell",
-  moveToWorkspace: "移动到工作区",
+  openDirBackground: "在此处打开 Kimi 小助手",
+  openDir: "在 Kimi 小助手中打开",
+  openFile: "复制到工作区并用 Kimi 小助手打开",
+  openFilesystemObject: "在 Kimi 小助手中打开",
+  moveToWorkspace: "移动到 Kimi 小助手工作区",
   importToDefaultWorkspace: "导入到默认工作区",
   importWithWorkspacePicker: "选择其他工作区",
 };
@@ -152,7 +149,6 @@ export function ControlCenterView({
   selectedWorkspaceSkillContainerKind,
   kimiPathInput,
   workDirInput,
-  kimiCodeAccessSummary,
   kimiCodeAccessView,
   kimiCodeAccessDraft,
   kimiCodeAccessBusy,
@@ -160,13 +156,13 @@ export function ControlCenterView({
   kimiCodeAccessTesting,
   kimiCodeAccessTestResult,
   installProbe,
+  installProbeBusy,
   installSource,
   installSettings,
   installSettingsBusy,
   installMirrorHealthReport,
   installMirrorHealthBusy,
   powershellPreflight,
-  installFlowCatalog,
   installSessionSnapshot,
   activeTask,
   activeTaskPayload,
@@ -245,8 +241,8 @@ export function ControlCenterView({
   onUpdateSkill,
   onUninstallSkill,
   onRecoverWorkspaceSkill,
+  onRefreshKimiCodeAccessConfig,
   onKimiCodeAccessDraftChange,
-  onResetKimiCodeAccessDraft,
   onSaveKimiCodeAccessConfig,
   onTestKimiCodeAccessConfig,
   onInstallSourceChange,
@@ -284,12 +280,11 @@ export function ControlCenterView({
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
   const [workspaceHubFocusPath, setWorkspaceHubFocusPath] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
+  const settingsTaskReturnCardRef = useRef<OnboardingCardId | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
   void bridgeOnboardingDraft;
   void bridgeOnboardingValidation;
   void onBridgeOnboardingDraftChange;
-  void onRunBridgePrimaryAction;
-  void onStopBridge;
   void onCancelInstallTask;
   void onInstallDependencies;
   void onInstallKimi;
@@ -299,9 +294,6 @@ export function ControlCenterView({
   void onRefreshSkillDiscoveryState;
   const installPathDisplay =
     onboarding?.detectedKimiPath?.trim() ?? kimiPathInput.trim();
-  const recentInstallSummary = installSessionSnapshot.title
-    ? `${installSessionSnapshot.title}: ${installSessionSnapshot.message ?? installSessionSnapshot.status}`
-    : null;
   const effectiveWorkDir = status?.effectiveWorkDir ?? onboarding?.workDir ?? "";
   const runtimeContextMenuSupported =
     contextMenuStatus?.supported ?? onboarding?.contextMenuSupported ?? false;
@@ -316,7 +308,6 @@ export function ControlCenterView({
     bridgeStatus.state === "running" ||
     bridgeStatus.state === "starting" ||
     bridgeStatus.state === "degraded";
-  const bridgeDisplayName = getBridgeDisplayName(bridgeSettings);
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
       ? activeTaskPayload?.connectorId ?? null
@@ -324,12 +315,8 @@ export function ControlCenterView({
   const effectiveSelectedBridgeConnectorId = bridgeTaskConnectorId ?? selectedBridgeConnectorId;
   const isBridgeConnectorSecretsTask = activeTask === "bridge_connector_secrets";
   const isBridgeRuntimeTask = activeTask === "bridge_runtime";
-  const isKimiCodeAccessTask = activeTask === "kimi_code_access";
   const isSkillGitImportTask = activeTask === "skill_git_import";
   const isSkillImportTask = activeTask === "skill_import";
-  const shouldRenderInlineBridgeTask =
-    activeControlSection === "bridge_center" &&
-    (isBridgeConnectorSecretsTask || isBridgeRuntimeTask);
   const selectedBridgeConnector =
     bridgeSettings.connectors.find(
       (connector) => connector.id === effectiveSelectedBridgeConnectorId,
@@ -403,16 +390,14 @@ export function ControlCenterView({
     });
   }, [bridgeRecentErrors, bridgeSettings.connectors, bridgeStatus.connectors]);
   const visibleBridgeConnectors = useMemo(
-    () => sortedBridgeConnectors,
+    () => sortedBridgeConnectors.filter((connector) => connector.platform !== "telegram"),
     [sortedBridgeConnectors],
   );
-  const installStatusLabel = onboarding?.kimiInstalled ? "就绪" : "待办";
-  const installStatusTone = onboarding?.kimiInstalled ? "success" : "warning";
-  const contextMenuStatusLabel = !runtimeContextMenuSupported
-    ? "不支持"
-    : runtimeContextMenuEnabled
-      ? "就绪"
-      : "待办";
+  const installStatusTone = !onboarding?.kimiInstalled
+    ? "warning"
+    : status?.state === "running"
+      ? "success"
+      : "neutral";
   const contextMenuStatusTone = !runtimeContextMenuSupported
     ? "neutral"
     : runtimeContextMenuEnabled
@@ -429,22 +414,16 @@ export function ControlCenterView({
           kimiCodeAccessView.services.fetch.apiKeyConfigured),
     );
   const providerApiReady = providerApiConfigured && !providerApiHealth?.needsAttention;
-  const optionalApiStatusLabel = providerApiConfigured
-    ? providerApiReady
-      ? "已配置"
-      : "可选配置异常"
-    : "可选";
   const optionalApiStatusTone = providerApiReady
     ? "success"
     : providerApiConfigured
-      ? "warning"
+      ? "danger"
       : "neutral";
-  const workDirStatusLabel = effectiveWorkDir ? "就绪" : "待办";
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
 
   useEffect(() => {
     if (
-      !isBridgeConnectorSecretsTask ||
+      (activeTask !== "bridge_connector_secrets" && expandedOnboardingCard !== "bridge") ||
       !selectedFeishuOnboarding ||
       !isFeishuOnboardingActive(selectedFeishuOnboarding)
     ) {
@@ -455,14 +434,15 @@ export function ControlCenterView({
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [
-    isBridgeConnectorSecretsTask,
+    activeTask,
+    expandedOnboardingCard,
     onRefreshFeishuConnectorOnboardingStatus,
     selectedFeishuOnboarding,
   ]);
 
   useEffect(() => {
     if (
-      !isBridgeConnectorSecretsTask ||
+      (activeTask !== "bridge_connector_secrets" && expandedOnboardingCard !== "bridge") ||
       !selectedWeixinOnboarding ||
       !isWeixinOnboardingActive(selectedWeixinOnboarding)
     ) {
@@ -473,7 +453,8 @@ export function ControlCenterView({
     }, 2000);
     return () => window.clearTimeout(timer);
   }, [
-    isBridgeConnectorSecretsTask,
+    activeTask,
+    expandedOnboardingCard,
     onRefreshWeixinConnectorOnboardingStatus,
     selectedWeixinOnboarding,
   ]);
@@ -498,22 +479,34 @@ export function ControlCenterView({
       : providerApiHealth?.state === "error"
         ? `运行异常${onboarding?.providerApiActiveProvider ? ` · ${onboarding.providerApiActiveProvider}` : ""}`
         : `已配置${onboarding?.providerApiActiveProvider ? ` · ${onboarding.providerApiActiveProvider}` : ""}`;
-  const providerApiStatusTone = !providerApiConfigured
-    ? "neutral"
-    : providerApiHealth?.state === "error"
-      ? "danger"
-      : providerApiHealth?.state === "auth_required"
-        ? "warning"
-        : "success";
+  const contextMenuLabelsDirty = CONTEXT_MENU_LABEL_FIELDS.some(
+    ({ key }) =>
+      contextMenuLabelsDraft[key] !==
+      (contextMenuStatus?.labels ?? DEFAULT_CONTEXT_MENU_LABELS)[key],
+  );
+  const workDirDirty = workDirInput.trim() !== effectiveWorkDir.trim();
+  const bridgeHasError = Boolean(
+    bridgeStatus.state === "degraded" ||
+      bridgeStatus.state === "crashed" ||
+      bridgeStatus.lastError ||
+      bridgeRecentErrors[0],
+  );
+  const bridgeStatusTone = bridgeHasError
+    ? "danger"
+    : visibleBridgeConnectors.length === 0
+      ? "warning"
+      : isBridgeRunning
+        ? "success"
+        : "neutral";
   useEffect(() => {
     if (activeControlSection !== "onboarding") {
       setExpandedOnboardingCard(null);
       return;
     }
-    if (installSessionSnapshot.status !== "idle" && !expandedOnboardingCard) {
+    if (installBusy && expandedOnboardingCard !== "install") {
       setExpandedOnboardingCard("install");
     }
-  }, [activeControlSection, expandedOnboardingCard, installSessionSnapshot.status]);
+  }, [activeControlSection, expandedOnboardingCard, installBusy]);
 
   useEffect(() => {
     if (
@@ -547,10 +540,10 @@ export function ControlCenterView({
   }, [bridgeCreateMenuOpen]);
 
   useEffect(() => {
-    if (activeControlSection !== "bridge_center" || shouldRenderInlineBridgeTask) {
+    if (activeControlSection !== "onboarding" || expandedOnboardingCard !== "bridge") {
       setBridgeCreateMenuOpen(false);
     }
-  }, [activeControlSection, shouldRenderInlineBridgeTask]);
+  }, [activeControlSection, expandedOnboardingCard]);
 
   const installSecondaryAction = (
     <Button
@@ -559,7 +552,7 @@ export function ControlCenterView({
       icon={<RefreshCcw size={15} />}
       className="cc-action-btn"
       onClick={() => void onRefreshInstallProbe()}
-      disabled={installBusy}
+      disabled={installBusy || installProbeBusy}
     >
       重新检测
     </Button>
@@ -579,7 +572,7 @@ export function ControlCenterView({
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
       onClick={() => void handleStartOnboardingInstallTask(installPrimaryTaskId)}
-      disabled={installBusy || !installPrerequisitesReady}
+      disabled={installBusy || installProbeBusy || !installPrerequisitesReady}
       title={installPrerequisiteIssues.join("；") || undefined}
     >
       {installPrimaryActionLabel}
@@ -589,25 +582,14 @@ export function ControlCenterView({
   const contextMenuPrimaryAction = (
     <Button
       type="button"
-      icon={<Plus size={15} />}
+      icon={runtimeContextMenuEnabled ? <Minus size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
-      onClick={() => void onEnableContextMenu()}
-      disabled={contextMenuBusy || !onboarding?.contextMenuSupported}
+      onClick={() =>
+        void (runtimeContextMenuEnabled ? onDisableContextMenu() : onEnableContextMenu())
+      }
+      disabled={contextMenuBusy || !runtimeContextMenuSupported}
     >
-      启用右键菜单
-    </Button>
-  );
-
-  const contextMenuSecondaryAction = (
-    <Button
-      type="button"
-      variant="ghost"
-      icon={<Minus size={15} />}
-      className="cc-action-btn"
-      onClick={() => void onDisableContextMenu()}
-      disabled={contextMenuBusy || !onboarding?.contextMenuSupported}
-    >
-      禁用右键菜单
+      {runtimeContextMenuEnabled ? "禁用菜单" : "启用菜单"}
     </Button>
   );
 
@@ -616,22 +598,31 @@ export function ControlCenterView({
       type="button"
       icon={<SlidersHorizontal size={15} />}
       className="cc-action-btn"
-      onClick={() => void onOpenTask("kimi_code_access")}
+      onClick={() => {
+        setExpandedOnboardingCard("auth");
+        void onRefreshKimiCodeAccessConfig();
+      }}
       disabled={kimiCodeAccessBusy}
     >
-      按需配置
+      打开 API 设置
     </Button>
   );
 
   const workDirPrimaryAction = (
     <Button
       type="button"
-      icon={<Check size={15} />}
+      icon={workDirDirty ? <Check size={15} /> : <FolderOpen size={15} />}
       className="cc-action-btn"
-      onClick={() => void onSaveWorkDirAndRestart()}
+      onClick={() =>
+        void (workDirDirty
+          ? onSaveWorkDirAndRestart()
+          : effectiveWorkDir.trim()
+            ? onOpenFolder(effectiveWorkDir.trim())
+            : onPickWorkDir())
+      }
       disabled={actionBusy}
     >
-      保存并重启后端
+      {workDirDirty ? "保存并重启" : effectiveWorkDir ? "打开文件夹" : "选择目录"}
     </Button>
   );
 
@@ -645,6 +636,23 @@ export function ControlCenterView({
       disabled={actionBusy}
     >
       清除并使用默认
+    </Button>
+  );
+
+  const bridgePrimaryAction = (
+    <Button
+      type="button"
+      icon={<Plus size={15} />}
+      className="cc-action-btn"
+      onClick={() => {
+        setExpandedOnboardingCard("bridge");
+        if (visibleBridgeConnectors.length === 0) {
+          setBridgeCreateMenuOpen(true);
+        }
+      }}
+      disabled={bridgeBusy}
+    >
+      {visibleBridgeConnectors.length === 0 ? "新建机器人" : "管理通道"}
     </Button>
   );
 
@@ -678,21 +686,6 @@ export function ControlCenterView({
     }
   }
 
-  async function handleSelectBridgeSection() {
-    try {
-      await Promise.all([onRefreshBridgeSettings(), onRefreshBridgeStatus()]);
-      await Promise.all([
-        onRefreshBridgeSessions({ silent: true }),
-        onRefreshBridgeBindings(),
-        onRefreshBridgeApprovals(),
-        onRefreshBridgeLogTail(),
-        onRefreshBridgeSecretsMask(),
-      ]);
-    } finally {
-      setActiveControlSection("bridge_center");
-    }
-  }
-
   async function handleSelectSkillCenterSection() {
     try {
       await onRefreshSkillCenterState();
@@ -714,10 +707,6 @@ export function ControlCenterView({
     }
     if (section === "onboarding") {
       await handleOpenOnboardingEntry();
-      return;
-    }
-    if (section === "bridge_center") {
-      await handleSelectBridgeSection();
       return;
     }
     if (section === "skill_center") {
@@ -875,12 +864,12 @@ export function ControlCenterView({
   function openBridgeConnectorSecretsModal(connectorId: string) {
     setSelectedBridgeConnectorId(connectorId);
     setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
-    void onOpenTask("bridge_connector_secrets", { connectorId });
+    openSettingsTask("bridge_connector_secrets", "bridge", { connectorId });
   }
 
   function openBridgeConnectorRuntimeModal(connectorId: string) {
     setSelectedBridgeConnectorId(connectorId);
-    void onOpenTask("bridge_runtime", { connectorId });
+    openSettingsTask("bridge_runtime", "bridge", { connectorId });
   }
 
   async function handleImmediateBridgeConnectorToggle(
@@ -971,36 +960,44 @@ export function ControlCenterView({
       ]);
 
       setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
-      onCloseTask();
+      closeSettingsTask();
     } catch (error) {
       setBridgeConnectorTaskError(`保存并应用机器人配置失败：${String(error)}`);
     }
   }
 
-  async function handleStartSelectedFeishuOnboarding() {
-    if (!selectedBridgeConnector || selectedBridgeConnector.platform !== "feishu") {
-      return;
-    }
+  async function handleStartConnectorOnboarding(connector: BridgeConnectorConfig) {
+    if (connector.platform === "telegram") return;
+    setSelectedBridgeConnectorId(connector.id);
     setBridgeConnectorTaskError(null);
-    const connectorId = selectedBridgeConnector.id;
     const shouldPersistBeforeOnboarding =
-      bridgeSettingsDirty || !selectedBridgeConnectorPersisted;
+      bridgeSettingsDirty || !bridgePersistedConnectorIds.includes(connector.id);
 
     if (shouldPersistBeforeOnboarding) {
       try {
         await onPersistBridgeSettings({ showRestartNotice: false });
       } catch (error) {
         setBridgeConnectorTaskError(
-          `保存当前机器人配置失败，未启动飞书创建流程：${String(error)}`,
+          `保存当前机器人配置失败，未启动扫码流程：${String(error)}`,
         );
         return;
       }
     }
 
     try {
-      await onStartFeishuConnectorOnboarding(connectorId);
+      if (connector.platform === "feishu") {
+        await onStartFeishuConnectorOnboarding(connector.id);
+      } else {
+        await onStartWeixinConnectorOnboarding(connector.id);
+      }
     } catch (error) {
-      setBridgeConnectorTaskError(`启动飞书创建流程失败：${String(error)}`);
+      setBridgeConnectorTaskError(`启动扫码流程失败：${String(error)}`);
+    }
+  }
+
+  async function handleStartSelectedFeishuOnboarding() {
+    if (selectedBridgeConnector?.platform === "feishu") {
+      await handleStartConnectorOnboarding(selectedBridgeConnector);
     }
   }
 
@@ -1012,29 +1009,8 @@ export function ControlCenterView({
   }
 
   async function handleStartSelectedWeixinOnboarding() {
-    if (!selectedBridgeConnector || selectedBridgeConnector.platform !== "weixin") {
-      return;
-    }
-    setBridgeConnectorTaskError(null);
-    const connectorId = selectedBridgeConnector.id;
-    const shouldPersistBeforeOnboarding =
-      bridgeSettingsDirty || !selectedBridgeConnectorPersisted;
-
-    if (shouldPersistBeforeOnboarding) {
-      try {
-        await onPersistBridgeSettings({ showRestartNotice: false });
-      } catch (error) {
-        setBridgeConnectorTaskError(
-          `保存当前机器人配置失败，未启动微信扫码流程：${String(error)}`,
-        );
-        return;
-      }
-    }
-
-    try {
-      await onStartWeixinConnectorOnboarding(connectorId);
-    } catch (error) {
-      setBridgeConnectorTaskError(`启动微信扫码流程失败：${String(error)}`);
+    if (selectedBridgeConnector?.platform === "weixin") {
+      await handleStartConnectorOnboarding(selectedBridgeConnector);
     }
   }
 
@@ -1047,28 +1023,18 @@ export function ControlCenterView({
 
   function renderContextMenuStepContent() {
     return (
-      <div className="cc-step-main">
-        <div className="cc-step-secondary-actions">
-          {contextMenuSecondaryAction}
+      <div className="cc-settings-detail-stack">
+        <div className="cc-settings-live-row" aria-live="polite">
+          <span>{contextMenuBusy ? "正在更新资源管理器右键菜单" : "右键菜单状态已同步"}</span>
           <Button
             type="button"
-            variant="outline"
-            icon={<Check size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onSaveContextMenuLabels(contextMenuLabelsDraft)}
-            disabled={contextMenuBusy || !runtimeContextMenuSupported}
-          >
-            保存菜单名称
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
+            variant="ghost"
             icon={<RefreshCcw size={15} />}
             className="cc-action-btn"
             onClick={() => void onRefreshContextMenuStatus()}
             disabled={contextMenuBusy}
           >
-            刷新状态
+            重新检测
           </Button>
         </div>
         {onboarding?.contextMenuMessage ? (
@@ -1077,53 +1043,86 @@ export function ControlCenterView({
         {contextMenuStatus?.message && contextMenuStatus.message !== onboarding?.contextMenuMessage ? (
           <p className="hint cc-step-meta">{contextMenuStatus.message}</p>
         ) : null}
-        <div className="cc-context-menu-label-grid">
-          {CONTEXT_MENU_LABEL_FIELDS.map((field) => (
-            <label key={field.key} className="cc-context-menu-label-field">
-              <span>{field.label}</span>
-              <Input
-                value={contextMenuLabelsDraft[field.key]}
-                onChange={(event) =>
-                  setContextMenuLabelsDraft((current) => ({
-                    ...current,
-                    [field.key]: event.currentTarget.value,
-                  }))
-                }
-                disabled={contextMenuBusy || !runtimeContextMenuSupported}
-              />
-            </label>
-          ))}
-        </div>
-        <div className="cc-context-menu-preview-list">
-          {(contextMenuStatus?.items ?? []).map((item) => (
-            <article key={item.id} className="cc-context-menu-preview-item">
-              <div>
-                <strong>{contextMenuLabelsDraft[item.labelKey] ?? item.label}</strong>
-                <span>{item.scope}</span>
-              </div>
-              <code>{item.command || item.registryKey}</code>
-            </article>
-          ))}
+        <div className="cc-settings-direct-detail">
+          <div className="cc-context-menu-label-grid">
+            {CONTEXT_MENU_LABEL_FIELDS.map((field) => (
+              <label key={field.key} className="cc-context-menu-label-field">
+                <span>{field.label}</span>
+                <Input
+                  value={contextMenuLabelsDraft[field.key]}
+                  onChange={(event) =>
+                    setContextMenuLabelsDraft((current) => ({
+                      ...current,
+                      [field.key]: event.currentTarget.value,
+                    }))
+                  }
+                  disabled={contextMenuBusy || !runtimeContextMenuSupported}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="cc-context-menu-preview-list">
+            {(contextMenuStatus?.items ?? []).length ? (
+              (contextMenuStatus?.items ?? []).map((item) => (
+                <article key={item.id} className="cc-context-menu-preview-item">
+                  <div>
+                    <strong>{contextMenuLabelsDraft[item.labelKey] ?? item.label}</strong>
+                    <span>{item.scope}</span>
+                  </div>
+                  <code>{item.command || item.registryKey}</code>
+                </article>
+              ))
+            ) : (
+              <p className="hint">启用右键菜单后显示命令预览。</p>
+            )}
+          </div>
+          <div className="cc-settings-more-actions">
+            <Button
+              type="button"
+              variant="outline"
+              icon={<Check size={15} />}
+              className="cc-action-btn"
+              onClick={() => void onSaveContextMenuLabels(contextMenuLabelsDraft)}
+              disabled={contextMenuBusy || !runtimeContextMenuSupported || !contextMenuLabelsDirty}
+            >
+              保存名称
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
+  function openSettingsTask(
+    task: "bridge_connector_secrets" | "bridge_runtime",
+    card: OnboardingCardId,
+    payload?: { connectorId?: string },
+  ) {
+    settingsTaskReturnCardRef.current = card;
+    void onOpenTask(task, payload);
+  }
+
+  function closeSettingsTask() {
+    const returnCard = settingsTaskReturnCardRef.current;
+    const closed = onCloseTask();
+    if (closed && returnCard) {
+      settingsTaskReturnCardRef.current = null;
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(
+            `#${focusDomId(`onboarding:${returnCard}`)} .cc-settings-bar-toggle`,
+          )
+          ?.focus();
+      });
+    }
+    return closed;
+  }
+
   function renderWorkDirStepContent() {
     return (
-      <div className="cc-step-main">
-        <div className="cc-step-secondary-actions">
-          {workDirSecondaryAction}
-          <Button
-            type="button"
-            variant="outline"
-            icon={<Check size={15} />}
-            className="cc-action-btn"
-            onClick={() => void onSaveWorkDirAndRestart()}
-            disabled={actionBusy}
-          >
-            保存并重启后端
-          </Button>
+      <div className="cc-settings-detail-stack">
+        <div className="cc-settings-live-row" aria-live="polite">
+          {actionBusy ? "正在应用默认工作目录" : workDirDirty ? "目录存在未保存修改" : "目录设置已同步"}
         </div>
         <div className="cc-workdir-row">
           <Input
@@ -1151,10 +1150,7 @@ export function ControlCenterView({
             aria-label="打开当前生效目录"
             title="打开当前生效目录"
           />
-          <p className="hint cc-inline-meta">
-            当前生效目录：
-            <strong>{effectiveWorkDir || "-"}</strong>
-          </p>
+          {workDirSecondaryAction}
         </div>
       </div>
     );
@@ -1165,7 +1161,6 @@ export function ControlCenterView({
     index: string;
     title: string;
     actionLabel: string;
-    statusLabel: string;
     statusTone: "neutral" | "success" | "warning" | "danger";
     complete: boolean;
     primaryAction: ReactNode;
@@ -1175,7 +1170,6 @@ export function ControlCenterView({
       index: "01",
       title: "安装 / 升级 Kimi Code",
       actionLabel: installPrimaryActionLabel,
-      statusLabel: installStatusLabel,
       statusTone: installStatusTone,
       complete: installReady,
       primaryAction: installPrimaryAction,
@@ -1185,7 +1179,6 @@ export function ControlCenterView({
       index: "02",
       title: "资源管理器右键菜单",
       actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
-      statusLabel: contextMenuStatusLabel,
       statusTone: contextMenuStatusTone,
       complete: contextMenuReady,
       primaryAction: contextMenuPrimaryAction,
@@ -1193,9 +1186,8 @@ export function ControlCenterView({
     {
       id: "auth",
       index: "03",
-      title: "Provider API（可选）",
+      title: "API 配置",
       actionLabel: providerApiConfigured ? "查看配置" : "按需配置",
-      statusLabel: optionalApiStatusLabel,
       statusTone: optionalApiStatusTone,
       complete: true,
       primaryAction: optionalApiPrimaryAction,
@@ -1205,10 +1197,21 @@ export function ControlCenterView({
       index: "04",
       title: "默认工作目录",
       actionLabel: workDirReady ? "已设置" : "设置默认工作目录",
-      statusLabel: workDirStatusLabel,
       statusTone: workDirStatusTone,
       complete: workDirReady,
       primaryAction: workDirPrimaryAction,
+    },
+    {
+      id: "bridge",
+      index: "05",
+      title: "外部 IM 通道",
+      actionLabel:
+        visibleBridgeConnectors.length === 0
+          ? "连接微信或飞书"
+          : `${visibleBridgeConnectors.length} 个机器人 · ${bridgeStatus.pendingApprovals} 个待审批`,
+      statusTone: bridgeStatusTone,
+      complete: visibleBridgeConnectors.length > 0 && !bridgeHasError,
+      primaryAction: bridgePrimaryAction,
     },
   ];
   const showStartupFailureDiagnostics = Boolean(
@@ -1233,7 +1236,7 @@ export function ControlCenterView({
   const unifiedRailGroups = useMemo<UnifiedRailGroup[]>(() => {
     const topLevelItems: UnifiedRailItem[] = controlSections.map((section) => ({
       id: section.id,
-      label: section.id === "bridge_center" ? bridgeDisplayName : section.label,
+      label: section.label,
       icon: section.icon,
       active:
         section.id === "onboarding"
@@ -1253,7 +1256,6 @@ export function ControlCenterView({
     ];
   }, [
     activeControlSection,
-    bridgeDisplayName,
     handleSelectControlSection,
     isAssistantSettingsSection,
   ]);
@@ -1264,17 +1266,11 @@ export function ControlCenterView({
         return (
           <div className="cc-onboarding-install-stack">
             <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-            {installPrerequisiteIssues.length ? (
-              <ul className="cc-install-blocker-list cc-settings-inline-blockers">
-                {installPrerequisiteIssues.map((issue) => (
-                  <li key={issue}>{issue}</li>
-                ))}
-              </ul>
-            ) : null}
             <InstallFlowTaskContent
-              catalog={installFlowCatalog}
               session={installSessionSnapshot}
               probe={installProbe}
+              probeBusy={installProbeBusy}
+              probeMessage={installMessage}
               backendState={status?.state ?? null}
               installSource={installSource}
               installSettings={installSettings}
@@ -1294,12 +1290,6 @@ export function ControlCenterView({
               onSavePathAndRetry={onSavePathAndRetry}
               restartBusy={actionBusy}
             />
-            {recentInstallSummary || installMessage ? (
-              <div className="cc-onboarding-install-meta">
-                {recentInstallSummary ? <p className="hint cc-step-meta">{recentInstallSummary}</p> : null}
-                {installMessage ? <p className="hint cc-step-meta">{installMessage}</p> : null}
-              </div>
-            ) : null}
           </div>
         );
       }
@@ -1308,41 +1298,27 @@ export function ControlCenterView({
       }
       if (stepId === "auth") {
         return (
-          <div className="cc-auth-panel">
-            <div className="cc-brief-list">
-              <article className="cc-brief-item">
-                <strong>Provider API</strong>
-                <ControlCenterStatusBadge tone={providerApiStatusTone}>
-                  {providerApiStatusLabel}
-                </ControlCenterStatusBadge>
-              </article>
-              <article className="cc-brief-item">
-                <strong>配置文件</strong>
-                <span>
-                  {kimiCodeAccessSummary?.configPath ||
-                    kimiCodeAccessView?.configPath ||
-                    "~/.kimi-code/config.toml"}
-                </span>
-              </article>
+          <div className="cc-settings-detail-stack">
+            <div className="cc-settings-live-row" aria-live="polite">
+              {kimiCodeAccessBusy ? "正在读取 API 配置" : providerApiStatusLabel}
             </div>
-            <div className="cc-api-inline-actions">
-              <Button type="button" variant="outline" icon={<SlidersHorizontal size={14} />} className="cc-action-btn" onClick={() => void onOpenTask("kimi_code_access")} disabled={kimiCodeAccessBusy}>
-                打开 API 配置
-              </Button>
-              <Button type="button" variant="outline" icon={<FolderOpen size={14} />} className="cc-action-btn" onClick={() => void onOpenKimiConfigDir()}>
-                打开配置目录
-              </Button>
-            </div>
-            {kimiCodeAccessDirty ? (
-              <p className="hint cc-step-meta">
-                API 配置存在未保存修改；这不会阻塞继续使用控制中心。
-              </p>
-            ) : null}
-            {kimiCodeAccessView?.warnings?.length ? (
-              <p className="hint cc-step-meta">当前警告：{kimiCodeAccessView.warnings[0]}</p>
-            ) : null}
+            <KimiCodeAccessTaskContent
+              dirty={kimiCodeAccessDirty}
+              view={kimiCodeAccessView}
+              draft={kimiCodeAccessDraft}
+              testResult={kimiCodeAccessTestResult}
+              testing={kimiCodeAccessTesting}
+              saving={kimiCodeAccessBusy}
+              onDraftChange={onKimiCodeAccessDraftChange}
+              onSave={onSaveKimiCodeAccessConfig}
+              onOpenConfigDir={onOpenKimiConfigDir}
+              onTestConnection={onTestKimiCodeAccessConfig}
+            />
           </div>
         );
+      }
+      if (stepId === "bridge") {
+        return renderBridgeStepContent();
       }
       return renderWorkDirStepContent();
     }
@@ -1366,12 +1342,13 @@ export function ControlCenterView({
                     <button
                       type="button"
                       className="cc-settings-bar-toggle"
-                      onClick={() =>
-                        setExpandedOnboardingCard((current) =>
-                          current === step.id ? null : step.id,
-                        )
-                      }
+                      onClick={() => {
+                        const next = expanded ? null : step.id;
+                        setExpandedOnboardingCard(next);
+                        if (next === "auth") void onRefreshKimiCodeAccessConfig();
+                      }}
                       aria-expanded={expanded}
+                      aria-controls={`cc-settings-detail-${step.id}`}
                     >
                       <div>
                         <div className="cc-image-row-title">
@@ -1386,14 +1363,11 @@ export function ControlCenterView({
                       />
                     </button>
                     <div className="cc-image-row-actions">
-                      <ControlCenterStatusBadge tone={step.statusTone}>
-                        {step.statusLabel}
-                      </ControlCenterStatusBadge>
                       {step.primaryAction}
                     </div>
                   </div>
                   {expanded ? (
-                    <div className="cc-settings-bar-detail">{renderStepDetail(step.id)}</div>
+                    <div id={`cc-settings-detail-${step.id}`} className="cc-settings-bar-detail">{renderStepDetail(step.id)}</div>
                   ) : null}
                 </li>
               );
@@ -1511,174 +1485,164 @@ export function ControlCenterView({
     );
   }
 
-  function renderBridgeSection() {
+  function renderInlineConnectorOnboarding(connector: BridgeConnectorConfig) {
+    const session = connector.platform === "feishu"
+      ? feishuConnectorOnboarding?.connectorId === connector.id ? feishuConnectorOnboarding : null
+      : weixinConnectorOnboarding?.connectorId === connector.id ? weixinConnectorOnboarding : null;
+    if (!session) return null;
+    const isFeishu = connector.platform === "feishu";
+    const active = isFeishu
+      ? isFeishuOnboardingActive(session as NonNullable<typeof feishuConnectorOnboarding>)
+      : isWeixinOnboardingActive(session as NonNullable<typeof weixinConnectorOnboarding>);
+    const stateLabel = isFeishu
+      ? formatFeishuOnboardingStateLabel(session.state)
+      : formatWeixinOnboardingStateLabel(session.state);
+    const stateTone = isFeishu
+      ? formatFeishuOnboardingTone(session.state)
+      : formatWeixinOnboardingTone(session.state);
+
     return (
-      <section className="cc-image-detail-page">
-        <div
-          id={focusDomId("bridge_center")}
-          className={`cc-image-detail-top ${activeFocusId === "bridge_center" ? "is-focus" : ""}`}
-        >
-          <div>
-            <h1>外部 IM 通道</h1>
-          </div>
-          <div className="cc-image-top-controls">
-            <span className={`cc-image-switch ${bridgeSettings.enabled ? "" : "off"}`} aria-label="Bridge enabled" />
-            <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onRestartBridge()} disabled={bridgeBusy}>
-              重启 Bridge
+      <div className="cc-inline-onboarding" aria-live="polite">
+        <div className="cc-inline-onboarding-head">
+          <ControlCenterStatusBadge tone={stateTone}>{stateLabel}</ControlCenterStatusBadge>
+          <div className="cc-image-row-actions">
+            {session.verificationUrl ? (
+              <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => void onOpenExternalUrl(session.verificationUrl ?? "")}>浏览器打开</Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              className="cc-action-btn"
+              onClick={() => void (isFeishu
+                ? onRefreshFeishuConnectorOnboardingStatus(session.sessionId)
+                : onRefreshWeixinConnectorOnboardingStatus(session.sessionId))}
+            >
+              刷新
             </Button>
-            <ControlCenterActionMenu
-              disabled={bridgeBusy}
-              items={[
-                {
-                  label: "刷新状态",
-                  icon: <RefreshCw size={15} />,
-                  onSelect: () => {
-                    void Promise.all([
-                      onRefreshBridgeSettings(),
-                      onRefreshBridgeStatus(),
-                      onRefreshBridgeBindings(),
-                      onRefreshBridgeApprovals(),
-                      onRefreshBridgeSecretsMask(),
-                    ]);
-                  },
-                },
-                { label: "打开日志目录", icon: <FolderOpen size={15} />, onSelect: () => void onOpenLogs() },
-                { label: "停止 Bridge", icon: <X size={15} />, tone: "danger", onSelect: () => void onStopBridge() },
-              ]}
-            />
-          </div>
-        </div>
-
-        {shouldRenderInlineBridgeTask ? renderActiveTask() : null}
-
-        <section className="cc-image-card">
-          <div className="cc-image-card-title-row">
-            <h2>Connectors</h2>
-            <div className="cc-bridge-create-menu" ref={bridgeCreateMenuRef}>
+            {active ? (
               <Button
                 type="button"
-                icon={<Plus size={14} />}
-                className="cc-action-btn cc-bridge-create-menu-trigger"
-                onClick={() => setBridgeCreateMenuOpen((current) => !current)}
-                disabled={bridgeBusy}
-                aria-haspopup="menu"
-                aria-expanded={bridgeCreateMenuOpen}
+                variant="ghost"
+                className="cc-action-btn danger"
+                onClick={() => void (isFeishu
+                  ? onCancelFeishuConnectorOnboarding(session.sessionId)
+                  : onCancelWeixinConnectorOnboarding(session.sessionId))}
               >
-                新建机器人
+                取消扫码
               </Button>
-              {bridgeCreateMenuOpen ? (
-                <div className="cc-bridge-create-menu-popover" role="menu" aria-label="选择机器人平台">
-                  {(["telegram", "weixin", "feishu"] as BridgePlatform[]).map((platform) => (
-                    <button
-                      key={platform}
-                      type="button"
-                      className="cc-bridge-create-menu-item"
-                      onClick={() => handleCreateBridgeConnector(platform)}
-                      disabled={bridgeBusy}
-                      role="menuitem"
-                    >
-                      <strong>{bridgePlatformLabel(platform)}</strong>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-          {visibleBridgeConnectors.length > 0 ? (
-            <ul className="cc-image-row-list">
-              {visibleBridgeConnectors.map((connector) => {
-                const connectorStatus =
-                  bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ?? null;
-                const connectorSecrets =
-                  bridgeSecretsMask.connectors.find((item) => item.connectorId === connector.id) ?? null;
-                const connectorSecretsConfigured = hasBridgeConnectorSecretsConfigured(connector, connectorSecrets);
-                const connectorRecentError = findBridgeConnectorRecentError(connector, connectorStatus, bridgeRecentErrors);
-                const connectorPending = bridgeOverviewPendingConnectorId === connector.id;
-                const enabledValue = connectorPending
-                  ? (bridgeOverviewPendingEnabled[connector.id] ?? connector.enabled)
-                  : connector.enabled;
-                return (
-                  <li
-                    key={connector.id}
-                    id={focusDomId(`bridge:${connector.id}`)}
-                    className={`cc-image-row ${activeFocusId === `bridge:${connector.id}` ? "is-focus" : ""}`}
-                  >
-                    <div>
-                      <div className="cc-image-row-title">
-                        <span className={`cc-dot ${formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle")}`} />
-                        {connector.label}
-                      </div>
-                      <div className="cc-image-row-desc">
-                        {bridgePlatformLabel(connector.platform)} · {connectorSecretsConfigured ? "凭据已配置" : "待配置凭据"}
-                        {connectorRecentError ? ` · ${connectorRecentError}` : ""}
-                      </div>
-                    </div>
-                    <div className="cc-image-row-actions">
-                      <ControlCenterStatusBadge tone={formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle")}>
-                        {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
-                      </ControlCenterStatusBadge>
-                      <ControlCenterToggleField
-                        label="启用"
-                        checked={enabledValue}
-                        onChange={(checked) => void handleImmediateBridgeConnectorToggle(connector.id, checked)}
-                        disabled={bridgeBusy || connectorPending}
-                        busy={connectorPending}
-                      />
-                      <Button type="button" variant="outline" className="cc-action-btn" onClick={() => openBridgeConnectorSecretsModal(connector.id)} disabled={bridgeBusy}>
-                        连接与凭据
-                      </Button>
-                      <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => openBridgeConnectorRuntimeModal(connector.id)} disabled={bridgeBusy}>
-                        运行面板
-                      </Button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="cc-image-muted">还没有机器人。使用“新建机器人”添加 Telegram、微信或飞书 connector。</p>
-          )}
-        </section>
+        </div>
+        {session.qrSvg ? (
+          <div className="cc-inline-onboarding-qr" dangerouslySetInnerHTML={{ __html: session.qrSvg }} />
+        ) : null}
+        {session.detailMessage ? <p className="hint">{session.detailMessage}</p> : null}
+        {session.errorMessage ? <p className="cc-settings-error">{session.errorMessage}</p> : null}
+      </div>
+    );
+  }
 
-        <section className="cc-image-card">
-          <h2>Sessions / Bindings / Approvals</h2>
-          <table className="cc-image-table">
-            <thead>
-              <tr><th>类型</th><th>内容</th><th>操作</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Session</td>
-                <td>{bridgeSessions.length} 个外部会话，最近导入后绑定到工作区默认目录。</td>
-                <td>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="cc-action-btn"
-                    onClick={() => {
-                      const connectorId = effectiveSelectedBridgeConnectorId ?? visibleBridgeConnectors[0]?.id;
-                      if (connectorId) openBridgeConnectorRuntimeModal(connectorId);
-                    }}
-                    disabled={visibleBridgeConnectors.length === 0}
-                  >
-                    管理 Session
-                  </Button>
-                </td>
-              </tr>
-              <tr>
-                <td>Binding</td>
-                <td>{bridgeBindings.length} 条绑定，可在 connector 运行面板中清除、重置或切换工作目录。</td>
-                <td><Button type="button" variant="outline" className="cc-action-btn" onClick={() => void onRefreshBridgeBindings()}>刷新绑定</Button></td>
-              </tr>
-              <tr>
-                <td>Approval</td>
-                <td>{bridgeApprovals.length} 个待审批动作。</td>
-                <td><Button type="button" className="cc-action-btn" onClick={() => void onRefreshBridgeApprovals()}>打开审批</Button></td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-      </section>
+  function renderBridgeStepContent() {
+    return (
+      <div className="cc-settings-detail-stack">
+        <div className="cc-settings-live-row" aria-live="polite">
+          <span>{bridgeBusy ? "正在更新外部 IM 通道" : `通道${isBridgeRunning ? "正在运行" : "已停止"}`}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<RefreshCw size={15} />}
+            className="cc-action-btn"
+            onClick={() => void Promise.all([onRefreshBridgeSettings(), onRefreshBridgeStatus(), onRefreshBridgeSecretsMask()])}
+            disabled={bridgeBusy}
+          >
+            刷新
+          </Button>
+        </div>
+        {bridgeHasError ? (
+          <p className="cc-settings-error" role="alert">
+            {bridgeStatus.lastError || bridgeRecentErrors[0] || "外部 IM 通道运行异常，请检查机器人配置。"}
+          </p>
+        ) : null}
+        <div className="cc-settings-more-actions">
+          <Button
+            type="button"
+            variant="outline"
+            className="cc-action-btn"
+            onClick={() => void onRunBridgePrimaryAction(isBridgeRunning ? "apply_restart" : "start")}
+            disabled={bridgeBusy || visibleBridgeConnectors.length === 0}
+          >
+            {isBridgeRunning ? "应用并重启" : "启动通道"}
+          </Button>
+          <div className="cc-bridge-create-menu" ref={bridgeCreateMenuRef}>
+            <Button
+              type="button"
+              variant="ghost"
+              icon={<Plus size={14} />}
+              className="cc-action-btn cc-bridge-create-menu-trigger"
+              onClick={() => setBridgeCreateMenuOpen((current) => !current)}
+              disabled={bridgeBusy}
+              aria-haspopup="menu"
+              aria-expanded={bridgeCreateMenuOpen}
+            >
+              新建机器人
+            </Button>
+            {bridgeCreateMenuOpen ? (
+              <div className="cc-bridge-create-menu-popover" role="menu" aria-label="选择机器人平台">
+                {(["weixin", "feishu"] as BridgePlatform[]).map((platform) => (
+                  <button key={platform} type="button" className="cc-bridge-create-menu-item" onClick={() => handleCreateBridgeConnector(platform)} disabled={bridgeBusy} role="menuitem">
+                    <strong>{bridgePlatformLabel(platform)}</strong>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {visibleBridgeConnectors.length ? (
+          <ul className="cc-settings-connector-list">
+            {visibleBridgeConnectors.map((connector) => {
+              const connectorStatus = bridgeStatus.connectors.find((item) => item.connectorId === connector.id) ?? null;
+              const connectorSecrets = bridgeSecretsMask.connectors.find((item) => item.connectorId === connector.id) ?? null;
+              const configured = hasBridgeConnectorSecretsConfigured(connector, connectorSecrets);
+              const recentError = findBridgeConnectorRecentError(connector, connectorStatus, bridgeRecentErrors);
+              const pending = bridgeOverviewPendingConnectorId === connector.id;
+              const enabled = pending ? (bridgeOverviewPendingEnabled[connector.id] ?? connector.enabled) : connector.enabled;
+              return (
+                <li key={connector.id} className="cc-settings-connector-row">
+                  <div className="cc-settings-connector-copy">
+                    <strong>{connector.label}</strong>
+                    <span>{bridgePlatformLabel(connector.platform)} · {configured ? "凭据已配置" : "待配置凭据"}{recentError ? ` · ${recentError}` : ""}</span>
+                  </div>
+                  <div className="cc-image-row-actions">
+                    <ControlCenterStatusBadge tone={formatBridgeConnectorStateTone(connectorStatus?.state ?? "idle")}>
+                      {formatBridgeConnectorStateLabel(connectorStatus?.state ?? "idle")}
+                    </ControlCenterStatusBadge>
+                    <Button type="button" variant="outline" className="cc-action-btn" onClick={() => openBridgeConnectorSecretsModal(connector.id)} disabled={bridgeBusy}>
+                      连接与凭据
+                    </Button>
+                    <Button type="button" variant="outline" className="cc-action-btn" onClick={() => void handleStartConnectorOnboarding(connector)} disabled={bridgeBusy}>
+                      扫码连接
+                    </Button>
+                    <ControlCenterToggleField label="启用" checked={enabled} onChange={(checked) => void handleImmediateBridgeConnectorToggle(connector.id, checked)} disabled={bridgeBusy || pending} busy={pending} />
+                    {configured ? <ControlCenterActionMenu disabled={bridgeBusy} items={[{ label: "运行面板", onSelect: () => openBridgeConnectorRuntimeModal(connector.id) }]} /> : null}
+                  </div>
+                  {renderInlineConnectorOnboarding(connector)}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="hint">还没有机器人。新建一个机器人即可连接外部 IM。</p>
+        )}
+        <details className="cc-settings-more">
+          <summary>更多选项</summary>
+          <div className="cc-settings-more-actions">
+            <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => void onOpenLogs()}>打开日志目录</Button>
+            {isBridgeRunning ? (
+              <Button type="button" variant="ghost" className="cc-action-btn danger" onClick={() => void onStopBridge()} disabled={bridgeBusy}>停止通道</Button>
+            ) : null}
+          </div>
+        </details>
+      </div>
     );
   }
 
@@ -1686,47 +1650,79 @@ export function ControlCenterView({
     const skillCenterActions =
       skillCenterSection === "manage" ? (
         <div className="skill-center-header-actions">
+          <ControlCenterActionMenu
+            label="添加 Skill"
+            triggerContent="添加 Skill"
+            triggerIcon={<Plus size={14} />}
+            disabled={skillCenterBusy}
+            items={[
+              {
+                label: "从 Git 安装",
+                description: "输入仓库地址安装 Skill",
+                onSelect: () => void onOpenTask("skill_git_import"),
+              },
+              {
+                label: "导入本地 Skill",
+                description: "从本机目录选择 Skill",
+                onSelect: () => void onOpenTask("skill_import"),
+              },
+            ]}
+          />
           <Button
             type="button"
-            icon={<Plus size={14} />}
+            variant="ghost"
+            size="sm"
             className="cc-action-btn"
-            onClick={() => {
-              void onOpenTask("skill_git_import");
-            }}
+            onClick={() => onSkillCenterSectionChange("workspace_insights")}
             disabled={skillCenterBusy}
           >
-            从 Git 安装
+            工作区目标
           </Button>
           <Button
             type="button"
-            icon={<FolderOpen size={14} />}
-            className="cc-action-btn"
+            variant="outline"
+            size="icon-sm"
+            icon={<RefreshCcw size={14} />}
             onClick={() => {
-              void onOpenTask("skill_import");
+              void (async () => {
+                await onRefreshSkillCenterState();
+                await onRefreshSkillDiscoveryState();
+              })();
             }}
             disabled={skillCenterBusy}
-          >
-            导入本地 Skill
-          </Button>
+            aria-label="刷新 Skill 中心"
+            title="刷新 Skill 中心"
+          />
         </div>
       ) : (
         <div className="skill-center-header-actions">
           <Button
             type="button"
-            icon={<RefreshCcw size={14} />}
+            variant="ghost"
+            size="sm"
             className="cc-action-btn"
+            onClick={() => onSkillCenterSectionChange("manage")}
+            disabled={skillCenterBusy}
+          >
+            返回技能库
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-sm"
+            icon={<RefreshCcw size={14} />}
             onClick={() => {
               void onRefreshWorkspaceSkillManagementState();
             }}
             disabled={skillCenterBusy}
-          >
-            刷新工作区
-          </Button>
+            aria-label="刷新工作区目标"
+            title="刷新工作区目标"
+          />
         </div>
       );
 
     return (
-      <section className="cc-image-detail-page">
+      <section className="cc-image-detail-page skill-center-page">
         <div
           id={focusDomId("skill_center")}
           className={`cc-image-detail-top ${activeFocusId === "skill_center" ? "is-focus" : ""}`}
@@ -1736,11 +1732,10 @@ export function ControlCenterView({
           </div>
           <div className="cc-image-top-controls">{skillCenterActions}</div>
         </div>
-        <section
+        <div
           id={focusDomId(activeFocusId?.startsWith("skill-") ? activeFocusId : "skill_center:list")}
-          className={`cc-image-card ${activeFocusId?.startsWith("skill-") ? "is-focus" : ""}`}
+          className={`skill-center-page-surface ${activeFocusId?.startsWith("skill-") ? "is-focus" : ""}`}
         >
-          <h2>Manage skills</h2>
           <div className="cc-skill-center-body">
             <SkillCenterPanel
               surface="page"
@@ -1831,93 +1826,21 @@ export function ControlCenterView({
             activeFocusId={activeFocusId}
           />
           </div>
-        </section>
+        </div>
       </section>
     );
   }
 
-  const configBlockingErrors = useMemo(
-    () => buildBlockingErrors(kimiCodeAccessDraft),
-    [kimiCodeAccessDraft],
-  );
-  const configWarnings = useMemo(
-    () => buildWarnings(kimiCodeAccessDraft, kimiCodeAccessView?.warnings ?? []),
-    [kimiCodeAccessDraft, kimiCodeAccessView?.warnings],
-  );
   function closeBridgeConnectorSecretsTask() {
     const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
     if (hasPendingDraft && !window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？")) {
       return;
     }
     setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
-    onCloseTask();
+    closeSettingsTask();
   }
 
   function renderActiveTask() {
-    if (isKimiCodeAccessTask) {
-      return (
-        <ControlCenterTaskSurface
-          title="Kimi Code 接入配置"
-          className="cc-config-modal"
-          bodyClassName="cc-config-modal-scroll"
-          onBack={onCloseTask}
-          onClose={onClose}
-          footer={
-            <>
-              <div className="cc-config-footer-meta">
-                <span>校验错误：{configBlockingErrors.length}</span>
-                <span>告警：{configWarnings.length}</span>
-                {kimiCodeAccessDirty ? (
-                  <span className="unsaved">存在未保存变更</span>
-                ) : (
-                  <span className="saved">已同步</span>
-                )}
-              </div>
-              <div className="cc-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="cc-action-btn"
-                  icon={<RefreshCcw size={14} />}
-                  onClick={onResetKimiCodeAccessDraft}
-                  disabled={kimiCodeAccessBusy || !kimiCodeAccessDirty}
-                >
-                  重置
-                </Button>
-                <Button
-                  type="button"
-                  className="cc-action-btn"
-                  icon={<Check size={14} />}
-                  onClick={() => void onSaveKimiCodeAccessConfig()}
-                  disabled={kimiCodeAccessBusy || configBlockingErrors.length > 0}
-                >
-                  保存接入配置
-                </Button>
-              </div>
-              {configBlockingErrors.length > 0 ? (
-                <ul className="cc-config-error-list">
-                  {configBlockingErrors.slice(0, 8).map((error) => (
-                    <li key={error}>{error}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </>
-          }
-        >
-          <KimiCodeAccessTaskContent
-            dirty={kimiCodeAccessDirty}
-            view={kimiCodeAccessView}
-            draft={kimiCodeAccessDraft}
-            testResult={kimiCodeAccessTestResult}
-            testing={kimiCodeAccessTesting}
-            onDraftChange={onKimiCodeAccessDraftChange}
-            onOpenConfigDir={onOpenKimiConfigDir}
-            onTestConnection={onTestKimiCodeAccessConfig}
-          />
-        </ControlCenterTaskSurface>
-      );
-    }
-
     if (isBridgeConnectorSecretsTask) {
       return (
         <ControlCenterTaskSurface
@@ -2707,7 +2630,7 @@ export function ControlCenterView({
           }
           className="cc-bridge-task-surface cc-bridge-runtime-modal"
           bodyClassName="cc-bridge-runtime-body"
-          onBack={onCloseTask}
+          onBack={closeSettingsTask}
           onClose={onClose}
           showCloseButton={false}
         >
@@ -2824,7 +2747,11 @@ export function ControlCenterView({
 
   function renderUnifiedRailFooter() {
     const installConsoleText =
-      installSessionSnapshot.logs.slice(-6).join("\n").trim() ||
+      installSessionSnapshot.logs
+        .slice(-6)
+        .map((chunk) => `[${chunk.stream}] ${chunk.text}`)
+        .join("\n")
+        .trim() ||
       installSessionSnapshot.message?.trim() ||
       installMessage.trim() ||
       "还没有安装输出。";
@@ -2873,7 +2800,7 @@ export function ControlCenterView({
               isOnboardingSection ? "cc-main-onboarding" : ""
             }`}
           >
-            {activeTask && !shouldRenderInlineBridgeTask ? (
+            {activeTask ? (
               renderActiveTask()
             ) : (
               <>
@@ -2903,7 +2830,6 @@ export function ControlCenterView({
                     {showStartupFailureDiagnostics ? renderRuntimeSection() : null}
                   </>
                 ) : null}
-                {activeControlSection === "bridge_center" ? renderBridgeSection() : null}
                 {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
               </>
             )}

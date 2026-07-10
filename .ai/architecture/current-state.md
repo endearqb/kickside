@@ -19,13 +19,15 @@
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
 - 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和 Kimi install/upgrade 走 npm 全局包 `@moonshot-ai/kimi-code`，执行前要求 Node.js 22.19+ 和 Git for Windows/Git Bash 就绪；旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
-- Shell 会自动检测 Git Bash：优先复用现有 `KIMI_SHELL_PATH`，其次检查 Git for Windows 常见 `bash.exe` 路径，再回退 PATH `bash`；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
-- Explorer 右键菜单 label 可通过控制中心编辑，持久化在 `AppSettings.context_menu_labels`；旧设置文件通过 schema 8 的默认字段加载，`enable_context_menu` 命令保持原有形状并在写注册表时读取当前 label 设置。
+- Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
+- Explorer 右键菜单 label 可通过控制中心编辑，持久化在 `AppSettings.context_menu_labels`；schema 9 将已知历史默认值迁移为“Kimi 小助手”中文名并保留用户自定义值，`enable_context_menu` 命令保持原有形状并在写注册表时读取当前 label 设置。
 - 控制中心运行诊断面板可手动执行 `kimi doctor`，返回 exit code、Kimi 路径、Shell 路径与脱敏 stdout/stderr；后端会注入检测到的 `KIMI_SHELL_PATH`。
+- 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。
 
 ## IM Bridge
 - `apps/kimi-im-bridge` 仍是 Shell 托管的 Go sidecar。
+- Shell 控制中心只提供微信和飞书机器人；初始化时会幂等删除 Shell 管理的 Telegram connector 与对应 secrets。Go Bridge 的 Telegram adapter 仍保留，不属于本次 UI 支持面。
 - Shell 启动 sidecar 时通过环境变量传 admin / host-control token，不再通过进程命令行传 secret。
 - Go sidecar 支持 env、token-file 和旧 flag fallback。
 - Go sidecar logger 注册 admin token、host-control token 和平台密钥并在写入前脱敏；Shell 侧托管的 sidecar stdout/stderr 通过 redactor 写入 bridge log，Bridge log tail 与启动失败摘要也会二次脱敏。

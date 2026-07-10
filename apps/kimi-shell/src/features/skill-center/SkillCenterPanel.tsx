@@ -37,7 +37,7 @@ import {
 } from "@/services/skillCenterService";
 
 type ManageContextId = "skill_center" | "current_workspace" | "user_home" | `workspace:${string}`;
-type SkillDirectorySection = "library" | "discovery" | "targets";
+type SkillDirectoryPrimarySource = "all" | "bundled" | "workspace";
 type SkillDirectorySourceFilter =
   | "all"
   | InstalledSkill["sourceType"]
@@ -214,10 +214,15 @@ export function matchesSkillDirectorySource(
   return candidate.sourceType === source;
 }
 
-function skillDirectorySectionLabel(section: SkillDirectorySection) {
-  if (section === "library") return "技能库";
-  if (section === "discovery") return "工作区发现";
-  return "工作区目标";
+export function matchesSkillDirectoryPrimarySource(
+  source: SkillDirectoryPrimarySource,
+  candidate: { kind: "installed"; sourceType: InstalledSkill["sourceType"] } | { kind: "discovered" },
+) {
+  if (source === "all") return true;
+  if (source === "bundled") {
+    return candidate.kind === "installed" && candidate.sourceType === "bundled";
+  }
+  return candidate.kind === "discovered" || candidate.sourceType === "discovered_import";
 }
 
 export function getSkillDirectoryEmptyCopy(rawCount: number) {
@@ -228,6 +233,14 @@ export function getSkillDirectoryEmptyCopy(rawCount: number) {
 
 export function shouldBackToSkillDirectory(key: string, hasDirectoryDetail: boolean) {
   return key === "Escape" && hasDirectoryDetail;
+}
+
+export function shouldShowSkillDirectory(
+  detailOnly: boolean,
+  section: SkillCenterSectionId,
+  hasDirectoryDetail: boolean,
+) {
+  return detailOnly && section === "manage" && !hasDirectoryDetail;
 }
 
 function renderManifestValues(values: string[], emptyLabel = "未声明") {
@@ -405,6 +418,8 @@ export function SkillCenterPanel({
 }: SkillCenterPanelProps) {
   const [filesExpanded, setFilesExpanded] = useState(true);
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
+  const [directoryPrimarySource, setDirectoryPrimarySource] =
+    useState<SkillDirectoryPrimarySource>("all");
   const [directorySource, setDirectorySource] = useState<SkillDirectorySourceFilter>("all");
   const [directorySort, setDirectorySort] = useState<SkillDirectorySortKey>("name");
   const actionErrorText = actionError?.trim() ?? "";
@@ -431,41 +446,12 @@ export function SkillCenterPanel({
     setManageContextId("skill_center");
   }, [currentWorkspaceTarget, homeWorkspaceTarget, manageContextId, workspaceSkillTargets]);
 
-  const defaultWorkspaceDiscoveryContext = useMemo<ManageContextId | null>(() => {
-    if (currentWorkspaceTarget) return "current_workspace";
-    const knownWorkspace = workspaceSkillTargets.find((target) => target.scope === "workspace");
-    return knownWorkspace ? (knownWorkspace.id as ManageContextId) : null;
-  }, [currentWorkspaceTarget, workspaceSkillTargets]);
-
-  const skillDirectorySection: SkillDirectorySection =
-    section === "workspace_insights"
-      ? "targets"
-      : manageContextId === "skill_center"
-        ? "library"
-        : "discovery";
-
   function resetSkillDirectoryFilters() {
     onSearchChange("");
     onFilterChange("all");
+    setDirectoryPrimarySource("all");
     setDirectorySource("all");
     setDirectorySort("name");
-  }
-
-  function handleSkillDirectorySectionChange(nextSection: SkillDirectorySection) {
-    resetSkillDirectoryFilters();
-    if (nextSection === "library") {
-      setManageContextId("skill_center");
-      onSectionChange("manage");
-      return;
-    }
-    if (nextSection === "discovery") {
-      if (defaultWorkspaceDiscoveryContext) {
-        setManageContextId(defaultWorkspaceDiscoveryContext);
-      }
-      onSectionChange("manage");
-      return;
-    }
-    onSectionChange("workspace_insights");
   }
 
   const recentSkills = useMemo(
@@ -577,13 +563,12 @@ export function SkillCenterPanel({
         };
       });
 
-    if (manageContextId === "skill_center") {
-      return installedEntries;
-    }
-
     const installedSkillIds = new Set(installedSkills.map((skill) => skill.id));
     const discoveredEntries: ManageListEntry[] = contextDiscoveryEntries
       .filter(({ record, matchedLocations }) => {
+        if (manageContextId === "skill_center" && filter !== "all") {
+          return false;
+        }
         if (record.importedSkillId && installedSkillIds.has(record.importedSkillId)) {
           return false;
         }
@@ -605,6 +590,7 @@ export function SkillCenterPanel({
     return [...installedEntries, ...discoveredEntries];
   }, [
     contextDiscoveryEntries,
+    filter,
     filteredInstalledSkills,
     installedSkills,
     keyword,
@@ -812,12 +798,18 @@ export function SkillCenterPanel({
     const pinnedSkillIds = new Set(workspaceSkillProfile?.pinnedSkillIds ?? []);
     const rows = manageEntries
       .filter((entry) =>
-        entry.kind === "installed"
+        matchesSkillDirectoryPrimarySource(
+          directoryPrimarySource,
+          entry.kind === "installed"
+            ? { kind: "installed", sourceType: entry.installedSkill.sourceType }
+            : { kind: "discovered" },
+        ) &&
+        (entry.kind === "installed"
           ? matchesSkillDirectorySource(directorySource, {
               kind: "installed",
               sourceType: entry.installedSkill.sourceType,
             })
-          : matchesSkillDirectorySource(directorySource, { kind: "discovered" }),
+          : matchesSkillDirectorySource(directorySource, { kind: "discovered" })),
       )
       .map((entry) => {
         if (entry.kind === "installed") {
@@ -964,6 +956,7 @@ export function SkillCenterPanel({
     return rows.map((row) => row.item);
   }, [
     activeSessionSkillState,
+    directoryPrimarySource,
     directorySort,
     directorySource,
     globalSkillProjections,
@@ -983,38 +976,7 @@ export function SkillCenterPanel({
     busy,
   ]);
 
-  const workspaceTargetDirectoryCards = useMemo<DirectoryCardItem[]>(
-    () =>
-      workspaceTargetRows.map(({ target }) => ({
-        id: `target:${target.id}`,
-        title: target.label,
-        subtitle: target.rootPath,
-        meta: describeWorkspaceTarget(target),
-        description: `${target.containerRoots.length} 个 Skill 容器`,
-        active: selectedWorkspaceSkillTargetId === target.id,
-        badges: [
-          {
-            label: target.readOnly ? "只读" : "可编辑",
-            tone: target.readOnly ? "warning" : "success",
-          },
-        ],
-        onOpen: () => {
-          onSectionChange("workspace_insights");
-          onSelectWorkspaceSkillTarget(target.id);
-        },
-      })),
-    [onSectionChange, onSelectWorkspaceSkillTarget, selectedWorkspaceSkillTargetId, workspaceTargetRows],
-  );
-
-  const visibleSkillDirectoryCards =
-    skillDirectorySection === "targets" ? workspaceTargetDirectoryCards : skillDirectoryCards;
-  const skillDirectoryRawCount =
-    skillDirectorySection === "library"
-      ? installedSkills.length
-      : skillDirectorySection === "discovery"
-        ? contextDiscoveryEntries.length
-        : workspaceSkillTargets.length;
-  const skillDirectoryEmptyCopy = getSkillDirectoryEmptyCopy(skillDirectoryRawCount);
+  const skillDirectoryEmptyCopy = getSkillDirectoryEmptyCopy(manageEntries.length);
   const hasDirectoryDetail = Boolean(selectedInstalledSkill || selectedDiscoveredRecord);
 
   function renderManageEntry(entry: ManageListEntry) {
@@ -1075,29 +1037,38 @@ export function SkillCenterPanel({
       }}
     >
       <div className="skill-center-content">
-        {detailOnly ? (
+        {shouldShowSkillDirectory(detailOnly, section, hasDirectoryDetail) ? (
           <div className="skill-center-directory-surface">
-            <ControlCenterSegmentedControl<SkillDirectorySection>
-              ariaLabel="Skill 中心二级导航"
-              className="skill-center-directory-tabs"
-              value={skillDirectorySection}
-              onChange={handleSkillDirectorySectionChange}
+            <ControlCenterSegmentedControl<SkillDirectoryPrimarySource>
+              ariaLabel="Skill 来源"
+              className="skill-center-directory-tabs skill-center-directory-primary-tabs"
+              value={directoryPrimarySource}
+              onChange={(value) => {
+                setDirectoryPrimarySource(value);
+                setDirectorySource("all");
+              }}
               items={[
                 {
-                  value: "library",
-                  label: skillDirectorySectionLabel("library"),
-                  description: installedSkills.length,
+                  value: "all",
+                  label: "全部",
+                  description: manageEntries.length,
                 },
                 {
-                  value: "discovery",
-                  label: skillDirectorySectionLabel("discovery"),
-                  description: contextDiscoveryEntries.length,
-                  disabled: !defaultWorkspaceDiscoveryContext,
+                  value: "bundled",
+                  label: "内置",
+                  description: installedSkills.filter((skill) => skill.sourceType === "bundled").length,
                 },
                 {
-                  value: "targets",
-                  label: skillDirectorySectionLabel("targets"),
-                  description: workspaceSkillTargets.length,
+                  value: "workspace",
+                  label: "工作区",
+                  description: manageEntries.filter((entry) =>
+                    matchesSkillDirectoryPrimarySource(
+                      "workspace",
+                      entry.kind === "installed"
+                        ? { kind: "installed", sourceType: entry.installedSkill.sourceType }
+                        : { kind: "discovered" },
+                    ),
+                  ).length,
                 },
               ]}
             />
@@ -1108,50 +1079,72 @@ export function SkillCenterPanel({
                 placeholder="搜索 Skill、描述、来源或路径"
                 aria-label="搜索 Skill"
               />
-              <ControlCenterSegmentedControl<SkillDirectorySourceFilter>
-                ariaLabel="Skill 来源筛选"
-                value={directorySource}
-                onChange={setDirectorySource}
-                items={[
-                  { value: "all", label: "全部" },
-                  { value: "bundled", label: "内置" },
-                  { value: "git", label: "Git" },
-                  { value: "local_import", label: "本地导入" },
-                  { value: "discovered_import", label: "工作区发现" },
-                  { value: "discovered", label: "待导入" },
-                ]}
-              />
-              <select
-                value={filter}
-                onChange={(event) => onFilterChange(event.currentTarget.value as SkillCenterFilter)}
-                aria-label="Skill Filter by"
-              >
-                <option value="all">Filter：全部</option>
-                <option value="session">会话已应用</option>
-                <option value="global">全局已应用</option>
-                <option value="pinned">已置顶</option>
-                <option value="untrusted">未信任</option>
-                <option value="update_available">有更新</option>
-              </select>
-              <select
-                value={directorySort}
-                onChange={(event) => setDirectorySort(event.currentTarget.value as SkillDirectorySortKey)}
-                aria-label="Skill Sort by"
-              >
-                <option value="name">Sort：名称 A-Z</option>
-                <option value="updated">最近更新</option>
-                <option value="source">来源</option>
-                <option value="status">状态</option>
-              </select>
-              <Button
-                type="button"
-                variant="outline"
-                icon={<Eraser size={14} />}
-                onClick={resetSkillDirectoryFilters}
-                disabled={!search && filter === "all" && directorySource === "all" && directorySort === "name"}
-              >
-                清空筛选
-              </Button>
+              <details className="skill-center-directory-filters">
+                <summary>筛选与排序</summary>
+                <div className="skill-center-directory-filter-popover">
+                  <label>
+                    <span>来源</span>
+                    <select
+                      value={directorySource}
+                      onChange={(event) => {
+                        const nextSource = event.currentTarget.value as SkillDirectorySourceFilter;
+                        setDirectorySource(nextSource);
+                        if (nextSource !== "all") setDirectoryPrimarySource("all");
+                      }}
+                    >
+                      <option value="all">全部来源</option>
+                      <option value="git">Git</option>
+                      <option value="local_import">本地导入</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>状态</span>
+                    <select
+                      value={filter}
+                      onChange={(event) =>
+                        onFilterChange(event.currentTarget.value as SkillCenterFilter)
+                      }
+                    >
+                      <option value="all">全部状态</option>
+                      <option value="session">会话已应用</option>
+                      <option value="global">全局已应用</option>
+                      <option value="pinned">已置顶</option>
+                      <option value="untrusted">未信任</option>
+                      <option value="update_available">有更新</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>排序</span>
+                    <select
+                      value={directorySort}
+                      onChange={(event) =>
+                        setDirectorySort(event.currentTarget.value as SkillDirectorySortKey)
+                      }
+                    >
+                      <option value="name">名称 A-Z</option>
+                      <option value="updated">最近更新</option>
+                      <option value="source">来源</option>
+                      <option value="status">状态</option>
+                    </select>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    icon={<Eraser size={14} />}
+                    onClick={resetSkillDirectoryFilters}
+                    disabled={
+                      !search &&
+                      filter === "all" &&
+                      directoryPrimarySource === "all" &&
+                      directorySource === "all" &&
+                      directorySort === "name"
+                    }
+                  >
+                    清空筛选
+                  </Button>
+                </div>
+              </details>
             </div>
             {actionErrorText ? (
               <div className="skill-center-action-error" role="alert">
@@ -1171,8 +1164,8 @@ export function SkillCenterPanel({
             ) : null}
             <DirectoryCardGrid
               className="skill-center-directory-grid"
-              items={visibleSkillDirectoryCards}
-              loading={busy && visibleSkillDirectoryCards.length === 0}
+              items={skillDirectoryCards}
+              loading={busy && skillDirectoryCards.length === 0}
               empty={
                 <ControlCenterEmptyState
                   className="skill-center-empty"
@@ -1184,7 +1177,7 @@ export function SkillCenterPanel({
             />
           </div>
         ) : null}
-        {section === "manage" ? (
+        {section === "manage" && (!detailOnly || hasDirectoryDetail) ? (
           <ControlCenterWorkbenchLayout
             mode="stack-on-mobile"
             railBodyClassName="skill-center-list"

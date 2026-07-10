@@ -530,30 +530,22 @@
   gap: 12px;
 }
 
-.cc-install-overview-grid,
-.cc-install-console-summary-grid,
 .cc-config-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
-.cc-install-overview-card,
-.cc-install-console-summary-card,
 .cc-config-summary-card {
   all: unset;
 }
 
-.cc-install-overview-card,
-.cc-install-console-summary-card,
 .cc-config-summary-card {
   display: block;
 }
 
 @media (max-width: 1180px) {
   .cc-control-summary-grid,
-  .cc-install-overview-grid,
-  .cc-install-console-summary-grid,
   .cc-config-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -584,8 +576,6 @@
 
   .cc-control-summary-grid,
   .cc-control-detail-grid,
-  .cc-install-overview-grid,
-  .cc-install-console-summary-grid,
   .cc-config-summary-grid {
     grid-template-columns: 1fr;
   }

@@ -1338,6 +1338,7 @@ try {{
 fn spawn_powershell_script_file(script_path: &Path) -> Result<std::process::Child, String> {
     let mut command = Command::new(POWERSHELL_EXE);
     command_utils::configure_system_command(&mut command);
+    configure_kimi_shell_path(&mut command, kimi_locator::locate_shell_path());
     command
         .args([
             "-NoLogo",
@@ -1357,6 +1358,7 @@ fn spawn_powershell_script_file(script_path: &Path) -> Result<std::process::Chil
 fn spawn_powershell_inline_script(script_text: &str) -> Result<std::process::Child, String> {
     let mut command = Command::new(POWERSHELL_EXE);
     command_utils::configure_system_command(&mut command);
+    configure_kimi_shell_path(&mut command, kimi_locator::locate_shell_path());
     command
         .args([
             "-NoLogo",
@@ -1391,6 +1393,7 @@ fn launch_external_fallback(
 
     let mut command = Command::new(POWERSHELL_EXE);
     command_utils::configure_system_command(&mut command);
+    configure_kimi_shell_path(&mut command, kimi_locator::locate_shell_path());
     command
         .args([
             "-NoLogo",
@@ -1410,6 +1413,12 @@ fn launch_external_fallback(
         "External fallback launched for {}.\n\n# PowerShell\n{}\n",
         task.title, commands
     ))
+}
+
+fn configure_kimi_shell_path(command: &mut Command, shell_path: Option<PathBuf>) {
+    if let Some(shell_path) = shell_path {
+        command.env("KIMI_SHELL_PATH", shell_path);
+    }
 }
 
 fn git_ready() -> bool {
@@ -2168,6 +2177,20 @@ mod tests {
         assert!(script.contains("Invoke-KimiShellPython313Check"));
         assert!(script.contains("py -3.13 --version"));
         assert!(script.contains("run --python 3.13 python --version"));
+    }
+
+    #[test]
+    fn powershell_child_inherits_detected_kimi_shell_path() {
+        let mut command = Command::new(POWERSHELL_EXE);
+        let shell_path = PathBuf::from(r"D:\Program Files\Git\bin\bash.exe");
+
+        configure_kimi_shell_path(&mut command, Some(shell_path.clone()));
+
+        let configured = command
+            .get_envs()
+            .find(|(name, _)| *name == "KIMI_SHELL_PATH")
+            .and_then(|(_, value)| value);
+        assert_eq!(configured, Some(shell_path.as_os_str()));
     }
 
     #[test]

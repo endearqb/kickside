@@ -8,7 +8,7 @@ describe("DirectoryCardGrid", () => {
     cleanup();
   });
 
-  it("opens cards with Enter", () => {
+  it("uses a native button for the card opener", () => {
     const onOpen = vi.fn();
     render(
       <DirectoryCardGrid
@@ -16,11 +16,11 @@ describe("DirectoryCardGrid", () => {
       />,
     );
 
-    fireEvent.keyDown(screen.getByRole("button", { name: /\/one Demo/ }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: /\/one Demo/ }));
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
-  it("does not bubble corner actions to the card", () => {
+  it("keeps corner actions separate from the card opener", () => {
     const onOpen = vi.fn();
     const onSelect = vi.fn();
     render(
@@ -37,6 +37,7 @@ describe("DirectoryCardGrid", () => {
       />,
     );
 
+    expect(screen.getAllByRole("button")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
     expect(onSelect).toHaveBeenCalledOnce();
     expect(onOpen).not.toHaveBeenCalled();

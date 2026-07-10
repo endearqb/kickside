@@ -17,6 +17,8 @@ type ControlCenterActionMenuProps = {
   items: ControlCenterActionMenuItem[];
   disabled?: boolean;
   className?: string;
+  triggerContent?: ReactNode;
+  triggerIcon?: ReactNode;
 };
 
 export function ControlCenterActionMenu({
@@ -24,6 +26,8 @@ export function ControlCenterActionMenu({
   items,
   disabled,
   className,
+  triggerContent,
+  triggerIcon,
 }: ControlCenterActionMenuProps) {
   const [open, setOpen] = useState(false);
 
@@ -39,9 +43,9 @@ export function ControlCenterActionMenu({
     >
       <Button
         type="button"
-        variant="ghost"
-        size="icon-sm"
-        icon={<MoreHorizontal size={16} />}
+        variant={triggerContent ? "default" : "ghost"}
+        size={triggerContent ? "sm" : "icon-sm"}
+        icon={triggerIcon ?? <MoreHorizontal size={16} />}
         className="cc-action-menu-trigger"
         onClick={() => setOpen((current) => !current)}
         disabled={disabled || items.length === 0}
@@ -49,7 +53,9 @@ export function ControlCenterActionMenu({
         aria-expanded={open}
         aria-label={label}
         title={label}
-      />
+      >
+        {triggerContent}
+      </Button>
       {open ? (
         <div className="cc-action-menu-popover" role="menu" aria-label={label}>
           {items.map((item, index) => (

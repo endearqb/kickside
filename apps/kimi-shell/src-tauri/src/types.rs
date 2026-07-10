@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 9;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1310,11 +1310,11 @@ pub struct ContextMenuLabelsInput {
 impl Default for ContextMenuLabelsInput {
     fn default() -> Self {
         Self {
-            open_dir_background: "Open Kimi Web Shell here".to_string(),
-            open_dir: "Open in Kimi Web Shell".to_string(),
-            open_file: "Open in Kimi Web Shell (Copy to Workspace)".to_string(),
-            open_filesystem_object: "Open in Kimi Web Shell".to_string(),
-            move_to_workspace: "移动到工作区".to_string(),
+            open_dir_background: "在此处打开 Kimi 小助手".to_string(),
+            open_dir: "在 Kimi 小助手中打开".to_string(),
+            open_file: "复制到工作区并用 Kimi 小助手打开".to_string(),
+            open_filesystem_object: "在 Kimi 小助手中打开".to_string(),
+            move_to_workspace: "移动到 Kimi 小助手工作区".to_string(),
             import_to_default_workspace: "导入到默认工作区".to_string(),
             import_with_workspace_picker: "选择其他工作区".to_string(),
         }

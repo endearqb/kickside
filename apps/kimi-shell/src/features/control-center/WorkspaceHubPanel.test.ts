@@ -4,6 +4,7 @@ import type { ScheduleStore, WorkspaceRecord } from "./controlCenterRebuildApi";
 import {
   findWorkspaceRecordByPath,
   findWorkspaceTargetForRecord,
+  matchesWorkspaceDirectoryFilters,
   normalizeWorkspacePathKey,
   shouldBackToWorkspaceDirectory,
   summarizeWorkspaceSchedule,
@@ -62,6 +63,20 @@ describe("WorkspaceHubPanel helpers", () => {
     expect(
       findWorkspaceRecordByPath([workspaceRecord()], "c:/projects/demo")?.id,
     ).toBe("workspace-1");
+  });
+
+  it("combines primary workspace tabs with compact advanced filters", () => {
+    const recentHarnessWorkspace = workspaceRecord({
+      source: "harness",
+      harnessId: "hermes-agent",
+      lastOpenedAt: "2026-07-03T08:00:00.000Z",
+    });
+
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "all", "recent")).toBe(true);
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "workspace", "harness_source")).toBe(true);
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "workspace", "hermes")).toBe(false);
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "harness", "all")).toBe(false);
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "workspace", "manual")).toBe(false);
   });
 
   it("summarizes heartbeat and task state for the selected workspace", () => {

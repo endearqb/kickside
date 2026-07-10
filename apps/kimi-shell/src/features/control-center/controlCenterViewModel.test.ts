@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getKimiInstallPrerequisiteIssues } from "./controlCenterViewModel";
+import {
+  controlSections,
+  formatBridgeConnectorStateLabel,
+  getKimiInstallPrerequisiteIssues,
+} from "./controlCenterViewModel";
 import type { InstallProbeStatus } from "@/app/types";
 
 const readyProbe: InstallProbeStatus = {
@@ -27,5 +31,22 @@ describe("getKimiInstallPrerequisiteIssues", () => {
 
   it("returns no issues when npm install prerequisites are ready", () => {
     expect(getKimiInstallPrerequisiteIssues(readyProbe)).toEqual([]);
+  });
+});
+
+describe("assistant settings navigation", () => {
+  it("keeps external IM inside assistant settings", () => {
+    expect(controlSections.map((section) => section.id)).toEqual([
+      "onboarding",
+      "skill_center",
+      "workspace_hub",
+      "schedule",
+    ]);
+  });
+
+  it("uses the design-system status vocabulary for connectors", () => {
+    expect(formatBridgeConnectorStateLabel("ready")).toBe("运行中");
+    expect(formatBridgeConnectorStateLabel("degraded")).toBe("错误");
+    expect(formatBridgeConnectorStateLabel("idle")).toBe("已停止");
   });
 });

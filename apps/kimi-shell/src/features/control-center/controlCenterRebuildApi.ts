@@ -146,6 +146,17 @@ export async function markWorkspaceOpened(id: string): Promise<WorkspaceRecord> 
   return invoke<WorkspaceRecord>("workspace_mark_opened", { id });
 }
 
+export async function listWorkspaceFileEntries(workspaceId: string): Promise<SkillFileEntry[]> {
+  return invoke<SkillFileEntry[]>("workspace_list_file_entries", { workspaceId });
+}
+
+export async function readWorkspaceFile(
+  workspaceId: string,
+  relPath: string,
+): Promise<SkillFileContent> {
+  return invoke<SkillFileContent>("workspace_read_file", { workspaceId, relPath });
+}
+
 export async function listHarnesses(): Promise<HarnessManifest[]> {
   return invoke<HarnessManifest[]>("harness_list");
 }

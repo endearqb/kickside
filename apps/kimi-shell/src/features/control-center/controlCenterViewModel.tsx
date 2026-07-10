@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Boxes, CalendarClock, Play, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Boxes, CalendarClock, SlidersHorizontal, Sparkles } from "lucide-react";
 import type {
   ActionableOnboardingStep,
   AppStatus,
@@ -25,7 +25,6 @@ import type {
   ControlSectionId,
   DiagnosticsInfo,
   KimiDoctorResult,
-  InstallFlowCatalog,
   InstallMirrorHealthReport,
   InstallSettingsView,
   InstallProbeStatus,
@@ -35,7 +34,6 @@ import type {
   SkillDiscoverySnapshot,
   InstalledSkill,
   KimiCodeAccessConfigInput,
-  KimiCodeAccessSummaryView,
   KimiCodeAccessConfigTestResult,
   KimiCodeAccessConfigView,
   MainWindowCloseBehavior,
@@ -84,7 +82,8 @@ export type OnboardingCardId =
   | "install"
   | "context_menu"
   | "auth"
-  | "work_dir";
+  | "work_dir"
+  | "bridge";
 
 export type BridgeConnectorSecretDraft = {
   botToken: string;
@@ -161,7 +160,6 @@ export type ControlCenterViewProps = {
   selectedWorkspaceSkillContainerKind: SkillDiscoveryContainerKind;
   kimiPathInput: string;
   workDirInput: string;
-  kimiCodeAccessSummary: KimiCodeAccessSummaryView | null;
   kimiCodeAccessView: KimiCodeAccessConfigView | null;
   kimiCodeAccessDraft: KimiCodeAccessConfigInput;
   kimiCodeAccessBusy: boolean;
@@ -169,13 +167,13 @@ export type ControlCenterViewProps = {
   kimiCodeAccessTesting: boolean;
   kimiCodeAccessTestResult: KimiCodeAccessConfigTestResult | null;
   installProbe: InstallProbeStatus | null;
+  installProbeBusy: boolean;
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
   installMirrorHealthReport: InstallMirrorHealthReport | null;
   installMirrorHealthBusy: boolean;
   powershellPreflight: PowerShellPreflightSummary | null;
-  installFlowCatalog: InstallFlowCatalog | null;
   installSessionSnapshot: InstallSessionSnapshot;
   activeTask: ControlCenterTaskId | null;
   activeTaskPayload: ControlCenterTaskPayload | null;
@@ -277,8 +275,8 @@ export type ControlCenterViewProps = {
   onUpdateSkill: (skillId: string) => Promise<void>;
   onUninstallSkill: (skillId: string) => Promise<void>;
   onRecoverWorkspaceSkill: (skillId: string) => Promise<void>;
+  onRefreshKimiCodeAccessConfig: () => Promise<void>;
   onKimiCodeAccessDraftChange: (next: KimiCodeAccessConfigInput) => void;
-  onResetKimiCodeAccessDraft: () => void;
   onSaveKimiCodeAccessConfig: () => Promise<void>;
   onTestKimiCodeAccessConfig: () => Promise<void>;
   onSaveMainWindowCloseBehavior: (
@@ -312,12 +310,6 @@ export const controlSections: Array<{
     icon: <SlidersHorizontal size={15} />,
   },
   {
-    id: "bridge_center",
-    label: "外部 IM 通道",
-    group: "setup",
-    icon: <Play size={15} />,
-  },
-  {
     id: "skill_center",
     label: "Skill 中心",
     group: "core",
@@ -336,28 +328,6 @@ export const controlSections: Array<{
     icon: <CalendarClock size={15} />,
   },
 ];
-
-export function getBridgeDisplayName(settings: BridgeSettings): string {
-  const weixinEnabled = settings.connectors.some(
-    (connector) => connector.platform === "weixin" && connector.enabled,
-  );
-  const feishuEnabled = settings.connectors.some(
-    (connector) => connector.platform === "feishu" && connector.enabled,
-  );
-  const telegramEnabled = settings.connectors.some(
-    (connector) => connector.platform === "telegram" && connector.enabled,
-  );
-  if (weixinEnabled) {
-    return "微信";
-  }
-  if (feishuEnabled) {
-    return "飞书";
-  }
-  if (telegramEnabled) {
-    return "Telegram";
-  }
-  return "外部 IM 通道";
-}
 
 export function createEmptyBridgeConnectorSecretDraft(): BridgeConnectorSecretDraft {
   return {
@@ -446,15 +416,15 @@ export function formatBridgeConnectorStateLabel(
 ): string {
   switch (value) {
     case "connecting":
-      return "连接中";
+      return "运行中";
     case "ready":
-      return "就绪";
+      return "运行中";
     case "degraded":
-      return "降级";
+      return "错误";
     case "error":
-      return "异常";
+      return "错误";
     default:
-      return "待机";
+      return "已停止";
   }
 }
 

@@ -95,6 +95,8 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::workspaces::workspace_register_many,
         super::workspaces::workspace_mark_opened,
         super::workspaces::workspace_remove,
+        super::workspaces::workspace_list_file_entries,
+        super::workspaces::workspace_read_file,
         // harness
         super::harness::harness_list,
         super::harness::harness_get,

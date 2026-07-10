@@ -34,13 +34,27 @@
 }
 
 .directory-card {
+  position: relative;
   min-height: 132px;
+  overflow: visible;
   border: 1px solid #dededb;
   border-radius: 14px;
   background: #fff;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.directory-card-open {
+  width: 100%;
+  min-height: 132px;
+  display: block;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
+  font: inherit;
   padding: 18px 20px;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  text-align: left;
 }
 
 .directory-card-skeleton {
@@ -82,12 +96,16 @@
 }
 
 .directory-card:hover,
-.directory-card:focus-visible,
+.directory-card:focus-within,
 .directory-card.is-active {
-  border-color: #c9c9c5;
-  background: #fbfbfa;
-  box-shadow: 0 8px 18px rgba(16, 20, 24, 0.06);
-  outline: none;
+  border-color: #777772;
+  background: #f4f4f1;
+}
+
+.directory-card-open:focus-visible,
+.directory-card-corner-action:focus-visible {
+  outline: 2px solid #1f1f1f;
+  outline-offset: 2px;
 }
 
 .directory-card-main {
@@ -102,6 +120,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  padding-right: 36px;
 }
 
 .directory-card-title-copy {
@@ -138,6 +157,9 @@
 }
 
 .directory-card-corner-action {
+  position: absolute;
+  top: 14px;
+  right: 14px;
   display: inline-flex;
   width: 32px;
   height: 32px;
@@ -153,6 +175,10 @@
 }
 
 .directory-card-corner-slot {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1;
   display: inline-flex;
   flex: 0 0 auto;
 }
@@ -491,7 +517,7 @@
 }
 
 .dark .directory-card:hover,
-.dark .directory-card:focus-visible,
+.dark .directory-card:focus-within,
 .dark .directory-card.is-active,
 .dark .directory-file-tree-row:hover,
 .dark .directory-file-tree-row:focus-visible,

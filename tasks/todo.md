@@ -509,3 +509,47 @@
 - secrets 继续只展示 masked/configured 状态，未把完整 token/appSecret/encryptKey 暴露到 UI。
 - 验证结果：`.\node_modules\.bin\tsc.cmd --noEmit`、`pnpm --dir apps/kimi-shell test -- --run`、`pnpm --dir apps/kimi-shell build`、`cargo check --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`、`go test ./...`（`apps/kimi-im-bridge`）均通过。
 - 未完成项：真实桌面三平台创建/保存/高级面板点击仍需人工验证。
+
+## 小助手设置区收敛与环境探测修复
+
+### Checklist
+- [x] 删除五个设置栏操作区的重复状态徽章并右对齐按钮
+- [x] 修复 Git Bash 的环境变量、PATH、Git 根目录和常见安装目录探测
+- [x] 在安装更多选项中恢复 uv / Python 3.13 legacy repair 入口
+- [x] 扁平化右键菜单、API 配置和默认工作目录详情
+- [x] 移除 Telegram 默认项、新建入口及已保存 connector/secrets
+- [x] 将微信/飞书扫码改为机器人行内直接展开二维码
+- [x] 补充前端与 Rust 单测、ADR、README、架构事实和变更记录
+- [x] 运行类型检查、前端测试/build、Rust fmt/check/test-no-run 和 diff 检查
+
+### Review
+- API 配置继续复用既有脱敏读写和连接测试命令，不再创建二级任务面；扫码继续复用现有 onboarding session 和轮询。
+- `AppSettings` schema 9 只迁移历史默认菜单名，保留自定义值；启动自愈会重写已启用的 Explorer 菜单。
+- Telegram 清理在 Shell 初始化时幂等执行，不写日志或备份 secrets；Go Bridge adapter 保留。
+- 自动验证通过：TypeScript、Vitest 12 files / 86 tests、Vite build、cargo fmt check、cargo check、cargo test no-run、git diff check。
+- Rust 测试二进制执行仍被本机既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 阻塞；真实 Explorer、Git Bash 和微信/飞书扫码需在 Tauri 窗口手工验证。
+
+## 自定义路径 Git Bash 升级预检修复
+
+### Checklist
+- [x] 复用 `kimi_locator::locate_shell_path()`，向安装任务 PowerShell 子进程注入 `KIMI_SHELL_PATH`
+- [x] 覆盖 managed file、inline retry 和 elevated fallback 三条启动路径
+- [x] 增加最小命令环境回归测试
+- [x] 运行 Rust fmt check 和 cargo check
+
+### Review
+- 根因是安装面板与升级脚本使用了两套不一致的 Git Bash 探测；现在 PowerShell 子进程直接继承统一 locator 的结果。
+- `cargo fmt -- --check`、`cargo check` 通过；目标测试完成编译，但执行仍受既有 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 阻塞。
+- 待在真实 Tauri 窗口验证 `D:\Program Files\Git\bin\bash.exe` 条件下的升级任务。
+
+## 设置主操作按钮右对齐
+
+### Checklist
+- [x] 设置列表和卡片头显式占满可用宽度
+- [x] 五个桌面主操作按钮统一靠右
+- [x] 保留 `820px` 以下单列堆叠布局
+- [x] 运行 TypeScript 检查、Vite build 和 diff 检查
+
+### Review
+- 本次只调整 `App.css`，未修改组件、交互或按钮尺寸。
+- 纯 Web 预览受 Tauri IPC 限制停在启动页；需要在真实 Tauri 控制中心补做最终截图复核。

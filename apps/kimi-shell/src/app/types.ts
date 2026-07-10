@@ -950,15 +950,6 @@ export interface KimiDoctorResult {
   stderr: string;
 }
 
-export interface KimiCodeAccessSummaryView {
-  configPath: string;
-  providerId: string;
-  model: string;
-  baseUrl: string;
-  hasApiKey: boolean;
-  templateConfigured: boolean;
-}
-
 export interface KimiCodeAccessConfigProviderView {
   id: string;
   type: string;
@@ -1265,7 +1256,6 @@ export type ControlSectionId =
   | "schedule"
   | "onboarding"
   | "runtime_center"
-  | "bridge_center"
   | "skill_center";
 
 export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
@@ -1273,7 +1263,6 @@ export type RuntimePanelId = "core" | "paths" | "logs" | "bridge";
 export type ControlCenterSurface = "fullscreen" | "modal";
 
 export type ControlCenterTaskId =
-  | "kimi_code_access"
   | "bridge_connector_secrets"
   | "bridge_runtime"
   | "skill_git_import"

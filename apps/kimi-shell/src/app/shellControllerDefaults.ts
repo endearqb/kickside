@@ -9,14 +9,11 @@ import type {
   InstallSettingsView,
   KimiCodeAccessConfigInput,
   KimiCodeAccessConfigView,
-  KimiCodeAccessSummaryView,
   SessionSkillState,
   WorkspaceSkillProfile,
   WorkspaceWebSettingsView,
 } from "@/app/types";
 
-const KIMI_CODING_PLAN_PROVIDER_ID = "kimi-app-api-key";
-const KIMI_CODING_PLAN_MODEL_ID = "kimi-app/kimi-for-coding";
 const KIMI_CODING_PLAN_BASE_URL = "https://api.kimi.com/coding/v1";
 const KIMI_CODING_PLAN_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
 const KIMI_CODING_PLAN_FETCH_URL = "https://api.kimi.com/coding/v1/fetch";
@@ -106,37 +103,6 @@ export function cloneKimiCodeAccessInput(
   return JSON.parse(JSON.stringify(input)) as KimiCodeAccessConfigInput;
 }
 
-export function deriveKimiCodeAccessSummary(
-  view: KimiCodeAccessConfigView | null,
-): KimiCodeAccessSummaryView | null {
-  if (!view) {
-    return null;
-  }
-
-  const hasApiKey =
-    view.provider.apiKeyConfigured ||
-    view.services.search.apiKeyConfigured ||
-    view.services.fetch.apiKeyConfigured;
-  const templateConfigured =
-    view.provider.type === "kimi" &&
-    view.provider.baseUrl?.trim() === KIMI_CODING_PLAN_BASE_URL &&
-    hasApiKey &&
-    view.model.exists &&
-    view.services.search.baseUrl?.trim() === KIMI_CODING_PLAN_SEARCH_URL &&
-    view.services.search.apiKeyConfigured &&
-    view.services.fetch.baseUrl?.trim() === KIMI_CODING_PLAN_FETCH_URL &&
-    view.services.fetch.apiKeyConfigured;
-
-  return {
-    configPath: view.configPath,
-    providerId: KIMI_CODING_PLAN_PROVIDER_ID,
-    model: KIMI_CODING_PLAN_MODEL_ID,
-    baseUrl: KIMI_CODING_PLAN_BASE_URL,
-    hasApiKey,
-    templateConfigured,
-  };
-}
-
 export function parseHashRoute(hash: string): string {
   return hash.replace(/^#\/?/, "");
 }
@@ -173,7 +139,6 @@ export function createDefaultBridgeSettings(): BridgeSettings {
     defaultWorkDir: "",
     workDirPresets: [],
     connectors: [
-      createDefaultBridgeConnector("telegram"),
       createDefaultBridgeConnector("feishu"),
       createDefaultBridgeConnector("weixin"),
     ],

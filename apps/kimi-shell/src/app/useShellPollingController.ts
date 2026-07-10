@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type {
   BridgeRuntimeState,
   ControlSectionId,
+  ControlCenterTaskId,
   RuntimePanelId,
 } from "@/app/types";
 
@@ -30,6 +31,7 @@ type ShellPollingControllerOptions = PollingCallbacks & {
   screen: string;
   controlCenterModalOpen: boolean;
   activeControlSection: ControlSectionId;
+  activeControlTask: ControlCenterTaskId | null;
   activeRuntimePanel: RuntimePanelId;
   bridgeState: BridgeRuntimeState;
 };
@@ -43,6 +45,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     screen,
     controlCenterModalOpen,
     activeControlSection,
+    activeControlTask,
     activeRuntimePanel,
     bridgeState,
   } = options;
@@ -77,13 +80,15 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
     const bridgeControlsVisible =
       controlCenterVisible &&
-      (activeControlSection === "bridge_center" ||
-        activeControlSection === "onboarding" ||
+      (activeControlSection === "onboarding" ||
+        activeControlTask === "bridge_connector_secrets" ||
+        activeControlTask === "bridge_runtime" ||
         (activeControlSection === "runtime_center" &&
           activeRuntimePanel === "bridge"));
     const bridgePanelVisible = isBridgePanelVisible(
       controlCenterVisible,
       activeControlSection,
+      activeControlTask,
       activeRuntimePanel,
     );
 
@@ -100,6 +105,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     }
   }, [
     activeControlSection,
+    activeControlTask,
     activeRuntimePanel,
     controlCenterModalOpen,
     screen,
@@ -120,7 +126,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
       }
       const callbacks = callbacksRef.current;
       void callbacks.refreshBridgeStatus();
-      if (isBridgePanelVisible(controlCenterVisible, activeControlSection, activeRuntimePanel)) {
+      if (isBridgePanelVisible(controlCenterVisible, activeControlSection, activeControlTask, activeRuntimePanel)) {
         void callbacks.refreshBridgeBindings();
         void callbacks.refreshBridgeApprovals();
         void callbacks.refreshBridgeLogTail();
@@ -130,6 +136,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     return () => window.clearInterval(timer);
   }, [
     activeControlSection,
+    activeControlTask,
     activeRuntimePanel,
     bridgeState,
     controlCenterModalOpen,
@@ -140,11 +147,12 @@ export function useShellPollingController(options: ShellPollingControllerOptions
 function isBridgePanelVisible(
   controlCenterVisible: boolean,
   activeControlSection: ControlSectionId,
+  activeControlTask: ControlCenterTaskId | null,
   activeRuntimePanel: RuntimePanelId,
 ): boolean {
   return (
     controlCenterVisible &&
-    (activeControlSection === "bridge_center" ||
+    (activeControlTask === "bridge_runtime" ||
       (activeControlSection === "runtime_center" && activeRuntimePanel === "bridge"))
   );
 }

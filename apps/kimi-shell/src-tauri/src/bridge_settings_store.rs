@@ -163,9 +163,39 @@ pub fn save_onboarding_config(
 
 pub fn ensure_bridge_files(app: &AppHandle) -> anyhow::Result<()> {
     let _ = settings_store::load_or_default(app)?;
-    let _ = load_or_default(app)?;
-    let _ = load_secrets_or_default(app)?;
+    let mut settings = load_or_default(app)?;
+    let mut secrets = load_secrets_or_default(app)?;
+    if remove_telegram_configuration(&mut settings, &mut secrets) {
+        save(app, &settings)?;
+        let secrets_path = app.state::<AppState>().bridge_secrets_path.clone();
+        write_json(&secrets_path, &normalize_bridge_secrets(secrets))?;
+    }
     Ok(())
+}
+
+fn remove_telegram_configuration(
+    settings: &mut BridgeSettings,
+    secrets: &mut BridgeSecrets,
+) -> bool {
+    let settings_len = settings.connectors.len();
+    settings
+        .connectors
+        .retain(|connector| connector.platform != BridgePlatform::Telegram);
+
+    let had_legacy_secret = secrets.telegram.bot_token.is_some();
+    let had_connector_secret = secrets
+        .connectors
+        .values()
+        .any(|connector| connector.telegram.is_some());
+    secrets.telegram = BridgeTelegramSecrets::default();
+    for connector in secrets.connectors.values_mut() {
+        connector.telegram = None;
+    }
+    secrets
+        .connectors
+        .retain(|_, connector| connector.feishu.is_some() || connector.weixin.is_some());
+
+    settings.connectors.len() != settings_len || had_legacy_secret || had_connector_secret
 }
 
 pub fn sync_default_work_dir_from_app(
@@ -580,7 +610,6 @@ fn default_bridge_settings(app_settings: &AppSettings) -> BridgeSettings {
         default_work_dir: normalize_work_dir_value(app_settings.work_dir.as_deref()),
         work_dir_presets: vec![],
         connectors: vec![
-            default_connector(BridgePlatform::Telegram, 1),
             default_connector(BridgePlatform::Feishu, 1),
             default_connector(BridgePlatform::Weixin, 1),
         ],
@@ -988,11 +1017,11 @@ mod tests {
         assert!(bridge_settings.feishu_reply_cards.is_none());
         assert!(bridge_settings.default_work_dir.is_none());
         assert!(bridge_settings.work_dir_presets.is_empty());
-        assert_eq!(bridge_settings.connectors.len(), 3);
+        assert_eq!(bridge_settings.connectors.len(), 2);
         assert!(bridge_settings
             .connectors
             .iter()
-            .any(|connector| connector.platform == BridgePlatform::Telegram));
+            .all(|connector| connector.platform != BridgePlatform::Telegram));
         assert!(bridge_settings
             .connectors
             .iter()
@@ -1944,5 +1973,55 @@ mod tests {
             .all(|connector| connector.platform != BridgePlatform::Weixin));
         let reloaded_secrets = load_secrets_at(&bridge_secrets_path).expect("reload secrets");
         assert!(!reloaded_secrets.connectors.contains_key("weixin-default"));
+    }
+
+    #[test]
+    fn telegram_cleanup_removes_settings_and_secrets_only() {
+        let mut settings = default_bridge_settings(&AppSettings::default());
+        settings
+            .connectors
+            .push(default_connector(BridgePlatform::Telegram, 1));
+        let mut secrets = BridgeSecrets {
+            connectors: BTreeMap::from([
+                (
+                    "telegram-default".to_string(),
+                    BridgeConnectorSecrets {
+                        telegram: Some(BridgeTelegramSecrets {
+                            bot_token: Some("telegram-token".to_string()),
+                        }),
+                        feishu: None,
+                        weixin: None,
+                    },
+                ),
+                (
+                    "feishu-default".to_string(),
+                    BridgeConnectorSecrets {
+                        telegram: None,
+                        feishu: Some(BridgeFeishuSecrets {
+                            app_id: Some("app-id".to_string()),
+                            app_secret: Some("app-secret".to_string()),
+                            verification_token: None,
+                            encrypt_key: None,
+                        }),
+                        weixin: None,
+                    },
+                ),
+            ]),
+            telegram: BridgeTelegramSecrets {
+                bot_token: Some("legacy-token".to_string()),
+            },
+            feishu: Default::default(),
+            weixin: Default::default(),
+        };
+
+        assert!(remove_telegram_configuration(&mut settings, &mut secrets));
+        assert!(settings
+            .connectors
+            .iter()
+            .all(|connector| connector.platform != BridgePlatform::Telegram));
+        assert!(!secrets.connectors.contains_key("telegram-default"));
+        assert!(secrets.connectors.contains_key("feishu-default"));
+        assert!(secrets.telegram.bot_token.is_none());
+        assert!(!remove_telegram_configuration(&mut settings, &mut secrets));
     }
 }

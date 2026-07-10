@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   getSkillDirectoryEmptyCopy,
+  matchesSkillDirectoryPrimarySource,
   matchesSkillDirectorySource,
   shouldBackToSkillDirectory,
+  shouldShowSkillDirectory,
 } from "./SkillCenterPanel";
 
 describe("SkillCenterPanel helpers", () => {
@@ -14,6 +16,27 @@ describe("SkillCenterPanel helpers", () => {
     expect(matchesSkillDirectorySource("git", { kind: "discovered" })).toBe(false);
   });
 
+  it("keeps the primary source tabs limited to all, bundled, and workspace skills", () => {
+    expect(
+      matchesSkillDirectoryPrimarySource("bundled", {
+        kind: "installed",
+        sourceType: "bundled",
+      }),
+    ).toBe(true);
+    expect(
+      matchesSkillDirectoryPrimarySource("workspace", {
+        kind: "installed",
+        sourceType: "discovered_import",
+      }),
+    ).toBe(true);
+    expect(
+      matchesSkillDirectoryPrimarySource("workspace", {
+        kind: "installed",
+        sourceType: "git",
+      }),
+    ).toBe(false);
+  });
+
   it("distinguishes empty sections from empty search results", () => {
     expect(getSkillDirectoryEmptyCopy(0).title).toBe("本分区为空");
     expect(getSkillDirectoryEmptyCopy(1).title).toBe("没有匹配结果");
@@ -23,5 +46,11 @@ describe("SkillCenterPanel helpers", () => {
     expect(shouldBackToSkillDirectory("Escape", true)).toBe(true);
     expect(shouldBackToSkillDirectory("Escape", false)).toBe(false);
     expect(shouldBackToSkillDirectory("Enter", true)).toBe(false);
+  });
+
+  it("shows the card directory until a detail is opened", () => {
+    expect(shouldShowSkillDirectory(true, "manage", false)).toBe(true);
+    expect(shouldShowSkillDirectory(true, "manage", true)).toBe(false);
+    expect(shouldShowSkillDirectory(true, "workspace_insights", false)).toBe(false);
   });
 });

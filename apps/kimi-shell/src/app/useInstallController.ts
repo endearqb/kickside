@@ -51,6 +51,7 @@ export function useInstallController({
   const [powershellPreflight, setPowershellPreflight] =
     useState<PowerShellPreflightSummary | null>(null);
   const [installMessage, setInstallMessage] = useState("");
+  const [installProbeBusy, setInstallProbeBusy] = useState(false);
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
   const [installFlowCatalog, setInstallFlowCatalog] =
     useState<InstallFlowCatalog | null>(null);
@@ -71,17 +72,20 @@ export function useInstallController({
   }
 
   async function handleRefreshInstallProbe() {
+    setInstallProbeBusy(true);
     setInstallMessage("正在检测安装环境...");
     setActionError(null);
     try {
       const data = await refreshInstallProbe();
-      setInstallMessage("环境检测完成。");
+      setInstallMessage("");
       return data;
     } catch (error) {
       const detail = String(error);
       setInstallMessage(detail);
       setActionError(detail);
       throw error;
+    } finally {
+      setInstallProbeBusy(false);
     }
   }
 
@@ -223,6 +227,7 @@ export function useInstallController({
 
   async function handleStartInstallTask(taskId: InstallTaskId) {
     setActionError(null);
+    setInstallMessage("");
     try {
       const catalog = installFlowCatalog ?? (await refreshInstallFlowCatalog());
       const task = catalog.tasks.find((item) => item.id === taskId);
@@ -304,6 +309,7 @@ export function useInstallController({
 
   return {
     installProbe,
+    installProbeBusy,
     installSource,
     installSettings,
     installSettingsBusy,
@@ -313,7 +319,6 @@ export function useInstallController({
       installSessionSnapshot.status === "running" ||
       installSessionSnapshot.status === "cancelling",
     installMessage,
-    installFlowCatalog,
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,

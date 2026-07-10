@@ -8,7 +8,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::skill_center;
+use crate::{
+    skill_center,
+    types::{SkillFileContent, SkillFileEntry},
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -142,6 +145,23 @@ pub fn find(app: &AppHandle, id: &str) -> anyhow::Result<WorkspaceRecord> {
         .ok_or_else(|| anyhow!("workspace not found: {id}"))
 }
 
+pub fn list_file_entries(
+    app: &AppHandle,
+    workspace_id: &str,
+) -> anyhow::Result<Vec<SkillFileEntry>> {
+    let workspace = find(app, workspace_id)?;
+    skill_center::list_safe_file_entries(Path::new(&workspace.cwd))
+}
+
+pub fn read_file(
+    app: &AppHandle,
+    workspace_id: &str,
+    rel_path: &str,
+) -> anyhow::Result<SkillFileContent> {
+    let workspace = find(app, workspace_id)?;
+    skill_center::read_safe_file(Path::new(&workspace.cwd), rel_path)
+}
+
 fn mark_opened_inner(app: &AppHandle, id: &str) -> anyhow::Result<WorkspaceRecord> {
     let mut records = list(app)?;
     let now = Utc::now().to_rfc3339();
@@ -264,9 +284,49 @@ pub fn workspace_remove(
     remove_inner(&app, &id, remove_files.unwrap_or(false)).map_err(|error| format!("{error:#}"))
 }
 
+#[tauri::command]
+pub fn workspace_list_file_entries(
+    app: AppHandle,
+    workspace_id: String,
+) -> Result<Vec<SkillFileEntry>, String> {
+    list_file_entries(&app, &workspace_id).map_err(|error| format!("{error:#}"))
+}
+
+#[tauri::command]
+pub fn workspace_read_file(
+    app: AppHandle,
+    workspace_id: String,
+    rel_path: String,
+) -> Result<SkillFileContent, String> {
+    read_file(&app, &workspace_id, &rel_path).map_err(|error| format!("{error:#}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "kimi-sidekick-workspaces-{label}-{}-{}",
+                std::process::id(),
+                NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).expect("temp dir");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn workspace_key_is_case_insensitive_on_windows() {
@@ -282,5 +342,61 @@ mod tests {
     #[test]
     fn fallback_name_uses_last_path_segment() {
         assert_eq!(fallback_workspace_name("D:/workspaces/demo"), "demo");
+    }
+
+    #[test]
+    fn workspace_file_listing_uses_shared_filters_and_limit() {
+        let temp = TempDir::new("listing");
+        fs::create_dir_all(temp.0.join(".git")).expect("hidden dir");
+        fs::create_dir_all(temp.0.join("node_modules")).expect("dependency dir");
+        fs::write(temp.0.join(".secret"), "hidden").expect("hidden file");
+        fs::write(temp.0.join(".git").join("config"), "hidden").expect("git file");
+        fs::write(temp.0.join("node_modules").join("package.json"), "hidden")
+            .expect("dependency file");
+        for index in 0..520 {
+            fs::write(temp.0.join(format!("file-{index:03}.txt")), "visible")
+                .expect("visible file");
+        }
+
+        let entries = skill_center::list_safe_file_entries(&temp.0).expect("workspace listing");
+
+        assert_eq!(entries.len(), 512);
+        assert!(entries.iter().all(|entry| {
+            !entry.rel_path.starts_with('.') && !entry.rel_path.starts_with("node_modules")
+        }));
+    }
+
+    #[test]
+    fn workspace_file_read_uses_shared_preview_safety() {
+        let temp = TempDir::new("read");
+        fs::write(temp.0.join("README.md"), "workspace").expect("text file");
+        fs::write(temp.0.join("blob.bin"), b"abc\0def").expect("binary file");
+        fs::write(temp.0.join("large.md"), vec![b'a'; 512 * 1024 + 1]).expect("large file");
+
+        let text = skill_center::read_safe_file(&temp.0, "README.md").expect("text preview");
+        let binary = skill_center::read_safe_file(&temp.0, "blob.bin").expect("binary preview");
+        let large = skill_center::read_safe_file(&temp.0, "large.md").expect("large preview");
+
+        assert_eq!(text.text.as_deref(), Some("workspace"));
+        assert!(binary.is_binary && binary.text.is_none());
+        assert!(large.truncated);
+        assert!(skill_center::read_safe_file(&temp.0, "../README.md").is_err());
+        assert!(
+            skill_center::read_safe_file(&temp.0, &temp.0.join("README.md").to_string_lossy())
+                .is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_file_listing_skips_symlinks() {
+        let temp = TempDir::new("symlink");
+        fs::write(temp.0.join("target.txt"), "visible").expect("target file");
+        std::os::unix::fs::symlink(temp.0.join("target.txt"), temp.0.join("link.txt"))
+            .expect("symlink");
+
+        let entries = skill_center::list_safe_file_entries(&temp.0).expect("workspace listing");
+
+        assert!(entries.iter().all(|entry| entry.rel_path != "link.txt"));
     }
 }

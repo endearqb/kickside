@@ -64,47 +64,14 @@ export function DirectoryCardGrid({
   return (
     <div className={cn("directory-card-grid", className)} aria-busy={loading || undefined}>
       {items.map((item) => (
-        <article
-          key={item.id}
-          className={cn("directory-card", item.active && "is-active")}
-          role="button"
-          tabIndex={0}
-          onClick={item.onOpen}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              item.onOpen();
-            }
-          }}
-        >
-          <div className="directory-card-main">
+        <article key={item.id} className={cn("directory-card", item.active && "is-active")}>
+          <button type="button" className="directory-card-open" onClick={item.onOpen}>
+            <div className="directory-card-main">
             <div className="directory-card-title-row">
               <div className="directory-card-title-copy">
                 <strong title={String(item.title)}>{item.title}</strong>
                 {item.subtitle ? <span>{item.subtitle}</span> : null}
               </div>
-              {item.cornerSlot ? (
-                <div
-                  className="directory-card-corner-slot"
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  {item.cornerSlot}
-                </div>
-              ) : item.cornerAction ? (
-                <button
-                  type="button"
-                  className="directory-card-corner-action"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    item.cornerAction?.onSelect();
-                  }}
-                  aria-label={item.cornerAction.label}
-                  title={item.cornerAction.label}
-                >
-                  {item.cornerAction.icon ?? item.cornerAction.label}
-                </button>
-              ) : null}
             </div>
             {item.meta ? <div className="directory-card-meta">{item.meta}</div> : null}
             <p>{item.description}</p>
@@ -117,7 +84,21 @@ export function DirectoryCardGrid({
                 ))}
               </div>
             ) : null}
-          </div>
+            </div>
+          </button>
+          {item.cornerSlot ? (
+            <div className="directory-card-corner-slot">{item.cornerSlot}</div>
+          ) : item.cornerAction ? (
+            <button
+              type="button"
+              className="directory-card-corner-action"
+              onClick={item.cornerAction.onSelect}
+              aria-label={item.cornerAction.label}
+              title={item.cornerAction.label}
+            >
+              {item.cornerAction.icon ?? item.cornerAction.label}
+            </button>
+          ) : null}
         </article>
       ))}
     </div>

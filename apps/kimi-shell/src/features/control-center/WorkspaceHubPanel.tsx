@@ -39,8 +39,10 @@ import {
   listHarnesses,
   listSchedule,
   listWorkspaces,
+  listWorkspaceFileEntries,
   markWorkspaceOpened,
   readHarnessFile,
+  readWorkspaceFile,
   type HarnessDryRunResult,
   type HarnessManifest,
   type ScheduleCadence,
@@ -59,11 +61,13 @@ type WorkspaceHubPanelProps = {
   onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
 };
 
+type WorkspaceHubDirectoryType = "all" | "harness" | "workspace";
+
 type WorkspaceHubDirectoryFilter =
   | "all"
-  | "harness"
-  | "workspace"
   | "kimi_code"
+  | "hermes"
+  | "other_runtime"
   | "recent"
   | "harness_source"
   | "manual";
@@ -93,6 +97,21 @@ function matchesDirectoryQuery(query: string, values: Array<string | undefined |
 
 function workspaceDirectoryName(workspace: WorkspaceRecord) {
   return workspace.name || workspace.cwd.replace(/\\/g, "/").split("/").filter(Boolean).pop() || workspace.cwd;
+}
+
+export function matchesWorkspaceDirectoryFilters(
+  workspace: WorkspaceRecord,
+  type: WorkspaceHubDirectoryType,
+  filter: WorkspaceHubDirectoryFilter,
+) {
+  if (type === "harness") return false;
+  if (filter === "kimi_code") return workspace.agentRuntime === "kimi-code";
+  if (filter === "hermes") return workspace.agentRuntime === "hermes";
+  if (filter === "other_runtime") return workspace.agentRuntime === "other";
+  if (filter === "recent") return Boolean(workspace.lastOpenedAt);
+  if (filter === "harness_source") return workspace.source === "harness" || Boolean(workspace.harnessId);
+  if (filter === "manual") return workspace.source === "manual";
+  return true;
 }
 
 function formatDiscoveryContainer(kind: SkillDiscoveryContainerKind) {
@@ -230,6 +249,7 @@ export function WorkspaceHubPanel({
   const [dryRun, setDryRun] = useState<HarnessDryRunResult | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<WorkspaceRecord | null>(null);
   const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryType, setDirectoryType] = useState<WorkspaceHubDirectoryType>("all");
   const [directoryFilter, setDirectoryFilter] = useState<WorkspaceHubDirectoryFilter>("all");
   const [directorySort, setDirectorySort] = useState<WorkspaceHubSortKey>("name");
   const [workspaceSkillTargets, setWorkspaceSkillTargets] = useState<WorkspaceSkillTarget[]>([]);
@@ -278,6 +298,22 @@ export function WorkspaceHubPanel({
       return readHarnessFile(selectedHarnessId, relPath);
     },
     [selectedHarnessId],
+  );
+  const loadSelectedWorkspaceFileEntries = useCallback(
+    () =>
+      selectedWorkspaceId
+        ? listWorkspaceFileEntries(selectedWorkspaceId)
+        : Promise.resolve([]),
+    [selectedWorkspaceId],
+  );
+  const readSelectedWorkspaceFile = useCallback(
+    (relPath: string) => {
+      if (!selectedWorkspaceId) {
+        return Promise.reject(new Error("missing selected workspace"));
+      }
+      return readWorkspaceFile(selectedWorkspaceId, relPath);
+    },
+    [selectedWorkspaceId],
   );
 
   async function refresh() {
@@ -445,7 +481,8 @@ export function WorkspaceHubPanel({
 
   const directoryCards = useMemo(() => {
     const harnessCards = harnesses
-      .filter(() => directoryFilter === "all" || directoryFilter === "harness")
+      .filter(() => directoryType === "all" || directoryType === "harness")
+      .filter(() => directoryFilter === "all")
       .filter((harness) =>
         matchesDirectoryQuery(directoryQuery, [
           harness.id,
@@ -484,14 +521,9 @@ export function WorkspaceHubPanel({
       });
 
     const workspaceCards = workspaces
-      .filter((workspace) => {
-        if (directoryFilter === "all" || directoryFilter === "workspace") return true;
-        if (directoryFilter === "kimi_code") return workspace.agentRuntime === "kimi-code";
-        if (directoryFilter === "recent") return Boolean(workspace.lastOpenedAt);
-        if (directoryFilter === "harness_source") return workspace.source === "harness" || Boolean(workspace.harnessId);
-        if (directoryFilter === "manual") return workspace.source === "manual";
-        return false;
-      })
+      .filter((workspace) =>
+        matchesWorkspaceDirectoryFilters(workspace, directoryType, directoryFilter),
+      )
       .filter((workspace) =>
         matchesDirectoryQuery(directoryQuery, [
           workspace.name,
@@ -542,7 +574,7 @@ export function WorkspaceHubPanel({
       return left.sortName.localeCompare(right.sortName);
     });
     return cards;
-  }, [busy, directoryFilter, directoryQuery, directorySort, harnesses, onOpenWorkspace, selectedItemId, workspaces]);
+  }, [busy, directoryFilter, directoryQuery, directorySort, directoryType, harnesses, onOpenWorkspace, selectedItemId, workspaces]);
 
   const rail = (
     <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
@@ -830,6 +862,14 @@ export function WorkspaceHubPanel({
         </div>
       ) : null}
 
+      <DirectoryFilePreview
+        entityKey={`workspace:${selectedWorkspace.id}`}
+        description={selectedWorkspace.cwd}
+        loadEntries={loadSelectedWorkspaceFileEntries}
+        readFile={readSelectedWorkspaceFile}
+        onOpenRoot={() => onOpenWorkspace(selectedWorkspace.cwd)}
+      />
+
       <section className="cc-surface-section">
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
@@ -1035,12 +1075,22 @@ export function WorkspaceHubPanel({
             <h1>WorkspaceHub</h1>
           </div>
           <div className="cc-image-top-controls">
-            <Button variant="outline" icon={<RefreshCw size={15} />} onClick={refresh} disabled={busy}>
-              刷新
-            </Button>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              icon={<RefreshCw size={15} />}
+              onClick={refresh}
+              disabled={busy}
+              aria-label="刷新 WorkspaceHub"
+            />
           </div>
         </div>
 
+        {detailContent ? (
+          <section className="cc-image-card workspace-hub-detail-card">
+            {detailContent}
+          </section>
+        ) : (
         <section className="cc-image-card workspace-hub-directory-card">
           <h2>Harness 与工作区</h2>
           <div className="directory-toolbar">
@@ -1050,20 +1100,33 @@ export function WorkspaceHubPanel({
               placeholder="搜索 Harness、工作区、路径或 runtime"
               aria-label="搜索 WorkspaceHub"
             />
-            <ControlCenterSegmentedControl<WorkspaceHubDirectoryFilter>
+            <ControlCenterSegmentedControl<WorkspaceHubDirectoryType>
               ariaLabel="WorkspaceHub 类型筛选"
-              value={directoryFilter}
-              onChange={setDirectoryFilter}
+              value={directoryType}
+              onChange={(value) => {
+                setDirectoryType(value);
+                if (value === "harness") setDirectoryFilter("all");
+              }}
               items={[
                 { value: "all", label: "全部", description: harnesses.length + workspaces.length },
                 { value: "harness", label: "Harness", description: harnesses.length },
                 { value: "workspace", label: "工作区", description: workspaces.length },
-                { value: "kimi_code", label: "Kimi Code" },
-                { value: "recent", label: "最近打开" },
-                { value: "harness_source", label: "Harness 来源" },
-                { value: "manual", label: "手动" },
               ]}
             />
+            <select
+              value={directoryFilter}
+              onChange={(event) => setDirectoryFilter(event.currentTarget.value as WorkspaceHubDirectoryFilter)}
+              aria-label="WorkspaceHub 高级筛选"
+              disabled={directoryType === "harness"}
+            >
+              <option value="all">全部筛选</option>
+              <option value="kimi_code">Kimi Code</option>
+              <option value="hermes">Hermes</option>
+              <option value="other_runtime">其他 Runtime</option>
+              <option value="recent">最近打开</option>
+              <option value="harness_source">Harness 来源</option>
+              <option value="manual">手动</option>
+            </select>
             <select
               value={directorySort}
               onChange={(event) => setDirectorySort(event.currentTarget.value as WorkspaceHubSortKey)}
@@ -1092,17 +1155,7 @@ export function WorkspaceHubPanel({
             }
           />
         </section>
-
-        <section className="cc-image-card">
-          <h2>{selectedKind === "workspace" ? "工作区详情" : "Harness 详情"}</h2>
-          {detailContent ?? (
-            <ControlCenterEmptyState
-              title="选择对象"
-              description="从左侧选择一个 harness 模板或已注册工作区。"
-              icon={<Boxes size={18} />}
-            />
-          )}
-        </section>
+        )}
         {message ? (
           <div className="cc-control-detail-item" role="alert">
             {message}

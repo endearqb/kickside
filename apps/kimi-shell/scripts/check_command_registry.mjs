@@ -109,6 +109,8 @@ const commandRegistry = {
     "workspaces::workspace_register_many",
     "workspaces::workspace_mark_opened",
     "workspaces::workspace_remove",
+    "workspaces::workspace_list_file_entries",
+    "workspaces::workspace_read_file",
   ],
   harness: [
     "harness::harness_list",

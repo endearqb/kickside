@@ -15,9 +15,10 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 - Workspace Grid 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持 1/2/3/4/5/6 窗预设、窗格切换、最大化、拖拽调宽/调高、命名布局保存/恢复、外部页降级、嵌入式子 Webview 承载、native Webview per-pane 存储目录与独立应用 WebviewWindow 打开
 - 后端守护与健康探测：拉起 `kimi server run --foreground --port <port>`，读取 `KIMI_CODE_HOME/server.token`，并用 `#token=` 接入 workspace
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
-- 控制中心：小助手设置以 4 个互斥展开项承载安装/升级、右键菜单、Provider API 和默认工作目录，侧边栏底部提供纯后端重启
+- 控制中心：小助手设置以 5 个互斥展开项承载安装/升级、右键菜单、API 配置、默认工作目录和外部 IM 通道；API 配置与微信/飞书扫码均在设置项内完成，侧边栏底部提供纯后端重启
+- Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的卡片目录；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
 - Chat 集成收口：跨站链接跳系统浏览器，Windows 安装版下载使用原生“另存为”
-- 右键菜单集成：支持目录空白处、文件、文件夹入口，并可编辑写入 Explorer 的菜单名称
+- 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“Kimi 小助手”中文名称，并可编辑写入 Explorer
 - 诊断与日志：应用日志、后端日志、Kimi Code Doctor、错误提示与恢复操作
 - 安全退出流程：退出读秒窗 + 状态反馈
 
@@ -64,6 +65,7 @@ pnpm check:nfr:reliability
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`。
 - `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/bridge.rs`、`src-tauri/src/commands/install.rs`、`src-tauri/src/commands/skills.rs`、`src-tauri/src/commands/workspace_grid.rs`、`src-tauri/src/commands/context_menu.rs` 和 `src-tauri/src/commands/workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
+- `src-tauri/src/workspaces.rs` 管理已注册工作区，并通过 `workspace_list_file_entries` / `workspace_read_file` 提供受根目录约束的只读文件预览；前端复用 Skill/Harness 的 `SkillFileEntry` 与 `SkillFileContent` 契约。
 
 ## 安全约定
 

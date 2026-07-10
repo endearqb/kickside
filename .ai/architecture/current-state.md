@@ -17,7 +17,7 @@
 - Shell 前端已从 `useShellController.ts` 拆出安装流、轮询、Bridge 运行态刷新、Skill Center 状态/刷新、workspace embed URL 和 workspace import picker 控制器；Bridge 写操作与 Skill 动作 handler 仍在主 controller 中编排。
 - Shell 在配置目录写入 `kimi_runtime_locator.json`，包含 origin、token path、redacted token、generation、ownership 和 health，不包含明文 token。
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
-- 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和 Kimi install/upgrade 走 npm 全局包 `@moonshot-ai/kimi-code`，执行前要求 Node.js 22.19+ 和 Git for Windows/Git Bash 就绪；旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。
+- 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和首次安装走 npm 全局包 `@moonshot-ai/kimi-code`；升级会在修改 PATH 前捕获当前实际命中的 `kimi` shim，按 `npm prefix -g` 或 `pnpm bin --global` 选择同源包管理器并精确验证对应 `kimi.cmd`，其他或歧义来源明确拒绝；执行前要求 Node.js 22.19+ 和 Git for Windows/Git Bash 就绪。旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
 - Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
 - Explorer 右键菜单 label 可通过控制中心编辑，持久化在 `AppSettings.context_menu_labels`；schema 9 将已知历史默认值迁移为“Kimi 小助手”中文名并保留用户自定义值，`enable_context_menu` 命令保持原有形状并在写注册表时读取当前 label 设置。

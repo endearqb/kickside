@@ -315,23 +315,67 @@ Ensure-KimiShellPath
 Invoke-KimiShellNodePrerequisites
 & $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__
 if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE." }
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
+$npmPrefix = (& $script:KimiShellNpm prefix -g).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $npmPrefix) { throw "npm global prefix lookup failed." }
+$npmKimiCmd = Join-Path $npmPrefix 'kimi.cmd'
+if (-not (Test-Path $npmKimiCmd)) { throw "npm did not create the Kimi command: $npmKimiCmd" }
+Write-Host "Verifying installed npm Kimi command: $npmKimiCmd"
+& $npmKimiCmd --version
+if ($LASTEXITCODE -ne 0) { throw "installed npm kimi version check failed with exit code $LASTEXITCODE." }
 "#
-    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
     .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
 }
 
 pub(super) fn kimi_upgrade_command(indexes_expr: Option<&str>) -> String {
     let _ = indexes_expr;
     r#"
+$currentKimiCommand = Get-Command kimi -ErrorAction SilentlyContinue
+if (-not $currentKimiCommand -or -not $currentKimiCommand.Source) {
+  throw 'The active Kimi command could not be resolved from PATH.'
+}
+$currentKimi = $currentKimiCommand.Source
+$currentPnpmCommand = Get-Command pnpm -ErrorAction SilentlyContinue
 Ensure-KimiShellPath
 Invoke-KimiShellNodePrerequisites
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
-& $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__@latest
-if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed with exit code $LASTEXITCODE." }
-Invoke-KimiShellVersionCheck 'kimi' __KIMI_CANDIDATE_PATHS__ @('--version')
+Write-Host "Current Kimi command: $currentKimi"
+& $currentKimi --version
+if ($LASTEXITCODE -ne 0) { throw "kimi version check failed with exit code $LASTEXITCODE." }
+
+$currentKimiDir = [IO.Path]::GetFullPath((Split-Path -Parent $currentKimi)).TrimEnd('\')
+$npmPrefix = (& $script:KimiShellNpm prefix -g).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $npmPrefix) { throw "npm global prefix lookup failed." }
+$npmBin = [IO.Path]::GetFullPath($npmPrefix).TrimEnd('\')
+$pnpm = if ($currentPnpmCommand -and $currentPnpmCommand.Source) { $currentPnpmCommand.Source } else { $null }
+$pnpmBin = $null
+if ($pnpm) {
+  $pnpmBin = (& $pnpm bin --global).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $pnpmBin) { throw "pnpm global bin lookup failed." }
+  $pnpmBin = [IO.Path]::GetFullPath($pnpmBin).TrimEnd('\')
+}
+$isNpmInstall = $currentKimiDir -eq $npmBin
+$isPnpmInstall = $pnpmBin -and $currentKimiDir -eq $pnpmBin
+
+if ($isNpmInstall -and $isPnpmInstall) {
+  throw "The active Kimi command matches both npm and pnpm global bins: $currentKimi"
+} elseif ($isPnpmInstall) {
+  Write-Host "Upgrading the active pnpm installation: $currentKimi"
+  & $pnpm add --global __KIMI_CODE_NPM_PACKAGE__@latest
+  if ($LASTEXITCODE -ne 0) { throw "pnpm upgrade failed with exit code $LASTEXITCODE." }
+  $verifiedKimi = Join-Path $pnpmBin 'kimi.cmd'
+} elseif ($isNpmInstall) {
+  Write-Host "Upgrading the active npm installation: $currentKimi"
+  & $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__@latest
+  if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed with exit code $LASTEXITCODE." }
+  $verifiedKimi = Join-Path $npmPrefix 'kimi.cmd'
+} else {
+  throw "The active Kimi command is not managed by npm or pnpm: $currentKimi"
+}
+
+if (-not (Test-Path $verifiedKimi)) { throw "Kimi command was not created after upgrade: $verifiedKimi" }
+Write-Host "Verifying upgraded Kimi command: $verifiedKimi"
+& $verifiedKimi --version
+if ($LASTEXITCODE -ne 0) { throw "upgraded kimi version check failed with exit code $LASTEXITCODE." }
 "#
-    .replace("__KIMI_CANDIDATE_PATHS__", &kimi_ps_candidate_paths())
     .replace("__KIMI_CODE_NPM_PACKAGE__", KIMI_CODE_NPM_PACKAGE)
 }
 

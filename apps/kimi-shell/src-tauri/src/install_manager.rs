@@ -2058,11 +2058,25 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_command_uses_npm_latest() {
+    fn upgrade_command_follows_the_active_npm_or_pnpm_shim() {
         let command = catalog::kimi_upgrade_command(None);
-        assert!(command.contains("install -g"));
+        let capture_index = command
+            .find("Get-Command kimi")
+            .expect("capture active kimi");
+        let path_mutation_index = command
+            .find("Ensure-KimiShellPath")
+            .expect("path setup exists");
+        assert!(capture_index < path_mutation_index);
+        assert!(command.contains("$pnpm add --global"));
+        assert!(command.contains("$script:KimiShellNpm install -g"));
         assert!(command.contains("@moonshot-ai/kimi-code@latest"));
-        assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(command.contains("$script:KimiShellNpm prefix -g"));
+        assert!(command.contains("$pnpm bin --global"));
+        assert!(command.contains("Join-Path $pnpmBin 'kimi.cmd'"));
+        assert!(command.contains("Join-Path $npmPrefix 'kimi.cmd'"));
+        assert!(command.contains("not managed by npm or pnpm"));
+        assert!(command.contains("matches both npm and pnpm global bins"));
+        assert!(command.contains("& $verifiedKimi --version"));
         assert!(command.contains("Invoke-KimiShellNodePrerequisites"));
         assert!(!command.contains("& $kimi upgrade"));
         assert!(!command.contains("uv tool upgrade kimi-cli"));
@@ -2076,7 +2090,10 @@ mod tests {
         assert!(command.contains("install -g"));
         assert!(command.contains("@moonshot-ai/kimi-code"));
         assert!(!command.contains("@moonshot-ai/kimi-code@latest"));
-        assert!(command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
+        assert!(command.contains("$script:KimiShellNpm prefix -g"));
+        assert!(command.contains("Join-Path $npmPrefix 'kimi.cmd'"));
+        assert!(command.contains("& $npmKimiCmd --version"));
+        assert!(!command.contains("Invoke-KimiShellVersionCheck 'kimi'"));
         assert!(command.contains("Invoke-KimiShellNodePrerequisites"));
         assert!(!command.contains("uv tool install kimi-cli"));
         assert!(!command.contains("uv python install 3.13"));

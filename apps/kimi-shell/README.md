@@ -34,7 +34,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 
 ## 运行环境
 
-- Node.js 22.19+（Kimi Code npm 安装/升级要求）
+- Node.js 22.19+（Kimi Code 首次安装使用 npm；升级跟随当前命中的 npm 或 pnpm 全局安装）
 - pnpm 10.34.4
 - Rust stable
 - Windows WebView2 Runtime（Tauri 桌面运行时依赖）

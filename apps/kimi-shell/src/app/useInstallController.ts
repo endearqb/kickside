@@ -21,6 +21,7 @@ const INSTALL_PROBE_INTERVAL_MS = 1500;
 
 type UseInstallControllerOptions = {
   tauriRuntime: boolean;
+  enabled: boolean;
   refreshOnboarding: () => Promise<unknown>;
   setActionError: (message: string | null) => void;
 };
@@ -40,6 +41,7 @@ function mergeInstallLogChunk(
 
 export function useInstallController({
   tauriRuntime,
+  enabled,
   refreshOnboarding,
   setActionError,
 }: UseInstallControllerOptions) {
@@ -141,7 +143,7 @@ export function useInstallController({
   }
 
   useEffect(() => {
-    if (!tauriRuntime) {
+    if (!tauriRuntime || !enabled) {
       return;
     }
 
@@ -174,7 +176,7 @@ export function useInstallController({
       .catch((error) => {
         setActionError(String(error));
       });
-  }, [setActionError, tauriRuntime]);
+  }, [enabled, setActionError, tauriRuntime]);
 
   async function waitForInstallProbe(
     predicate: (probe: InstallProbeStatus) => boolean,

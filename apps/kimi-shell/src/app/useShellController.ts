@@ -295,6 +295,8 @@ export function useShellController() {
   const [activeControlTaskPayload, setActiveControlTaskPayload] =
     useState<ControlCenterTaskPayload | null>(null);
   const [routeHash, setRouteHash] = useState(() => window.location.hash);
+  const hashRoute = parseHashRoute(routeHash);
+  const isWorkspaceImportPickerRoute = hashRoute === "workspace-import-picker";
   const [listenersReady, setListenersReady] = useState(false);
   const [pendingPrefill, setPendingPrefill] = useState<PrefillChatPayload | null>(
     null,
@@ -359,6 +361,7 @@ export function useShellController() {
     handleCloseInstallCommands,
   } = useInstallController({
     tauriRuntime,
+    enabled: !isWorkspaceImportPickerRoute,
     refreshOnboarding,
     setActionError,
   });
@@ -392,8 +395,6 @@ export function useShellController() {
     refreshWorkspaceEmbedUrlForStatus,
   } = useWorkspaceEmbedUrl(status);
   const chatRemoteUrlRef = useRef<string | null>(null);
-  const hashRoute = parseHashRoute(routeHash);
-  const isWorkspaceImportPickerRoute = hashRoute === "workspace-import-picker";
   const useBootHintWorkspace =
     hashRoute === "loading" &&
     !status &&
@@ -1792,6 +1793,7 @@ export function useShellController() {
 
   useShellPollingController({
     tauriRuntime,
+    enabled: !isWorkspaceImportPickerRoute,
     screen,
     controlCenterModalOpen,
     activeControlSection,
@@ -1870,10 +1872,14 @@ export function useShellController() {
   }, [bridgeOnboardingDirty, bridgeOnboardingDraftTouched, bridgeSettings]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) return;
     void refreshActiveSessionSkills();
-  }, [status?.activeSessionId, status?.activeSessionWorkDir]);
+  }, [isWorkspaceImportPickerRoute, status?.activeSessionId, status?.activeSessionWorkDir]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) {
+      return;
+    }
     const visible =
       activeControlSection === "skill_center" &&
       (screen === "control_center" || controlCenterModalOpen);
@@ -1884,6 +1890,7 @@ export function useShellController() {
   }, [
       activeControlSection,
       controlCenterModalOpen,
+      isWorkspaceImportPickerRoute,
       screen,
       status?.activeSessionId,
       status?.activeSessionWorkDir,
@@ -1891,6 +1898,9 @@ export function useShellController() {
   ]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) {
+      return;
+    }
     const visible =
       activeControlSection === "skill_center" &&
       (screen === "control_center" || controlCenterModalOpen);
@@ -1901,6 +1911,7 @@ export function useShellController() {
   }, [
     activeControlSection,
     controlCenterModalOpen,
+    isWorkspaceImportPickerRoute,
     screen,
     status?.activeSessionId,
     status?.activeSessionWorkDir,
@@ -1908,6 +1919,9 @@ export function useShellController() {
   ]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) {
+      return;
+    }
     const visible =
       activeControlSection === "skill_center" &&
       skillCenterSection === "workspace_insights" &&
@@ -1919,6 +1933,7 @@ export function useShellController() {
   }, [
     activeControlSection,
     controlCenterModalOpen,
+    isWorkspaceImportPickerRoute,
     screen,
     selectedWorkspaceSkillTargetId,
     skillCenterSection,
@@ -1928,6 +1943,9 @@ export function useShellController() {
   ]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) {
+      return;
+    }
     const workspaceKey =
       status?.activeSessionWorkDir?.trim() || status?.effectiveWorkDir?.trim() || "";
     const sessionId = status?.activeSessionId?.trim() || "";
@@ -2024,6 +2042,7 @@ export function useShellController() {
   }, [
     activeSessionSkillState.appliedSkillIds,
     installedSkills,
+    isWorkspaceImportPickerRoute,
     selectedSkillId,
     status?.activeSessionId,
     status?.activeSessionWorkDir,
@@ -2120,6 +2139,7 @@ export function useShellController() {
   }, [controlCenterModalOpen, onboarding, pendingWorkspaceEntryAfterOnboarding, status]);
 
   useEffect(() => {
+    if (isWorkspaceImportPickerRoute) return;
     if (!status) return;
     if (status.state !== "starting") return;
     if (loadingReportCycleRef.current === status.startCycleId) return;
@@ -2130,7 +2150,7 @@ export function useShellController() {
     }).catch(() => {
       // Best-effort metric reporting.
     });
-  }, [status]);
+  }, [isWorkspaceImportPickerRoute, status]);
 
   async function handleRetry() {
     setActionBusy(true);

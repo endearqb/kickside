@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -232,16 +233,21 @@ func NewHandler(service Service, adminToken string) http.Handler {
 
 func decodeAdminJSON(writer http.ResponseWriter, request *http.Request, target any, maxBytes int64) bool {
 	request.Body = http.MaxBytesReader(writer, request.Body, maxBytes)
-	if err := json.NewDecoder(request.Body).Decode(target); err != nil {
-		var maxBytesError *http.MaxBytesError
-		if errors.As(err, &maxBytesError) {
-			writeAdminError(writer, request, http.StatusRequestEntityTooLarge, "body_too_large", "request body too large", nil)
-			return false
+	decoder := json.NewDecoder(request.Body)
+	err := decoder.Decode(target)
+	if err == nil {
+		err = decoder.Decode(&struct{}{})
+		if err == io.EOF {
+			return true
 		}
-		writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+	}
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		writeAdminError(writer, request, http.StatusRequestEntityTooLarge, "body_too_large", "request body too large", nil)
 		return false
 	}
-	return true
+	writeAdminError(writer, request, http.StatusBadRequest, "invalid_json", "invalid JSON request body", nil)
+	return false
 }
 
 func parseNestedAction(path string, prefix string) (string, string, bool) {

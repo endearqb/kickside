@@ -553,3 +553,39 @@
 ### Review
 - 本次只调整 `App.css`，未修改组件、交互或按钮尺寸。
 - 纯 Web 预览受 Tauri IPC 限制停在启动页；需要在真实 Tauri 控制中心补做最终截图复核。
+
+## kimi-app review fix kit 审核后适配
+
+### Checklist
+- [x] 校验工具包基线、manifest、SHA256 和 check-only 行为
+- [x] 核验 5 个问题在 `main@c2aaa14` 仍真实存在
+- [x] 显式收紧 Tauri 自定义 command 的窗口权限，并恢复 Picker 目录对话框权限
+- [x] 隔离 Picker 路由的安装、轮询、Skill 和 loading 后台副作用
+- [x] 串行 Bridge `Start` / `Shutdown`，严格拒绝多 JSON 请求体
+- [x] 清理异步迟到的嵌入式 Webview controller
+- [x] 补齐自动测试、README、架构事实和变更记录
+- [x] 运行前端、Rust、Go 与 diff gate，并记录 blocked 的手工/环境门禁
+
+### Deferred TODO：轮询 single-flight / 响应代次
+- What：为状态、Bridge 详情和日志轮询增加每个轮询域独立的 single-flight 或 generation 控制。
+- Why：固定间隔触发的慢请求可能重叠，较旧响应晚到时可能覆盖新状态。
+- Pros：消除轮询重入和旧响应回写，降低后端阻塞时的请求放大。
+- Cons：需要逐个确认各刷新函数的取消、错误和可见性语义，不适合混入本轮权限修复。
+- Context：入口为 `src/app/useShellPollingController.ts`；本轮只在 Import Picker 路由禁用这些轮询，不改变主窗口轮询模型。
+- Depends on / blocked by：先为状态、Bridge 详情和日志轮询建立可独立断言的回归测试。
+
+### Deferred TODO：Workspace embed URL 启动周期保护
+- What：为 `useWorkspaceEmbedUrl` 的异步刷新增加请求 generation，并只接受当前 `startCycleId` 的返回值。
+- Why：快速重启时旧启动周期的响应可能晚到并覆盖新的 embed URL。
+- Pros：避免 iframe 在重启竞态下回退到旧 runtime 地址。
+- Cons：需要覆盖启动、重试和状态切换时序，和本轮 child Webview controller 生命周期不是同一问题。
+- Context：入口为 `src/app/useWorkspaceEmbedUrl.ts`；本轮 generation 只保护 Workspace Grid 的原生 child Webview 创建。
+- Depends on / blocked by：需要可控 deferred response 测试覆盖两个启动周期的逆序返回。
+
+### Review
+- Tauri：135 个自定义 commands 已进入应用 manifest；`main`、`prefill`、`workspace-import-picker` 分别使用完整、6 项和 4 项 command permission，现有 command registry 门禁同步检查 build、permission 与 capability。
+- Picker：独立窗口保留目录选择和 4 个导入命令；安装 Channel、轮询、Skill 刷新、loading 上报及完成后的全局状态刷新均被隔离，主窗口 modal 的完成后刷新保持不变。
+- Bridge/Admin：完整生命周期使用独立互斥锁串行；Admin 请求体只接受一个 JSON 值，并保留 413 body-size 行为。
+- Webview：删除 pane、换 URL、挂起或重复打开都会使旧 generation 失效，迟到 controller 只关闭一次。
+- 已验证：固定 pnpm 10.34.4 frozen install；前端 `verify` 16 files / 105 tests、Web build、安全门禁；Rust fmt/check/clippy/test-no-run；Go vet/test；Tauri release build 及 MSI/NSIS bundle；`git diff --check`。
+- Blocked：完整 Rust test binary 在本机以 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 退出；Go race 需要 CGO/GCC 或 Linux CI；真实 Prefill/Picker/Bridge/Webview 点击回归仍需桌面人工执行。

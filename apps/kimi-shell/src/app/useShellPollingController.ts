@@ -28,6 +28,7 @@ type PollingCallbacks = {
 
 type ShellPollingControllerOptions = PollingCallbacks & {
   tauriRuntime: boolean;
+  enabled: boolean;
   screen: string;
   controlCenterModalOpen: boolean;
   activeControlSection: ControlSectionId;
@@ -42,6 +43,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
 
   const {
     tauriRuntime,
+    enabled,
     screen,
     controlCenterModalOpen,
     activeControlSection,
@@ -51,6 +53,9 @@ export function useShellPollingController(options: ShellPollingControllerOptions
   } = options;
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const callbacks = callbacksRef.current;
     if (!tauriRuntime) {
       void callbacks.refreshStatus();
@@ -74,9 +79,12 @@ export function useShellPollingController(options: ShellPollingControllerOptions
       void callbacksRef.current.refreshStatus();
     }, statusPollMs);
     return () => window.clearInterval(timer);
-  }, [controlCenterModalOpen, screen, tauriRuntime]);
+  }, [controlCenterModalOpen, enabled, screen, tauriRuntime]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
     const bridgeControlsVisible =
       controlCenterVisible &&
@@ -108,10 +116,14 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     activeControlTask,
     activeRuntimePanel,
     controlCenterModalOpen,
+    enabled,
     screen,
   ]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
     if (!controlCenterVisible && bridgeState === "stopped") {
       return;
@@ -140,6 +152,7 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     activeRuntimePanel,
     bridgeState,
     controlCenterModalOpen,
+    enabled,
     screen,
   ]);
 }

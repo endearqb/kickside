@@ -6,8 +6,8 @@
 - Shell 从 `KIMI_CODE_HOME/server.token` 读取 server token；若未设置 `KIMI_CODE_HOME`，默认使用用户目录下 `.kimi-code/server.token`。
 - workspace URL 由 Shell 组装为 `http://127.0.0.1:<port>/#token=<token>`；对外状态只展示脱敏 token。
 - iframe/embed 导航通过专用 `get_workspace_embed_url` 获取 tokenized URL；`get_app_status` 与 `get_diagnostics` 只返回 redacted `workspaceUrl` 展示面。
-- Tauri capability 已按窗口分层：`main` 保留 webview 创建权限，`prefill` 与 `workspace-import-picker` 只持有 `core:default`，外部 iframe 只允许内置 Kimi origin 与 `VITE_KIMI_EXTERNAL_FRAME_ALLOWLIST` 中的精确 origin。
-- Tauri command 注册表已从 `lib.rs` 移到 `src-tauri/src/commands.rs`，按运行域分组；bridge、install、skills、workspace grid、context menu 和 workspace import 域 command 实现已迁到 `src-tauri/src/commands/` 子模块；`scripts/check_command_registry.mjs` 校验每个注册 command 有 domain owner、窗口 capability、用途说明，并检查 install compat commands 的退出登记。
+- Tauri capability 已按窗口分层：`main` 保留 webview 创建权限和完整自定义 command 注册表；`prefill` 只允许 6 个启动监控/恢复 commands；`workspace-import-picker` 只允许 4 个导入 commands，并额外持有目录选择所需的 `dialog:allow-open`。外部 iframe 只允许内置 Kimi origin 与 `VITE_KIMI_EXTERNAL_FRAME_ALLOWLIST` 中的精确 origin。
+- Tauri command 注册表已从 `lib.rs` 移到 `src-tauri/src/commands.rs`，按运行域分组；bridge、install、skills、workspace grid、context menu 和 workspace import 域 command 实现已迁到 `src-tauri/src/commands/` 子模块；`scripts/check_command_registry.mjs` 校验每个注册 command 有 domain owner、窗口 capability、用途说明，并同步检查 build manifest、分组 permission、capability 与 install compat commands 的退出登记。
 - `api_v1_client.rs` 已提供 `/api/v1` Bearer + envelope `{code,msg,data,request_id}` 解包薄客户端，workspace/session 调用已复用它。
 - `workspace_session.rs` 使用 `GET /api/v1/sessions?page_size=100`、`POST /api/v1/workspaces { root }` 和 `POST /api/v1/sessions` 的最小映射；session 主键兼容官方 `id`，工作目录优先从 `metadata.cwd` 提取。
 - Workspace Grid 前端已引入 `zustand` 切片，使用 Pane/Slot 分离模型、1/2/3/4/5/6 窗预设、标题栏布局 popover、逐缝拖拽 resize + 持久化自定义 track、键盘切换、pane header 拖拽交换、iframe 内跨站 http(s) 链接系统浏览器打开、外部页 timeout fallback、嵌入式 Tauri 子 Webview 承载、独立应用 WebviewWindow fallback、native Webview per-pane `dataDirectory` namespace、mount policy 挂起/恢复和 6 窗上限；旧双窗 localStorage 键保留为迁移兼容层，Grid 内不再渲染自定义布局保存/恢复工具栏。

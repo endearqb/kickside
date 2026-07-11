@@ -364,6 +364,52 @@ describe("WorkspaceGridView", () => {
       document.querySelector('iframe[src="https://kimi.com/path"]'),
     ).toBeNull();
   });
+
+  it.each([
+    ["pane removal", (paneId: string) => useWorkspaceGridStore.getState().removePane(paneId)],
+    [
+      "URL change",
+      (paneId: string) =>
+        useWorkspaceGridStore.setState((state) => ({
+          panes: state.panes.map((pane) =>
+            pane.id === paneId ? { ...pane, url: "https://kimi.com/next" } : pane,
+          ),
+        })),
+    ],
+    [
+      "suspension",
+      (paneId: string) =>
+        useWorkspaceGridStore.getState().setPaneMountPolicy(paneId, "suspended"),
+    ],
+  ])("closes a child webview that resolves after %s", async (_scenario, invalidate) => {
+    vi.useFakeTimers();
+    const externalPane = addExternalPaneToGrid();
+    const controller = {
+      close: vi.fn(async () => undefined),
+      sync: vi.fn(async () => undefined),
+    };
+    const creation = deferred<typeof controller>();
+    vi.mocked(createEmbeddedExternalWebview).mockReturnValueOnce(creation.promise);
+    render(<WorkspaceGridView {...props} />);
+
+    act(() => {
+      vi.advanceTimersByTime(8_000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "在窗格内打开" }));
+      await Promise.resolve();
+    });
+    expect(createEmbeddedExternalWebview).toHaveBeenCalledTimes(1);
+
+    act(() => invalidate(externalPane.id));
+    await act(async () => {
+      creation.resolve(controller);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(controller.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 function pointerEvent(type: string, clientX: number, clientY = 0): Event {
@@ -394,6 +440,14 @@ function setElementRect(element: Element, value: DOMRect) {
     configurable: true,
     value: () => value,
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }
 
 function addExternalPaneToGrid() {

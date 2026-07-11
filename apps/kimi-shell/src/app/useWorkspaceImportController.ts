@@ -130,7 +130,9 @@ export function useWorkspaceImportController({
       });
       setWorkspaceImportRequest(null);
       setWorkspaceImportResult(result);
-      await refreshStatus();
+      if (!isWorkspaceImportPickerRoute) {
+        await refreshStatus();
+      }
       return result;
     } catch (error) {
       setActionError(String(error));
@@ -159,7 +161,9 @@ export function useWorkspaceImportController({
       });
       setWorkspaceImportRequest(null);
       setWorkspaceImportResult(result);
-      await refreshStatus();
+      if (!isWorkspaceImportPickerRoute) {
+        await refreshStatus();
+      }
       return result;
     } catch (error) {
       setActionError(String(error));

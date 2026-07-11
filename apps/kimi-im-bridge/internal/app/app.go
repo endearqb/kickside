@@ -55,6 +55,7 @@ type Service struct {
 	runtimeSvc         *runtime.Service
 	skillsAuthFilePath string
 
+	lifecycleMu   sync.Mutex
 	mu            sync.RWMutex
 	state         domain.BridgeRuntimeState
 	startedAt     string
@@ -179,6 +180,9 @@ func newRuntimeProvider(
 }
 
 func (s *Service) Start() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
 	s.mu.Lock()
 	if s.state == domain.BridgeStateRunning {
 		s.mu.Unlock()
@@ -231,6 +235,9 @@ func (s *Service) Start() error {
 }
 
 func (s *Service) Shutdown(ctx context.Context) error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
 	s.mu.Lock()
 	if s.state == domain.BridgeStateStopped {
 		s.mu.Unlock()

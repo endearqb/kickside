@@ -401,6 +401,37 @@ func TestAdminJSONBodyLimit(t *testing.T) {
 	}
 }
 
+func TestAdminJSONRejectsExtraContent(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"multiple values":  `{"workDir":"D:/repo"} {"workDir":"D:/other"}`,
+		"trailing garbage": `{"workDir":"D:/repo"} trailing`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeService{}
+			server := httptest.NewServer(NewHandler(fake, "token-1"))
+			defer server.Close()
+
+			request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/sessions/import", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("X-Bridge-Admin-Token", "token-1")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatalf("request returned error: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", response.StatusCode)
+			}
+			if len(fake.imported) != 0 {
+				t.Fatalf("invalid body reached service: %+v", fake.imported)
+			}
+		})
+	}
+}
+
 func TestApprovalsAndRuntimeStopEndpoints(t *testing.T) {
 	t.Parallel()
 

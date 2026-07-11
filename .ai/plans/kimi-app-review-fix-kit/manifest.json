@@ -1,0 +1,53 @@
+{
+  "kitVersion": "1.0.0",
+  "generatedAt": "2026-07-11",
+  "repository": "endearqb/kimi-app",
+  "branch": "main",
+  "reviewedCommit": "c2aaa14b9891c7de31363610d643ba70fa95c1e4",
+  "applicationVersion": "0.1.7",
+  "githubWrites": false,
+  "fixes": [
+    {
+      "id": "KIMI-SEC-001",
+      "severity": "high",
+      "summary": "Scope custom Tauri commands per local window"
+    },
+    {
+      "id": "KIMI-FUNC-002",
+      "severity": "high",
+      "summary": "Restore workspace import directory-dialog permission and suppress unrelated picker side effects"
+    },
+    {
+      "id": "KIMI-CONC-003",
+      "severity": "high",
+      "summary": "Serialize Go Bridge Start and Shutdown lifecycle operations"
+    },
+    {
+      "id": "KIMI-UI-004",
+      "severity": "high",
+      "summary": "Close stale asynchronously-created child Webviews"
+    },
+    {
+      "id": "KIMI-API-005",
+      "severity": "medium",
+      "summary": "Reject multiple JSON values in one Bridge Admin API request body"
+    }
+  ],
+  "repositoryChanges": [
+    "apps/kimi-im-bridge/internal/admin/server.go",
+    "apps/kimi-im-bridge/internal/admin/server_test.go",
+    "apps/kimi-im-bridge/internal/app/app.go",
+    "apps/kimi-im-bridge/internal/app/app_test.go",
+    "apps/kimi-shell/package.json",
+    "apps/kimi-shell/scripts/check_command_permissions.mjs",
+    "apps/kimi-shell/src-tauri/build.rs",
+    "apps/kimi-shell/src-tauri/capabilities/default.json",
+    "apps/kimi-shell/src-tauri/permissions/command-access.toml",
+    "apps/kimi-shell/src/app/useInstallController.ts",
+    "apps/kimi-shell/src/app/useShellController.ts",
+    "apps/kimi-shell/src/app/useShellPollingController.ts",
+    "apps/kimi-shell/src/app/useWorkspaceImportController.ts",
+    "apps/kimi-shell/src/features/workspace-grid/PaneFrame.tsx",
+    "apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.test.tsx"
+  ]
+}

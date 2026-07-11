@@ -2,7 +2,7 @@
   "name": "appskimi-shell",
   "description": "Kimi Sidekick desktop shell for Kimi Code Web.",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.1.8",
   "packageManager": "pnpm@10.34.4",
   "license": "MIT",
   "repository": {

@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
@@ -134,6 +136,79 @@ func TestNewStatusHandlesFreshDatabaseChannelRows(t *testing.T) {
 	if len(status.Channels) != 0 {
 		t.Fatalf("expected fresh database status to start without connectors, got %+v", status.Channels)
 	}
+}
+
+func TestServiceSerializesConcurrentLifecycleCalls(t *testing.T) {
+	run := func(calls ...func() error) {
+		t.Helper()
+		var wait sync.WaitGroup
+		errs := make(chan error, len(calls))
+		for _, call := range calls {
+			wait.Add(1)
+			go func(call func() error) {
+				defer wait.Done()
+				errs <- call()
+			}(call)
+		}
+		wait.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Errorf("lifecycle call returned error: %v", err)
+			}
+		}
+	}
+
+	concurrentStartService := newLifecycleTestService(t)
+	defer concurrentStartService.Close()
+	run(concurrentStartService.Start, concurrentStartService.Start)
+	if err := concurrentStartService.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown after concurrent Start returned error: %v", err)
+	}
+
+	interleavedService := newLifecycleTestService(t)
+	defer interleavedService.Close()
+	run(interleavedService.Start, func() error { return interleavedService.Shutdown(context.Background()) })
+	if err := interleavedService.Shutdown(context.Background()); err != nil {
+		t.Fatalf("final Shutdown returned error: %v", err)
+	}
+	interleavedService.mu.RLock()
+	state := interleavedService.state
+	interleavedService.mu.RUnlock()
+	if state != domain.BridgeStateStopped {
+		t.Fatalf("expected final state %q, got %q", domain.BridgeStateStopped, state)
+	}
+}
+
+func newLifecycleTestService(t *testing.T) *Service {
+	t.Helper()
+	dir := t.TempDir()
+	service, err := New(Options{
+		Version:     "test",
+		ConfigPath:  filepath.Join(dir, "bridge_settings.json"),
+		SecretsPath: filepath.Join(dir, "bridge_secrets.json"),
+		DBPath:      filepath.Join(dir, "bridge.db"),
+		LogFilePath: filepath.Join(dir, "logs", "bridge.log"),
+		AdminPort:   reserveTCPPort(t),
+		AdminToken:  "token-1",
+	})
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	return service
+}
+
+func reserveTCPPort(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve TCP port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("release reserved TCP port: %v", err)
+	}
+	return port
 }
 
 func TestStatusFallsBackToConfiguredChannelsWhenStoreSnapshotFails(t *testing.T) {

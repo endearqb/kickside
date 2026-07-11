@@ -320,6 +320,7 @@ function PaneContent({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const embeddedControllerRef =
     useRef<EmbeddedExternalWebviewController | null>(null);
+  const embeddedOpenGenerationRef = useRef(0);
   const [externalState, setExternalState] =
     useState<WorkspacePaneState>("loading");
   const [embeddedStatus, setEmbeddedStatus] = useState<
@@ -349,6 +350,7 @@ function PaneContent({
     setEmbeddedStatus("idle");
     setEmbeddedError("");
     return () => {
+      embeddedOpenGenerationRef.current += 1;
       void closeEmbeddedController(embeddedControllerRef).catch(() => undefined);
     };
   }, [pane.id, sourceUrl]);
@@ -362,6 +364,7 @@ function PaneContent({
       return;
     }
 
+    embeddedOpenGenerationRef.current += 1;
     void closeEmbeddedController(embeddedControllerRef)
       .then(() => setEmbeddedStatus("idle"))
       .catch((error) => {
@@ -446,20 +449,37 @@ function PaneContent({
       return;
     }
 
+    const openGeneration = embeddedOpenGenerationRef.current + 1;
+    embeddedOpenGenerationRef.current = openGeneration;
     setEmbeddedStatus("opening");
     setEmbeddedError("");
 
+    let controller: EmbeddedExternalWebviewController | null = null;
     try {
       await closeEmbeddedController(embeddedControllerRef);
-      embeddedControllerRef.current = await createEmbeddedExternalWebview({
+      if (embeddedOpenGenerationRef.current !== openGeneration) {
+        return;
+      }
+
+      controller = await createEmbeddedExternalWebview({
         url: sourceUrl,
         title: source.title,
         bounds: rectToEmbeddedBounds(host.getBoundingClientRect()),
         storageNamespace: pane.storageNamespace,
       });
+      if (embeddedOpenGenerationRef.current !== openGeneration) {
+        await controller.close().catch(() => undefined);
+        return;
+      }
+
+      embeddedControllerRef.current = controller;
       setExternalState("ready");
       setEmbeddedStatus("active");
     } catch (error) {
+      if (embeddedOpenGenerationRef.current !== openGeneration) {
+        await controller?.close().catch(() => undefined);
+        return;
+      }
       setEmbeddedStatus("failed");
       setEmbeddedError(`嵌入式 Webview 打开失败：${formatError(error)}`);
     }

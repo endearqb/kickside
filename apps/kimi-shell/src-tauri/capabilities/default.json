@@ -14,7 +14,8 @@
         "core:webview:allow-set-webview-position",
         "core:webview:allow-set-webview-size",
         "core:webview:allow-webview-close",
-        "dialog:allow-open"
+        "dialog:allow-open",
+        "main-command-access"
       ]
     },
     {
@@ -22,14 +23,18 @@
       "description": "Capability for the prefill window",
       "local": true,
       "windows": ["prefill"],
-      "permissions": ["core:default"]
+      "permissions": ["core:default", "prefill-command-access"]
     },
     {
       "identifier": "workspace-import-picker",
       "description": "Capability for the workspace import picker window",
       "local": true,
       "windows": ["workspace-import-picker"],
-      "permissions": ["core:default"]
+      "permissions": [
+        "core:default",
+        "dialog:allow-open",
+        "workspace-import-command-access"
+      ]
     },
     {
       "identifier": "frameless-window-controls",

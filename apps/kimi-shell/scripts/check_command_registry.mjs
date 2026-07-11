@@ -3,6 +3,14 @@ import path from "node:path";
 import process from "node:process";
 
 const commandsPath = path.resolve(process.cwd(), "src-tauri", "src", "commands.rs");
+const buildPath = path.resolve(process.cwd(), "src-tauri", "build.rs");
+const permissionPath = path.resolve(
+  process.cwd(),
+  "src-tauri",
+  "permissions",
+  "command-access.toml",
+);
+const capabilityPath = path.resolve(process.cwd(), "src-tauri", "capabilities", "default.json");
 const architecturePath = path.resolve(process.cwd(), "..", "..", ".ai", "architecture", "current-state.md");
 const source = fs.readFileSync(commandsPath, "utf8");
 const match = source.match(/tauri::generate_handler!\[\s*([\s\S]*?)\s*\]/);
@@ -283,6 +291,47 @@ for (const command of knownCommands.keys()) {
   }
 }
 
+const registeredCommandNames = registeredCommands.map((command) => command.split("::").pop());
+const buildCommands = parseRustStringArray(fs.readFileSync(buildPath, "utf8"), "APP_COMMANDS");
+const permissionCommands = parsePermissionCommands(fs.readFileSync(permissionPath, "utf8"));
+const capabilities = JSON.parse(fs.readFileSync(capabilityPath, "utf8"));
+const expectedPermissions = new Map([
+  ["main-command-access", registeredCommandNames],
+  [
+    "prefill-command-access",
+    [
+      "get_app_status",
+      "get_startup_monitor_status",
+      "complete_startup_monitor_route",
+      "retry_start_backend",
+      "open_logs_folder",
+      "quit_app_gracefully",
+    ],
+  ],
+  [
+    "workspace-import-command-access",
+    [
+      "list_workspace_import_targets",
+      "get_active_workspace_import_request",
+      "complete_workspace_import_request",
+      "cancel_workspace_import_request",
+    ],
+  ],
+]);
+
+compareSets("build.rs APP_COMMANDS", buildCommands, registeredCommandNames);
+for (const [identifier, expected] of expectedPermissions) {
+  compareSets(`permission ${identifier}`, permissionCommands.get(identifier) ?? [], expected);
+}
+requireCapabilityPermission(capabilities, "default", "main-command-access");
+requireCapabilityPermission(capabilities, "prefill", "prefill-command-access");
+requireCapabilityPermission(
+  capabilities,
+  "workspace-import-picker",
+  "workspace-import-command-access",
+);
+requireCapabilityPermission(capabilities, "workspace-import-picker", "dialog:allow-open");
+
 const architecture = fs.existsSync(architecturePath)
   ? fs.readFileSync(architecturePath, "utf8")
   : "";
@@ -304,4 +353,48 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log(`Command registry check passed (${registeredCommands.length} commands).`);
+console.log(
+  `Command registry and window ACL check passed (${registeredCommands.length} commands).`,
+);
+
+function parseRustStringArray(source, constantName) {
+  const match = source.match(
+    new RegExp(`const\\s+${constantName}\\s*:[^=]+=[\\s\\S]*?&\\[([\\s\\S]*?)\\];`),
+  );
+  if (!match) throw new Error(`could not find ${constantName} in build.rs`);
+  return [...match[1].matchAll(/"([a-zA-Z_][a-zA-Z0-9_]*)"/g)].map((item) => item[1]);
+}
+
+function parsePermissionCommands(source) {
+  const permissions = new Map();
+  for (const block of source.split("[[permission]]").slice(1)) {
+    const identifier = block.match(/identifier\s*=\s*"([^"]+)"/)?.[1];
+    const allowed = block.match(/commands\.allow\s*=\s*\[([\s\S]*?)\]/)?.[1];
+    if (identifier && allowed != null) {
+      permissions.set(
+        identifier,
+        [...allowed.matchAll(/"([a-zA-Z_][a-zA-Z0-9_]*)"/g)].map((item) => item[1]),
+      );
+    }
+  }
+  return permissions;
+}
+
+function compareSets(label, actual, expected) {
+  const actualSet = new Set(actual);
+  const expectedSet = new Set(expected);
+  const missing = [...expectedSet].filter((item) => !actualSet.has(item));
+  const extra = [...actualSet].filter((item) => !expectedSet.has(item));
+  if (actual.length !== actualSet.size) errors.push(`${label} contains duplicate entries`);
+  if (missing.length > 0) errors.push(`${label} missing: ${missing.join(", ")}`);
+  if (extra.length > 0) errors.push(`${label} has unexpected entries: ${extra.join(", ")}`);
+}
+
+function requireCapabilityPermission(capabilities, identifier, permission) {
+  const capability = capabilities.capabilities?.find((item) => item.identifier === identifier);
+  if (!capability) {
+    errors.push(`missing capability: ${identifier}`);
+  } else if (!capability.permissions?.includes(permission)) {
+    errors.push(`capability ${identifier} is missing permission ${permission}`);
+  }
+}

@@ -8003,6 +8003,48 @@ input:focus {
   overflow-y: auto;
 }
 
+.control-center-shell .workspace-hub-detail-top {
+  align-items: center;
+}
+
+.control-center-shell .workspace-hub-top-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-center-shell .workspace-hub-top-title h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.control-center-shell .workspace-hub-detail-top-actions {
+  align-items: center;
+}
+
+.control-center-shell .workspace-hub-workspace-detail {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  max-width: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.control-center-shell .workspace-hub-workspace-file-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-width: none;
+}
+
+.control-center-shell .workspace-hub-workspace-file-preview .directory-preview-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
 .control-center-shell .workspace-hub-directory-panel > .directory-toolbar {
   flex: 0 0 auto;
 }

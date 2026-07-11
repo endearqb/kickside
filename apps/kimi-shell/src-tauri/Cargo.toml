@@ -1,6 +1,6 @@
 [package]
 name = "appskimi-shell"
-version = "0.1.6"
+version = "0.1.7"
 description = "Kimi Sidekick"
 authors = ["kimi-shell"]
 edition = "2021"

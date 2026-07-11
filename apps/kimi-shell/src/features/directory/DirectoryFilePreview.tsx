@@ -13,6 +13,7 @@ type DirectoryFilePreviewProps = {
   readFile: (relPath: string) => Promise<SkillFileContent>;
   onOpenRoot?: () => Promise<void> | void;
   className?: string;
+  showDescription?: boolean;
 };
 
 export function DirectoryFilePreview({
@@ -22,6 +23,7 @@ export function DirectoryFilePreview({
   readFile,
   onOpenRoot,
   className,
+  showDescription = true,
 }: DirectoryFilePreviewProps) {
   const [entries, setEntries] = useState<SkillFileEntry[] | null>(null);
   const [entriesError, setEntriesError] = useState<string | null>(null);
@@ -190,39 +192,33 @@ export function DirectoryFilePreview({
 
   return (
     <div className={cn("directory-file-preview", className)}>
-      <section className="directory-description-card">
-        <div>
-          <span className="directory-eyebrow">Description</span>
-          <p>{description}</p>
-          {licenseEntry ? (
-            <button
-              type="button"
-              className="directory-license-link"
-              onClick={() => setSelectedPath(licenseEntry.relPath)}
-            >
-              License 完整条款见 {licenseEntry.relPath}
-            </button>
-          ) : null}
-        </div>
-        <div className="directory-preview-actions">
-          <Button type="button" variant="outline" size="sm" onClick={() => setMode("preview")} disabled={!canPreview}>
-            预览
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setMode("source")} disabled={!selectedPath}>
-            源码
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            icon={copied ? <Check size={15} /> : <Copy size={15} />}
-            onClick={() => void copyCurrentFile()}
-            disabled={!content?.text || content.truncated}
-            aria-label="复制当前文件"
-            title="复制当前文件"
+      {showDescription ? (
+        <section className="directory-description-card">
+          <div>
+            <span className="directory-eyebrow">Description</span>
+            <p>{description}</p>
+            {licenseEntry ? (
+              <button
+                type="button"
+                className="directory-license-link"
+                onClick={() => setSelectedPath(licenseEntry.relPath)}
+              >
+                License 完整条款见 {licenseEntry.relPath}
+              </button>
+            ) : null}
+          </div>
+          <DirectoryPreviewActions
+            canPreview={canPreview}
+            selectedPath={selectedPath}
+            copied={copied}
+            contentText={content?.text}
+            contentTruncated={content?.truncated}
+            onPreview={() => setMode("preview")}
+            onSource={() => setMode("source")}
+            onCopy={() => void copyCurrentFile()}
           />
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <div className="directory-preview-layout">
         <aside className="directory-file-tree" aria-label="Skill 文件树" role="tree">
@@ -270,6 +266,21 @@ export function DirectoryFilePreview({
         </aside>
 
         <section ref={contentPaneRef} className="directory-file-content" aria-live="polite">
+          {!showDescription && selectedPath && !entriesError && !contentError ? (
+            <div className="directory-file-content-header">
+              <strong>{selectedEntry?.relPath ?? content?.relPath ?? selectedPath}</strong>
+              <DirectoryPreviewActions
+                canPreview={canPreview}
+                selectedPath={selectedPath}
+                copied={copied}
+                contentText={content?.text}
+                contentTruncated={content?.truncated}
+                onPreview={() => setMode("preview")}
+                onSource={() => setMode("source")}
+                onCopy={() => void copyCurrentFile()}
+              />
+            </div>
+          ) : null}
           {entriesError ? (
             <div className="directory-file-error-state" role="alert">
               <strong>文件列表加载失败</strong>
@@ -316,9 +327,11 @@ export function DirectoryFilePreview({
           ) : null}
           {showTextContent && content?.text ? (
             <>
-              <div className="directory-file-content-header">
-                <strong>{selectedEntry?.relPath ?? content.relPath}</strong>
-              </div>
+              {showDescription ? (
+                <div className="directory-file-content-header">
+                  <strong>{selectedEntry?.relPath ?? content.relPath}</strong>
+                </div>
+              ) : null}
               {activeMode === "preview" && canPreview ? (
                 <MarkdownPreview text={content.text} onOpenLink={openMarkdownLink} />
               ) : (
@@ -328,6 +341,49 @@ export function DirectoryFilePreview({
           ) : null}
         </section>
       </div>
+    </div>
+  );
+}
+
+function DirectoryPreviewActions({
+  canPreview,
+  selectedPath,
+  copied,
+  contentText,
+  contentTruncated,
+  onPreview,
+  onSource,
+  onCopy,
+  className,
+}: {
+  canPreview: boolean;
+  selectedPath: string;
+  copied: boolean;
+  contentText?: string;
+  contentTruncated?: boolean;
+  onPreview: () => void;
+  onSource: () => void;
+  onCopy: () => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("directory-preview-actions", className)}>
+      <Button type="button" variant="outline" size="sm" onClick={onPreview} disabled={!canPreview}>
+        预览
+      </Button>
+      <Button type="button" variant="outline" size="sm" onClick={onSource} disabled={!selectedPath}>
+        源码
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        icon={copied ? <Check size={15} /> : <Copy size={15} />}
+        onClick={onCopy}
+        disabled={!contentText || contentTruncated}
+        aria-label="复制当前文件"
+        title="复制当前文件"
+      />
     </div>
   );
 }

@@ -63,6 +63,36 @@ describe("MarkdownPreview", () => {
     await waitFor(() => expect(second.getAttribute("aria-selected")).toBe("true"));
   });
 
+  it("puts preview actions inside the file content header without a description card", async () => {
+    render(
+      <DirectoryFilePreview
+        entityKey="skill:compact"
+        description="Demo"
+        showDescription={false}
+        loadEntries={async () => [{ relPath: "SKILL.md", isDir: false }]}
+        readFile={async (relPath) => ({
+          relPath,
+          size: relPath.length,
+          isBinary: false,
+          truncated: false,
+          text: "# Skill",
+        })}
+      />,
+    );
+
+    await screen.findByRole("treeitem", { name: /SKILL.md/ });
+
+    const previewButton = await screen.findByRole("button", { name: "预览" });
+    const sourceButton = screen.getByRole("button", { name: "源码" });
+    const copyButton = screen.getByRole("button", { name: "复制当前文件" });
+    const header = previewButton.closest(".directory-file-content-header");
+
+    expect(header).toBeTruthy();
+    expect(sourceButton.closest(".directory-file-content-header")).toBe(header);
+    expect(copyButton.closest(".directory-file-content-header")).toBe(header);
+    expect(document.querySelector(".directory-description-card")).toBeNull();
+  });
+
   it("collapses directories by default and expands them with ArrowRight", async () => {
     const readFile = vi.fn(async (relPath: string) => ({
       relPath,

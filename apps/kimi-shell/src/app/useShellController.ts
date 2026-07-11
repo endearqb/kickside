@@ -2860,6 +2860,8 @@ export function useShellController() {
 
   async function handleSelectSkill(skillId: string) {
     setSelectedSkillId(skillId);
+    setSelectedDiscoveryId(null);
+    setSelectedDiscoveryDetail(null);
     try {
       await refreshSelectedSkillDetail(skillId);
     } catch (error) {
@@ -2878,6 +2880,10 @@ export function useShellController() {
   function openSkillCenter() {
     setActionError(null);
     handleCloseInstallCommands();
+    setSelectedSkillId(null);
+    setSelectedSkillDetail(null);
+    setSelectedDiscoveryId(null);
+    setSelectedDiscoveryDetail(null);
     setActiveControlSection("skill_center");
     setControlCenterTask(null);
     if (screen === "workspace") {
@@ -2888,7 +2894,7 @@ export function useShellController() {
       window.location.hash = "/control-center";
       setRouteHash(window.location.hash);
     }
-    void refreshSkillCenterState(selectedSkillId);
+    void refreshSkillCenterState();
   }
 
   async function handleInstallSkillFromGit() {
@@ -3184,6 +3190,8 @@ export function useShellController() {
 
   async function handleSelectDiscoveredSkill(discoveryId: string) {
     setSelectedDiscoveryId(discoveryId);
+    setSelectedSkillId(null);
+    setSelectedSkillDetail(null);
     try {
       await refreshSelectedDiscoveryDetail(discoveryId);
     } catch (error) {

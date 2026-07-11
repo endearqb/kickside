@@ -174,12 +174,13 @@ export function KimiCodeAccessTaskContent({
       <details
         className="cc-config-disclosure"
         open={expandedSections[field] ?? Boolean(serviceView?.apiKeyConfigured || mode === "custom")}
-        onToggle={(event) =>
+        onToggle={(event) => {
+          const open = event.currentTarget.open;
           setExpandedSections((current) => ({
             ...current,
-            [field]: event.currentTarget.open,
-          }))
-        }
+            [field]: open,
+          }));
+        }}
       >
         <summary>
           <span>{label}</span>

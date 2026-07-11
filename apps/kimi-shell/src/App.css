@@ -1208,6 +1208,26 @@
   flex-wrap: wrap;
 }
 
+.skill-center-top-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skill-center-top-title h1 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-center-detail-top {
+  align-items: center;
+}
+
+.skill-center-detail-top-actions {
+  align-items: center;
+}
+
 .skill-center-rail-title-row {
   min-width: 0;
   display: grid;
@@ -5362,7 +5382,7 @@ input:focus {
 }
 
 .skill-center-detail-body {
-  gap: 18px;
+  gap: 10px;
   scroll-padding-bottom: 36px;
 }
 
@@ -7840,6 +7860,17 @@ input:focus {
   background: transparent;
 }
 
+.control-center-shell .skill-center-detail-only .cc-workbench-detail,
+.control-center-shell .skill-center-detail-only .cc-workbench-detail-body {
+  min-height: 0;
+}
+
+.control-center-shell .skill-center-detail-only .cc-workbench-detail-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .control-center-shell .workspace-hub-panel-detail-only,
 .control-center-shell .workspace-schedule-panel-detail-only,
 .control-center-shell .cc-unified-detail-section,
@@ -7869,6 +7900,19 @@ input:focus {
   height: 100%;
   max-height: none;
   margin-bottom: 0;
+}
+
+.control-center-shell .skill-center-page .skill-center-file-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-width: none;
+}
+
+.control-center-shell .skill-center-page .skill-center-file-preview .directory-preview-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .control-center-shell .skill-center-directory-toolbar {
@@ -7944,7 +7988,7 @@ input:focus {
   justify-self: end;
 }
 
-.control-center-shell .workspace-hub-directory-card {
+.control-center-shell .workspace-hub-directory-panel {
   display: flex;
   min-height: 0;
   height: 100%;
@@ -7959,13 +8003,12 @@ input:focus {
   overflow-y: auto;
 }
 
-.control-center-shell .workspace-hub-directory-card > h2,
-.control-center-shell .workspace-hub-directory-card > .directory-toolbar {
+.control-center-shell .workspace-hub-directory-panel > .directory-toolbar {
   flex: 0 0 auto;
 }
 
-.control-center-shell .workspace-hub-directory-card > .directory-toolbar {
-  grid-template-columns: minmax(220px, 1fr) auto minmax(132px, auto) minmax(132px, auto);
+.control-center-shell .workspace-hub-directory-panel > .directory-toolbar {
+  grid-template-columns: minmax(220px, 1fr) minmax(132px, auto) minmax(132px, auto);
 }
 
 .control-center-shell .workspace-hub-directory-grid {
@@ -8494,16 +8537,6 @@ input:focus {
   text-transform: uppercase;
 }
 
-.control-center-shell .cc-config-access-layout .cc-config-panel,
-.control-center-shell .cc-config-access-layout .cc-config-summary-panel {
-  min-width: 0;
-  padding: 16px;
-  border: 1px solid var(--cc-border);
-  border-radius: var(--radius-container);
-  background: color-mix(in srgb, var(--cc-surface) 82%, transparent);
-  overflow: hidden;
-}
-
 .control-center-shell .cc-config-modal-body.cc-config-access-layout {
   min-width: 0;
   display: block;
@@ -8777,6 +8810,7 @@ input:focus {
 
 .cc-settings-bar {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 0;
   padding: 0;
@@ -9696,7 +9730,7 @@ input:focus {
 }
 
 @media (max-width: 900px) {
-  .control-center-shell .workspace-hub-directory-card > .directory-toolbar,
+  .control-center-shell .workspace-hub-directory-panel > .directory-toolbar,
   .control-center-shell .skill-center-directory-toolbar {
     grid-template-columns: 1fr;
   }

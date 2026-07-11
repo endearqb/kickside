@@ -21,7 +21,6 @@ import {
   ControlCenterStatusBadge,
   type ControlCenterStatusTone,
 } from "@/components/control-center/ControlCenterStatusBadge";
-import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -249,7 +248,6 @@ export function WorkspaceHubPanel({
   const [dryRun, setDryRun] = useState<HarnessDryRunResult | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<WorkspaceRecord | null>(null);
   const [directoryQuery, setDirectoryQuery] = useState("");
-  const [directoryType, setDirectoryType] = useState<WorkspaceHubDirectoryType>("all");
   const [directoryFilter, setDirectoryFilter] = useState<WorkspaceHubDirectoryFilter>("all");
   const [directorySort, setDirectorySort] = useState<WorkspaceHubSortKey>("name");
   const [workspaceSkillTargets, setWorkspaceSkillTargets] = useState<WorkspaceSkillTarget[]>([]);
@@ -481,7 +479,6 @@ export function WorkspaceHubPanel({
 
   const directoryCards = useMemo(() => {
     const harnessCards = harnesses
-      .filter(() => directoryType === "all" || directoryType === "harness")
       .filter(() => directoryFilter === "all")
       .filter((harness) =>
         matchesDirectoryQuery(directoryQuery, [
@@ -522,7 +519,7 @@ export function WorkspaceHubPanel({
 
     const workspaceCards = workspaces
       .filter((workspace) =>
-        matchesWorkspaceDirectoryFilters(workspace, directoryType, directoryFilter),
+        matchesWorkspaceDirectoryFilters(workspace, "all", directoryFilter),
       )
       .filter((workspace) =>
         matchesDirectoryQuery(directoryQuery, [
@@ -574,7 +571,7 @@ export function WorkspaceHubPanel({
       return left.sortName.localeCompare(right.sortName);
     });
     return cards;
-  }, [busy, directoryFilter, directoryQuery, directorySort, directoryType, harnesses, onOpenWorkspace, selectedItemId, workspaces]);
+  }, [busy, directoryFilter, directoryQuery, directorySort, harnesses, onOpenWorkspace, selectedItemId, workspaces]);
 
   const rail = (
     <div className="cc-control-list" aria-label="WorkspaceHub 对象列表">
@@ -1091,8 +1088,7 @@ export function WorkspaceHubPanel({
             {detailContent}
           </section>
         ) : (
-        <section className="cc-image-card workspace-hub-directory-card">
-          <h2>Harness 与工作区</h2>
+        <section className="workspace-hub-directory-panel">
           <div className="directory-toolbar">
             <Input
               value={directoryQuery}
@@ -1100,24 +1096,10 @@ export function WorkspaceHubPanel({
               placeholder="搜索 Harness、工作区、路径或 runtime"
               aria-label="搜索 WorkspaceHub"
             />
-            <ControlCenterSegmentedControl<WorkspaceHubDirectoryType>
-              ariaLabel="WorkspaceHub 类型筛选"
-              value={directoryType}
-              onChange={(value) => {
-                setDirectoryType(value);
-                if (value === "harness") setDirectoryFilter("all");
-              }}
-              items={[
-                { value: "all", label: "全部", description: harnesses.length + workspaces.length },
-                { value: "harness", label: "Harness", description: harnesses.length },
-                { value: "workspace", label: "工作区", description: workspaces.length },
-              ]}
-            />
             <select
               value={directoryFilter}
               onChange={(event) => setDirectoryFilter(event.currentTarget.value as WorkspaceHubDirectoryFilter)}
               aria-label="WorkspaceHub 高级筛选"
-              disabled={directoryType === "harness"}
             >
               <option value="all">全部筛选</option>
               <option value="kimi_code">Kimi Code</option>

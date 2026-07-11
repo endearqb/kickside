@@ -362,6 +362,10 @@
   font-size: 12px;
 }
 
+.directory-file-content-header .directory-preview-actions {
+  margin-left: auto;
+}
+
 .directory-code-viewer,
 .directory-markdown-viewer pre {
   overflow: auto;

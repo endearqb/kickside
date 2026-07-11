@@ -72,6 +72,7 @@ describe("WorkspaceHubPanel helpers", () => {
       lastOpenedAt: "2026-07-03T08:00:00.000Z",
     });
 
+    expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "all", "all")).toBe(true);
     expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "all", "recent")).toBe(true);
     expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "workspace", "harness_source")).toBe(true);
     expect(matchesWorkspaceDirectoryFilters(recentHarnessWorkspace, "workspace", "hermes")).toBe(false);

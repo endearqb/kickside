@@ -38,6 +38,25 @@ type SkillCenterControllerOptions = {
   setActionError: Dispatch<SetStateAction<string | null>>;
 };
 
+export function selectPreferredSkillId(
+  skills: InstalledSkill[],
+  preferredSkillId?: string | null,
+) {
+  return preferredSkillId && skills.some((skill) => skill.id === preferredSkillId)
+    ? preferredSkillId
+    : null;
+}
+
+export function selectPreferredDiscoveryId(
+  records: { discoveryId: string }[],
+  preferredDiscoveryId?: string | null,
+) {
+  return preferredDiscoveryId &&
+    records.some((record) => record.discoveryId === preferredDiscoveryId)
+    ? preferredDiscoveryId
+    : null;
+}
+
 export function useSkillCenterController({
   setActionError,
 }: SkillCenterControllerOptions) {
@@ -87,10 +106,7 @@ export function useSkillCenterController({
   async function refreshInstalledSkills(preferredSkillId?: string | null) {
     const data = await listInstalledSkills();
     setInstalledSkills(data);
-    const nextSelectedId =
-      preferredSkillId && data.some((skill) => skill.id === preferredSkillId)
-        ? preferredSkillId
-        : data[0]?.id ?? null;
+    const nextSelectedId = selectPreferredSkillId(data, preferredSkillId);
     setSelectedSkillId(nextSelectedId);
     return { skills: data, selectedSkillId: nextSelectedId };
   }
@@ -185,11 +201,10 @@ export function useSkillCenterController({
         scanDiscoverableSkills(),
       ]);
       setSkillDiscoverySnapshot(snapshot);
-      const nextSelectedId =
-        preferredDiscoveryId &&
-        snapshot.records.some((record) => record.discoveryId === preferredDiscoveryId)
-          ? preferredDiscoveryId
-          : snapshot.records[0]?.discoveryId ?? null;
+      const nextSelectedId = selectPreferredDiscoveryId(
+        snapshot.records,
+        preferredDiscoveryId,
+      );
       setSelectedDiscoveryId(nextSelectedId);
       setSkillDiscoveryWorkspaces(snapshot.workspaces.length > 0 ? snapshot.workspaces : workspaces);
       await refreshSelectedDiscoveryDetail(nextSelectedId);
@@ -260,7 +275,7 @@ export function useSkillCenterController({
     try {
       const [{ selectedSkillId: nextSelectedId }, globalState, sessionState] =
         await Promise.all([
-          refreshInstalledSkills(preferredSkillId ?? selectedSkillId),
+          refreshInstalledSkills(preferredSkillId),
           refreshGlobalSkillProjections(),
           refreshActiveSessionSkills(),
         ]);

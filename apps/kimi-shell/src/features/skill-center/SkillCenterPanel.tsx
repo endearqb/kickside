@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Eraser, FolderOpen, Plus, Shield, ShieldOff, Sparkles } from "lucide-react";
+import { Eraser, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
   DiscoveredSkillRecord,
@@ -23,7 +23,6 @@ import { ControlCenterEmptyState } from "@/components/control-center/ControlCent
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
-import { ControlCenterSurfaceSection } from "@/components/control-center/ControlCenterSurfaceSection";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,24 +133,6 @@ function statusForSkill(
   };
 }
 
-function projectionForSkill(
-  skillId: string,
-  projections: SkillProjectionRecord[],
-  scope?: SkillApplyScope,
-) {
-  return (
-    projections.find(
-      (item) => item.skillId === skillId && (scope ? item.scope === scope : true),
-    ) ?? null
-  );
-}
-
-function formatProjectionScope(scope: SkillApplyScope) {
-  if (scope === "user_global_kimi") return "用户全局 ~/.agents";
-  if (scope === "kimi_code_home") return "KIMI_CODE_HOME";
-  return "当前工作区";
-}
-
 function renderStatusChip(label: string, tone: "ready" | "muted" | "warning") {
   const mappedTone =
     tone === "ready" ? "success" : tone === "warning" ? "warning" : "neutral";
@@ -163,19 +144,6 @@ function renderStatusChip(label: string, tone: "ready" | "muted" | "warning") {
       {label}
     </ControlCenterStatusBadge>
   );
-}
-
-function formatSkillSource(skill: InstalledSkill) {
-  if (skill.sourceType === "git") {
-    return skill.repoUrl || skill.sourceLabel || "Git";
-  }
-  if (skill.sourceType === "bundled") {
-    return "内置 Skill";
-  }
-  if (skill.sourceType === "discovered_import") {
-    return skill.sourcePath || skill.sourceLabel || "外部发现导入";
-  }
-  return skill.sourcePath || skill.sourceLabel || "本地导入";
 }
 
 function formatSkillSourceGroup(sourceType: InstalledSkill["sourceType"]) {
@@ -243,51 +211,6 @@ export function shouldShowSkillDirectory(
   return detailOnly && section === "manage" && !hasDirectoryDetail;
 }
 
-function renderManifestValues(values: string[], emptyLabel = "未声明") {
-  if (values.length === 0) {
-    return <span className="skill-center-muted">{emptyLabel}</span>;
-  }
-  return (
-    <div className="skill-center-token-list">
-      {values.slice(0, 12).map((value) => (
-        <span key={value} className="skill-center-token">
-          {value}
-        </span>
-      ))}
-      {values.length > 12 ? (
-        <span className="skill-center-token skill-center-token-muted">
-          +{values.length - 12}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function renderInstalledManifestGrid(skill: InstalledSkill) {
-  const rows = [
-    { label: "标签", values: skill.metadata.tags },
-    { label: "触发器", values: skill.metadata.triggers },
-    { label: "文件匹配", values: skill.metadata.filePatterns },
-    {
-      label: "推荐范围",
-      values: skill.metadata.recommendedScopes.map(formatProjectionScope),
-    },
-  ].filter((row) => row.values.length > 0);
-
-  if (rows.length === 0) return null;
-
-  return (
-    <div className="skill-center-manifest-grid">
-      {rows.map((row) => (
-        <div key={row.label} className="skill-center-manifest-card">
-          <span>{row.label}</span>
-          {renderManifestValues(row.values)}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function formatDiscoveryScope(scope: SkillDiscoveryLocation["scope"]) {
   return scope === "user_home" ? "主目录" : "工作区";
 }
@@ -338,37 +261,6 @@ function describeWorkspaceTarget(target: WorkspaceSkillTarget) {
   return "已知工作区";
 }
 
-function renderCollapsibleSection(
-  title: string,
-  expanded: boolean,
-  onToggle: () => void,
-  content: ReactNode,
-) {
-  return (
-    <ControlCenterSurfaceSection
-      className={`skill-center-collapsible ${expanded ? "is-open" : ""}`}
-      title={
-        <button
-          type="button"
-          className="skill-center-section-toggle"
-          onClick={onToggle}
-          aria-expanded={expanded}
-        >
-          <div className="skill-center-section-toggle-copy">
-            <h4>{title}</h4>
-          </div>
-          <ChevronRight
-            size={16}
-            className={`skill-center-section-toggle-icon ${expanded ? "is-open" : ""}`}
-          />
-        </button>
-      }
-    >
-      {expanded ? <div className="skill-center-section-body">{content}</div> : null}
-    </ControlCenterSurfaceSection>
-  );
-}
-
 export function SkillCenterPanel({
   surface,
   busy,
@@ -381,9 +273,6 @@ export function SkillCenterPanel({
   globalSkillProjections,
   activeSessionSkillState,
   workspaceSkillProfile,
-  workspaceRecentSkillIds,
-  workspaceSkillRecommendations,
-  workspaceSkillRestoreResults,
   skillDiscoverySnapshot,
   selectedDiscoveryId,
   selectedDiscoveryDetail,
@@ -391,7 +280,6 @@ export function SkillCenterPanel({
   selectedWorkspaceSkillTargetId,
   workspaceSkillInventory,
   selectedWorkspaceSkillContainerKind,
-  currentWorkspaceLabel,
   onSelectSkill,
   onBackToDirectory,
   onSelectDiscoveredSkill,
@@ -407,7 +295,6 @@ export function SkillCenterPanel({
   onSetPin,
   onUpdateSkill,
   onUninstallSkill,
-  onRecoverWorkspaceSkill,
   search,
   filter,
   onSearchChange,
@@ -416,17 +303,12 @@ export function SkillCenterPanel({
   railActions,
   detailOnly = false,
 }: SkillCenterPanelProps) {
-  const [filesExpanded, setFilesExpanded] = useState(true);
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
   const [directoryPrimarySource, setDirectoryPrimarySource] =
     useState<SkillDirectoryPrimarySource>("all");
   const [directorySource, setDirectorySource] = useState<SkillDirectorySourceFilter>("all");
   const [directorySort, setDirectorySort] = useState<SkillDirectorySortKey>("name");
   const actionErrorText = actionError?.trim() ?? "";
-
-  useEffect(() => {
-    setFilesExpanded(true);
-  }, [manageContextId, section, selectedDiscoveryId, selectedSkillId]);
 
   const keyword = search.trim().toLowerCase();
   const currentWorkspaceTarget =
@@ -453,33 +335,6 @@ export function SkillCenterPanel({
     setDirectorySource("all");
     setDirectorySort("name");
   }
-
-  const recentSkills = useMemo(
-    () =>
-      workspaceRecentSkillIds
-        .map((skillId) => installedSkills.find((item) => item.id === skillId))
-        .filter((item): item is InstalledSkill => Boolean(item)),
-    [installedSkills, workspaceRecentSkillIds],
-  );
-
-  const recommendationMap = useMemo(
-    () =>
-      new Map(
-        workspaceSkillRecommendations.map((recommendation) => [
-          recommendation.skillId,
-          recommendation,
-        ]),
-      ),
-    [workspaceSkillRecommendations],
-  );
-
-  const restoreResultMap = useMemo(
-    () =>
-      new Map(
-        workspaceSkillRestoreResults.map((result) => [result.skillId, result]),
-      ),
-    [workspaceSkillRestoreResults],
-  );
 
   const filteredInstalledSkills = useMemo(() => {
     const pinnedSkillIds = new Set(workspaceSkillProfile?.pinnedSkillIds ?? []);
@@ -672,55 +527,6 @@ export function SkillCenterPanel({
     },
     [selectedDiscoveredSkillId],
   );
-
-  const selectedInstalledState = selectedInstalledSkill
-    ? statusForSkill(selectedInstalledSkill.id, globalSkillProjections, activeSessionSkillState)
-    : {
-        globalApplied: false,
-        userGlobalApplied: false,
-        kimiCodeHomeApplied: false,
-        sessionApplied: false,
-      };
-  const selectedInstalledUserGlobalProjection = selectedInstalledSkill
-    ? projectionForSkill(selectedInstalledSkill.id, globalSkillProjections, "user_global_kimi")
-    : null;
-  const selectedInstalledKimiCodeHomeProjection = selectedInstalledSkill
-    ? projectionForSkill(selectedInstalledSkill.id, globalSkillProjections, "kimi_code_home")
-    : null;
-  const selectedInstalledSessionProjection = selectedInstalledSkill
-    ? projectionForSkill(selectedInstalledSkill.id, activeSessionSkillState.projections)
-    : null;
-  const selectedInstalledPinned = selectedInstalledSkill
-    ? (workspaceSkillProfile?.pinnedSkillIds ?? []).includes(selectedInstalledSkill.id)
-    : false;
-  const selectedInstalledRecommendation = selectedInstalledSkill
-    ? recommendationMap.get(selectedInstalledSkill.id) ?? null
-    : null;
-  const selectedInstalledRestoreResult = selectedInstalledSkill
-    ? restoreResultMap.get(selectedInstalledSkill.id) ?? null
-    : null;
-  const selectedInstalledRecentLabel =
-    selectedInstalledSkill && workspaceRecentSkillIds.includes(selectedInstalledSkill.id)
-      ? "当前工作区"
-      : "未记录";
-  const selectedInstalledProjectionTarget =
-    selectedInstalledSkill && selectedInstalledState.sessionApplied
-      ? ".agents"
-      : selectedInstalledState.userGlobalApplied
-        ? "~/.agents"
-        : selectedInstalledState.kimiCodeHomeApplied
-          ? "KIMI_CODE_HOME"
-          : ".agents";
-  const selectedInstalledTriggerLabel =
-    selectedInstalledSkill?.metadata?.triggers?.length
-      ? selectedInstalledSkill.metadata.triggers.join(" / ")
-      : selectedInstalledSkill?.projectionName ?? "未声明";
-  const selectedInstalledLocations =
-    selectedManageEntry?.kind === "installed"
-      ? selectedManageEntry.matchedLocations.length > 0
-        ? selectedManageEntry.matchedLocations
-        : selectedInstalledSkill?.discoveryLocations ?? []
-      : [];
 
   const selectedWorkspaceTarget =
     workspaceSkillTargets.find((target) => target.id === selectedWorkspaceSkillTargetId) ?? null;
@@ -1280,33 +1086,6 @@ export function SkillCenterPanel({
             detail={
               selectedInstalledSkill ? (
                 <>
-                  <div className="skill-center-detail-header">
-                    <div className="skill-center-detail-title">
-                      {onBackToDirectory ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          icon={<ChevronLeft size={14} />}
-                          onClick={onBackToDirectory}
-                        >
-                          返回
-                        </Button>
-                      ) : null}
-                      <h3>{selectedInstalledSkill.name}</h3>
-                    </div>
-                    <div className="skill-center-chip-row skill-center-chip-row-detail">
-                      {selectedInstalledSkill.trusted
-                        ? renderStatusChip("已信任", "ready")
-                        : renderStatusChip("未信任", "warning")}
-                    </div>
-                  </div>
-                  <p className="skill-center-detail-description">
-                    {selectedInstalledSkill.description || "这个技能没有提供描述。"}
-                  </p>
-
-                  {renderInstalledManifestGrid(selectedInstalledSkill)}
-
                   {selectedInstalledSkill.hasScripts ? (
                     <div className="skill-center-script-warning" role="alert">
                       {selectedInstalledSkill.trusted
@@ -1315,335 +1094,26 @@ export function SkillCenterPanel({
                     </div>
                   ) : null}
 
-                  <div className="skill-center-actions skill-center-actions-primary">
-                    <Button
-                      type="button"
-                      onClick={() => onApplySkill(selectedInstalledSkill.id, "session_kimi")}
-                      disabled={
-                        busy ||
-                        !selectedInstalledSkill.trusted ||
-                        selectedInstalledState.sessionApplied
-                      }
-                    >
-                      投影到当前工作区 .agents
-                    </Button>
-                    <ControlCenterActionMenu
-                      disabled={busy}
-                      items={[
-                        {
-                          label: "投影到用户全局 ~/.agents",
-                          disabled:
-                            !selectedInstalledSkill.trusted ||
-                            selectedInstalledState.userGlobalApplied,
-                          onSelect: () =>
-                            onApplySkill(selectedInstalledSkill.id, "user_global_kimi"),
-                        },
-                        {
-                          label: "投影到 KIMI_CODE_HOME",
-                          disabled:
-                            !selectedInstalledSkill.trusted ||
-                            selectedInstalledState.kimiCodeHomeApplied,
-                          onSelect: () =>
-                            onApplySkill(selectedInstalledSkill.id, "kimi_code_home"),
-                        },
-                        {
-                          label: selectedInstalledPinned ? "取消固定" : "固定到工作区",
-                          onSelect: () =>
-                            onSetPin(selectedInstalledSkill.id, !selectedInstalledPinned),
-                        },
-                        {
-                          label: "更新技能",
-                          onSelect: () => onUpdateSkill(selectedInstalledSkill.id),
-                        },
-                        {
-                          label: selectedInstalledSkill.trusted ? "取消信任" : "信任技能",
-                          icon: selectedInstalledSkill.trusted ? (
-                            <ShieldOff size={14} />
-                          ) : (
-                            <Shield size={14} />
-                          ),
-                          onSelect: () =>
-                            onSetTrust(selectedInstalledSkill.id, !selectedInstalledSkill.trusted),
-                        },
-                        ...(selectedInstalledState.userGlobalApplied
-                          ? [
-                              {
-                                label: "从 ~/.agents 移除",
-                                onSelect: () =>
-                                  onRemoveSkill(
-                                    selectedInstalledSkill.id,
-                                    "user_global_kimi",
-                                  ),
-                              },
-                            ]
-                          : []),
-                        ...(selectedInstalledState.kimiCodeHomeApplied
-                          ? [
-                              {
-                                label: "从 KIMI_CODE_HOME 移除",
-                                onSelect: () =>
-                                  onRemoveSkill(
-                                    selectedInstalledSkill.id,
-                                    "kimi_code_home",
-                                  ),
-                              },
-                            ]
-                          : []),
-                        ...(selectedInstalledState.sessionApplied
-                          ? [
-                              {
-                                label: "从当前工作区移除",
-                                onSelect: () =>
-                                  onRemoveSkill(selectedInstalledSkill.id, "session_kimi"),
-                              },
-                            ]
-                          : []),
-                        {
-                          label: "卸载技能",
-                          tone: "danger",
-                          onSelect: () => onUninstallSkill(selectedInstalledSkill.id),
-                        },
-                      ]}
-                    />
-                  </div>
-
-                  <dl className="skill-center-meta">
-                    <div>
-                      <dt>来源</dt>
-                      <dd>{formatSkillSource(selectedInstalledSkill)}</dd>
-                    </div>
-                    <div>
-                      <dt>最近使用</dt>
-                      <dd>{selectedInstalledRecentLabel}</dd>
-                    </div>
-                    <div>
-                      <dt>投影目标</dt>
-                      <dd>{selectedInstalledProjectionTarget}</dd>
-                    </div>
-                    <div>
-                      <dt>触发词</dt>
-                      <dd>{selectedInstalledTriggerLabel}</dd>
-                    </div>
-                  </dl>
-
-                  {selectedInstalledLocations.length > 0 ? (
-                    <div className="skill-center-applied-paths">
-                      <div className="skill-center-section-header">
-                        <h4>{manageContextId === "skill_center" ? "外部发现位置" : "当前范围来源位置"}</h4>
-                        <span>{selectedInstalledLocations.length} 个位置</span>
-                      </div>
-                      <div className="skill-center-path-list">
-                        {selectedInstalledLocations.map((location) => (
-                          <div
-                            key={`${location.skillPath}-${location.containerKind}`}
-                            className="skill-center-path-item"
-                          >
-                            <strong>{formatDiscoveryLocationLabel(location)}</strong>
-                            <code>{location.skillPath}</code>
-                            {location.scope === "workspace" && location.workspaceId && onOpenWorkspaceDetail ? (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => onOpenWorkspaceDetail(location.workspaceId ?? "")}
-                              >
-                                查看工作区
-                              </Button>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {renderCollapsibleSection(
-                    "技能内容预览",
-                    filesExpanded,
-                    () => setFilesExpanded((current) => !current),
-                    <DirectoryFilePreview
-                      entityKey={`installed:${selectedInstalledSkill.id}`}
-                      description={selectedInstalledSkill.description || "这个技能没有提供描述。"}
-                      loadEntries={loadSelectedInstalledFileEntries}
-                      readFile={readSelectedInstalledFile}
-                      onOpenRoot={() => onOpenFolder(selectedInstalledSkill.localPath)}
-                    />,
-                  )}
-
-                  <div className="skill-center-recent">
-                    <div className="skill-center-section-header">
-                      <h4>当前工作区最近使用</h4>
-                      <span>{currentWorkspaceLabel || "未识别工作区"}</span>
-                    </div>
-                    {recentSkills.length === 0 ? (
-                      <p className="skill-center-muted">这个工作区还没有最近使用记录。</p>
-                    ) : (
-                      <div className="skill-center-recent-list">
-                        {recentSkills.map((skill) => (
-                          <div key={skill.id} className="skill-center-recent-item">
-                            <div>
-                              <strong>{skill.name}</strong>
-                              <p>{skill.projectionName}</p>
-                            </div>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => onRecoverWorkspaceSkill(skill.id)}
-                              disabled={busy || !skill.trusted}
-                            >
-                              投影到当前工作区
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="skill-center-applied-paths">
-                    <div className="skill-center-section-header">
-                      <h4>已应用目录</h4>
-                    </div>
-                    {!selectedInstalledUserGlobalProjection &&
-                    !selectedInstalledKimiCodeHomeProjection &&
-                    !selectedInstalledSessionProjection ? (
-                      <p className="skill-center-muted">这个技能当前还没有应用到任何目录。</p>
-                    ) : (
-                      <div className="skill-center-path-list">
-                        {selectedInstalledUserGlobalProjection ? (
-                          <div className="skill-center-path-item">
-                            <strong>
-                              {formatProjectionScope(selectedInstalledUserGlobalProjection.scope)}
-                            </strong>
-                            <code>{selectedInstalledUserGlobalProjection.targetPath}</code>
-                          </div>
-                        ) : null}
-                        {selectedInstalledKimiCodeHomeProjection ? (
-                          <div className="skill-center-path-item">
-                            <strong>
-                              {formatProjectionScope(
-                                selectedInstalledKimiCodeHomeProjection.scope,
-                              )}
-                            </strong>
-                            <code>{selectedInstalledKimiCodeHomeProjection.targetPath}</code>
-                          </div>
-                        ) : null}
-                        {selectedInstalledSessionProjection ? (
-                          <div className="skill-center-path-item">
-                            <strong>{formatProjectionScope(selectedInstalledSessionProjection.scope)}</strong>
-                            <code>{selectedInstalledSessionProjection.targetPath}</code>
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </div>
-
-                  {selectedInstalledRecommendation ? (
-                    <div className="skill-center-applied-paths">
-                      <div className="skill-center-section-header">
-                        <h4>推荐理由</h4>
-                        <span>{selectedInstalledRecommendation.recommendedScope}</span>
-                      </div>
-                      <div className="skill-center-path-list">
-                        {selectedInstalledRecommendation.reasons.map((reason) => (
-                          <div key={reason} className="skill-center-path-item">
-                            <code>{reason}</code>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {selectedInstalledRestoreResult ? (
-                    <div className="skill-center-applied-paths">
-                      <div className="skill-center-section-header">
-                        <h4>最近恢复结果</h4>
-                        <span>{selectedInstalledRestoreResult.status}</span>
-                      </div>
-                      <p className="skill-center-muted">{selectedInstalledRestoreResult.detail}</p>
-                    </div>
-                  ) : null}
+                  <DirectoryFilePreview
+                    entityKey={`installed:${selectedInstalledSkill.id}`}
+                    description={selectedInstalledSkill.description || "这个技能没有提供描述。"}
+                    loadEntries={loadSelectedInstalledFileEntries}
+                    readFile={readSelectedInstalledFile}
+                    onOpenRoot={() => onOpenFolder(selectedInstalledSkill.localPath)}
+                    showDescription={false}
+                    className="skill-center-file-preview"
+                  />
                 </>
               ) : selectedDiscoveredRecord ? (
                 <>
-                  <div className="skill-center-detail-header">
-                    <div className="skill-center-detail-title">
-                      {onBackToDirectory ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          icon={<ChevronLeft size={14} />}
-                          onClick={onBackToDirectory}
-                        >
-                          返回
-                        </Button>
-                      ) : null}
-                      <h3>{selectedDiscoveredRecord.name}</h3>
-                    </div>
-                    <div className="skill-center-chip-row skill-center-chip-row-detail">
-                      {renderStatusChip("待导入", "warning")}
-                      {selectedDiscoveredRecord.hasScripts
-                        ? renderStatusChip("包含 scripts/", "muted")
-                        : null}
-                    </div>
-                  </div>
-                  <p className="skill-center-detail-description">
-                    {selectedDiscoveredRecord.description || "这个外部 Skill 没有提供描述。"}
-                  </p>
-
-                  <div className="skill-center-actions skill-center-actions-primary">
-                    <Button
-                      type="button"
-                      onClick={() => onImportDiscoveredSkill(selectedDiscoveredRecord.discoveryId)}
-                      disabled={busy}
-                    >
-                      导入到受管 Skill
-                    </Button>
-                  </div>
-
-                  <div className="skill-center-applied-paths">
-                    <div className="skill-center-section-header">
-                      <h4>基础信息</h4>
-                      <span>{selectedDiscoveredRecord.projectionName}</span>
-                    </div>
-                    <div className="skill-center-path-list">
-                      <div className="skill-center-path-item">
-                        <strong>Canonical 来源路径</strong>
-                        <code>{selectedDiscoveredRecord.canonicalPath}</code>
-                      </div>
-                      <div className="skill-center-path-item">
-                        <strong>上次扫描时间</strong>
-                        <code>{selectedDiscoveredRecord.lastScannedAt}</code>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="skill-center-applied-paths">
-                    <div className="skill-center-section-header">
-                      <h4>发现位置</h4>
-                      <span>{selectedManageEntry?.kind === "discovered" ? selectedManageEntry.matchedLocations.length : selectedDiscoveredRecord.locations.length} 个位置</span>
-                    </div>
-                    <div className="skill-center-path-list">
-                      {(selectedManageEntry?.kind === "discovered"
-                        ? selectedManageEntry.matchedLocations
-                        : selectedDiscoveredRecord.locations
-                      ).map((location) => (
-                        <div
-                          key={`${selectedDiscoveredRecord.discoveryId}-${location.skillPath}-${location.containerKind}`}
-                          className="skill-center-path-item"
-                        >
-                          <strong>{formatDiscoveryLocationLabel(location)}</strong>
-                          <code>{location.skillPath}</code>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   <DirectoryFilePreview
                     entityKey={`discovered:${selectedDiscoveredRecord.discoveryId}`}
                     description={selectedDiscoveredRecord.description || "这个外部 Skill 没有提供描述。"}
                     loadEntries={loadSelectedDiscoveredFileEntries}
                     readFile={readSelectedDiscoveredFile}
                     onOpenRoot={() => onOpenFolder(selectedDiscoveredRecord.canonicalPath)}
+                    showDescription={false}
+                    className="skill-center-file-preview"
                   />
                 </>
               ) : null

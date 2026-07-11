@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   Eraser,
   FolderOpen,
@@ -8,6 +9,8 @@ import {
   Plus,
   RefreshCcw,
   RefreshCw,
+  Shield,
+  ShieldOff,
   SlidersHorizontal,
   Sparkles,
   X,
@@ -78,6 +81,10 @@ const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
   importToDefaultWorkspace: "导入到默认工作区",
   importWithWorkspacePicker: "选择其他工作区",
 };
+
+function copyText(value: string) {
+  void navigator.clipboard?.writeText(value);
+}
 
 const CONTEXT_MENU_LABEL_FIELDS: Array<{
   key: keyof ContextMenuLabelsInput;
@@ -308,6 +315,13 @@ export function ControlCenterView({
     bridgeStatus.state === "running" ||
     bridgeStatus.state === "starting" ||
     bridgeStatus.state === "degraded";
+  const appLogText = diagnostics?.appLogTail?.length
+    ? diagnostics.appLogTail.join("\n")
+    : "暂无应用日志。";
+  const backendLogText = diagnostics?.backendLogTail?.length
+    ? diagnostics.backendLogTail.join("\n")
+    : "暂无后端日志。";
+  const bridgeLogText = bridgeLogTail.length ? bridgeLogTail.join("\n") : "暂无 Bridge 日志。";
   const bridgeTaskConnectorId =
     activeTask === "bridge_connector_secrets" || activeTask === "bridge_runtime"
       ? activeTaskPayload?.connectorId ?? null
@@ -653,6 +667,17 @@ export function ControlCenterView({
       disabled={bridgeBusy}
     >
       {visibleBridgeConnectors.length === 0 ? "新建机器人" : "管理通道"}
+    </Button>
+  );
+
+  const logsPrimaryAction = (
+    <Button
+      type="button"
+      icon={<FolderOpen size={15} />}
+      className="cc-action-btn"
+      onClick={() => void onOpenLogs()}
+    >
+      打开日志目录
     </Button>
   );
 
@@ -1213,6 +1238,15 @@ export function ControlCenterView({
       complete: visibleBridgeConnectors.length > 0 && !bridgeHasError,
       primaryAction: bridgePrimaryAction,
     },
+    {
+      id: "logs",
+      index: "06",
+      title: "日志",
+      actionLabel: "app.log · backend.log · bridge.log",
+      statusTone: "neutral",
+      complete: true,
+      primaryAction: logsPrimaryAction,
+    },
   ];
   const showStartupFailureDiagnostics = Boolean(
     status?.startupPhase === "failed" ||
@@ -1320,6 +1354,9 @@ export function ControlCenterView({
       if (stepId === "bridge") {
         return renderBridgeStepContent();
       }
+      if (stepId === "logs") {
+        return renderLogsStepContent();
+      }
       return renderWorkDirStepContent();
     }
 
@@ -1346,6 +1383,9 @@ export function ControlCenterView({
                         const next = expanded ? null : step.id;
                         setExpandedOnboardingCard(next);
                         if (next === "auth") void onRefreshKimiCodeAccessConfig();
+                        if (next === "logs") {
+                          void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()]);
+                        }
                       }}
                       aria-expanded={expanded}
                       aria-controls={`cc-settings-detail-${step.id}`}
@@ -1379,18 +1419,7 @@ export function ControlCenterView({
   }
 
   function renderRuntimeSection() {
-    const appLogText =
-      diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
-        ? diagnostics.appLogTail.join("\n")
-        : "暂无应用日志。";
-    const backendLogText =
-      diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0
-        ? diagnostics.backendLogTail.join("\n")
-        : "暂无后端日志。";
     const startupTraceRows = diagnostics?.startupTrace ?? [];
-    const copyText = (value: string) => {
-      void navigator.clipboard?.writeText(value);
-    };
 
     return (
       <section className="cc-image-detail-page">
@@ -1646,9 +1675,193 @@ export function ControlCenterView({
     );
   }
 
+  function renderLogsStepContent() {
+    return (
+      <div className="cc-settings-detail-stack">
+        <div className="cc-settings-live-row" aria-live="polite">
+          <span>{diagnosticsBusy ? "正在刷新日志" : "显示最近日志"}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<RefreshCw size={15} />}
+            className="cc-action-btn"
+            onClick={() => void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()])}
+            disabled={diagnosticsBusy}
+          >
+            刷新
+          </Button>
+        </div>
+        <div className="cc-image-code-grid">
+          {[
+            ["app.log", appLogText],
+            ["backend.log", backendLogText],
+            ["bridge.log", bridgeLogText],
+          ].map(([label, content]) => (
+            <div key={label} className="cc-image-code-card">
+              <div className="cc-image-code-toolbar">
+                <span>{label}</span>
+                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(content)}>复制</Button>
+              </div>
+              <pre>{content}</pre>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   function renderSkillCenterSection() {
-    const skillCenterActions =
-      skillCenterSection === "manage" ? (
+    const selectedInstalledSkill =
+      selectedSkillDetail?.skill ??
+      installedSkills.find((skill) => skill.id === selectedSkillId) ??
+      null;
+    const selectedDiscoveredRecord =
+      selectedInstalledSkill
+        ? null
+        : selectedDiscoveryDetail?.record ??
+          skillDiscoverySnapshot?.records.find(
+            (record) => record.discoveryId === selectedDiscoveryId,
+          ) ??
+          null;
+    const showSkillDetailHeader =
+      skillCenterSection === "manage" &&
+      Boolean(selectedInstalledSkill || selectedDiscoveredRecord);
+    const selectedInstalledState = selectedInstalledSkill
+      ? {
+          userGlobalApplied: globalSkillProjections.some(
+            (projection) =>
+              projection.skillId === selectedInstalledSkill.id &&
+              projection.scope === "user_global_kimi",
+          ),
+          kimiCodeHomeApplied: globalSkillProjections.some(
+            (projection) =>
+              projection.skillId === selectedInstalledSkill.id &&
+              projection.scope === "kimi_code_home",
+          ),
+          sessionApplied: activeSessionSkillState.appliedSkillIds.includes(
+            selectedInstalledSkill.id,
+          ),
+        }
+      : null;
+    const selectedInstalledPinned =
+      selectedInstalledSkill && workspaceSkillProfile
+        ? workspaceSkillProfile.pinnedSkillIds.includes(selectedInstalledSkill.id)
+        : false;
+    const skillCenterTitle = showSkillDetailHeader
+      ? (selectedInstalledSkill?.name ?? selectedDiscoveredRecord?.name ?? "Skill")
+      : "Skill 中心";
+    const skillCenterActions = showSkillDetailHeader ? (
+      <div className="skill-center-header-actions skill-center-detail-top-actions">
+        {selectedInstalledSkill && selectedInstalledState ? (
+          <>
+            <ControlCenterStatusBadge
+              tone={selectedInstalledSkill.trusted ? "success" : "warning"}
+            >
+              {selectedInstalledSkill.trusted ? "已信任" : "未信任"}
+            </ControlCenterStatusBadge>
+            <Button
+              type="button"
+              onClick={() => onApplySkill(selectedInstalledSkill.id, "session_kimi")}
+              disabled={
+                skillCenterBusy ||
+                !selectedInstalledSkill.trusted ||
+                selectedInstalledState.sessionApplied
+              }
+            >
+              投影到当前工作区 .agents
+            </Button>
+            <ControlCenterActionMenu
+              label={`${selectedInstalledSkill.name} 操作`}
+              disabled={skillCenterBusy}
+              items={[
+                {
+                  label: "投影到用户全局 ~/.agents",
+                  disabled:
+                    !selectedInstalledSkill.trusted ||
+                    selectedInstalledState.userGlobalApplied,
+                  onSelect: () =>
+                    onApplySkill(selectedInstalledSkill.id, "user_global_kimi"),
+                },
+                {
+                  label: "投影到 KIMI_CODE_HOME",
+                  disabled:
+                    !selectedInstalledSkill.trusted ||
+                    selectedInstalledState.kimiCodeHomeApplied,
+                  onSelect: () =>
+                    onApplySkill(selectedInstalledSkill.id, "kimi_code_home"),
+                },
+                {
+                  label: selectedInstalledPinned ? "取消固定" : "固定到工作区",
+                  onSelect: () =>
+                    onSetWorkspaceSkillPin(selectedInstalledSkill.id, !selectedInstalledPinned),
+                },
+                {
+                  label: "更新技能",
+                  onSelect: () => onUpdateSkill(selectedInstalledSkill.id),
+                },
+                {
+                  label: selectedInstalledSkill.trusted ? "取消信任" : "信任技能",
+                  icon: selectedInstalledSkill.trusted ? (
+                    <ShieldOff size={14} />
+                  ) : (
+                    <Shield size={14} />
+                  ),
+                  onSelect: () =>
+                    onSetSkillTrust(selectedInstalledSkill.id, !selectedInstalledSkill.trusted),
+                },
+                ...(selectedInstalledState.userGlobalApplied
+                  ? [
+                      {
+                        label: "从 ~/.agents 移除",
+                        onSelect: () =>
+                          onRemoveSkill(selectedInstalledSkill.id, "user_global_kimi"),
+                      },
+                    ]
+                  : []),
+                ...(selectedInstalledState.kimiCodeHomeApplied
+                  ? [
+                      {
+                        label: "从 KIMI_CODE_HOME 移除",
+                        onSelect: () =>
+                          onRemoveSkill(selectedInstalledSkill.id, "kimi_code_home"),
+                      },
+                    ]
+                  : []),
+                ...(selectedInstalledState.sessionApplied
+                  ? [
+                      {
+                        label: "从当前工作区移除",
+                        onSelect: () =>
+                          onRemoveSkill(selectedInstalledSkill.id, "session_kimi"),
+                      },
+                    ]
+                  : []),
+                {
+                  label: "卸载技能",
+                  tone: "danger",
+                  onSelect: () => onUninstallSkill(selectedInstalledSkill.id),
+                },
+              ]}
+            />
+          </>
+        ) : null}
+        {selectedDiscoveredRecord ? (
+          <>
+            <ControlCenterStatusBadge tone="warning">待导入</ControlCenterStatusBadge>
+            {selectedDiscoveredRecord.hasScripts ? (
+              <ControlCenterStatusBadge tone="neutral">包含 scripts/</ControlCenterStatusBadge>
+            ) : null}
+            <Button
+              type="button"
+              onClick={() => onImportDiscoveredSkill(selectedDiscoveredRecord.discoveryId)}
+              disabled={skillCenterBusy}
+            >
+              导入到受管 Skill
+            </Button>
+          </>
+        ) : null}
+      </div>
+    ) : skillCenterSection === "manage" ? (
         <div className="skill-center-header-actions">
           <ControlCenterActionMenu
             label="添加 Skill"
@@ -1725,10 +1938,24 @@ export function ControlCenterView({
       <section className="cc-image-detail-page skill-center-page">
         <div
           id={focusDomId("skill_center")}
-          className={`cc-image-detail-top ${activeFocusId === "skill_center" ? "is-focus" : ""}`}
+          className={`cc-image-detail-top ${
+            showSkillDetailHeader ? "skill-center-detail-top" : ""
+          } ${activeFocusId === "skill_center" ? "is-focus" : ""}`}
         >
-          <div>
-            <h1>Skill 中心</h1>
+          <div className="skill-center-top-title">
+            {showSkillDetailHeader ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon={<ChevronLeft size={14} />}
+                onClick={onClearSkillSelection}
+                disabled={skillCenterBusy}
+              >
+                返回
+              </Button>
+            ) : null}
+            <h1>{skillCenterTitle}</h1>
           </div>
           <div className="cc-image-top-controls">{skillCenterActions}</div>
         </div>

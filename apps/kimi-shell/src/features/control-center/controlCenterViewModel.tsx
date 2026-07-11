@@ -83,7 +83,8 @@ export type OnboardingCardId =
   | "context_menu"
   | "auth"
   | "work_dir"
-  | "bridge";
+  | "bridge"
+  | "logs";
 
 export type BridgeConnectorSecretDraft = {
   botToken: string;

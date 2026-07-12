@@ -49,7 +49,7 @@ const props: WorkspaceViewProps = {
   actionBusy: false,
   onRetry: vi.fn(),
   onOpenLogs: vi.fn(),
-  onOpenFolder: vi.fn(),
+  onOpenPaneFolder: vi.fn(async () => undefined),
   onOpenExternalUrl: vi.fn(),
   onSplitRatioChange: vi.fn(),
   onSplitDragStateChange: vi.fn(),
@@ -62,7 +62,7 @@ const props: WorkspaceViewProps = {
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    if (typeof window.localStorage.clear === "function") {
+    if (typeof window.localStorage?.clear === "function") {
       window.localStorage.clear();
     }
     useWorkspaceGridStore.setState(createDefaultWorkspaceGridState(100));
@@ -176,12 +176,88 @@ describe("WorkspaceGridView", () => {
     });
   });
 
-  it("opens the current Code pane work directory from the pane header", () => {
+  it("opens the current Code pane only after its iframe reports a session", async () => {
+    const opening = deferred<void>();
+    vi.mocked(props.onOpenPaneFolder).mockReturnValueOnce(opening.promise);
+    useWorkspaceGridStore.getState().setPaneWorkDir("pane-code", "D:/pane-work");
+    render(<WorkspaceGridView {...props} />);
+    const frame = document.querySelector<HTMLIFrameElement>(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(frame).toBeTruthy();
+    const pendingButton = screen.getByRole("button", { name: "正在识别当前会话" });
+    expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "http://127.0.0.1:1234",
+          source: frame?.contentWindow,
+          data: {
+            source: "kimi-shell-session-bridge",
+            action: "pane_session_changed",
+            sessionId: "session-b",
+            applied: true,
+          },
+        }),
+      );
+    });
+    const button = screen.getByRole("button", { name: "打开当前会话目录" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await act(async () => Promise.resolve());
+
+    expect(props.onOpenPaneFolder).toHaveBeenCalledWith(frame);
+    expect(props.onOpenPaneFolder).toHaveBeenCalledTimes(1);
+    await act(async () => opening.resolve());
+  });
+
+  it("enables the folder action from the iframe load handshake", async () => {
+    render(<WorkspaceGridView {...props} />);
+    const frame = document.querySelector<HTMLIFrameElement>(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(frame).toBeTruthy();
+    const postMessage = vi.spyOn(frame!.contentWindow!, "postMessage");
+
+    fireEvent.load(frame!);
+    const request = postMessage.mock.calls
+      .map(([message]) => message as { action?: string; requestId?: string })
+      .find((message) => message.action === "report_current_session");
+    expect(request?.requestId).toBeTruthy();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "http://127.0.0.1:1234",
+          source: frame?.contentWindow,
+          data: {
+            source: "kimi-shell-session-bridge",
+            action: "current_session_response",
+            requestId: request?.requestId,
+            sessionId: "session-load",
+            applied: true,
+          },
+        }),
+      );
+    });
+
+    expect(screen.getByRole("button", { name: "打开当前会话目录" })).toBeTruthy();
+  });
+
+  it("does not trust a persisted pane session or cached work directory", () => {
+    useWorkspaceGridStore.setState((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === "pane-code"
+          ? { ...pane, sessionId: "session-a", workDir: undefined }
+          : pane,
+      ),
+    }));
     render(<WorkspaceGridView {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "打开此窗格目录" }));
-
-    expect(props.onOpenFolder).toHaveBeenCalledWith("D:/work");
+    const button = screen.getByRole("button", { name: "正在识别当前会话" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(props.onOpenPaneFolder).not.toHaveBeenCalled();
   });
 
   it("does not render pane theme controls in pane headers", () => {

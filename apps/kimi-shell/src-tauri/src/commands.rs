@@ -32,6 +32,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::save_work_dir,
         // workspace grid
         workspace_grid::grid_list_sessions,
+        workspace_grid::grid_get_session,
         workspace_grid::grid_create_session,
         // bridge
         bridge::get_bridge_settings,

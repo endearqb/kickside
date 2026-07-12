@@ -53,6 +53,7 @@ export interface WorkspaceGridActions {
   ) => void;
   setPaneTheme: (paneId: string, theme: WorkspacePaneTheme | undefined) => void;
   setPaneWorkDir: (paneId: string, workDir: string | undefined) => void;
+  setSessionWorkDir: (sessionId: string, workDir: string) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
   setGridTrackSizes: (trackSizes: WorkspaceGridTrackSizes) => void;
@@ -516,6 +517,30 @@ function createWorkspaceGridSlice(
                 workDir: sanitizeWorkDir(workDir),
                 updatedAt: Date.now(),
               }
+            : pane,
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
+    setSessionWorkDir(sessionId, workDir) {
+      const normalizedSessionId = sessionId.trim();
+      const normalizedWorkDir = sanitizeWorkDir(workDir);
+      if (!normalizedSessionId || !normalizedWorkDir) {
+        return;
+      }
+      if (
+        !get().panes.some(
+          (pane) =>
+            pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId,
+        )
+      ) {
+        return;
+      }
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((pane) =>
+          pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId
+            ? { ...pane, workDir: normalizedWorkDir, updatedAt: Date.now() }
             : pane,
         ),
         updatedAt: Date.now(),

@@ -20,6 +20,7 @@ const APP_COMMANDS: &[&str] = &[
     "save_kimi_path",
     "save_work_dir",
     "grid_list_sessions",
+    "grid_get_session",
     "grid_create_session",
     "get_bridge_settings",
     "save_bridge_settings",

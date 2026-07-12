@@ -1,4 +1,5 @@
 use std::{
+    fmt::Write as _,
     path::{Path, PathBuf},
     thread,
     time::Duration,
@@ -25,6 +26,7 @@ const WORKSPACE_SESSION_BOOTSTRAP_EVENT: &str = "workspace-session-bootstrap";
 const WORKSPACE_SESSION_BRIDGE_EVENT: &str = "workspace-session-bridge";
 const WORKSPACE_SESSION_POLL_INTERVAL_MS: u64 = 1_200;
 const SESSION_LIST_FETCH_LIMIT: usize = 100;
+const MAX_SESSION_ID_LENGTH: usize = 512;
 const BOOTSTRAP_ROUTE_TEMPLATE: &str = "/?session={{session_id}}";
 const MAX_PENDING_WORKSPACE_BOOTSTRAPS: usize = 64;
 
@@ -202,8 +204,6 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
         let Ok(mut runtime) = lock else {
             return;
         };
-        runtime.workspace_bootstrap_worker_running = false;
-
         if runtime.pending_workspace_bootstraps.is_empty() {
             if let Some(work_dir) = runtime.effective_work_dir.clone() {
                 runtime
@@ -227,36 +227,73 @@ fn kick_workspace_bootstrap_worker(app: &AppHandle) {
         let Ok(mut runtime) = state.runtime.lock() else {
             return;
         };
-        if runtime.workspace_bootstrap_worker_running
+        if runtime.workspace_bootstrap_worker_generation.is_some()
             || runtime.pending_workspace_bootstraps.is_empty()
         {
             return;
         }
-        runtime.workspace_bootstrap_worker_running = true;
-        runtime.generation
+        let generation = runtime.generation;
+        runtime.workspace_bootstrap_worker_generation = Some(generation);
+        generation
     };
 
     let app = app.clone();
-    thread::spawn(move || loop {
-        let request = {
+    thread::spawn(move || {
+        loop {
+            let request = {
+                let state = app.state::<AppState>();
+                let Ok(runtime) = state.runtime.lock() else {
+                    // A poisoned runtime cannot safely transfer worker ownership.
+                    return;
+                };
+                if runtime.generation != generation
+                    || runtime.workspace_bootstrap_worker_generation != Some(generation)
+                {
+                    break;
+                }
+                let Some(request) = runtime.pending_workspace_bootstraps.front().cloned() else {
+                    break;
+                };
+                request
+            };
+
+            if !process_bootstrap_session(&app, generation, request) {
+                break;
+            }
+
             let state = app.state::<AppState>();
             let Ok(mut runtime) = state.runtime.lock() else {
                 return;
             };
+            if runtime.workspace_bootstrap_worker_generation != Some(generation) {
+                break;
+            }
+            runtime.pending_workspace_bootstraps.pop_front();
             if runtime.generation != generation {
-                runtime.workspace_bootstrap_worker_running = false;
+                break;
+            }
+        }
+
+        {
+            let state = app.state::<AppState>();
+            let Ok(mut runtime) = state.runtime.lock() else {
                 return;
-            }
-            match runtime.pending_workspace_bootstraps.pop_front() {
-                Some(request) => request,
-                None => {
-                    runtime.workspace_bootstrap_worker_running = false;
-                    return;
-                }
-            }
-        };
-        process_bootstrap_session(&app, generation, request);
+            };
+            clear_workspace_bootstrap_worker_owner(
+                &mut runtime.workspace_bootstrap_worker_generation,
+                generation,
+            );
+        }
+        if runtime_api_ready(&app).unwrap_or(false) {
+            kick_workspace_bootstrap_worker(&app);
+        }
     });
+}
+
+fn clear_workspace_bootstrap_worker_owner(owner: &mut Option<u64>, generation: u64) {
+    if *owner == Some(generation) {
+        *owner = None;
+    }
 }
 
 pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &str) {
@@ -360,7 +397,11 @@ fn start_session_poller(app: AppHandle, generation: u64, _workspace_port: u16) {
     });
 }
 
-fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingWorkspaceBootstrap) {
+fn process_bootstrap_session(
+    app: &AppHandle,
+    generation: u64,
+    request: PendingWorkspaceBootstrap,
+) -> bool {
     let work_dir = request.work_dir;
     let source = request.source;
     let force_create_new = request.force_create_new;
@@ -395,10 +436,16 @@ fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingW
         );
         (snapshot, "bootstrap_resume_existing")
     } else {
+        if !is_generation_alive(app, generation) {
+            return false;
+        }
         let response = create_session_for_work_dir(&app, &work_dir);
         let created = match response {
             Ok(session) => session,
             Err(error) => {
+                if !is_generation_alive(app, generation) {
+                    return false;
+                }
                 maybe_capture_workspace_auth_failure(&app, &error);
                 let error_message = format!(
                         "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
@@ -413,7 +460,7 @@ fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingW
                         &error_message,
                     );
                 }
-                return;
+                return true;
             }
         };
         log_manager::append_line(
@@ -428,7 +475,7 @@ fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingW
     };
 
     if !is_generation_alive(&app, generation) {
-        return;
+        return false;
     }
 
     let work_dir_value = session
@@ -476,6 +523,7 @@ fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingW
                 session_id
             ),
         );
+    true
 }
 
 fn emit_bootstrap_open_request_error(app: &AppHandle, source: &str, stage: &str, message: &str) {
@@ -497,8 +545,8 @@ fn fetch_session_by_id(
     app: &AppHandle,
     session_id: &str,
 ) -> Result<Option<SessionSnapshot>, String> {
-    let sessions = fetch_sessions(app)?;
-    Ok(select_session_by_id(&sessions, session_id))
+    fetch_api_session_by_id(app, session_id)
+        .map(|session| Some(session_snapshot_from_api(&session)))
 }
 
 pub fn list_workspace_sessions_for_bridge(
@@ -563,6 +611,15 @@ pub fn list_workspace_sessions_for_grid(
         .collect())
 }
 
+pub fn get_workspace_session_for_grid(
+    app: &AppHandle,
+    session_id: &str,
+) -> Result<WorkspaceSessionRecord, String> {
+    let session = fetch_api_session_by_id(app, session_id)?;
+    remember_workspace_paths(app, std::slice::from_ref(&session));
+    Ok(workspace_session_record_from_api(session))
+}
+
 pub fn create_workspace_session_for_grid(
     app: &AppHandle,
     workspace_root: &Path,
@@ -588,6 +645,34 @@ fn fetch_sessions_with_client(client: &ApiV1Client) -> Result<Vec<ApiSession>, S
         .get::<SessionListData>(&path)
         .map_err(|error| format!("GET `/api/v1/{path}` failed: {error:#}"))?;
     Ok(data.into_sessions())
+}
+
+fn fetch_api_session_by_id(app: &AppHandle, session_id: &str) -> Result<ApiSession, String> {
+    let path = session_api_path(session_id)?;
+    let client = require_runtime_api_client(app)?;
+    client
+        .get::<ApiSession>(&path)
+        .map(ApiSession::normalized)
+        .map_err(|error| format!("GET `/api/v1/{path}` failed: {error:#}"))
+}
+
+fn session_api_path(session_id: &str) -> Result<String, String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err("session id is required".to_string());
+    }
+    if session_id.len() > MAX_SESSION_ID_LENGTH {
+        return Err(format!("session id exceeds {MAX_SESSION_ID_LENGTH} bytes"));
+    }
+    let mut encoded = String::with_capacity(session_id.len());
+    for byte in session_id.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            write!(&mut encoded, "%{byte:02X}").expect("writing to a string cannot fail");
+        }
+    }
+    Ok(format!("sessions/{encoded}"))
 }
 
 fn create_session_for_work_dir(app: &AppHandle, work_dir: &Path) -> Result<ApiSession, String> {
@@ -878,17 +963,6 @@ fn select_active_session(sessions: &[ApiSession]) -> Option<SessionSnapshot> {
     Some(session_snapshot_from_api(selected))
 }
 
-fn select_session_by_id(sessions: &[ApiSession], session_id: &str) -> Option<SessionSnapshot> {
-    let target = session_id.trim();
-    if target.is_empty() {
-        return None;
-    }
-    sessions
-        .iter()
-        .find(|item| item.session_id == target)
-        .map(session_snapshot_from_api)
-}
-
 fn select_latest_session_for_work_dir(
     sessions: &[ApiSession],
     work_dir: &Path,
@@ -1031,6 +1105,16 @@ mod tests {
     }
 
     #[test]
+    fn stale_worker_cannot_clear_new_worker_owner() {
+        let mut owner = Some(2);
+        clear_workspace_bootstrap_worker_owner(&mut owner, 1);
+        assert_eq!(owner, Some(2));
+
+        clear_workspace_bootstrap_worker_owner(&mut owner, 2);
+        assert_eq!(owner, None);
+    }
+
+    #[test]
     fn select_active_session_prefers_running_sessions() {
         let sessions = vec![
             session(
@@ -1076,28 +1160,18 @@ mod tests {
     }
 
     #[test]
-    fn select_session_by_id_returns_matching_session_snapshot() {
-        let sessions = vec![
-            session("first", false, Some("2026-03-05T08:20:00Z"), Some("D:/a")),
-            session("target", true, Some("2026-03-05T12:20:00Z"), Some("D:/b")),
-        ];
-
-        let selected = select_session_by_id(&sessions, "target").expect("must select target");
-        assert_eq!(selected.session_id, "target");
-        assert_eq!(selected.work_dir.as_deref(), Some("D:/b"));
-    }
-
-    #[test]
-    fn select_session_by_id_returns_none_when_missing() {
-        let sessions = vec![session(
-            "only",
-            false,
-            Some("2026-03-05T08:20:00Z"),
-            Some("D:/a"),
-        )];
-
-        assert!(select_session_by_id(&sessions, "missing").is_none());
-        assert!(select_session_by_id(&sessions, " ").is_none());
+    fn session_api_path_encodes_untrusted_path_segments() {
+        assert_eq!(
+            session_api_path("../session id").expect("encoded path"),
+            "sessions/%2E%2E%2Fsession%20id"
+        );
+        assert_eq!(session_api_path(".").expect("dot id"), "sessions/%2E");
+        assert_eq!(
+            session_api_path("..").expect("dot-dot id"),
+            "sessions/%2E%2E"
+        );
+        assert!(session_api_path(" ").is_err());
+        assert!(session_api_path(&"x".repeat(MAX_SESSION_ID_LENGTH + 1)).is_err());
     }
 
     #[test]

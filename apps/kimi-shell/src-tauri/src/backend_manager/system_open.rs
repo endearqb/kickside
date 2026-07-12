@@ -67,7 +67,7 @@ fn open_with_system_file_manager(path: &Path) -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         Command::new("explorer")
-            .arg(path)
+            .arg(windows_explorer_path(path))
             .spawn()
             .context("failed to open folder with explorer")?;
         return Ok(());
@@ -93,6 +93,11 @@ fn open_with_system_file_manager(path: &Path) -> anyhow::Result<()> {
 
     #[allow(unreachable_code)]
     Err(anyhow::anyhow!("unsupported platform for opening folder"))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_explorer_path(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\")
 }
 
 fn open_with_system_browser(url: &str) -> anyhow::Result<()> {
@@ -141,6 +146,15 @@ mod tests {
         assert_eq!(
             external_url_log_display(&url),
             "https://example.com/oauth/callback"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_explorer_path_uses_native_separators() {
+        assert_eq!(
+            windows_explorer_path(Path::new("D:/workspace/project")),
+            "D:\\workspace\\project"
         );
     }
 }

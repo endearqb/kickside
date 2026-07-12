@@ -12,6 +12,14 @@ pub(crate) fn grid_list_sessions(
 }
 
 #[tauri::command]
+pub(crate) fn grid_get_session(
+    app: AppHandle,
+    session_id: String,
+) -> Result<workspace_session::WorkspaceSessionRecord, String> {
+    workspace_session::get_workspace_session_for_grid(&app, &session_id)
+}
+
+#[tauri::command]
 pub(crate) fn grid_create_session(
     app: AppHandle,
     workspace_root: String,

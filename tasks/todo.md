@@ -6,13 +6,16 @@
 - [x] 持久化菜单启用意图并清理重叠注册表入口
 - [x] 使用有界单消费者队列创建独立 session，不重启运行中的后端
 - [x] 新增 `new_pane` 路由、sessionId 精确 workDir 更新与事件去重
+- [x] Pane 目录按 iframe 当前 sessionId 精确解析，移除全部缓存 workDir 回退
 - [x] 支持六个可见、十二个总 pane 与 Pane Shelf
+- [x] 修复 worker 世代归属竞态，并让异步打开失败拉起主窗口
 - [x] 运行 Rust G0/G1 编译门、前端测试与生产构建
 
 ## Review
 - 包内 `0001`–`0004` 是人工参考且包含并发失序、静默回退和重复 reducer 问题，未机械应用；实现复用现有 `/api/v1` client、RuntimeState queue 与 Zustand Grid store。
-- `cargo check`、`cargo test --no-run`、前端 107 项测试和 `pnpm build` 通过；Rust 测试执行仍被本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 阻塞。
-- Windows Explorer 真机矩阵属于 G3，发布前补跑。
+- Pane header 通过 iframe route handshake 获取当前 session，并用 `grid_get_session` 精确查询；打开前再次确认 session 未切换。
+- `cargo check`、`cargo test --no-run`、前端 116 项测试和 `pnpm build` 通过；Rust 测试执行仍被本机既有 `STATUS_ENTRYPOINT_NOT_FOUND` 阻塞。
+- Windows Explorer 真机矩阵属于 G3，发布前补跑；包含后端处于 `Stopping` 时右键打开、停止完成后请求可继续执行的窄窗口场景。
 
 # Windows browser open bugfix
 

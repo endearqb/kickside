@@ -372,7 +372,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 maximized={Boolean(pane && pane.id === maximizedPaneId)}
                 dragging={isDragSource}
                 canAddPane={canAddPane}
-                effectiveWorkDir={props.effectiveWorkDir}
                 themeMode={props.themeMode}
                 codeRemoteUrl={props.codeRemoteUrl}
                 codeFrameKey={props.codeFrameKey}
@@ -385,7 +384,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 actionBusy={props.actionBusy}
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
-                onOpenFolder={props.onOpenFolder}
+                onOpenPaneFolder={props.onOpenPaneFolder}
                 onOpenExternalUrl={props.onOpenExternalUrl}
                 onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
                   void handleOpenTauriWebviewUrl(url, title, storageNamespace);

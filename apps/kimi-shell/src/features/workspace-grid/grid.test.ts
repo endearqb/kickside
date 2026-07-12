@@ -252,6 +252,30 @@ describe("workspace grid store", () => {
     });
   });
 
+  it("updates session work directories without depending on the active pane", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/old-a",
+    });
+    store.getState().configurePane("pane-chat", {
+      kind: "code",
+      sessionId: "session-b",
+      workDir: "D:/old-b",
+    });
+    store.getState().setActivePane("pane-chat");
+
+    store.getState().setSessionWorkDir("session-a", "D:/new-a");
+
+    expect(store.getState().panes.find((pane) => pane.id === "pane-code")?.workDir).toBe(
+      "D:/new-a",
+    );
+    expect(store.getState().panes.find((pane) => pane.id === "pane-chat")?.workDir).toBe(
+      "D:/old-b",
+    );
+  });
+
   it("does not persist URL fragments", () => {
     const store = createWorkspaceGridStore(undefined, null);
     const paneId = store.getState().addPane({

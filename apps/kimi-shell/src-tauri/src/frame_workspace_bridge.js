@@ -2,7 +2,10 @@
   const CHAT_BRIDGE_SOURCE = "kimi-shell-chat-external-link-bridge";
   const EXTERNAL_BRIDGE_SOURCE = "kimi-shell-external-link-bridge";
   const THEME_SYNC_SOURCE = "kimi-shell-theme-sync";
+  const SESSION_SYNC_SOURCE = "kimi-shell-session-sync";
+  const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
   const CHAT_ORIGIN = "https://www.kimi.com";
+  const MAX_SESSION_ID_LENGTH = 512;
   const THEME_STYLE_ID = "kimi-sidekick-pane-theme";
   const THEME_PALETTES = {
     light: {
@@ -64,10 +67,20 @@
 
   window.addEventListener("message", function (event) {
     const data = event && event.data;
-    if (!data || data.source !== THEME_SYNC_SOURCE) {
+    if (!data) {
       return;
     }
-    applyPaneTheme(data.theme);
+    if (data.source === THEME_SYNC_SOURCE) {
+      applyPaneTheme(data.theme);
+      return;
+    }
+    if (
+      data.source === SESSION_SYNC_SOURCE &&
+      data.action === "report_current_session" &&
+      event.source === window.parent
+    ) {
+      postCurrentSession("current_session_response", data.requestId, "requested");
+    }
   });
 
   if (window.top === window) {
@@ -91,6 +104,80 @@
       return null;
     }
   }
+
+  function normalizeSessionId(value) {
+    if (typeof value !== "string") {
+      return null;
+    }
+    const trimmed = value.trim();
+    return trimmed && trimmed.length <= MAX_SESSION_ID_LENGTH ? trimmed : null;
+  }
+
+  function currentSessionId() {
+    try {
+      const match = window.location.pathname.match(/^\/sessions\/([^/]+)\/?$/);
+      if (match && match[1]) {
+        return normalizeSessionId(decodeURIComponent(match[1]));
+      }
+      return normalizeSessionId(new URLSearchParams(window.location.search).get("session"));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function postCurrentSession(action, requestId, reason) {
+    try {
+      if (!window.parent || window.parent === window) {
+        return;
+      }
+      const sessionId = currentSessionId();
+      window.parent.postMessage(
+        {
+          source: SESSION_BRIDGE_SOURCE,
+          action: action,
+          requestId: typeof requestId === "string" ? requestId : "",
+          sessionId: sessionId,
+          applied: Boolean(sessionId),
+          reason: sessionId ? reason : "no_active_session",
+        },
+        "*",
+      );
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  let lastReportedSessionId;
+  function reportSessionChange(reason) {
+    const sessionId = currentSessionId();
+    if (sessionId === lastReportedSessionId) {
+      return;
+    }
+    lastReportedSessionId = sessionId;
+    postCurrentSession("pane_session_changed", "", reason);
+  }
+
+  ["pushState", "replaceState"].forEach(function (methodName) {
+    try {
+      const nativeMethod = window.history[methodName];
+      if (typeof nativeMethod !== "function") {
+        return;
+      }
+      window.history[methodName] = function () {
+        const result = nativeMethod.apply(this, arguments);
+        reportSessionChange("history_" + methodName);
+        return result;
+      };
+    } catch (_) {
+      // ignore
+    }
+  });
+  window.addEventListener("popstate", function () {
+    reportSessionChange("popstate");
+  });
+  setTimeout(function () {
+    reportSessionChange("initial");
+  }, 0);
 
   function isExternalHttpUrl(parsed) {
     if (!parsed) {

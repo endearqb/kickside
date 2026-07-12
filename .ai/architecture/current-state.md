@@ -12,8 +12,8 @@
 - `workspace_session.rs` 使用 `GET /api/v1/sessions?page_size=100`、`POST /api/v1/workspaces { root }` 和 `POST /api/v1/sessions` 的最小映射；session 主键兼容官方 `id`，工作目录优先从 `metadata.cwd` 提取。
 - Workspace Grid 前端已引入 `zustand` 切片，使用 Pane/Slot 分离模型、1/2/3/4/5/6 窗预设、标题栏布局 popover、逐缝拖拽 resize + 持久化自定义 track、键盘切换、pane header 拖拽交换、iframe 内跨站 http(s) 链接系统浏览器打开、外部页 timeout fallback、嵌入式 Tauri 子 Webview 承载、独立应用 WebviewWindow fallback、native Webview per-pane `dataDirectory` namespace、mount policy 挂起/恢复和 6 窗上限；旧双窗 localStorage 键保留为迁移兼容层，Grid 内不再渲染自定义布局保存/恢复工具栏。
 - Workspace Grid 的三窗预设是左侧主 pane + 右侧上下两 pane；空 pane 和 pane header 不再提供 Kimi.com 新建/切换入口，external pane carrier 仅保留兼容、fallback 与已保存布局渲染能力。
-- Shell 已暴露 `grid_list_sessions` / `grid_create_session` Tauri command，薄封装既有 `/api/v1` session 建/查逻辑；当前 Grid UI 新建 Code pane 或把现有 pane 切换为 Code 时不再自动创建 session，而是打开 Kimi Code Web 根页面，旧持久化 pane 若已有 `sessionId` 仍会构造 `/sessions/{id}` URL。
-- Workspace Grid 持久化 state 在加载/恢复时会归一化未知 preset、超限或重复 pane、幽灵 slot 引用和失效 active/maximized pane；Code pane 可保存 `workDir` 用于 header “打开此窗格目录”，pane 可保存独立 `light` / `dark` 主题，未设置独立主题的 pane 跟随全局主题；Code session pane URL 会从运行时 workspace URL 保留 `#token=` bootstrap，但 token 不写入 persisted state。
+- Shell 已暴露 `grid_list_sessions` / `grid_get_session` / `grid_create_session` Tauri command，薄封装既有 `/api/v1` session 查单、列表与创建逻辑；当前 Grid UI 新建 Code pane 或把现有 pane 切换为 Code 时不再自动创建 session，而是打开 Kimi Code Web 根页面，旧持久化 pane 若已有 `sessionId` 仍会构造 `/sessions/{id}` URL。
+- Workspace Grid 持久化 state 在加载/恢复时会归一化未知 preset、超限或重复 pane、幽灵 slot 引用和失效 active/maximized pane；Code pane 可保存历史 `workDir` 元数据，但 header “打开当前会话目录”以 pane iframe 当前路由为权威，按 session id 精确查询且失败时不回退缓存；pane 可保存独立 `light` / `dark` 主题，未设置独立主题的 pane 跟随全局主题；Code session pane URL 会从运行时 workspace URL 保留 `#token=` bootstrap，但 token 不写入 persisted state。
 - Shell 前端已从 `useShellController.ts` 拆出安装流、轮询、Bridge 运行态刷新、Skill Center 状态/刷新、workspace embed URL 和 workspace import picker 控制器；Bridge 写操作与 Skill 动作 handler 仍在主 controller 中编排。
 - Shell 在配置目录写入 `kimi_runtime_locator.json`，包含 origin、token path、redacted token、generation、ownership 和 health，不包含明文 token。
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
@@ -21,7 +21,7 @@
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
 - Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
 - Explorer 右键菜单 label 可通过控制中心编辑，启用意图持久化在 `AppSettings` schema 10；禁用后启动自愈不会重新启用。注册表只保留 `Directory\\Background`、`Directory` 和 `*` 入口，旧 `AllFilesystemObjects` 键会清理，写删后通知 Explorer 刷新。
-- Explorer 打开目录/文件使用有界串行队列复用 `/api/v1` 创建独立 session；运行中的后端不重启、不切全局 cwd。前端按 `new_pane` 路由，最多六个可见 pane、十二个总 pane，第七个换入 active slot，被替换 pane 进入 Pane Shelf。
+- Explorer 打开目录/文件使用有界、按 backend generation 归属的单消费者队列复用 `/api/v1` 创建独立 session；请求在确定完成前保留队首，运行中的后端不重启、不切全局 cwd。前端按 `new_pane` 路由，最多六个可见 pane、十二个总 pane，第七个换入 active slot，被替换 pane 进入 Pane Shelf。
 - 控制中心运行诊断面板可手动执行 `kimi doctor`，返回 exit code、Kimi 路径、Shell 路径与脱敏 stdout/stderr；后端会注入检测到的 `KIMI_SHELL_PATH`。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。

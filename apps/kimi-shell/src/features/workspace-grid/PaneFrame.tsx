@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type MutableRefObject,
@@ -19,6 +20,10 @@ import {
   Trash2,
 } from "lucide-react";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
+import {
+  parseWorkspaceFrameSessionMessage,
+  queryWorkspaceFrameSessionId,
+} from "@/app/linkBridge";
 import type { Theme, WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
@@ -39,7 +44,6 @@ interface PaneFrameProps {
   maximized: boolean;
   dragging: boolean;
   canAddPane: boolean;
-  effectiveWorkDir?: string;
   themeMode: Theme;
   codeRemoteUrl: string | null;
   codeFrameKey: string;
@@ -52,7 +56,7 @@ interface PaneFrameProps {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
-  onOpenFolder: (path: string) => void;
+  onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
   onOpenExternalUrl: (url: string) => void;
   onOpenTauriWebviewUrl: (
     url: string,
@@ -79,7 +83,6 @@ export function PaneFrame({
   maximized,
   dragging,
   canAddPane,
-  effectiveWorkDir,
   themeMode,
   codeRemoteUrl,
   codeFrameKey,
@@ -92,7 +95,7 @@ export function PaneFrame({
   actionBusy,
   onRetry,
   onOpenLogs,
-  onOpenFolder,
+  onOpenPaneFolder,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
   onCodeFrameLoad,
@@ -107,6 +110,40 @@ export function PaneFrame({
   onPaneDragStart,
   onToggleMaximize,
 }: PaneFrameProps) {
+  const paneIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const sessionObservationGenerationRef = useRef(0);
+  const folderBusyRef = useRef(false);
+  const [observedSessionId, setObservedSessionId] = useState<string | null>();
+  const [folderBusy, setFolderBusy] = useState(false);
+  const codeOrigin = pane?.kind === "code" ? urlOrigin(codeRemoteUrl) : "";
+  const codeFrameMounted = Boolean(
+    pane?.kind === "code" && codeRemoteUrl && isPaneContentMounted(pane, active),
+  );
+
+  useLayoutEffect(() => {
+    sessionObservationGenerationRef.current += 1;
+    setObservedSessionId(undefined);
+  }, [codeFrameKey, codeFrameMounted, codeOrigin]);
+
+  useEffect(() => {
+    if (!codeFrameMounted || !codeOrigin) {
+      return;
+    }
+    const handleMessage = (event: MessageEvent) => {
+      const message = parseWorkspaceFrameSessionMessage(
+        event,
+        paneIframeRef.current,
+        codeOrigin,
+      );
+      if (message?.action === "pane_session_changed") {
+        sessionObservationGenerationRef.current += 1;
+        setObservedSessionId(message.sessionId);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [codeFrameMounted, codeOrigin]);
+
   if (!pane) {
     return (
       <div className="workspace-grid-pane workspace-grid-pane-empty">
@@ -154,8 +191,13 @@ export function PaneFrame({
     onChatFrameError,
   });
   const paneTheme = pane.theme ?? themeMode;
-  const paneWorkDir =
-    pane.kind === "code" ? pane.workDir?.trim() || effectiveWorkDir?.trim() || "" : "";
+  const folderActionLabel = folderBusy
+    ? "正在解析当前会话目录"
+    : observedSessionId === undefined
+      ? "正在识别当前会话"
+      : observedSessionId === null
+        ? "当前窗格尚未进入会话"
+        : "打开当前会话目录";
   const viewToggle =
     pane.kind === "code"
       ? {
@@ -204,9 +246,21 @@ export function PaneFrame({
         <div className="workspace-grid-pane-actions">
           {pane.kind === "code" ? (
             <IconButton
-              label="打开此窗格目录"
-              onClick={() => onOpenFolder(paneWorkDir)}
-              disabled={!paneWorkDir}
+              label={folderActionLabel}
+              onClick={() => {
+                if (folderBusyRef.current) {
+                  return;
+                }
+                folderBusyRef.current = true;
+                setFolderBusy(true);
+                void Promise.resolve()
+                  .then(() => onOpenPaneFolder(paneIframeRef.current))
+                  .finally(() => {
+                    folderBusyRef.current = false;
+                    setFolderBusy(false);
+                  });
+              }}
+              disabled={!codeFrameMounted || !observedSessionId || folderBusy}
             >
               <FolderOpen size={14} aria-hidden />
             </IconButton>
@@ -245,6 +299,26 @@ export function PaneFrame({
         themeSignal={themeMode}
         active={active}
         onResumePane={onResumePane}
+        iframeRef={paneIframeRef}
+        onIframeLoad={() => {
+          if (!codeOrigin) {
+            return;
+          }
+          const generation = sessionObservationGenerationRef.current + 1;
+          sessionObservationGenerationRef.current = generation;
+          setObservedSessionId(undefined);
+          void queryWorkspaceFrameSessionId(paneIframeRef.current, codeOrigin)
+            .then((sessionId) => {
+              if (sessionObservationGenerationRef.current === generation) {
+                setObservedSessionId(sessionId);
+              }
+            })
+            .catch(() => {
+              if (sessionObservationGenerationRef.current === generation) {
+                setObservedSessionId(null);
+              }
+            });
+        }}
       />
     </article>
   );
@@ -301,6 +375,8 @@ interface PaneContentProps {
   paneTheme: Theme;
   themeSignal: Theme;
   onResumePane: () => void;
+  iframeRef: MutableRefObject<HTMLIFrameElement | null>;
+  onIframeLoad: () => void;
 }
 
 function PaneContent({
@@ -315,9 +391,10 @@ function PaneContent({
   paneTheme,
   themeSignal,
   onResumePane,
+  iframeRef,
+  onIframeLoad,
 }: PaneContentProps) {
   const embedHostRef = useRef<HTMLDivElement | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const embeddedControllerRef =
     useRef<EmbeddedExternalWebviewController | null>(null);
   const embeddedOpenGenerationRef = useRef(0);
@@ -608,6 +685,7 @@ function PaneContent({
                 return;
               }
               source.onLoad();
+              onIframeLoad();
             }}
             onError={source.onError}
           />
@@ -698,6 +776,21 @@ function PaneContent({
       )}
     </div>
   );
+}
+
+function isPaneContentMounted(pane: WorkspacePane, active: boolean): boolean {
+  return (
+    pane.mountPolicy === "eager" ||
+    (pane.mountPolicy === "on-focus" && active)
+  );
+}
+
+function urlOrigin(value: string | null | undefined): string {
+  try {
+    return value ? new URL(value).origin : "";
+  } catch {
+    return "";
+  }
 }
 
 function rectToEmbeddedBounds(rect: DOMRect | DOMRectReadOnly): EmbeddedExternalWebviewBounds {

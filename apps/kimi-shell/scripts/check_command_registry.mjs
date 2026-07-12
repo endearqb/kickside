@@ -52,7 +52,11 @@ const commandRegistry = {
     "save_kimi_path",
     "save_work_dir",
   ],
-  workspace_grid: ["workspace_grid::grid_list_sessions", "workspace_grid::grid_create_session"],
+  workspace_grid: [
+    "workspace_grid::grid_list_sessions",
+    "workspace_grid::grid_get_session",
+    "workspace_grid::grid_create_session",
+  ],
   bridge: [
     "bridge::get_bridge_settings",
     "bridge::save_bridge_settings",

@@ -924,6 +924,7 @@ pub fn publish_open_request_error(
     payload: &OpenRequestErrorPayload,
     source: &str,
 ) {
+    show_and_focus(app);
     let should_queue = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {

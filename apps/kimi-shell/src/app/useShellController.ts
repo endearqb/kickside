@@ -15,6 +15,7 @@ import {
   isExpectedWorkspaceBridgeNonce,
   isTrustedWorkspaceIframeSource,
   normalizeExternalOpenUrl,
+  queryWorkspaceFrameSessionId,
 } from "@/app/linkBridge";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
@@ -111,6 +112,7 @@ import { useShellPollingController } from "@/app/useShellPollingController";
 import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
 import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+import { resolveCurrentPaneWorkDir } from "@/services/workspaceGridService";
 import {
   applySkill,
   addInstalledSkillToWorkspaceTarget,
@@ -327,8 +329,8 @@ export function useShellController() {
   const configureWorkspaceGridPane = useWorkspaceGridStore(
     (state) => state.configurePane,
   );
-  const setWorkspaceGridPaneWorkDir = useWorkspaceGridStore(
-    (state) => state.setPaneWorkDir,
+  const setWorkspaceGridSessionWorkDir = useWorkspaceGridStore(
+    (state) => state.setSessionWorkDir,
   );
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
@@ -724,17 +726,9 @@ export function useShellController() {
         return;
       }
 
-      const { panes } = useWorkspaceGridStore.getState();
-      const targetPane = panes.find(
-        (pane) => pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId,
-      );
-      if (!targetPane) {
-        return;
-      }
-
-      setWorkspaceGridPaneWorkDir(targetPane.id, nextWorkDir);
+      setWorkspaceGridSessionWorkDir(normalizedSessionId, nextWorkDir);
     },
-    [setWorkspaceGridPaneWorkDir],
+    [setWorkspaceGridSessionWorkDir],
   );
 
   function clearShutdownElapsedTimer(resetValue: boolean) {
@@ -2308,6 +2302,22 @@ export function useShellController() {
     }
   }
 
+  async function handleOpenPaneFolder(frame: HTMLIFrameElement | null) {
+    try {
+      setActionError(null);
+      if (!workspaceOrigin) {
+        throw new Error("Kimi Code workspace 尚未就绪。");
+      }
+
+      const workDir = await resolveCurrentPaneWorkDir(() =>
+        queryWorkspaceFrameSessionId(frame, workspaceOrigin),
+      );
+      await handleOpenFolder(workDir);
+    } catch (error) {
+      setActionError(`无法打开当前会话目录：${String(error)}`);
+    }
+  }
+
   async function handleOpenKimiConfigDir() {
     try {
       await invoke("open_kimi_config_dir");
@@ -3745,6 +3755,7 @@ export function useShellController() {
     handleQuitAppGracefully,
     handleOpenExternalUrl,
     handleOpenFolder,
+    handleOpenPaneFolder,
     handleOpenKimiConfigDir,
     handleOpenKimiCodeAccessPanel,
     handleOpenControlTask,

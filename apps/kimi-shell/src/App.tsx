@@ -326,9 +326,7 @@ function App() {
             actionBusy={shell.actionBusy}
             onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
-            onOpenFolder={(path) => {
-              void shell.handleOpenFolder(path);
-            }}
+            onOpenPaneFolder={shell.handleOpenPaneFolder}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
             onSplitRatioChange={shell.handleWorkspaceSplitRatioChange}
             onSplitDragStateChange={shell.handleWorkspaceSplitDragStateChange}

@@ -92,9 +92,13 @@ function PaneList({ title, panes, activePaneId, onOpen, onRemove }: PaneListProp
       <h3>{title}</h3>
       {panes.length ? panes.map((pane) => (
         <div className={`pane-shelf-item${pane.id === activePaneId ? " is-active" : ""}`} key={pane.id}>
-          <button type="button" onClick={() => onOpen(pane.id)} title={pane.workDir || pane.title}>
-            <strong>{pane.title}</strong>
-            <small>{pane.workDir || pane.sessionId || pane.kind}</small>
+          <button
+            type="button"
+            onClick={() => onOpen(pane.id)}
+            title={pane.workDir || pane.title}
+            aria-label={pane.workDir || pane.title}
+          >
+            <strong>{pane.workDir ? getDirectoryName(pane.workDir) : pane.title}</strong>
           </button>
           <button type="button" onClick={() => onRemove(pane.id)} aria-label={`关闭 ${pane.title}`}>
             <X size={13} aria-hidden />
@@ -103,4 +107,8 @@ function PaneList({ title, panes, activePaneId, onOpen, onRemove }: PaneListProp
       )) : <p>无</p>}
     </section>
   );
+}
+
+function getDirectoryName(workDir: string): string {
+  return workDir.split(/[\\/]+/).filter(Boolean).pop() || workDir;
 }

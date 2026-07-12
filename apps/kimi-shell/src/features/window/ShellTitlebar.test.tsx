@@ -72,6 +72,39 @@ describe("ShellTitlebar", () => {
     expect(onOpenExternalUrl).toHaveBeenCalledWith("https://www.kimi.com/");
   });
 
+  it("closes each titlebar menu when clicking elsewhere in the app", () => {
+    render(<ShellTitlebar {...titlebarProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /选择工作区布局/ }));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu", { name: "选择工作区布局" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /打开窗格库/ }));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "窗格库" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "在浏览器打开" }));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("menu", { name: "在浏览器打开" })).toBeNull();
+  });
+
+  it("shows only the current session directory name in the pane shelf", () => {
+    const state = useWorkspaceGridStore.getState();
+    const paneId = state.slots.find((slot) => slot.paneId)?.paneId;
+    useWorkspaceGridStore.setState({
+      panes: state.panes.map((pane) => pane.id === paneId
+        ? { ...pane, workDir: "D:\\projects\\client\\current-session" }
+        : pane),
+    });
+    render(<ShellTitlebar {...titlebarProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /打开窗格库/ }));
+
+    expect(screen.getByText("current-session")).toBeTruthy();
+    expect(screen.queryByText("D:\\projects\\client\\current-session")).toBeNull();
+    expect(screen.getByRole("button", { name: "D:\\projects\\client\\current-session" })).toBeTruthy();
+  });
+
   it("hides workspace title chrome and exposes control center instead of skills", () => {
     const onOpenControlCenter = vi.fn();
     render(

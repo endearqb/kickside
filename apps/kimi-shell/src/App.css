@@ -212,7 +212,14 @@
 .pane-shelf-popover {
   width: 280px;
   max-height: min(420px, calc(100vh - 48px));
+  display: block;
   overflow: auto;
+}
+
+.pane-shelf-section + .pane-shelf-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--chrome-border);
 }
 
 .pane-shelf-summary,

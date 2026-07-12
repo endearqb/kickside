@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Code2,
   Columns2,
@@ -92,7 +92,30 @@ export function ShellTitlebar({
   const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [browserMenuOpen, setBrowserMenuOpen] = useState(false);
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
+  const browserMenuRef = useRef<HTMLDivElement>(null);
   const layoutToggleLabel = `选择工作区布局，当前 ${GRID_PRESETS[workspaceGridPreset].label}`;
+
+  useEffect(() => {
+    if (!layoutMenuOpen && !browserMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!layoutMenuRef.current?.contains(target)) setLayoutMenuOpen(false);
+      if (!browserMenuRef.current?.contains(target)) setBrowserMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLayoutMenuOpen(false);
+        setBrowserMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [browserMenuOpen, layoutMenuOpen]);
 
   const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
@@ -133,7 +156,7 @@ export function ShellTitlebar({
           />
         ) : null}
         {screen === "workspace" ? (
-          <div className="titlebar-layout-menu-wrap">
+          <div ref={layoutMenuRef} className="titlebar-layout-menu-wrap">
             <IconButton
               icon={<Columns2 size={14} />}
               label={layoutToggleLabel}
@@ -173,7 +196,7 @@ export function ShellTitlebar({
         ) : null}
         {screen === "workspace" ? <PaneShelf /> : null}
         {screen === "workspace" ? (
-          <div className="titlebar-layout-menu-wrap">
+          <div ref={browserMenuRef} className="titlebar-layout-menu-wrap">
             <IconButton
               icon={<ExternalLink size={14} />}
               label="在浏览器打开"

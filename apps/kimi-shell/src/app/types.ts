@@ -787,6 +787,8 @@ export interface WorkspaceSessionBridgePayload {
   sessionId?: string;
   workDir?: string;
   routeTemplate?: string;
+  disposition?: "replace_active" | "new_pane";
+  targetWindowLabel?: string;
   applied?: boolean;
   reason?: string;
 }

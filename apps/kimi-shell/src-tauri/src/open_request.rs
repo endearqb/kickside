@@ -426,19 +426,28 @@ fn apply_open_dir_request(app: &AppHandle, directory: PathBuf) -> Result<(), Str
     }
     let _ = skill_center::track_workspace_root(app, &directory);
 
-    backend_manager::set_session_work_dir(app, Some(directory.clone()))
-        .map_err(|error| error.to_string())?;
-    workspace_session::clear_active_session_runtime(app, "open_dir_request");
-    workspace_session::queue_workspace_bootstrap(app, &directory, "open_dir_request", false, false);
+    let ready = workspace_session::queue_explorer_workspace_open(
+        app,
+        &directory,
+        "open_dir_request",
+        format!(
+            "explorer-open-dir-{}-{:08x}",
+            crate::app_state::unix_time_millis(),
+            rand::random::<u32>()
+        ),
+    )?;
+    if !ready {
+        backend_manager::set_session_work_dir(app, Some(directory.clone()))
+            .map_err(|error| error.to_string())?;
+        backend_manager::start_backend(app.clone());
+    }
     log_manager::append_line(
         app,
         format!(
-            "received open-dir request, switching session work directory to {}",
+            "queued open-dir request for independent session: {}",
             directory.display()
         ),
     );
-    backend_manager::restart_backend(app.clone());
-    window_manager::show_and_focus(app);
     Ok(())
 }
 
@@ -487,21 +496,28 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
         )
     })?;
 
-    backend_manager::set_session_work_dir(app, Some(workspace_dir.clone())).map_err(|error| {
-        format!(
-            "open-files stage=set_session_work_dir failed (workspace_dir={}): {error}",
-            workspace_dir.display()
-        )
-    })?;
     let _ = skill_center::track_workspace_root(app, &workspace_dir);
-    workspace_session::clear_active_session_runtime(app, "open_files_request");
-    workspace_session::queue_workspace_bootstrap(
+    let ready = workspace_session::queue_explorer_workspace_open(
         app,
         &workspace_dir,
         "open_files_request",
-        false,
-        false,
-    );
+        format!(
+            "explorer-open-files-{}-{:08x}",
+            crate::app_state::unix_time_millis(),
+            rand::random::<u32>()
+        ),
+    )?;
+    if !ready {
+        backend_manager::set_session_work_dir(app, Some(workspace_dir.clone())).map_err(
+            |error| {
+                format!(
+                    "open-files stage=set_session_work_dir failed (workspace_dir={}): {error}",
+                    workspace_dir.display()
+                )
+            },
+        )?;
+        backend_manager::start_backend(app.clone());
+    }
 
     log_manager::append_line(
         app,
@@ -512,8 +528,6 @@ fn apply_open_files_request(app: &AppHandle, files: Vec<PathBuf>) -> Result<(), 
         ),
     );
 
-    backend_manager::restart_backend(app.clone());
-    window_manager::show_and_focus(app);
     Ok(())
 }
 

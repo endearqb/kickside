@@ -11,6 +11,7 @@ import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
   WORKSPACE_GRID_MAX_PANES,
+  WORKSPACE_GRID_MAX_TOTAL_PANES,
   WORKSPACE_GRID_STATE_STORAGE_KEY,
   createWorkspaceGridStore,
   loadWorkspaceGridState,
@@ -370,6 +371,41 @@ describe("workspace grid store", () => {
     expect(pane?.url).toBeUndefined();
   });
 
+  it("opens Explorer sessions visibly and shelves the displaced pane after six", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    for (let index = 1; index <= 7; index += 1) {
+      store.getState().openPaneFromExplorer({
+        kind: "code",
+        sessionId: `session-${index}`,
+        workDir: `D:/work/${index}`,
+      });
+    }
+
+    const state = store.getState();
+    const visibleIds = state.slots.map((slot) => slot.paneId).filter(Boolean);
+    expect(state.panes).toHaveLength(9);
+    expect(visibleIds).toHaveLength(6);
+    expect(state.panes.find((pane) => pane.id === state.activePaneId)?.sessionId).toBe(
+      "session-7",
+    );
+    expect(state.panes.filter((pane) => !visibleIds.includes(pane.id))).toHaveLength(3);
+  });
+
+  it("rejects the thirteenth Explorer pane without changing slots", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    while (store.getState().panes.length < WORKSPACE_GRID_MAX_TOTAL_PANES) {
+      store.getState().openPaneFromExplorer({
+        kind: "code",
+        sessionId: `session-${store.getState().panes.length}`,
+      });
+    }
+    const before = store.getState().slots;
+    expect(
+      store.getState().openPaneFromExplorer({ kind: "code", sessionId: "session-13" }),
+    ).toEqual({ kind: "limit_reached", paneId: null });
+    expect(store.getState().slots).toEqual(before);
+  });
+
   it("uses a new storage namespace when reconfiguring panes", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
@@ -415,7 +451,7 @@ describe("workspace grid store", () => {
 
   it("normalizes damaged persisted grid state before rendering", () => {
     const persistedPanes = Array.from(
-      { length: WORKSPACE_GRID_MAX_PANES + 2 },
+      { length: WORKSPACE_GRID_MAX_TOTAL_PANES + 2 },
       (_, index) => persistedPane(`pane-${index}`),
     );
     const state = loadWorkspaceGridState(
@@ -440,12 +476,12 @@ describe("workspace grid store", () => {
     );
 
     expect(state.preset).toBe("1x2");
-    expect(state.panes).toHaveLength(WORKSPACE_GRID_MAX_PANES);
+    expect(state.panes).toHaveLength(WORKSPACE_GRID_MAX_TOTAL_PANES);
     expect(state.slots).toEqual([
       { id: "left", area: "left", paneId: "pane-1" },
       { id: "right", area: "right", paneId: "pane-0" },
     ]);
-    expect(state.activePaneId).toBe("pane-0");
+    expect(state.activePaneId).toBe("pane-1");
     expect(state.maximizedPaneId).toBeNull();
     expect(state.trackSizes).toBeUndefined();
   });

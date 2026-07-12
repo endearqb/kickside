@@ -25,13 +25,23 @@ import type {
 export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v1";
 export const WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY =
   "kimi-workspace-grid-saved-layouts-v1";
-export const WORKSPACE_GRID_MAX_PANES = 6;
+export const WORKSPACE_GRID_MAX_VISIBLE_PANES = 6;
+export const WORKSPACE_GRID_MAX_TOTAL_PANES = 12;
+export const WORKSPACE_GRID_MAX_PANES = WORKSPACE_GRID_MAX_VISIBLE_PANES;
+
+export type ExplorerPanePlacement = {
+  kind: "added_visible" | "added_swapped" | "reused_visible" | "reused_swapped" | "limit_reached";
+  paneId: string | null;
+  displacedPaneId?: string;
+};
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
 
 export interface WorkspaceGridActions {
   setPreset: (preset: WorkspaceGridPresetId) => void;
   addPane: (pane: AddWorkspacePaneInput, targetSlotId?: string) => string | null;
+  openPaneFromExplorer: (pane: AddWorkspacePaneInput) => ExplorerPanePlacement;
+  showPane: (paneId: string, targetSlotId?: string) => void;
   removePane: (paneId: string) => void;
   movePane: (paneId: string, slotId: string) => void;
   swapSlots: (sourceSlotId: string, targetSlotId: string) => void;
@@ -231,7 +241,7 @@ function createWorkspaceGridSlice(
     },
     addPane(input, targetSlotId) {
       const state = get();
-      if (state.panes.length >= WORKSPACE_GRID_MAX_PANES) {
+      if (state.panes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) {
         return null;
       }
       const targetSlot = targetSlotId
@@ -243,23 +253,7 @@ function createWorkspaceGridSlice(
 
       const now = Date.now();
       const paneId = createPaneId(input.kind);
-      const pane: WorkspacePane = {
-        id: paneId,
-        kind: input.kind,
-        carrier: "iframe",
-        title: input.title ?? defaultPaneTitle(input.kind),
-        sessionId: input.sessionId,
-        url: sanitizeUrl(input.url),
-        workDir: sanitizeWorkDir(input.workDir),
-        theme: isPaneTheme(input.theme) ? input.theme : undefined,
-        storageNamespace:
-          sanitizeStorageNamespace(input.storageNamespace) ??
-          createPaneStorageNamespace(paneId),
-        mountPolicy: "eager",
-        loadState: "idle",
-        createdAt: now,
-        updatedAt: now,
-      };
+      const pane = createWorkspacePane(input, paneId, now);
 
       update(set, storage, (current) => ({
         ...current,
@@ -273,14 +267,141 @@ function createWorkspaceGridSlice(
 
       return paneId;
     },
+    openPaneFromExplorer(input) {
+      let result: ExplorerPanePlacement = { kind: "limit_reached", paneId: null };
+      update(set, storage, (state) => {
+        const now = Date.now();
+        const existing = input.sessionId
+          ? state.panes.find((pane) => pane.sessionId === input.sessionId)
+          : undefined;
+        if (existing) {
+          const visibleSlot = state.slots.find((slot) => slot.paneId === existing.id);
+          const targetSlot =
+            visibleSlot ??
+            state.slots.find((slot) => !slot.paneId) ??
+            state.slots.find((slot) => slot.paneId === state.activePaneId) ??
+            state.slots[0];
+          if (!targetSlot) return state;
+          const displacedPaneId = visibleSlot ? undefined : targetSlot.paneId;
+          result = {
+            kind: visibleSlot ? "reused_visible" : "reused_swapped",
+            paneId: existing.id,
+            displacedPaneId,
+          };
+          return {
+            ...state,
+            panes: state.panes.map((pane) =>
+              pane.id === existing.id
+                ? {
+                    ...pane,
+                    workDir: sanitizeWorkDir(input.workDir) ?? pane.workDir,
+                    updatedAt: now,
+                  }
+                : pane,
+            ),
+            slots: visibleSlot
+              ? state.slots
+              : state.slots.map((slot) =>
+                  slot.id === targetSlot.id ? { ...slot, paneId: existing.id } : slot,
+                ),
+            activePaneId: existing.id,
+            maximizedPaneId: null,
+            updatedAt: now,
+          };
+        }
+        if (state.panes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) return state;
+
+        const paneId = createPaneId(input.kind);
+        const pane = createWorkspacePane(input, paneId, now);
+        const visiblePaneIds = state.slots
+          .map((slot) => slot.paneId)
+          .filter((id): id is string => Boolean(id));
+        const emptySlot = state.slots.find((slot) => !slot.paneId);
+        if (emptySlot) {
+          result = { kind: "added_visible", paneId };
+          return {
+            ...state,
+            panes: [...state.panes, pane],
+            slots: state.slots.map((slot) =>
+              slot.id === emptySlot.id ? { ...slot, paneId } : slot,
+            ),
+            activePaneId: paneId,
+            maximizedPaneId: null,
+            updatedAt: now,
+          };
+        }
+        if (visiblePaneIds.length < WORKSPACE_GRID_MAX_VISIBLE_PANES) {
+          const preset = presetForPaneCount(visiblePaneIds.length + 1);
+          result = { kind: "added_visible", paneId };
+          return {
+            ...state,
+            preset,
+            panes: [...state.panes, pane],
+            slots: materializeGridSlots(preset, [...visiblePaneIds, paneId]),
+            activePaneId: paneId,
+            maximizedPaneId: null,
+            trackSizes: undefined,
+            updatedAt: now,
+          };
+        }
+
+        const targetSlot =
+          state.slots.find((slot) => slot.paneId === state.activePaneId) ?? state.slots[0];
+        if (!targetSlot) return state;
+        result = {
+          kind: "added_swapped",
+          paneId,
+          displacedPaneId: targetSlot.paneId,
+        };
+        return {
+          ...state,
+          panes: [...state.panes, pane],
+          slots: state.slots.map((slot) =>
+            slot.id === targetSlot.id ? { ...slot, paneId } : slot,
+          ),
+          activePaneId: paneId,
+          maximizedPaneId: null,
+          updatedAt: now,
+        };
+      });
+      return result;
+    },
+    showPane(paneId, targetSlotId) {
+      update(set, storage, (state) => {
+        if (!state.panes.some((pane) => pane.id === paneId)) return state;
+        if (state.slots.some((slot) => slot.paneId === paneId)) {
+          return { ...state, activePaneId: paneId, maximizedPaneId: null };
+        }
+        const targetSlot =
+          state.slots.find((slot) => slot.id === targetSlotId && !slot.paneId) ??
+          state.slots.find((slot) => !slot.paneId) ??
+          state.slots.find((slot) => slot.paneId === state.activePaneId) ??
+          state.slots[0];
+        if (!targetSlot) return state;
+        return {
+          ...state,
+          slots: state.slots.map((slot) =>
+            slot.id === targetSlot.id ? { ...slot, paneId } : slot,
+          ),
+          activePaneId: paneId,
+          maximizedPaneId: null,
+          updatedAt: Date.now(),
+        };
+      });
+    },
     removePane(paneId) {
       update(set, storage, (state) => {
         const panes = state.panes.filter((pane) => pane.id !== paneId);
         const slots = state.slots.map((slot) =>
           slot.paneId === paneId ? { ...slot, paneId: undefined } : slot,
         );
+        const visiblePaneIds = slots
+          .map((slot) => slot.paneId)
+          .filter((id): id is string => Boolean(id));
         const activePaneId =
-          state.activePaneId === paneId ? (panes[0]?.id ?? null) : state.activePaneId;
+          state.activePaneId === paneId
+            ? (visiblePaneIds[0] ?? null)
+            : state.activePaneId;
         return {
           ...state,
           panes,
@@ -512,12 +633,13 @@ function sanitizeGridState(
     assignedPaneIds.length > 0
       ? assignedPaneIds
       : panes.slice(0, GRID_PRESETS[preset].slots.length).map((pane) => pane.id);
+  const visiblePaneIdSet = new Set(slotPaneIds);
   const activePaneId =
-    parsed.activePaneId && paneIds.has(parsed.activePaneId)
+    parsed.activePaneId && visiblePaneIdSet.has(parsed.activePaneId)
       ? parsed.activePaneId
-      : (panes[0]?.id ?? null);
+      : (slotPaneIds[0] ?? null);
   const maximizedPaneId =
-    parsed.maximizedPaneId && paneIds.has(parsed.maximizedPaneId)
+    parsed.maximizedPaneId && visiblePaneIdSet.has(parsed.maximizedPaneId)
       ? parsed.maximizedPaneId
       : null;
 
@@ -549,7 +671,7 @@ function sanitizePanes(panes: unknown[]): WorkspacePane[] {
     }
     seenPaneIds.add(pane.id);
     sanitizedPanes.push(pane);
-    if (sanitizedPanes.length >= WORKSPACE_GRID_MAX_PANES) {
+    if (sanitizedPanes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) {
       break;
     }
   }
@@ -675,6 +797,35 @@ function defaultPaneTitle(kind: WorkspacePaneKind): string {
   if (kind === "code") return getKimiAssistantDisplayName();
   if (kind === "chat") return "Kimi Chat";
   return "外部网页";
+}
+
+function createWorkspacePane(
+  input: AddWorkspacePaneInput,
+  paneId: string,
+  now: number,
+): WorkspacePane {
+  return {
+    id: paneId,
+    kind: input.kind,
+    carrier: "iframe",
+    title: input.title ?? defaultPaneTitle(input.kind),
+    sessionId: input.sessionId,
+    url: sanitizeUrl(input.url),
+    workDir: sanitizeWorkDir(input.workDir),
+    theme: isPaneTheme(input.theme) ? input.theme : undefined,
+    storageNamespace:
+      sanitizeStorageNamespace(input.storageNamespace) ?? createPaneStorageNamespace(paneId),
+    mountPolicy: "eager",
+    loadState: "idle",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function presetForPaneCount(count: number): WorkspaceGridPresetId {
+  return (["single", "1x2", "1x3", "2x2", "2x3-5", "2x3"] as const)[
+    Math.max(0, Math.min(WORKSPACE_GRID_MAX_VISIBLE_PANES - 1, count - 1))
+  ];
 }
 
 function createPaneId(kind: WorkspacePaneKind): string {

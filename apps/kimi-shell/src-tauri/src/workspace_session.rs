@@ -16,7 +16,7 @@ use crate::{
     types::{
         AuthMode, BackendState, KimiLoginHealthSource, KimiLoginHealthState,
         OpenRequestErrorPayload, ProviderApiHealthSource, ProviderApiHealthState,
-        WorkspaceSessionBridgePayload,
+        WorkspaceSessionBridgePayload, WorkspaceSessionDisposition,
     },
     window_manager,
 };
@@ -26,6 +26,7 @@ const WORKSPACE_SESSION_BRIDGE_EVENT: &str = "workspace-session-bridge";
 const WORKSPACE_SESSION_POLL_INTERVAL_MS: u64 = 1_200;
 const SESSION_LIST_FETCH_LIMIT: usize = 100;
 const BOOTSTRAP_ROUTE_TEMPLATE: &str = "/?session={{session_id}}";
+const MAX_PENDING_WORKSPACE_BOOTSTRAPS: usize = 64;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ApiSession {
@@ -113,40 +114,40 @@ struct SessionSnapshot {
     work_dir: Option<String>,
 }
 
-pub fn queue_workspace_bootstrap(
+pub fn queue_explorer_workspace_open(
     app: &AppHandle,
     work_dir: &Path,
     source: &str,
-    auto_session: bool,
-    force_create_new: bool,
-) {
+    request_id: String,
+) -> Result<bool, String> {
     let normalized = normalize_path(work_dir);
     let _ = skill_center::track_workspace_root(app, &normalized);
-    let state = app.state::<AppState>();
-    let lock = state.runtime.lock();
-    let Ok(mut runtime) = lock else {
-        log_manager::append_line(
-            app,
-            format!(
-                "failed to queue workspace bootstrap: runtime mutex poisoned (source={source})"
-            ),
-        );
-        return;
-    };
-
-    runtime.pending_workspace_bootstrap = Some(PendingWorkspaceBootstrap {
-        work_dir: normalized.clone(),
-        auto_session,
-        force_create_new,
-        source: source.to_string(),
-    });
-    log_manager::append_line(
-        app,
-        format!(
-            "queued workspace bootstrap (source={source}, work_dir={}, auto_session={auto_session}, force_create_new={force_create_new})",
-            normalized.display()
-        ),
-    );
+    {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime mutex poisoned while queuing Explorer open".to_string())?;
+        if runtime.pending_workspace_bootstraps.len() >= MAX_PENDING_WORKSPACE_BOOTSTRAPS {
+            return Err(format!(
+                "Explorer open queue is full ({MAX_PENDING_WORKSPACE_BOOTSTRAPS} requests)"
+            ));
+        }
+        runtime
+            .pending_workspace_bootstraps
+            .push_back(PendingWorkspaceBootstrap {
+                work_dir: normalized,
+                force_create_new: true,
+                source: source.to_string(),
+                request_id: Some(request_id),
+                disposition: WorkspaceSessionDisposition::NewPane,
+            });
+    }
+    let ready = runtime_api_ready(app).unwrap_or(false);
+    if ready {
+        kick_workspace_bootstrap_worker(app);
+    }
+    Ok(ready)
 }
 
 pub fn clear_active_session_runtime(app: &AppHandle, source: &str) {
@@ -195,42 +196,67 @@ fn cleanup_replaced_session_skills(
 pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u16) {
     start_session_poller(app.clone(), generation, workspace_port);
 
-    let bootstrap_target = {
+    {
         let state = app.state::<AppState>();
         let lock = state.runtime.lock();
         let Ok(mut runtime) = lock else {
             return;
         };
+        runtime.workspace_bootstrap_worker_running = false;
 
-        runtime.pending_workspace_bootstrap.take().or_else(|| {
-            runtime
-                .effective_work_dir
-                .clone()
-                .map(|work_dir| PendingWorkspaceBootstrap {
-                    work_dir,
-                    auto_session: true,
-                    force_create_new: false,
-                    source: "backend_ready_bootstrap".to_string(),
-                })
-        })
-    };
+        if runtime.pending_workspace_bootstraps.is_empty() {
+            if let Some(work_dir) = runtime.effective_work_dir.clone() {
+                runtime
+                    .pending_workspace_bootstraps
+                    .push_back(PendingWorkspaceBootstrap {
+                        work_dir,
+                        force_create_new: false,
+                        source: "backend_ready_bootstrap".to_string(),
+                        request_id: None,
+                        disposition: WorkspaceSessionDisposition::ReplaceActive,
+                    });
+            }
+        }
+    }
+    kick_workspace_bootstrap_worker(app);
+}
 
-    if let Some(request) = bootstrap_target {
-        if !request.auto_session {
-            log_manager::append_line(
-                app,
-                format!(
-                    "workspace bootstrap skipped (source={}, work_dir={}, auto_session=false)",
-                    request.source,
-                    request.work_dir.display()
-                ),
-            );
-            clear_active_session_runtime(app, &format!("skip_bootstrap:{}", request.source));
+fn kick_workspace_bootstrap_worker(app: &AppHandle) {
+    let generation = {
+        let state = app.state::<AppState>();
+        let Ok(mut runtime) = state.runtime.lock() else {
+            return;
+        };
+        if runtime.workspace_bootstrap_worker_running
+            || runtime.pending_workspace_bootstraps.is_empty()
+        {
             return;
         }
+        runtime.workspace_bootstrap_worker_running = true;
+        runtime.generation
+    };
 
-        spawn_bootstrap_session(app.clone(), generation, workspace_port, request);
-    }
+    let app = app.clone();
+    thread::spawn(move || loop {
+        let request = {
+            let state = app.state::<AppState>();
+            let Ok(mut runtime) = state.runtime.lock() else {
+                return;
+            };
+            if runtime.generation != generation {
+                runtime.workspace_bootstrap_worker_running = false;
+                return;
+            }
+            match runtime.pending_workspace_bootstraps.pop_front() {
+                Some(request) => request,
+                None => {
+                    runtime.workspace_bootstrap_worker_running = false;
+                    return;
+                }
+            }
+        };
+        process_bootstrap_session(&app, generation, request);
+    });
 }
 
 pub fn note_session_stream_activity(app: &AppHandle, session_id: &str, source: &str) {
@@ -334,118 +360,122 @@ fn start_session_poller(app: AppHandle, generation: u64, _workspace_port: u16) {
     });
 }
 
-fn spawn_bootstrap_session(
-    app: AppHandle,
-    generation: u64,
-    _workspace_port: u16,
-    request: PendingWorkspaceBootstrap,
-) {
+fn process_bootstrap_session(app: &AppHandle, generation: u64, request: PendingWorkspaceBootstrap) {
     let work_dir = request.work_dir;
-    let auto_session = request.auto_session;
     let source = request.source;
     let force_create_new = request.force_create_new;
-    thread::spawn(move || {
-        let existing_session = if force_create_new {
-            None
-        } else {
-            match fetch_sessions(&app) {
-                Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
-                Err(error) => {
-                    maybe_capture_workspace_auth_failure(&app, &error);
-                    log_manager::append_line(
+    let disposition = request.disposition;
+    let existing_session = if force_create_new {
+        None
+    } else {
+        match fetch_sessions(&app) {
+            Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
+            Err(error) => {
+                maybe_capture_workspace_auth_failure(&app, &error);
+                log_manager::append_line(
                         &app,
                         format!(
                             "workspace bootstrap failed to list sessions; fallback to create (source={source}, work_dir={}): {error}",
                             work_dir.display()
                         ),
                     );
-                    None
-                }
+                None
             }
-        };
-
-        let (session, snapshot_source) = if let Some(snapshot) = existing_session {
-            log_manager::append_line(
-                &app,
-                format!(
-                    "bootstrap_resume_existing source={source} work_dir={} session_id={}",
-                    work_dir.display(),
-                    snapshot.session_id
-                ),
-            );
-            (snapshot, "bootstrap_resume_existing")
-        } else {
-            let response = create_session_for_work_dir(&app, &work_dir);
-            let created = match response {
-                Ok(session) => session,
-                Err(error) => {
-                    maybe_capture_workspace_auth_failure(&app, &error);
-                    let error_message = format!(
-                        "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
-                        work_dir.display()
-                    );
-                    log_manager::append_line(&app, error_message.clone());
-                    if force_create_new {
-                        emit_bootstrap_open_request_error(
-                            &app,
-                            &source,
-                            "create_session_for_work_dir",
-                            &error_message,
-                        );
-                    }
-                    return;
-                }
-            };
-            log_manager::append_line(
-                &app,
-                format!(
-                    "bootstrap_create_new source={source} work_dir={} session_id={}",
-                    work_dir.display(),
-                    created.session_id
-                ),
-            );
-            (session_snapshot_from_api(&created), "bootstrap_create_new")
-        };
-
-        if !is_generation_alive(&app, generation) {
-            return;
         }
+    };
 
-        let work_dir_value = session
-            .work_dir
-            .clone()
-            .or_else(|| Some(work_dir.to_string_lossy().to_string()));
-        let session_id = session.session_id.clone();
-        let snapshot = SessionSnapshot {
-            session_id: session_id.clone(),
-            work_dir: work_dir_value.clone(),
-        };
-        apply_active_session_snapshot(&app, Some(snapshot), snapshot_source);
-
-        let request_id = format!("ws-bootstrap-{}", unix_time_millis());
-        let payload = WorkspaceSessionBridgePayload {
-            action: "navigate_session".to_string(),
-            source: source.clone(),
-            request_id: Some(request_id),
-            session_id: Some(session_id.clone()),
-            work_dir: work_dir_value,
-            route_template: Some(BOOTSTRAP_ROUTE_TEMPLATE.to_string()),
-            applied: None,
-            reason: None,
-        };
-
-        emit_workspace_session_event(&app, WORKSPACE_SESSION_BOOTSTRAP_EVENT, &payload);
-        emit_workspace_session_event(&app, WORKSPACE_SESSION_BRIDGE_EVENT, &payload);
-
+    let (session, snapshot_source) = if let Some(snapshot) = existing_session {
         log_manager::append_line(
             &app,
             format!(
-                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE}, auto_session={auto_session}, force_create_new={force_create_new})",
+                "bootstrap_resume_existing source={source} work_dir={} session_id={}",
+                work_dir.display(),
+                snapshot.session_id
+            ),
+        );
+        (snapshot, "bootstrap_resume_existing")
+    } else {
+        let response = create_session_for_work_dir(&app, &work_dir);
+        let created = match response {
+            Ok(session) => session,
+            Err(error) => {
+                maybe_capture_workspace_auth_failure(&app, &error);
+                let error_message = format!(
+                        "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
+                        work_dir.display()
+                    );
+                log_manager::append_line(&app, error_message.clone());
+                if force_create_new {
+                    emit_bootstrap_open_request_error(
+                        &app,
+                        &source,
+                        "create_session_for_work_dir",
+                        &error_message,
+                    );
+                }
+                return;
+            }
+        };
+        log_manager::append_line(
+            &app,
+            format!(
+                "bootstrap_create_new source={source} work_dir={} session_id={}",
+                work_dir.display(),
+                created.session_id
+            ),
+        );
+        (session_snapshot_from_api(&created), "bootstrap_create_new")
+    };
+
+    if !is_generation_alive(&app, generation) {
+        return;
+    }
+
+    let work_dir_value = session
+        .work_dir
+        .clone()
+        .or_else(|| Some(work_dir.to_string_lossy().to_string()));
+    let session_id = session.session_id.clone();
+    let snapshot = SessionSnapshot {
+        session_id: session_id.clone(),
+        work_dir: work_dir_value.clone(),
+    };
+    if disposition == WorkspaceSessionDisposition::ReplaceActive {
+        apply_active_session_snapshot(app, Some(snapshot), snapshot_source);
+    }
+
+    let request_id = request
+        .request_id
+        .unwrap_or_else(|| format!("ws-bootstrap-{}", unix_time_millis()));
+    let payload = WorkspaceSessionBridgePayload {
+        action: "navigate_session".to_string(),
+        source: source.clone(),
+        request_id: Some(request_id),
+        session_id: Some(session_id.clone()),
+        work_dir: work_dir_value,
+        route_template: Some(BOOTSTRAP_ROUTE_TEMPLATE.to_string()),
+        disposition: Some(disposition),
+        target_window_label: Some(window_manager::MAIN_WINDOW_LABEL.to_string()),
+        applied: None,
+        reason: None,
+    };
+
+    if disposition == WorkspaceSessionDisposition::ReplaceActive {
+        emit_workspace_session_event(app, WORKSPACE_SESSION_BOOTSTRAP_EVENT, &payload);
+    }
+    emit_workspace_session_event(app, WORKSPACE_SESSION_BRIDGE_EVENT, &payload);
+    if disposition == WorkspaceSessionDisposition::NewPane {
+        window_manager::show_and_focus(app);
+    }
+
+    log_manager::append_line(
+            app,
+            format!(
+                "workspace bootstrap session ready (source={source}, work_dir={}, session_id={}, route_template={BOOTSTRAP_ROUTE_TEMPLATE}, force_create_new={force_create_new})",
                 work_dir.display(),
                 session_id
             ),
         );
-    });
 }
 
 fn emit_bootstrap_open_request_error(app: &AppHandle, source: &str, stage: &str, message: &str) {
@@ -782,6 +812,8 @@ fn apply_active_session_snapshot(app: &AppHandle, snapshot: Option<SessionSnapsh
         session_id: snapshot.as_ref().map(|item| item.session_id.clone()),
         work_dir: snapshot.and_then(|item| item.work_dir),
         route_template: None,
+        disposition: None,
+        target_window_label: None,
         applied: None,
         reason: None,
     };

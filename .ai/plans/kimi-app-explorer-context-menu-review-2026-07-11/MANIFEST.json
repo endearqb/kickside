@@ -1,0 +1,256 @@
+{
+  "package": "kimi-app-explorer-context-menu-review",
+  "version": "2026-07-11",
+  "repository": "endearqb/kimi-app",
+  "baseBranch": "main",
+  "baseCommit": "c2aaa14b9891c7de31363610d643ba70fa95c1e4",
+  "deliveryType": "review-and-reference-implementation",
+  "githubMutations": {
+    "branchCreated": false,
+    "commitCreated": false,
+    "pullRequestCreated": false,
+    "filesPushed": false
+  },
+  "validation": {
+    "typescriptStrictCompile": "passed",
+    "standaloneNodeTests": {
+      "status": "passed",
+      "passed": 9,
+      "failed": 0
+    },
+    "paneShelfTsxSyntaxAndTypeShape": "passed-with-local-stubs",
+    "standardPatchApplyCheck": "passed-in-empty-temporary-git-repository",
+    "fullRepositoryBuild": "not-run-no-full-checkout",
+    "rustCargoCheck": "not-run-rust-toolchain-unavailable",
+    "windowsRegistryAndExplorerTest": "not-run-non-windows-environment"
+  },
+  "designDefaults": {
+    "maxVisiblePanes": 6,
+    "maxTotalPanes": 12,
+    "seventhPaneBehavior": "show-new-pane-in-active-slot-and-shelve-displaced-pane",
+    "explorerDisposition": "new_pane"
+  },
+  "fileCountExcludingManifestAndChecksums": 44,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1069,
+      "sha256": "2b6a4f18c7425ae162bcd3ba4a2bd2b8e783018a208ddfafa2fe1204408689e0"
+    },
+    {
+      "path": "README_APPLY.md",
+      "bytes": 1953,
+      "sha256": "0719cf3873c41f6b4608f6f069923ecafdbe32369a0d580f7042a5f0e7ba9bb5"
+    },
+    {
+      "path": "docs/ADR-001-PANE-SHELF.md",
+      "bytes": 1197,
+      "sha256": "4fdd7157dbfc477f69c9e922b45abd06cdb8cc08726a71c462d8744ec1a2406c"
+    },
+    {
+      "path": "docs/BEHAVIOR_MATRIX.md",
+      "bytes": 1817,
+      "sha256": "0a32ab685a7d655e4e4c1bdbaa41b68576f2858cbe98d940d617262ffbd698a6"
+    },
+    {
+      "path": "docs/IMPLEMENTATION_PLAN.md",
+      "bytes": 2386,
+      "sha256": "a705ef4f2ac32fefceea5524d65cdb9d2e8dc3a19e21b220b881ec8dc30e19c1"
+    },
+    {
+      "path": "docs/REVIEW.md",
+      "bytes": 17322,
+      "sha256": "a38d4ef992787692253a4674936b3bcb9542db32addc3e89e52ef8711b2bd096"
+    },
+    {
+      "path": "docs/SOURCE_EVIDENCE.md",
+      "bytes": 2690,
+      "sha256": "a358579ed128fb6444e4efb81fe227584a5278c2da5d82ee5ef7c5da4628bcd6"
+    },
+    {
+      "path": "docs/TEST_MATRIX.md",
+      "bytes": 2387,
+      "sha256": "33555e813c7de7a88c0d3b550bcb07fc44c6161c9668cd22b51db2d14820ceba"
+    },
+    {
+      "path": "patches/0000-add-pane-shelf-reference-files.patch",
+      "bytes": 32569,
+      "sha256": "c13752418519223dead8e1ea6e831f9980740f1f0bfe1388adaeb444173c766d"
+    },
+    {
+      "path": "patches/0001-persist-context-menu-intent-and-notify-shell.integration.diff",
+      "bytes": 6501,
+      "sha256": "1098c37c2f7d728ae46a595994551b9c4f0a9c7387990e11b44884d79d481666"
+    },
+    {
+      "path": "patches/0002-route-explorer-open-to-independent-session.integration.diff",
+      "bytes": 7053,
+      "sha256": "e97955c58a8f1505aac123e0792751801982ade1306ae163df6ca21f3da72e61"
+    },
+    {
+      "path": "patches/0003-add-new-pane-placement-and-pane-shelf.integration.diff",
+      "bytes": 7206,
+      "sha256": "7d1a65bfa933961b435e7bd867825ec019ee74539b838d3d034a2cd1a80d4d49"
+    },
+    {
+      "path": "patches/0004-remove-overlapping-allfilesystemobjects-and-rename-copy.integration.diff",
+      "bytes": 2392,
+      "sha256": "aeb96e316dbd9d2307127a634cead352f63d4e49b5f1991dd96c7cff15a17763"
+    },
+    {
+      "path": "proposed/frontend/PaneShelf.css",
+      "bytes": 2041,
+      "sha256": "0d97c7af3ed3c9fb876193692302cc3a1fc9e25a7b72d153ceeff33fc70ce170"
+    },
+    {
+      "path": "proposed/frontend/PaneShelf.tsx",
+      "bytes": 6241,
+      "sha256": "51f503cdff03c2b4d9f3af149d7f660b956011dbf0a0c5d96272de82292e15e1"
+    },
+    {
+      "path": "proposed/frontend/README.md",
+      "bytes": 683,
+      "sha256": "e7cee7bb17eba58218ec52144cbe628f89632a70e2de5651ef9454baadade6e1"
+    },
+    {
+      "path": "proposed/frontend/requestIdDeduper.ts",
+      "bytes": 1618,
+      "sha256": "0b71d16faf396c38412bca3be94a9cdf2e94ad88b6f502821035c34a671e1a60"
+    },
+    {
+      "path": "proposed/frontend/sessionPaneRouting.ts",
+      "bytes": 1401,
+      "sha256": "aa685061b672bb18f82829ffb6d2f9381ef7a4270a633760b390b81a6b4152fb"
+    },
+    {
+      "path": "proposed/frontend/tsconfig.json",
+      "bytes": 390,
+      "sha256": "e6783ad4200d2d2173efca155cda36833eb59ed9058e346a85b9c0ff4bd98999"
+    },
+    {
+      "path": "proposed/frontend/workspacePaneShelfCore.test.mjs",
+      "bytes": 5045,
+      "sha256": "a62740da55dae756f0e5d2642525729c56d249e23a143f6821e84a56172faa41"
+    },
+    {
+      "path": "proposed/frontend/workspacePaneShelfCore.test.ts",
+      "bytes": 4697,
+      "sha256": "7508c966b2a023e328b91205e975c660534dba29ba583de49c4cfae9f6af87fd"
+    },
+    {
+      "path": "proposed/frontend/workspacePaneShelfCore.ts",
+      "bytes": 13368,
+      "sha256": "7458345c3533a69967c9a366d134b612e0a0c84381866af52a79fea5c0e5aa5c"
+    },
+    {
+      "path": "proposed/rust/README.md",
+      "bytes": 868,
+      "sha256": "d1ce5a96af84a7f7697a517cedeeba5c77fea1fbcb9189d470ec7c34670f9755"
+    },
+    {
+      "path": "proposed/rust/context_menu_install_state.rs",
+      "bytes": 2656,
+      "sha256": "bb239461ed94bd7ca0f82bad7e1179bcf4909eda251354b82afc8039bc43a631"
+    },
+    {
+      "path": "proposed/rust/explorer_open_integration_example.rs",
+      "bytes": 2513,
+      "sha256": "e36571eb2eb5bcd7cd266f75370075ef2c0f292473a8c8c4260300b8be91f9ea"
+    },
+    {
+      "path": "proposed/rust/windows_shell_notify.rs",
+      "bytes": 429,
+      "sha256": "310b1acef7f079ee45e84ecd8dca8cb130546c71542e68ab3172721bf55cf36e"
+    },
+    {
+      "path": "proposed/rust/workspace_open_queue.rs",
+      "bytes": 4490,
+      "sha256": "17ca23732a35b8917a4a961c3f752d992e47e48f1ceb77295f43e821ac677220"
+    },
+    {
+      "path": "repo-overlay/README.md",
+      "bytes": 569,
+      "sha256": "015ef6969b2c2096384c9abbcf189d042bd3f69b9768062b1a53abfcc92f1457"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/PaneShelf.css",
+      "bytes": 2041,
+      "sha256": "0d97c7af3ed3c9fb876193692302cc3a1fc9e25a7b72d153ceeff33fc70ce170"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/PaneShelf.tsx",
+      "bytes": 6241,
+      "sha256": "51f503cdff03c2b4d9f3af149d7f660b956011dbf0a0c5d96272de82292e15e1"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/requestIdDeduper.ts",
+      "bytes": 1618,
+      "sha256": "0b71d16faf396c38412bca3be94a9cdf2e94ad88b6f502821035c34a671e1a60"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/sessionPaneRouting.ts",
+      "bytes": 1401,
+      "sha256": "aa685061b672bb18f82829ffb6d2f9381ef7a4270a633760b390b81a6b4152fb"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/workspacePaneShelfCore.test.ts",
+      "bytes": 4697,
+      "sha256": "7508c966b2a023e328b91205e975c660534dba29ba583de49c4cfae9f6af87fd"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src/features/workspace-grid/workspacePaneShelfCore.ts",
+      "bytes": 13368,
+      "sha256": "7458345c3533a69967c9a366d134b612e0a0c84381866af52a79fea5c0e5aa5c"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src-tauri/src/context_menu_install_state.rs",
+      "bytes": 2656,
+      "sha256": "bb239461ed94bd7ca0f82bad7e1179bcf4909eda251354b82afc8039bc43a631"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src-tauri/src/windows_shell_notify.rs",
+      "bytes": 429,
+      "sha256": "310b1acef7f079ee45e84ecd8dca8cb130546c71542e68ab3172721bf55cf36e"
+    },
+    {
+      "path": "repo-overlay/apps/kimi-shell/src-tauri/src/workspace_open_queue.rs",
+      "bytes": 4490,
+      "sha256": "17ca23732a35b8917a4a961c3f752d992e47e48f1ceb77295f43e821ac677220"
+    },
+    {
+      "path": "scripts/Inspect-KimiExplorerContextMenu.ps1",
+      "bytes": 3944,
+      "sha256": "036ff5accff3fbe75615856a109ddcfa5a16d1321029d12a88fb3a95bf28f490"
+    },
+    {
+      "path": "scripts/Run-FrontendReferenceTests.ps1",
+      "bytes": 374,
+      "sha256": "456e388a62b399e9e26cb0b29f70dcf11142642a34e9fac1d4d83eb9acefe794"
+    },
+    {
+      "path": "scripts/run_frontend_reference_tests.sh",
+      "bytes": 185,
+      "sha256": "35c71e2e58bcfbf19f55634dc3ec49b194fa926c55df312a08414b2ed174faa1"
+    },
+    {
+      "path": "test-output/node-test.log",
+      "bytes": 1772,
+      "sha256": "049c0a373b9c7fcfafa47f7ef590d1be3a0a08973ce6894631090e6df5131269"
+    },
+    {
+      "path": "test-output/pane-shelf-syntax.log",
+      "bytes": 79,
+      "sha256": "f86601c780ed7e27995cf3065a9307aa953589314b779cd64fcbcc724e9750c9"
+    },
+    {
+      "path": "test-output/patch-parse.log",
+      "bytes": 412,
+      "sha256": "41b944a8786a7e5c730880c9d830722d5c687a9ced4cb17a4655ffabe1302e30"
+    },
+    {
+      "path": "test-output/tsc.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

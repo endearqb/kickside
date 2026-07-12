@@ -1,0 +1,163 @@
+From: review-package <review@local>
+Subject: [PATCH 1/3] persist Explorer menu intent and notify Shell
+Base: c2aaa14b9891c7de31363610d643ba70fa95c1e4
+
+This is a review patch, not a commit. Run git apply --check in a checkout first.
+
+---
+ apps/kimi-shell/src-tauri/Cargo.toml                  |  2 +-
+ apps/kimi-shell/src-tauri/src/commands/context_menu.rs | 38 ++++++++++++++++++--
+ apps/kimi-shell/src-tauri/src/context_menu.rs          | 17 +++++++++
+ apps/kimi-shell/src-tauri/src/lib.rs                   | 14 ++++++++
+ apps/kimi-shell/src-tauri/src/types.rs                 |  5 ++-
+ 5 files changed, 71 insertions(+), 5 deletions(-)
+
+diff --git a/apps/kimi-shell/src-tauri/Cargo.toml b/apps/kimi-shell/src-tauri/Cargo.toml
+--- a/apps/kimi-shell/src-tauri/Cargo.toml
++++ b/apps/kimi-shell/src-tauri/Cargo.toml
+@@
+-windows = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
++windows = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_UI_Shell"] }
+ winreg = "0.52"
+
+diff --git a/apps/kimi-shell/src-tauri/src/types.rs b/apps/kimi-shell/src-tauri/src/types.rs
+--- a/apps/kimi-shell/src-tauri/src/types.rs
++++ b/apps/kimi-shell/src-tauri/src/types.rs
+@@
+-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 9;
++pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 10;
+@@
+ pub struct AppSettings {
+@@
+     pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
++    /// User intent. This must not be inferred from registry health.
++    pub context_menu_desired_enabled: bool,
+     pub context_menu_labels: ContextMenuLabelsInput,
+ }
+@@
+             custom_mirror_config: InstallCustomMirrorConfig::default(),
+             kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
++            context_menu_desired_enabled: true,
+             context_menu_labels: ContextMenuLabelsInput::default(),
+@@
+-            move_to_workspace: "移动到 Kimi 小助手工作区".to_string(),
++            move_to_workspace: "复制到 Kimi 小助手工作区".to_string(),
+
+diff --git a/apps/kimi-shell/src-tauri/src/commands/context_menu.rs b/apps/kimi-shell/src-tauri/src/commands/context_menu.rs
+--- a/apps/kimi-shell/src-tauri/src/commands/context_menu.rs
++++ b/apps/kimi-shell/src-tauri/src/commands/context_menu.rs
+@@
+ use crate::{
+-    context_menu,
++    context_menu, settings_store,
+     types::{ContextMenuLabelsInput, ContextMenuStatus},
+ };
+@@
+ pub(crate) fn enable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
+-    context_menu::enable(&app)?;
++    set_context_menu_enabled(&app, true)?;
+     Ok(context_menu::status(&app))
+ }
+@@
+ pub(crate) fn disable_context_menu(app: AppHandle) -> Result<ContextMenuStatus, String> {
+-    context_menu::disable(&app)?;
++    set_context_menu_enabled(&app, false)?;
+     Ok(context_menu::status(&app))
+ }
++
++fn set_context_menu_enabled(app: &AppHandle, desired: bool) -> Result<(), String> {
++    let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
++    let previous = settings.context_menu_desired_enabled;
++
++    if desired {
++        context_menu::enable(app)?;
++    } else {
++        context_menu::disable(app)?;
++    }
++
++    settings.context_menu_desired_enabled = desired;
++    if let Err(error) = settings_store::save(app, &settings) {
++        // Keep registry and preference convergent if persistence fails.
++        let rollback = if previous {
++            context_menu::enable(app)
++        } else {
++            context_menu::disable(app)
++        };
++        let rollback_detail = rollback
++            .err()
++            .map(|value| format!("; rollback failed: {value}"))
++            .unwrap_or_default();
++        return Err(format!(
++            "failed to persist Explorer menu preference: {error}{rollback_detail}"
++        ));
++    }
++    Ok(())
++}
+
+diff --git a/apps/kimi-shell/src-tauri/src/context_menu.rs b/apps/kimi-shell/src-tauri/src/context_menu.rs
+--- a/apps/kimi-shell/src-tauri/src/context_menu.rs
++++ b/apps/kimi-shell/src-tauri/src/context_menu.rs
+@@
+ fn build_expected_commands(executable: &str) -> ExpectedContextMenuCommands {
+@@
+-        open_dir_background_command: format!("{quoted_exe} --open-dir \"%V\""),
+-        open_dir_command: format!("{quoted_exe} --open-dir \"%1\""),
+-        open_files_command: format!("{quoted_exe} --open-files \"%1\""),
+-        import_default_command: format!("{quoted_exe} --import-to-default-workspace \"%1\""),
+-        import_picker_command: format!("{quoted_exe} --import-with-workspace-picker \"%1\""),
++        open_dir_background_command: format!("{quoted_exe} --open-dir -- \"%V\""),
++        open_dir_command: format!("{quoted_exe} --open-dir -- \"%1\""),
++        open_files_command: format!("{quoted_exe} --open-files -- \"%1\""),
++        import_default_command: format!("{quoted_exe} --import-to-default-workspace -- \"%1\""),
++        import_picker_command: format!("{quoted_exe} --import-with-workspace-picker -- \"%1\""),
+@@
+         for keyset in CASCADING_MENU_KEYSETS {
+             write_cascading_menu(&hkcu, keyset, &expected, &labels)?;
+         }
+ 
++        notify_shell_association_changed();
+         Ok(())
+@@
+         for subkey in [
+@@
+             delete_key_if_exists(&hkcu, subkey)?;
+         }
++        notify_shell_association_changed();
+         Ok(())
+@@
+ }
++
++#[cfg(target_os = "windows")]
++fn notify_shell_association_changed() {
++    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
++    unsafe {
++        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
++    }
++}
+
+diff --git a/apps/kimi-shell/src-tauri/src/lib.rs b/apps/kimi-shell/src-tauri/src/lib.rs
+--- a/apps/kimi-shell/src-tauri/src/lib.rs
++++ b/apps/kimi-shell/src-tauri/src/lib.rs
+@@
+ fn auto_repair_context_menu(app: &AppHandle) {
++    let settings = match settings_store::load_or_default(app) {
++        Ok(settings) => settings,
++        Err(error) => {
++            log_manager::append_line(
++                app,
++                format!("context-menu self-heal skipped: failed to load preference: {error:#}"),
++            );
++            return;
++        }
++    };
++    if !settings.context_menu_desired_enabled {
++        log_manager::append_line(app, "context-menu self-heal skipped (disabled by user)");
++        return;
++    }
++
+     let status = context_menu::status(app);
+@@
+     let recommended_step = recommend_onboarding_step(
+@@
+-        context_status.enabled,
++        context_status.enabled || !settings.context_menu_desired_enabled,

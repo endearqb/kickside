@@ -1,0 +1,125 @@
+.pane-shelf-root {
+  position: relative;
+}
+
+.pane-shelf-trigger {
+  width: auto;
+  gap: 5px;
+  padding-inline: 7px;
+}
+
+.pane-shelf-trigger-label {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pane-shelf-popover {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 96px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 22%);
+  padding: 10px;
+}
+
+.pane-shelf-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 2px 8px;
+}
+
+.pane-shelf-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.pane-shelf-header strong {
+  font-size: 13px;
+}
+
+.pane-shelf-header span,
+.pane-shelf-copy small,
+.pane-shelf-empty {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.pane-shelf-section {
+  border-top: 1px solid var(--border);
+  padding-top: 9px;
+  margin-top: 4px;
+}
+
+.pane-shelf-section h3 {
+  margin: 0 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.pane-shelf-list {
+  display: grid;
+  gap: 4px;
+}
+
+.pane-shelf-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+}
+
+.pane-shelf-item:hover,
+.pane-shelf-item.is-active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.pane-shelf-open {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 7px 8px;
+  cursor: pointer;
+}
+
+.pane-shelf-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.pane-shelf-copy strong,
+.pane-shelf-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-shelf-copy strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pane-shelf-remove {
+  margin-right: 4px;
+  opacity: 0.72;
+}
+
+.pane-shelf-empty {
+  margin: 0;
+  padding: 7px 8px 10px;
+}

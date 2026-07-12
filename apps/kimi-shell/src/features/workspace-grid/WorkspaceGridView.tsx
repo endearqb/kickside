@@ -17,7 +17,7 @@ import {
   resizeGridTrackSizes,
 } from "./gridPresets";
 import {
-  WORKSPACE_GRID_MAX_PANES,
+  WORKSPACE_GRID_MAX_TOTAL_PANES,
   type AddWorkspacePaneInput,
   useWorkspaceGridStore,
 } from "./gridStore";
@@ -83,7 +83,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     customTrackSizes?.columns ?? createEqualTrackSizes(trackCounts.columns);
   const effectiveRows =
     customTrackSizes?.rows ?? createEqualTrackSizes(trackCounts.rows);
-  const canAddPane = panes.length < WORKSPACE_GRID_MAX_PANES;
+  const canAddPane = panes.length < WORKSPACE_GRID_MAX_TOTAL_PANES;
   const renderedSlots = maximizedPaneId
     ? [
         {

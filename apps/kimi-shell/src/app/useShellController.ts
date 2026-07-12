@@ -321,6 +321,9 @@ export function useShellController() {
     (state) => state.setActivePane,
   );
   const addWorkspaceGridPane = useWorkspaceGridStore((state) => state.addPane);
+  const openWorkspaceGridPaneFromExplorer = useWorkspaceGridStore(
+    (state) => state.openPaneFromExplorer,
+  );
   const configureWorkspaceGridPane = useWorkspaceGridStore(
     (state) => state.configurePane,
   );
@@ -379,6 +382,7 @@ export function useShellController() {
   const prefillLastFailureReasonRef = useRef<string | null>(null);
   const pendingSessionBridgeRef =
     useRef<WorkspaceSessionBridgePayload | null>(null);
+  const handledSessionNavigationIdsRef = useRef<Set<string>>(new Set());
   const sessionRouteTemplateRef = useRef<string | null>(null);
   const sessionNavigateTimerRef = useRef<number | null>(null);
   const shutdownElapsedBaseRef = useRef<number>(0);
@@ -628,6 +632,55 @@ export function useShellController() {
         return false;
       }
 
+      const requestId = payload.requestId?.trim();
+      if (requestId && handledSessionNavigationIdsRef.current.has(requestId)) {
+        return true;
+      }
+      const rememberRequest = () => {
+        if (!requestId) return;
+        const handled = handledSessionNavigationIdsRef.current;
+        handled.add(requestId);
+        if (handled.size > 512) handled.delete(handled.values().next().value!);
+      };
+
+      const disposition =
+        payload.disposition ??
+        (payload.source === "open_dir_request" || payload.source === "open_files_request"
+          ? "new_pane"
+          : "replace_active");
+      if (disposition === "new_pane") {
+        const placement = openWorkspaceGridPaneFromExplorer({
+          kind: "code",
+          title: getKimiAssistantDisplayName(),
+          sessionId,
+          workDir: payload.workDir?.trim() || undefined,
+        });
+        rememberRequest();
+        if (placement.kind === "limit_reached") {
+          const activePane = workspaceGridPanes.find(
+            (pane) => pane.id === workspaceGridActivePaneId,
+          );
+          if (
+            activePane &&
+            window.confirm(
+              "窗格库已达 12 个上限。是否用新工作区替换当前窗格？\n选择“取消”后可打开窗格库关闭或切换窗格。",
+            )
+          ) {
+            configureWorkspaceGridPane(activePane.id, {
+              kind: "code",
+              title: getKimiAssistantDisplayName(),
+              sessionId,
+              workDir: payload.workDir?.trim() || undefined,
+            });
+            setWorkspaceGridActivePane(activePane.id);
+          } else {
+            setActionError("未打开新工作区；请在窗格库中关闭一个窗格后重试。");
+          }
+          return true;
+        }
+        return placement.paneId !== null;
+      }
+
       const targetPane =
         workspaceGridPanes.find(
           (pane) => pane.id === workspaceGridActivePaneId && pane.kind === "code",
@@ -645,34 +698,41 @@ export function useShellController() {
       if (targetPane) {
         configureWorkspaceGridPane(targetPane.id, input);
         setWorkspaceGridActivePane(targetPane.id);
+        rememberRequest();
         return true;
       }
 
-      return addWorkspaceGridPane(input) !== null;
+      const paneId = addWorkspaceGridPane(input);
+      if (paneId) rememberRequest();
+      return paneId !== null;
     },
     [
       addWorkspaceGridPane,
       configureWorkspaceGridPane,
+      openWorkspaceGridPaneFromExplorer,
       setWorkspaceGridActivePane,
       workspaceGridActivePaneId,
       workspaceGridPanes,
     ],
   );
 
-  const syncActiveCodePaneWorkDir = useCallback(
-    (workDir?: string) => {
+  const syncCodePaneWorkDir = useCallback(
+    (sessionId?: string, workDir?: string) => {
+      const normalizedSessionId = sessionId?.trim();
       const nextWorkDir = workDir?.trim();
-      if (!nextWorkDir) {
+      if (!normalizedSessionId || !nextWorkDir) {
         return;
       }
 
-      const { activePaneId, panes } = useWorkspaceGridStore.getState();
-      const activePane = panes.find((pane) => pane.id === activePaneId);
-      if (activePane?.kind !== "code") {
+      const { panes } = useWorkspaceGridStore.getState();
+      const targetPane = panes.find(
+        (pane) => pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId,
+      );
+      if (!targetPane) {
         return;
       }
 
-      setWorkspaceGridPaneWorkDir(activePane.id, nextWorkDir);
+      setWorkspaceGridPaneWorkDir(targetPane.id, nextWorkDir);
     },
     [setWorkspaceGridPaneWorkDir],
   );
@@ -1379,7 +1439,7 @@ export function useShellController() {
                     sessionSource: payload.source?.trim() || current.sessionSource,
                   };
                 });
-                syncActiveCodePaneWorkDir(payload.workDir);
+                syncCodePaneWorkDir(payload.sessionId, payload.workDir);
               }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
@@ -1408,7 +1468,7 @@ export function useShellController() {
                     sessionSource: payload.source?.trim() || current.sessionSource,
                   };
                 });
-                syncActiveCodePaneWorkDir(payload.workDir);
+                syncCodePaneWorkDir(payload.sessionId, payload.workDir);
               }
               if (payload.action === "navigate_session") {
                 pendingSessionBridgeRef.current = payload;
@@ -1490,7 +1550,7 @@ export function useShellController() {
     enqueuePrefillPayload,
     handleWorkspaceImportRequest,
     handleWorkspaceImportResult,
-    syncActiveCodePaneWorkDir,
+    syncCodePaneWorkDir,
     tauriRuntime,
   ]);
 

@@ -30,10 +30,6 @@ const FILE_COMMAND_KEY: &str = "Software\\Classes\\*\\shell\\KimiWebShell\\comma
 const ALL_FILESYSTEM_OBJECTS_KEY: &str =
     "Software\\Classes\\AllFilesystemObjects\\shell\\KimiWebShell";
 #[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_COMMAND_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\KimiWebShell\\command";
-
-#[cfg(target_os = "windows")]
 const DIR_MOVE_TO_WORKSPACE_KEY: &str = "Software\\Classes\\Directory\\shell\\MoveToWorkspace";
 #[cfg(target_os = "windows")]
 const DIR_MOVE_TO_WORKSPACE_SHELL_KEY: &str =
@@ -72,22 +68,6 @@ const FILE_IMPORT_PICKER_COMMAND_KEY: &str =
 #[cfg(target_os = "windows")]
 const ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY: &str =
     "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace";
-#[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_SHELL_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell";
-#[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace";
-#[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_COMMAND_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportToDefaultWorkspace\\command";
-#[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker";
-#[cfg(target_os = "windows")]
-const ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_COMMAND_KEY: &str =
-    "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace\\shell\\ImportWithWorkspacePicker\\command";
-
 #[derive(Debug, Clone)]
 struct ExpectedContextMenuCommands {
     icon_value: String,
@@ -110,7 +90,7 @@ struct CascadingMenuKeySet {
 }
 
 #[cfg(target_os = "windows")]
-const CASCADING_MENU_KEYSETS: [CascadingMenuKeySet; 3] = [
+const CASCADING_MENU_KEYSETS: [CascadingMenuKeySet; 2] = [
     CascadingMenuKeySet {
         parent_key: DIR_MOVE_TO_WORKSPACE_KEY,
         shell_key: DIR_MOVE_TO_WORKSPACE_SHELL_KEY,
@@ -127,14 +107,6 @@ const CASCADING_MENU_KEYSETS: [CascadingMenuKeySet; 3] = [
         import_picker_key: FILE_IMPORT_PICKER_KEY,
         import_picker_command_key: FILE_IMPORT_PICKER_COMMAND_KEY,
     },
-    CascadingMenuKeySet {
-        parent_key: ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
-        shell_key: ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_SHELL_KEY,
-        import_default_key: ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY,
-        import_default_command_key: ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_COMMAND_KEY,
-        import_picker_key: ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY,
-        import_picker_command_key: ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_COMMAND_KEY,
-    },
 ];
 
 fn quote_executable_path(executable: &str) -> String {
@@ -145,12 +117,44 @@ fn build_expected_commands(executable: &str) -> ExpectedContextMenuCommands {
     let quoted_exe = quote_executable_path(executable);
     ExpectedContextMenuCommands {
         icon_value: quoted_exe.clone(),
-        open_dir_background_command: format!("{quoted_exe} --open-dir \"%V\""),
-        open_dir_command: format!("{quoted_exe} --open-dir \"%1\""),
-        open_files_command: format!("{quoted_exe} --open-files \"%1\""),
-        import_default_command: format!("{quoted_exe} --import-to-default-workspace \"%1\""),
-        import_picker_command: format!("{quoted_exe} --import-with-workspace-picker \"%1\""),
+        open_dir_background_command: format!("{quoted_exe} --open-dir -- \"%V\""),
+        open_dir_command: format!("{quoted_exe} --open-dir -- \"%1\""),
+        open_files_command: format!("{quoted_exe} --open-files -- \"%1\""),
+        import_default_command: format!("{quoted_exe} --import-to-default-workspace -- \"%1\""),
+        import_picker_command: format!("{quoted_exe} --import-with-workspace-picker -- \"%1\""),
     }
+}
+
+#[cfg(target_os = "windows")]
+fn delete_key_if_exists(hkcu: &winreg::RegKey, subkey: &str) -> Result<(), String> {
+    use std::io::ErrorKind;
+    match hkcu.delete_subkey_all(subkey) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to delete `{subkey}`: {error}")),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cleanup_owned_keys(hkcu: &winreg::RegKey) -> Result<(), String> {
+    for subkey in [
+        DIR_BACKGROUND_KEY,
+        DIR_KEY,
+        FILE_KEY,
+        ALL_FILESYSTEM_OBJECTS_KEY,
+        DIR_MOVE_TO_WORKSPACE_KEY,
+        FILE_MOVE_TO_WORKSPACE_KEY,
+        ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
+    ] {
+        delete_key_if_exists(hkcu, subkey)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn notify_shell_association_changed() {
+    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+    unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
 }
 
 fn load_context_menu_labels(app: &AppHandle) -> ContextMenuLabelsInput {
@@ -210,14 +214,6 @@ fn context_menu_item_views(
             &expected.open_files_command,
         ),
         item_view(
-            "all_filesystem_open",
-            "openFilesystemObject",
-            &labels.open_filesystem_object,
-            "所有文件系统对象",
-            ALL_FILESYSTEM_OBJECTS_KEY,
-            &expected.open_files_command,
-        ),
-        item_view(
             "dir_move_parent",
             "moveToWorkspace",
             &labels.move_to_workspace,
@@ -265,30 +261,6 @@ fn context_menu_item_views(
             FILE_IMPORT_PICKER_KEY,
             &expected.import_picker_command,
         ),
-        item_view(
-            "all_move_parent",
-            "moveToWorkspace",
-            &labels.move_to_workspace,
-            "所有对象父菜单",
-            ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
-            "",
-        ),
-        item_view(
-            "all_import_default",
-            "importToDefaultWorkspace",
-            &labels.import_to_default_workspace,
-            "所有对象子菜单",
-            ALL_FILESYSTEM_OBJECTS_IMPORT_DEFAULT_KEY,
-            &expected.import_default_command,
-        ),
-        item_view(
-            "all_import_picker",
-            "importWithWorkspacePicker",
-            &labels.import_with_workspace_picker,
-            "所有对象子菜单",
-            ALL_FILESYSTEM_OBJECTS_IMPORT_PICKER_KEY,
-            &expected.import_picker_command,
-        ),
     ])
 }
 
@@ -323,12 +295,22 @@ pub fn save_labels(
     input: ContextMenuLabelsInput,
 ) -> Result<ContextMenuStatus, String> {
     let labels = validate_context_menu_labels(input)?;
-    let was_enabled = status(app).enabled;
     let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    let previous = settings.clone();
     settings.context_menu_labels = labels;
     settings_store::save(app, &settings).map_err(|error| error.to_string())?;
-    if was_enabled {
-        enable(app)?;
+    if settings.context_menu_desired_enabled {
+        if let Err(error) = enable(app) {
+            let rollback = settings_store::save(app, &previous)
+                .and_then(|_| enable(app).map_err(anyhow::Error::msg));
+            return Err(format!(
+                "failed to apply Explorer menu labels: {error}{}",
+                rollback
+                    .err()
+                    .map(|value| format!("; rollback failed: {value:#}"))
+                    .unwrap_or_default()
+            ));
+        }
     }
     Ok(status(app))
 }
@@ -421,48 +403,45 @@ pub fn enable(app: &AppHandle) -> Result<(), String> {
         let labels = load_context_menu_labels(app);
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-        write_simple_verb(
-            &hkcu,
-            DIR_BACKGROUND_KEY,
-            DIR_BACKGROUND_COMMAND_KEY,
-            &labels.open_dir_background,
-            &expected.icon_value,
-            None,
-            &expected.open_dir_background_command,
-        )?;
-        write_simple_verb(
-            &hkcu,
-            DIR_KEY,
-            DIR_COMMAND_KEY,
-            &labels.open_dir,
-            &expected.icon_value,
-            None,
-            &expected.open_dir_command,
-        )?;
-        write_simple_verb(
-            &hkcu,
-            FILE_KEY,
-            FILE_COMMAND_KEY,
-            &labels.open_file,
-            &expected.icon_value,
-            Some(MULTI_SELECT_MODEL_PLAYER),
-            &expected.open_files_command,
-        )?;
-        write_simple_verb(
-            &hkcu,
-            ALL_FILESYSTEM_OBJECTS_KEY,
-            ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
-            &labels.open_filesystem_object,
-            &expected.icon_value,
-            Some(MULTI_SELECT_MODEL_PLAYER),
-            &expected.open_files_command,
-        )?;
-
-        for keyset in CASCADING_MENU_KEYSETS {
-            write_cascading_menu(&hkcu, keyset, &expected, &labels)?;
+        let result = (|| {
+            cleanup_owned_keys(&hkcu)?;
+            write_simple_verb(
+                &hkcu,
+                DIR_BACKGROUND_KEY,
+                DIR_BACKGROUND_COMMAND_KEY,
+                &labels.open_dir_background,
+                &expected.icon_value,
+                None,
+                &expected.open_dir_background_command,
+            )?;
+            write_simple_verb(
+                &hkcu,
+                DIR_KEY,
+                DIR_COMMAND_KEY,
+                &labels.open_dir,
+                &expected.icon_value,
+                None,
+                &expected.open_dir_command,
+            )?;
+            write_simple_verb(
+                &hkcu,
+                FILE_KEY,
+                FILE_COMMAND_KEY,
+                &labels.open_file,
+                &expected.icon_value,
+                Some(MULTI_SELECT_MODEL_PLAYER),
+                &expected.open_files_command,
+            )?;
+            for keyset in CASCADING_MENU_KEYSETS {
+                write_cascading_menu(&hkcu, keyset, &expected, &labels)?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = cleanup_owned_keys(&hkcu);
         }
-
-        Ok(())
+        notify_shell_association_changed();
+        result
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -474,30 +453,12 @@ pub fn enable(app: &AppHandle) -> Result<(), String> {
 pub fn disable(_app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use std::io::ErrorKind;
         use winreg::{enums::HKEY_CURRENT_USER, RegKey};
 
-        fn delete_key_if_exists(hkcu: &RegKey, subkey: &str) -> Result<(), String> {
-            match hkcu.delete_subkey_all(subkey) {
-                Ok(_) => Ok(()),
-                Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(format!("failed to delete `{subkey}`: {error}")),
-            }
-        }
-
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        for subkey in [
-            DIR_BACKGROUND_KEY,
-            DIR_KEY,
-            FILE_KEY,
-            ALL_FILESYSTEM_OBJECTS_KEY,
-            DIR_MOVE_TO_WORKSPACE_KEY,
-            FILE_MOVE_TO_WORKSPACE_KEY,
-            ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY,
-        ] {
-            delete_key_if_exists(&hkcu, subkey)?;
-        }
-        Ok(())
+        let result = cleanup_owned_keys(&hkcu);
+        notify_shell_association_changed();
+        result
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -518,44 +479,33 @@ fn inspect_windows_context_menu_state(app: &AppHandle) -> Result<ContextMenuStat
     let labels = load_context_menu_labels(app);
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    let legacy_required_keys = [
+    let required_keys = [
         DIR_BACKGROUND_KEY,
         DIR_BACKGROUND_COMMAND_KEY,
         DIR_KEY,
         DIR_COMMAND_KEY,
         FILE_KEY,
         FILE_COMMAND_KEY,
-        ALL_FILESYSTEM_OBJECTS_KEY,
-        ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
     ];
-    validate_required_keys(&hkcu, &legacy_required_keys, "旧入口")?;
+    validate_required_keys(&hkcu, &required_keys, "右键入口")?;
 
-    let legacy_verb_checks = [
+    let verb_checks = [
         (DIR_BACKGROUND_KEY, labels.open_dir_background.as_str()),
         (DIR_KEY, labels.open_dir.as_str()),
         (FILE_KEY, labels.open_file.as_str()),
-        (
-            ALL_FILESYSTEM_OBJECTS_KEY,
-            labels.open_filesystem_object.as_str(),
-        ),
     ];
-    validate_mui_verbs(&hkcu, &legacy_verb_checks, "旧入口")?;
+    validate_mui_verbs(&hkcu, &verb_checks, "右键入口")?;
 
-    let legacy_command_checks = [
+    let command_checks = [
         (
             DIR_BACKGROUND_COMMAND_KEY,
             expected.open_dir_background_command.as_str(),
         ),
         (DIR_COMMAND_KEY, expected.open_dir_command.as_str()),
         (FILE_COMMAND_KEY, expected.open_files_command.as_str()),
-        (
-            ALL_FILESYSTEM_OBJECTS_COMMAND_KEY,
-            expected.open_files_command.as_str(),
-        ),
     ];
-    validate_commands(&hkcu, &legacy_command_checks, "旧入口")?;
-    validate_multi_select_model(&hkcu, FILE_KEY, "旧入口文件菜单")?;
-    validate_multi_select_model(&hkcu, ALL_FILESYSTEM_OBJECTS_KEY, "旧入口文件系统对象菜单")?;
+    validate_commands(&hkcu, &command_checks, "右键入口")?;
+    validate_multi_select_model(&hkcu, FILE_KEY, "文件菜单")?;
 
     for keyset in CASCADING_MENU_KEYSETS {
         validate_required_keys(
@@ -884,15 +834,15 @@ mod tests {
         let commands = build_expected_commands(r"C:\Program Files\Kimi Shell\kimi-shell.exe");
         assert_eq!(
             commands.open_files_command,
-            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --open-files \"%1\""
+            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --open-files -- \"%1\""
         );
         assert_eq!(
             commands.open_dir_background_command,
-            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --open-dir \"%V\""
+            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --open-dir -- \"%V\""
         );
         assert_eq!(
             commands.import_default_command,
-            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --import-to-default-workspace \"%1\""
+            "\"C:\\Program Files\\Kimi Shell\\kimi-shell.exe\" --import-to-default-workspace -- \"%1\""
         );
     }
 

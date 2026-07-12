@@ -77,7 +77,7 @@ const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
   openDir: "在 Kimi 小助手中打开",
   openFile: "复制到工作区并用 Kimi 小助手打开",
   openFilesystemObject: "在 Kimi 小助手中打开",
-  moveToWorkspace: "移动到 Kimi 小助手工作区",
+  moveToWorkspace: "复制到 Kimi 小助手工作区",
   importToDefaultWorkspace: "导入到默认工作区",
   importWithWorkspacePicker: "选择其他工作区",
 };
@@ -93,8 +93,7 @@ const CONTEXT_MENU_LABEL_FIELDS: Array<{
   { key: "openDirBackground", label: "目录空白处" },
   { key: "openDir", label: "文件夹" },
   { key: "openFile", label: "文件" },
-  { key: "openFilesystemObject", label: "所有文件系统对象" },
-  { key: "moveToWorkspace", label: "移动父菜单" },
+  { key: "moveToWorkspace", label: "复制父菜单" },
   { key: "importToDefaultWorkspace", label: "导入默认工作区" },
   { key: "importWithWorkspacePicker", label: "选择其他工作区" },
 ];

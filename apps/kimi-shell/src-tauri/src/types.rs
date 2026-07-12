@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 9;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -336,8 +336,17 @@ pub struct WorkspaceSessionBridgePayload {
     pub session_id: Option<String>,
     pub work_dir: Option<String>,
     pub route_template: Option<String>,
+    pub disposition: Option<WorkspaceSessionDisposition>,
+    pub target_window_label: Option<String>,
     pub applied: Option<bool>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceSessionDisposition {
+    ReplaceActive,
+    NewPane,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -414,6 +423,7 @@ pub struct AppSettings {
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
     pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
+    pub context_menu_desired_enabled: bool,
     pub context_menu_labels: ContextMenuLabelsInput,
 }
 
@@ -441,6 +451,7 @@ impl Default for AppSettings {
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),
             kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
+            context_menu_desired_enabled: true,
             context_menu_labels: ContextMenuLabelsInput::default(),
         }
     }
@@ -1314,7 +1325,7 @@ impl Default for ContextMenuLabelsInput {
             open_dir: "在 Kimi 小助手中打开".to_string(),
             open_file: "复制到工作区并用 Kimi 小助手打开".to_string(),
             open_filesystem_object: "在 Kimi 小助手中打开".to_string(),
-            move_to_workspace: "移动到 Kimi 小助手工作区".to_string(),
+            move_to_workspace: "复制到 Kimi 小助手工作区".to_string(),
             import_to_default_workspace: "导入到默认工作区".to_string(),
             import_with_workspace_picker: "选择其他工作区".to_string(),
         }

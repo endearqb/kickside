@@ -1,0 +1,190 @@
+From: review-package <review@local>
+Subject: [PATCH 3/3] add new-pane placement, dedupe and pane shelf
+Base: c2aaa14b9891c7de31363610d643ba70fa95c1e4
+
+This patch references the full new files under proposed/frontend in this review
+package. Copy those files into `apps/kimi-shell/src/features/workspace-grid/`
+then apply/adapt the integration hunks below.
+
+---
+ apps/kimi-shell/src/app/types.ts                     |  3 +
+ apps/kimi-shell/src/app/useShellController.ts        | 62 ++++++++++++++------
+ apps/kimi-shell/src/features/window/ShellTitlebar.tsx| 18 ++++++
+ apps/kimi-shell/src/features/workspace-grid/gridStore.ts | 47 +++++++++++++--
+ 4 files changed, 108 insertions(+), 22 deletions(-)
+
+diff --git a/apps/kimi-shell/src/app/types.ts b/apps/kimi-shell/src/app/types.ts
+--- a/apps/kimi-shell/src/app/types.ts
++++ b/apps/kimi-shell/src/app/types.ts
+@@
+ export interface WorkspaceSessionBridgePayload {
+@@
+   routeTemplate?: string;
++  disposition?: "replace_active" | "new_pane";
++  targetWindowLabel?: string;
+   applied?: boolean;
+
+diff --git a/apps/kimi-shell/src/features/workspace-grid/gridStore.ts b/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
+--- a/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
++++ b/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
+@@
+ import type {
+@@
+ } from "./gridTypes";
++import {
++  openPaneFromExplorer as reduceExplorerPane,
++  showPaneFromShelf as reduceShowPane,
++} from "./workspacePaneShelfCore";
+@@
+-export const WORKSPACE_GRID_MAX_PANES = 6;
++export const WORKSPACE_GRID_MAX_VISIBLE_PANES = 6;
++export const WORKSPACE_GRID_MAX_TOTAL_PANES = 12;
++/** @deprecated: use the explicit visible/total constants. */
++export const WORKSPACE_GRID_MAX_PANES = WORKSPACE_GRID_MAX_VISIBLE_PANES;
+@@
+ export interface WorkspaceGridActions {
+@@
+   addPane: (pane: AddWorkspacePaneInput, targetSlotId?: string) => string | null;
++  openPaneFromExplorer: (pane: AddWorkspacePaneInput) => {
++    kind: string;
++    paneId: string | null;
++    displacedPaneId?: string;
++  };
++  showPane: (paneId: string, targetSlotId?: string) => void;
+@@
+     addPane(input, targetSlotId) {
+@@
+     },
++    openPaneFromExplorer(input) {
++      const now = Date.now();
++      const paneId = createPaneId(input.kind);
++      const pane: WorkspacePane = {
++        id: paneId,
++        kind: input.kind,
++        carrier: "iframe",
++        title: input.title ?? defaultPaneTitle(input.kind),
++        sessionId: input.sessionId,
++        url: sanitizeUrl(input.url),
++        workDir: sanitizeWorkDir(input.workDir),
++        theme: isPaneTheme(input.theme) ? input.theme : undefined,
++        storageNamespace:
++          sanitizeStorageNamespace(input.storageNamespace) ??
++          createPaneStorageNamespace(paneId),
++        mountPolicy: "eager",
++        loadState: "idle",
++        createdAt: now,
++        updatedAt: now,
++      };
++      const reduced = reduceExplorerPane(get(), pane, {
++        now,
++        limits: {
++          maxVisible: WORKSPACE_GRID_MAX_VISIBLE_PANES,
++          maxTotal: WORKSPACE_GRID_MAX_TOTAL_PANES,
++        },
++      });
++      if (reduced.kind !== "limit_reached") {
++        update(set, storage, () => reduced.state);
++      }
++      return {
++        kind: reduced.kind,
++        paneId: reduced.paneId,
++        displacedPaneId: reduced.displacedPaneId,
++      };
++    },
++    showPane(paneId, targetSlotId) {
++      const reduced = reduceShowPane(get(), paneId, { targetSlotId });
++      if (reduced.changed) update(set, storage, () => reduced.state);
++    },
+@@
+-    if (sanitizedPanes.length >= WORKSPACE_GRID_MAX_PANES) {
++    if (sanitizedPanes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) {
+       break;
+
+diff --git a/apps/kimi-shell/src/app/useShellController.ts b/apps/kimi-shell/src/app/useShellController.ts
+--- a/apps/kimi-shell/src/app/useShellController.ts
++++ b/apps/kimi-shell/src/app/useShellController.ts
+@@
++import { RequestIdDeduper } from "@/features/workspace-grid/requestIdDeduper";
++import { resolveDisposition, resolvePaneForSessionUpdate } from "@/features/workspace-grid/sessionPaneRouting";
+@@
+   const addWorkspaceGridPane = useWorkspaceGridStore((state) => state.addPane);
++  const openWorkspaceGridPaneFromExplorer = useWorkspaceGridStore(
++    (state) => state.openPaneFromExplorer,
++  );
+@@
+   const pendingSessionBridgeRef =
+     useRef<WorkspaceSessionBridgePayload | null>(null);
++  const handledSessionNavigationIdsRef = useRef(new RequestIdDeduper());
+@@
+   const applySessionBridgeToGrid = useCallback(
+     (payload: WorkspaceSessionBridgePayload) => {
+@@
++      if (!handledSessionNavigationIdsRef.current.accept(payload.requestId)) {
++        return true;
++      }
++
++      if (resolveDisposition(payload) === "new_pane") {
++        const placement = openWorkspaceGridPaneFromExplorer({
++          kind: "code",
++          title: getKimiAssistantDisplayName(),
++          sessionId,
++          workDir: payload.workDir?.trim() || undefined,
++        });
++        if (placement.kind === "limit_reached") {
++          setActionError("窗格库已达 12 个上限，请先关闭或替换一个窗格。");
++          return false;
++        }
++        return placement.paneId !== null;
++      }
++
+       const targetPane =
+@@
+       addWorkspaceGridPane,
+@@
++      openWorkspaceGridPaneFromExplorer,
+@@
+-  const syncActiveCodePaneWorkDir = useCallback(
+-    (workDir?: string) => {
++  const syncCodePaneWorkDir = useCallback(
++    (sessionId?: string, workDir?: string) => {
+@@
+-      const { activePaneId, panes } = useWorkspaceGridStore.getState();
+-      const activePane = panes.find((pane) => pane.id === activePaneId);
+-      if (activePane?.kind !== "code") {
++      const { panes } = useWorkspaceGridStore.getState();
++      const targetPane = resolvePaneForSessionUpdate(panes, sessionId);
++      if (!targetPane) {
+         return;
+       }
+-
+-      setWorkspaceGridPaneWorkDir(activePane.id, nextWorkDir);
++      setWorkspaceGridPaneWorkDir(targetPane.id, nextWorkDir);
+@@
+-        syncActiveCodePaneWorkDir(payload.workDir);
++        syncCodePaneWorkDir(payload.sessionId, payload.workDir);
+
+diff --git a/apps/kimi-shell/src/features/window/ShellTitlebar.tsx b/apps/kimi-shell/src/features/window/ShellTitlebar.tsx
+--- a/apps/kimi-shell/src/features/window/ShellTitlebar.tsx
++++ b/apps/kimi-shell/src/features/window/ShellTitlebar.tsx
+@@
++import { PaneShelf } from "@/features/workspace-grid/PaneShelf";
++import {
++  WORKSPACE_GRID_MAX_TOTAL_PANES,
++  useWorkspaceGridStore,
++} from "@/features/workspace-grid/gridStore";
+@@
+ export function ShellTitlebar(/* existing props */) {
++  const panes = useWorkspaceGridStore((state) => state.panes);
++  const slots = useWorkspaceGridStore((state) => state.slots);
++  const activePaneId = useWorkspaceGridStore((state) => state.activePaneId);
++  const showPane = useWorkspaceGridStore((state) => state.showPane);
++  const removePane = useWorkspaceGridStore((state) => state.removePane);
+@@
++      <PaneShelf
++        panes={panes}
++        slots={slots}
++        activePaneId={activePaneId}
++        maxTotalPanes={WORKSPACE_GRID_MAX_TOTAL_PANES}
++        onShowPane={showPane}
++        onRemovePane={removePane}
++      />

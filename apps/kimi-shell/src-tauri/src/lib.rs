@@ -972,7 +972,6 @@ pub fn run() {
     let shortcut = shortcut_manager::default_shortcut();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            window_manager::show_and_focus(app);
             open_request::handle_external_cli_request(app.clone(), args, Some(cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -1198,7 +1197,7 @@ fn build_onboarding_status(app: &AppHandle) -> Result<OnboardingStatus, String> 
         runtime_state,
         kimi_installed,
         context_status.supported,
-        context_status.enabled,
+        context_status.enabled || !settings.context_menu_desired_enabled,
         auth_ready,
         work_dir_configured,
         api_config_ack,
@@ -1779,8 +1778,31 @@ fn should_attempt_stop_bridge(app: &AppHandle) -> bool {
 }
 
 fn auto_repair_context_menu(app: &AppHandle) {
+    let settings = match settings_store::load_or_default(app) {
+        Ok(settings) => settings,
+        Err(error) => {
+            log_manager::append_line(
+                app,
+                format!("context-menu self-heal skipped: failed to load preference: {error:#}"),
+            );
+            return;
+        }
+    };
     let status = context_menu::status(app);
     if !status.supported {
+        return;
+    }
+    if !settings.context_menu_desired_enabled {
+        match context_menu::disable(app) {
+            Ok(_) => log_manager::append_line(
+                app,
+                "context-menu self-heal kept disabled and removed stale entries",
+            ),
+            Err(error) => log_manager::append_line(
+                app,
+                format!("context-menu disabled-state cleanup failed: {error}"),
+            ),
+        }
         return;
     }
     if status.enabled {

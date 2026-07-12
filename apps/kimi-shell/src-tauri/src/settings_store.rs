@@ -32,6 +32,11 @@ pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
         changed = true;
     }
 
+    if settings.schema_version < 10 {
+        migrate_context_menu_copy_label(&mut settings);
+        changed = true;
+    }
+
     if settings.schema_version < CURRENT_SETTINGS_SCHEMA_VERSION {
         settings.schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
         changed = true;
@@ -65,6 +70,12 @@ fn migrate_context_menu_labels(settings: &mut AppSettings) {
     }
     if defaults.move_to_workspace == "移动到工作区" {
         defaults.move_to_workspace = "移动到 Kimi 小助手工作区".to_string();
+    }
+}
+
+fn migrate_context_menu_copy_label(settings: &mut AppSettings) {
+    if settings.context_menu_labels.move_to_workspace == "移动到 Kimi 小助手工作区" {
+        settings.context_menu_labels.move_to_workspace = "复制到 Kimi 小助手工作区".to_string();
     }
 }
 
@@ -114,6 +125,24 @@ mod tests {
         assert_eq!(
             settings.context_menu_labels.move_to_workspace,
             "移动到 Kimi 小助手工作区"
+        );
+    }
+
+    #[test]
+    fn context_menu_copy_label_migration_preserves_custom_values() {
+        let mut settings = AppSettings::default();
+        settings.context_menu_labels.move_to_workspace = "移动到 Kimi 小助手工作区".into();
+        migrate_context_menu_copy_label(&mut settings);
+        assert_eq!(
+            settings.context_menu_labels.move_to_workspace,
+            "复制到 Kimi 小助手工作区"
+        );
+
+        settings.context_menu_labels.move_to_workspace = "我的自定义菜单".into();
+        migrate_context_menu_copy_label(&mut settings);
+        assert_eq!(
+            settings.context_menu_labels.move_to_workspace,
+            "我的自定义菜单"
         );
     }
 }

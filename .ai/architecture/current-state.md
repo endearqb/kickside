@@ -20,7 +20,8 @@
 - 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和首次安装走 npm 全局包 `@moonshot-ai/kimi-code`；升级会在修改 PATH 前捕获当前实际命中的 `kimi` shim，按 `npm prefix -g` 或 `pnpm bin --global` 选择同源包管理器并精确验证对应 `kimi.cmd`，其他或歧义来源明确拒绝；执行前要求 Node.js 22.19+ 和 Git for Windows/Git Bash 就绪。旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
 - Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
-- Explorer 右键菜单 label 可通过控制中心编辑，持久化在 `AppSettings.context_menu_labels`；schema 9 将已知历史默认值迁移为“Kimi 小助手”中文名并保留用户自定义值，`enable_context_menu` 命令保持原有形状并在写注册表时读取当前 label 设置。
+- Explorer 右键菜单 label 可通过控制中心编辑，启用意图持久化在 `AppSettings` schema 10；禁用后启动自愈不会重新启用。注册表只保留 `Directory\\Background`、`Directory` 和 `*` 入口，旧 `AllFilesystemObjects` 键会清理，写删后通知 Explorer 刷新。
+- Explorer 打开目录/文件使用有界串行队列复用 `/api/v1` 创建独立 session；运行中的后端不重启、不切全局 cwd。前端按 `new_pane` 路由，最多六个可见 pane、十二个总 pane，第七个换入 active slot，被替换 pane 进入 Pane Shelf。
 - 控制中心运行诊断面板可手动执行 `kimi doctor`，返回 exit code、Kimi 路径、Shell 路径与脱敏 stdout/stderr；后端会注入检测到的 `KIMI_SHELL_PATH`。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。

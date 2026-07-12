@@ -193,6 +193,74 @@
   font-size: 11px;
 }
 
+.pane-shelf-root { position: relative; }
+
+.pane-shelf-count {
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  min-width: 13px;
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.pane-shelf-popover {
+  width: 280px;
+  max-height: min(420px, calc(100vh - 48px));
+  overflow: auto;
+}
+
+.pane-shelf-summary,
+.pane-shelf-section h3,
+.pane-shelf-section > p {
+  margin: 0;
+  padding: 6px 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.pane-shelf-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.pane-shelf-item:hover,
+.pane-shelf-item.is-active {
+  background: color-mix(in srgb, var(--text-primary) 7%, var(--surface));
+}
+
+.pane-shelf-item button {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pane-shelf-item button:first-child {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.pane-shelf-item strong,
+.pane-shelf-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-shelf-item strong { font-size: 12px; font-weight: 500; }
+.pane-shelf-item small { color: var(--text-secondary); font-size: 10px; }
+
 .titlebar-right {
   height: 100%;
   display: flex;

@@ -17,6 +17,7 @@ import { KimiAssistantBrand } from "@/components/kimi-code-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { GRID_PRESETS } from "@/features/workspace-grid/gridPresets";
+import { PaneShelf } from "@/features/workspace-grid/PaneShelf";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import type {
   BackendState,
@@ -170,6 +171,7 @@ export function ShellTitlebar({
             ) : null}
           </div>
         ) : null}
+        {screen === "workspace" ? <PaneShelf /> : null}
         {screen === "workspace" ? (
           <div className="titlebar-layout-menu-wrap">
             <IconButton

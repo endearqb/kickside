@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     fs::{File, OpenOptions},
     path::PathBuf,
     process::Child,
@@ -15,16 +16,17 @@ use crate::types::{
     AuthMode, BackendState, BridgeChannelStatus, BridgeRuntimeState,
     FeishuConnectorOnboardingState, KimiCodeAuthState, KimiLoginHealth, MainCreateMode,
     StartupFailureKind, StartupMonitorReason, StartupMonitorState, StartupMonitorTargetRoute,
-    StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
+    StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState, WorkspaceSessionDisposition,
 };
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PendingWorkspaceBootstrap {
     pub work_dir: PathBuf,
-    pub auto_session: bool,
     pub force_create_new: bool,
     pub source: String,
+    pub request_id: Option<String>,
+    pub disposition: WorkspaceSessionDisposition,
 }
 
 #[derive(Debug)]
@@ -46,7 +48,8 @@ pub struct RuntimeState {
     pub backend_ready_at_ms: Option<u64>,
     pub last_exit_reason: Option<String>,
     pub session_work_dir: Option<PathBuf>,
-    pub pending_workspace_bootstrap: Option<PendingWorkspaceBootstrap>,
+    pub pending_workspace_bootstraps: VecDeque<PendingWorkspaceBootstrap>,
+    pub workspace_bootstrap_worker_running: bool,
     pub active_session_id: Option<String>,
     pub active_session_work_dir: Option<PathBuf>,
     pub session_source: Option<String>,
@@ -99,7 +102,8 @@ impl Default for RuntimeState {
             backend_ready_at_ms: None,
             last_exit_reason: None,
             session_work_dir: None,
-            pending_workspace_bootstrap: None,
+            pending_workspace_bootstraps: VecDeque::new(),
+            workspace_bootstrap_worker_running: false,
             active_session_id: None,
             active_session_work_dir: None,
             session_source: None,

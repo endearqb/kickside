@@ -1,0 +1,58 @@
+From: review-package <review@local>
+Subject: [INTEGRATION DIFF 4/4] remove overlapping generic verbs and rename copy action
+Base: c2aaa14b9891c7de31363610d643ba70fa95c1e4
+
+Manual integration reference; not a directly applicable patch.
+
+Key changes for apps/kimi-shell/src-tauri/src/context_menu.rs:
+
+- Remove AllFilesystemObjects from the set of keys written and validated:
+
+- const ALL_FS_SHELL_KEY: &str = r"Software\Classes\AllFilesystemObjects\shell\KimiWebShell";
+- const ALL_FS_COMMAND_KEY: &str = r"Software\Classes\AllFilesystemObjects\shell\KimiWebShell\command";
+- const ALL_FS_MOVE_PARENT_KEY: &str = r"Software\Classes\AllFilesystemObjects\shell\MoveToWorkspace";
+- const ALL_FS_MOVE_DEFAULT_SHELL_KEY: ...
+- const ALL_FS_MOVE_DEFAULT_COMMAND_KEY: ...
+- const ALL_FS_MOVE_PICKER_SHELL_KEY: ...
+- const ALL_FS_MOVE_PICKER_COMMAND_KEY: ...
+
+- Keep the old top-level keys only in an explicit cleanup list so an upgrade
+  removes stale registrations created by previous versions:
+
++ const LEGACY_OVERLAPPING_KEYS: &[&str] = &[
++     r"Software\Classes\AllFilesystemObjects\shell\KimiWebShell",
++     r"Software\Classes\AllFilesystemObjects\shell\MoveToWorkspace",
++ ];
++
++ fn cleanup_legacy_overlapping_keys(hkcu: &RegKey) -> Result<(), String> {
++     for key in LEGACY_OVERLAPPING_KEYS {
++         delete_key_if_exists(hkcu, key)?;
++     }
++     Ok(())
++ }
+
+- The desired registrations become:
+
+  Directory\Background\shell\KimiWebShell -> --open-dir -- "%V"
+  Directory\shell\KimiWebShell            -> --open-dir -- "%1"
+  *\shell\KimiWebShell                    -> --open-files -- "%1"
+  Directory\shell\MoveToWorkspace         -> copy submenu
+  *\shell\MoveToWorkspace                 -> copy submenu
+
+- Call cleanup_legacy_overlapping_keys during enable, disable and migration,
+  then call SHChangeNotify once after the complete operation.
+
+Key changes for apps/kimi-shell/src-tauri/src/settings_store.rs:
+
++ if settings.schema_version < 10 {
++     if settings.context_menu_labels.move_to_workspace
++         == "移动到 Kimi 小助手工作区"
++     {
++         settings.context_menu_labels.move_to_workspace =
++             "复制到 Kimi 小助手工作区".to_string();
++     }
++     changed = true;
++ }
+
+Also update any frontend default/fallback copy of this label. The backend operation
+uses fs::copy/copy_directory_recursive, so “移动” is factually incorrect.

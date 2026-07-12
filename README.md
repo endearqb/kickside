@@ -15,7 +15,7 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 ## Key Highlights
 
 - Persistent desktop shell for `Kimi Code Web` and `Kimi Chat`, with Workspace Grid presets, resizable saved layouts, embedded external Webview panes, WebviewWindow fallback, and view switching
-- Windows Explorer context-menu launch for folders, single files, and multi-file selections, with folder handoff and file-to-workspace import
+- Windows Explorer context-menu launch for folders, single files, and multi-file selections, creating independent sessions without restarting a running backend
 - Compact assistant settings with four expandable setup bars for install/upgrade, Explorer context menu, Provider API, and default work directory
 - Built-in npm-based Kimi Code install and upgrade center with PowerShell preflight checks and dependency status
 - Unified Control Center for overview, quick setup, runtime diagnostics, and IM Bridge operations

@@ -1,4 +1,8 @@
 use super::*;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 const ENV_VALUE_VISIBLE_EDGE: usize = 2;
 
@@ -14,11 +18,57 @@ pub(super) const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE: i64 = 262144;
 pub(super) const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY: &str = "moonshot_search";
 pub(super) const KIMI_CODING_PLAN_FETCH_SERVICE_KEY: &str = "moonshot_fetch";
 const KIMI_CONFIG_BACKUP_KEEP: usize = 5;
+const KIMI_CONFIG_REPLACE_ATTEMPTS: usize = 4;
+const CONFIG_CONFLICT: &str =
+    "config_conflict: Kimi Code 配置已被其他程序修改。请保留当前输入，重新打开配置面板后再保存。";
+
+#[derive(Debug, Clone)]
+struct KimiConfigSnapshot {
+    raw: Option<String>,
+    fingerprint: String,
+}
+
+fn config_fingerprint(raw: Option<&str>) -> String {
+    match raw {
+        None => "missing".to_string(),
+        Some(raw) => {
+            let mut hasher = DefaultHasher::new();
+            raw.hash(&mut hasher);
+            format!("content:{:016x}", hasher.finish())
+        }
+    }
+}
+
+fn read_kimi_config_snapshot(path: &Path) -> Result<KimiConfigSnapshot, String> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => Some(raw),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "failed to read config file {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    Ok(KimiConfigSnapshot {
+        fingerprint: config_fingerprint(raw.as_deref()),
+        raw,
+    })
+}
+
+fn ensure_config_fingerprint(path: &Path, expected: &str) -> Result<(), String> {
+    if read_kimi_config_snapshot(path)?.fingerprint == expected {
+        Ok(())
+    } else {
+        Err(CONFIG_CONFLICT.to_string())
+    }
+}
 
 pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessConfigView, String> {
     let kimi_code_home = resolve_kimi_config_dir()?;
     let config_path = kimi_code_home.join("config.toml");
-    let config_exists = config_path.exists();
+    let snapshot = read_kimi_config_snapshot(&config_path)?;
+    let config_exists = snapshot.raw.is_some();
     let mut provider_base_url = None;
     let mut provider_api_key = None;
     let mut model_exists = false;
@@ -29,16 +79,8 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
     let mut config_error = None;
     let mut warnings = Vec::new();
 
-    if config_exists {
-        let doc = match fs::read_to_string(&config_path)
-            .map_err(|error| {
-                format!(
-                    "failed to read config file {}: {error}",
-                    config_path.display()
-                )
-            })
-            .and_then(|raw| parse_kimi_config_document(&raw, &config_path))
-        {
+    if let Some(raw) = snapshot.raw.as_deref() {
+        let doc = match parse_kimi_config_document(raw, &config_path) {
             Ok(doc) => Some(doc),
             Err(error) => {
                 warnings.push(format!("配置读取失败：{error}"));
@@ -100,6 +142,7 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
         kimi_code_home: kimi_code_home.to_string_lossy().to_string(),
         config_path: config_path.to_string_lossy().to_string(),
         config_exists,
+        config_fingerprint: Some(snapshot.fingerprint),
         config_error,
         provider: KimiCodeAccessConfigProviderView {
             id: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
@@ -153,9 +196,20 @@ pub fn save_kimi_code_access_config(
     })?;
 
     let config_path = config_dir.join("config.toml");
-    let mut doc = read_or_init_kimi_config(&config_path)?;
+    let snapshot = read_kimi_config_snapshot(&config_path)?;
+    if input
+        .expected_config_fingerprint
+        .as_deref()
+        .is_some_and(|expected| expected != snapshot.fingerprint)
+    {
+        return Err(CONFIG_CONFLICT.to_string());
+    }
+    let mut doc = match snapshot.raw.as_deref() {
+        Some(raw) => parse_kimi_config_document(raw, &config_path)?,
+        None => DocumentMut::new(),
+    };
     apply_kimi_code_access_input(&mut doc, &input)?;
-    write_kimi_config_atomically_with_backup(&config_path, &doc)?;
+    write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)?;
 
     let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
     settings.onboarding_step_acks.api_config_ack = true;
@@ -408,6 +462,7 @@ fn patch_kimi_access_service(
 fn write_kimi_config_atomically_with_backup(
     config_path: &Path,
     doc: &DocumentMut,
+    source: &KimiConfigSnapshot,
 ) -> Result<(), String> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -417,10 +472,6 @@ fn write_kimi_config_atomically_with_backup(
             )
         })?;
     }
-    if config_path.exists() {
-        backup_kimi_config(config_path)?;
-    }
-
     let parent = config_path
         .parent()
         .ok_or_else(|| format!("config path has no parent: {}", config_path.display()))?;
@@ -465,13 +516,27 @@ fn write_kimi_config_atomically_with_backup(
             )
         })?;
         drop(file);
-        fs::rename(&temp_path, config_path).map_err(|error| {
-            format!(
-                "failed to replace config file {} from {}: {error}",
-                config_path.display(),
-                temp_path.display()
-            )
-        })?;
+
+        ensure_config_fingerprint(config_path, &source.fingerprint)?;
+        if let Some(raw) = source.raw.as_deref() {
+            backup_kimi_config(config_path, raw)?;
+        }
+        for attempt in 0..KIMI_CONFIG_REPLACE_ATTEMPTS {
+            ensure_config_fingerprint(config_path, &source.fingerprint)?;
+            match fs::rename(&temp_path, config_path) {
+                Ok(()) => return Ok(()),
+                Err(error) if should_retry_config_replace(&error, attempt) => {
+                    std::thread::sleep(Duration::from_millis(50 * (attempt as u64 + 1)));
+                }
+                Err(error) => {
+                    return Err(format!(
+                        "failed to replace config file {} from {}: {error}",
+                        config_path.display(),
+                        temp_path.display()
+                    ))
+                }
+            }
+        }
         Ok(())
     })();
 
@@ -481,7 +546,20 @@ fn write_kimi_config_atomically_with_backup(
     write_result
 }
 
-fn backup_kimi_config(config_path: &Path) -> Result<(), String> {
+fn should_retry_config_replace(error: &std::io::Error, attempt: usize) -> bool {
+    #[cfg(windows)]
+    {
+        attempt + 1 < KIMI_CONFIG_REPLACE_ATTEMPTS
+            && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (error, attempt);
+        false
+    }
+}
+
+fn backup_kimi_config(config_path: &Path, raw: &str) -> Result<(), String> {
     let parent = config_path
         .parent()
         .ok_or_else(|| format!("config path has no parent: {}", config_path.display()))?;
@@ -504,7 +582,7 @@ fn backup_kimi_config(config_path: &Path) -> Result<(), String> {
             "{file_name}.kimi-app-backup-{backup_stamp}-{index}"
         ));
     }
-    fs::copy(config_path, &backup_path).map_err(|error| {
+    fs::write(&backup_path, raw).map_err(|error| {
         format!(
             "failed to create config backup {}: {error}",
             backup_path.display()
@@ -870,6 +948,7 @@ api_key = "other-key"
         apply_kimi_code_access_input(
             &mut doc,
             &KimiCodeAccessConfigInput {
+                expected_config_fingerprint: None,
                 provider_base_url: KIMI_CODING_PLAN_BASE_URL.to_string(),
                 provider_api_key: None,
                 clear_provider_api_key: Some(false),
@@ -938,8 +1017,10 @@ api_key = "other-key"
         let doc = "new_key = true\n"
             .parse::<DocumentMut>()
             .expect("new config");
+        let snapshot = read_kimi_config_snapshot(&config_path).expect("read source config");
 
-        write_kimi_config_atomically_with_backup(&config_path, &doc).expect("write config");
+        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+            .expect("write config");
 
         let raw = fs::read_to_string(&config_path).expect("read config");
         assert!(raw.contains("new_key"));
@@ -960,6 +1041,64 @@ api_key = "other-key"
                 .parent()
                 .expect("config path should have temp parent directory"),
         );
+    }
+
+    #[test]
+    fn access_config_fingerprint_tracks_exact_snapshot_and_missing_file() {
+        let config_path = temp_config_path("access-config-fingerprint");
+        let missing = read_kimi_config_snapshot(&config_path).expect("read missing config");
+        assert!(missing.raw.is_none());
+        assert_eq!(missing.fingerprint, "missing");
+
+        fs::write(&config_path, "key = 1\n").expect("write first config");
+        let first = read_kimi_config_snapshot(&config_path).expect("read first config");
+        assert_eq!(first.fingerprint, config_fingerprint(Some("key = 1\n")));
+        fs::write(&config_path, "key = 2\n").expect("write changed config");
+        let second = read_kimi_config_snapshot(&config_path).expect("read changed config");
+        assert_ne!(first.fingerprint, second.fingerprint);
+
+        let _ = fs::remove_dir_all(config_path.parent().expect("temp parent"));
+    }
+
+    #[test]
+    fn access_config_write_creates_a_missing_config() {
+        let config_path = temp_config_path("access-config-create");
+        let snapshot = read_kimi_config_snapshot(&config_path).expect("read missing config");
+        let doc = "created = true\n"
+            .parse::<DocumentMut>()
+            .expect("new config");
+
+        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+            .expect("create config");
+        assert_eq!(
+            fs::read_to_string(&config_path).expect("read created config"),
+            "created = true\n"
+        );
+
+        let _ = fs::remove_dir_all(config_path.parent().expect("temp parent"));
+    }
+
+    #[test]
+    fn access_config_write_rejects_external_change_without_overwrite() {
+        let config_path = temp_config_path("access-config-conflict");
+        fs::write(&config_path, "key = 1\n").expect("seed config");
+        let snapshot = read_kimi_config_snapshot(&config_path).expect("read source config");
+        fs::write(&config_path, "external = true\n").expect("simulate external writer");
+        let doc = "shell = true\n".parse::<DocumentMut>().expect("new config");
+
+        let error = write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+            .expect_err("stale write must fail");
+        assert!(error.starts_with("config_conflict:"));
+        assert_eq!(
+            fs::read_to_string(&config_path).expect("read retained external config"),
+            "external = true\n"
+        );
+        assert!(fs::read_dir(config_path.parent().expect("temp parent"))
+            .expect("list temp parent")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains("kimi-app-tmp")));
+
+        let _ = fs::remove_dir_all(config_path.parent().expect("temp parent"));
     }
 
     #[test]

@@ -980,6 +980,7 @@ export interface KimiCodeAccessConfigView {
   kimiCodeHome: string;
   configPath: string;
   configExists: boolean;
+  configFingerprint?: string;
   configError?: string;
   provider: KimiCodeAccessConfigProviderView;
   model: KimiCodeAccessConfigModelView;
@@ -1000,6 +1001,7 @@ export type KimiCodeAccessServiceApiKeyMode =
   | "clear";
 
 export interface KimiCodeAccessConfigInput {
+  expectedConfigFingerprint?: string;
   providerBaseUrl: string;
   providerApiKey?: string;
   clearProviderApiKey?: boolean;

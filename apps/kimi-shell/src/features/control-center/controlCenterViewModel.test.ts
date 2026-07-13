@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   controlSections,
   formatBridgeConnectorStateLabel,
+  getStartupFailureMessage,
   getKimiInstallPrerequisiteIssues,
+  isAssistantSettingsSection,
+  shouldShowStartupFailureDiagnostics,
 } from "./controlCenterViewModel";
-import type { InstallProbeStatus } from "@/app/types";
+import type { AppStatus, DiagnosticsInfo, InstallProbeStatus } from "@/app/types";
 
 const readyProbe: InstallProbeStatus = {
   wingetReady: true,
@@ -35,6 +38,19 @@ describe("getKimiInstallPrerequisiteIssues", () => {
 });
 
 describe("assistant settings navigation", () => {
+  it("recognizes every section that renders assistant settings", () => {
+    expect((["overview", "onboarding", "runtime_center"] as const).map(isAssistantSettingsSection)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect((["workspace_hub", "schedule", "skill_center"] as const).map(isAssistantSettingsSection)).toEqual([
+      false,
+      false,
+      false,
+    ]);
+  });
+
   it("keeps external IM inside assistant settings", () => {
     expect(controlSections.map((section) => section.id)).toEqual([
       "onboarding",
@@ -48,5 +64,15 @@ describe("assistant settings navigation", () => {
     expect(formatBridgeConnectorStateLabel("ready")).toBe("运行中");
     expect(formatBridgeConnectorStateLabel("degraded")).toBe("错误");
     expect(formatBridgeConnectorStateLabel("idle")).toBe("已停止");
+  });
+});
+
+describe("startup failure diagnostics", () => {
+  it("shows crashed backends and selects an actionable message", () => {
+    const status = { state: "crashed", message: "后端启动失败" } as AppStatus;
+    const diagnostics = { state: "crashed", lastError: "诊断错误" } as DiagnosticsInfo;
+
+    expect(shouldShowStartupFailureDiagnostics(status, diagnostics)).toBe(true);
+    expect(getStartupFailureMessage(status, diagnostics)).toBe("后端启动失败");
   });
 });

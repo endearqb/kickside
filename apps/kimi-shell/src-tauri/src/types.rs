@@ -1528,6 +1528,7 @@ pub struct KimiCodeAccessConfigView {
     pub kimi_code_home: String,
     pub config_path: String,
     pub config_exists: bool,
+    pub config_fingerprint: Option<String>,
     pub config_error: Option<String>,
     pub provider: KimiCodeAccessConfigProviderView,
     pub model: KimiCodeAccessConfigModelView,
@@ -1548,6 +1549,7 @@ pub enum KimiCodeAccessServiceApiKeyMode {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct KimiCodeAccessConfigInput {
+    pub expected_config_fingerprint: Option<String>,
     pub provider_base_url: String,
     pub provider_api_key: Option<String>,
     pub clear_provider_api_key: Option<bool>,

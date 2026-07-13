@@ -62,10 +62,13 @@ import {
   formatWeixinOnboardingStateLabel,
   formatWeixinOnboardingTone,
   generateUniqueBridgeConnectorId,
+  getStartupFailureMessage,
   getKimiInstallPrerequisiteIssues,
   hasBridgeConnectorSecretsConfigured,
+  isAssistantSettingsSection,
   isFeishuOnboardingActive,
   isWeixinOnboardingActive,
+  shouldShowStartupFailureDiagnostics,
   type BridgeConnectorSecretDraft,
   type BridgeDeleteConfirmState,
   type ControlCenterViewProps,
@@ -304,11 +307,8 @@ export function ControlCenterView({
     contextMenuStatus?.supported ?? onboarding?.contextMenuSupported ?? false;
   const runtimeContextMenuEnabled =
     contextMenuStatus?.enabled ?? onboarding?.contextMenuEnabled ?? false;
-  const isAssistantSettingsSection =
-    activeControlSection === "overview" ||
-    activeControlSection === "onboarding" ||
-    activeControlSection === "runtime_center";
-  const isOnboardingSection = isAssistantSettingsSection;
+  const assistantSettingsSectionActive = isAssistantSettingsSection(activeControlSection);
+  const isOnboardingSection = assistantSettingsSectionActive;
   const isBridgeRunning =
     bridgeStatus.state === "running" ||
     bridgeStatus.state === "starting" ||
@@ -511,14 +511,14 @@ export function ControlCenterView({
         ? "success"
         : "neutral";
   useEffect(() => {
-    if (activeControlSection !== "onboarding") {
+    if (!assistantSettingsSectionActive) {
       setExpandedOnboardingCard(null);
       return;
     }
     if (installBusy && expandedOnboardingCard !== "install") {
       setExpandedOnboardingCard("install");
     }
-  }, [activeControlSection, expandedOnboardingCard, installBusy]);
+  }, [assistantSettingsSectionActive, expandedOnboardingCard, installBusy]);
 
   useEffect(() => {
     if (
@@ -552,10 +552,10 @@ export function ControlCenterView({
   }, [bridgeCreateMenuOpen]);
 
   useEffect(() => {
-    if (activeControlSection !== "onboarding" || expandedOnboardingCard !== "bridge") {
+    if (!assistantSettingsSectionActive || expandedOnboardingCard !== "bridge") {
       setBridgeCreateMenuOpen(false);
     }
-  }, [activeControlSection, expandedOnboardingCard]);
+  }, [assistantSettingsSectionActive, expandedOnboardingCard]);
 
   const installSecondaryAction = (
     <Button
@@ -1246,11 +1246,8 @@ export function ControlCenterView({
       primaryAction: logsPrimaryAction,
     },
   ];
-  const showStartupFailureDiagnostics = Boolean(
-    status?.startupPhase === "failed" ||
-      status?.startupFailureDetail ||
-      diagnostics?.startupFailureDetail,
-  );
+  const showStartupFailureDiagnostics = shouldShowStartupFailureDiagnostics(status, diagnostics);
+  const startupFailureMessage = getStartupFailureMessage(status, diagnostics);
   const runtimeIssues = [
     diagnostics?.lastError ? `最近错误：${diagnostics.lastError}` : null,
     diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
@@ -1272,7 +1269,7 @@ export function ControlCenterView({
       icon: section.icon,
       active:
         section.id === "onboarding"
-          ? isAssistantSettingsSection
+          ? assistantSettingsSectionActive
           : activeControlSection === section.id,
       onSelect: () => {
         void handleSelectControlSection(section.id);
@@ -1289,7 +1286,7 @@ export function ControlCenterView({
   }, [
     activeControlSection,
     handleSelectControlSection,
-    isAssistantSettingsSection,
+    assistantSettingsSectionActive,
   ]);
 
   function renderOnboardingSection() {
@@ -1454,6 +1451,11 @@ export function ControlCenterView({
           className={`cc-image-card ${activeFocusId === "runtime:core" ? "is-focus" : ""}`}
         >
           <h2>启动链路</h2>
+          {startupFailureMessage ? (
+            <p className="cc-settings-error" role="alert">
+              {startupFailureMessage}
+            </p>
+          ) : null}
           <table className="cc-image-table">
             <thead>
               <tr><th>#</th><th>阶段</th><th>状态</th></tr>
@@ -2978,7 +2980,7 @@ export function ControlCenterView({
       "还没有安装输出。";
     return (
       <div className="cc-unified-rail-footer-stack">
-        {isAssistantSettingsSection && expandedOnboardingCard === "install" ? (
+        {assistantSettingsSectionActive && expandedOnboardingCard === "install" ? (
           <div className="cc-rail-install-terminal">
             <div className="cc-rail-install-terminal-head">
               <strong>内置终端</strong>
@@ -3044,7 +3046,7 @@ export function ControlCenterView({
                     activeFocusId={activeFocusId}
                   />
                 ) : null}
-                {isAssistantSettingsSection ? (
+                {assistantSettingsSectionActive ? (
                   <>
                     {renderOnboardingSection()}
                     {showStartupFailureDiagnostics ? renderRuntimeSection() : null}

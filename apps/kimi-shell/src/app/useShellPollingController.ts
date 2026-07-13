@@ -5,6 +5,7 @@ import type {
   ControlCenterTaskId,
   RuntimePanelId,
 } from "@/app/types";
+import { isAssistantSettingsSection } from "@/features/control-center/controlCenterViewModel";
 
 const ACTIVE_STATUS_POLL_MS = 1000;
 const BACKGROUND_STATUS_POLL_MS = 5000;
@@ -88,11 +89,9 @@ export function useShellPollingController(options: ShellPollingControllerOptions
     const controlCenterVisible = screen === "control_center" || controlCenterModalOpen;
     const bridgeControlsVisible =
       controlCenterVisible &&
-      (activeControlSection === "onboarding" ||
+      (isAssistantSettingsSection(activeControlSection) ||
         activeControlTask === "bridge_connector_secrets" ||
-        activeControlTask === "bridge_runtime" ||
-        (activeControlSection === "runtime_center" &&
-          activeRuntimePanel === "bridge"));
+        activeControlTask === "bridge_runtime");
     const bridgePanelVisible = isBridgePanelVisible(
       controlCenterVisible,
       activeControlSection,

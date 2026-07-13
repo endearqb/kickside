@@ -52,6 +52,7 @@ export function getBridgePlatformConnectors(
 
 export function createEmptyKimiCodeAccessInput(): KimiCodeAccessConfigInput {
   return {
+    expectedConfigFingerprint: undefined,
     providerBaseUrl: KIMI_CODING_PLAN_BASE_URL,
     providerApiKey: undefined,
     clearProviderApiKey: false,
@@ -77,6 +78,7 @@ export function serviceModeFromView(
 
 export function toKimiCodeAccessInput(view: KimiCodeAccessConfigView): KimiCodeAccessConfigInput {
   return {
+    expectedConfigFingerprint: view.configFingerprint,
     providerBaseUrl: view.provider.baseUrl ?? KIMI_CODING_PLAN_BASE_URL,
     providerApiKey: undefined,
     clearProviderApiKey: false,
@@ -101,6 +103,13 @@ export function cloneKimiCodeAccessInput(
   input: KimiCodeAccessConfigInput,
 ): KimiCodeAccessConfigInput {
   return JSON.parse(JSON.stringify(input)) as KimiCodeAccessConfigInput;
+}
+
+export function formatKimiCodeAccessSaveError(error: unknown): string {
+  const message = String(error);
+  return message.includes("config_conflict:")
+    ? "配置已被其他程序修改。当前输入已保留；请先复制需要保留的内容，再重新打开配置面板加载最新版。"
+    : message;
 }
 
 export function parseHashRoute(hash: string): string {

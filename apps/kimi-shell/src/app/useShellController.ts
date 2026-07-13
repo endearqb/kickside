@@ -19,12 +19,13 @@ import {
 } from "@/app/linkBridge";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
+  buildSkillUninstallConfirmMessage,
   cloneKimiCodeAccessInput,
   createBridgeOnboardingValidation,
   createDefaultBridgeOnboardingConfigInput,
   createDefaultWorkspaceWebSettings,
   createEmptyKimiCodeAccessInput,
-  buildSkillUninstallConfirmMessage,
+  formatKimiCodeAccessSaveError,
   formatBridgeErrorEntry,
   getBridgeChannelEnabled,
   hasBridgeDraftSecretValue,
@@ -2380,14 +2381,23 @@ export function useShellController() {
       const data = await invoke<KimiCodeAccessConfigView>("save_kimi_code_access_config", {
         input: kimiCodeAccessDraft,
       });
-      setKimiCodeAccessView(data);
+      setKimiCodeAccessView({
+        ...data,
+        warnings: [
+          ...data.warnings,
+          "API 配置已保存；新建或重新打开的会话将使用新配置。",
+        ],
+      });
       const nextInput = toKimiCodeAccessInput(data);
       setKimiCodeAccessDraft(nextInput);
       setKimiCodeAccessSnapshot(cloneKimiCodeAccessInput(nextInput));
       setKimiCodeAccessTestResult(null);
       await refreshCoreState();
     } catch (error) {
-      setActionError(String(error));
+      const message = formatKimiCodeAccessSaveError(error);
+      setKimiCodeAccessView((current) =>
+        current ? { ...current, configError: message } : current,
+      );
     } finally {
       setActionBusy(false);
       setKimiCodeAccessBusy(false);

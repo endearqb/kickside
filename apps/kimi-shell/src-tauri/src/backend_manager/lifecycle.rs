@@ -1,5 +1,6 @@
 use super::config::resolve_working_directory;
 use super::*;
+use std::io::BufRead;
 
 pub fn start_backend(app: AppHandle) {
     let (generation, stale_child) = {
@@ -265,15 +266,25 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     log_manager::append_line(app, "KIMI_CODE_NO_AUTO_UPDATE=1");
 
     let spawn_started = Instant::now();
-    let mut child = spawn_backend_process(
+    let mut child = match spawn_backend_process(
         &kimi_path,
         &work_dir,
         &command_args,
         &log_path,
         kimi_shell_path.as_ref(),
         agent_swarm_max_concurrency,
-    )
-    .with_context(|| format!("failed to spawn kimi process from {}", kimi_path.display()))?;
+    ) {
+        Ok(child) => child,
+        Err(error) => {
+            let probe = probe_kimi_server_contract(&kimi_path, kimi_shell_path.as_ref());
+            set_crashed(
+                app,
+                generation,
+                startup_failure_message(&error, probe, kimi_shell_path.is_none()),
+            );
+            return Ok(());
+        }
+    };
     log_manager::append_line(
         app,
         format!(
@@ -319,7 +330,12 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
                 ),
             );
             terminate_child(&mut child);
-            set_crashed(app, generation, format!("Startup failed: {error:#}"));
+            let probe = probe_kimi_server_contract(&kimi_path, kimi_shell_path.as_ref());
+            set_crashed(
+                app,
+                generation,
+                startup_failure_message(&error, probe, kimi_shell_path.is_none()),
+            );
             return Ok(());
         }
     };
@@ -498,14 +514,11 @@ fn spawn_backend_process(
     kimi_shell_path: Option<&PathBuf>,
     agent_swarm_max_concurrency: Option<u32>,
 ) -> anyhow::Result<Child> {
-    let stdout_file = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_path)
         .with_context(|| format!("failed to open backend log file: {}", log_path.display()))?;
-    let stderr_file = stdout_file
-        .try_clone()
-        .context("failed to clone log file handle for stderr")?;
 
     let mut command = Command::new(kimi_path);
     command_utils::configure_kimi_background_command(&mut command);
@@ -516,8 +529,8 @@ fn spawn_backend_process(
         .env("PYTHONUTF8", "1")
         .env("KIMI_CODE_NO_AUTO_UPDATE", "1")
         .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout_file))
-        .stderr(Stdio::from(stderr_file));
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     if let Some(shell_path) = kimi_shell_path {
         command.env("KIMI_SHELL_PATH", shell_path);
@@ -528,9 +541,116 @@ fn spawn_backend_process(
 
     command.current_dir(work_dir);
 
-    command
+    let mut child = command
         .spawn()
-        .context("failed to spawn kimi-code server command")
+        .context("failed to spawn kimi-code server command")?;
+    let redactor = Arc::new(super::redaction::SecretRedactor::from_system());
+    let stdout = child
+        .stdout
+        .take()
+        .context("kimi-code stdout pipe was unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("kimi-code stderr pipe was unavailable")?;
+    spawn_backend_log_reader(stdout, log_path.clone(), redactor.clone());
+    spawn_backend_log_reader(stderr, log_path.clone(), redactor);
+    Ok(child)
+}
+
+fn spawn_backend_log_reader(
+    stream: impl Read + Send + 'static,
+    log_path: PathBuf,
+    redactor: Arc<super::redaction::SecretRedactor>,
+) {
+    thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stream);
+        let mut buffer = Vec::new();
+        loop {
+            buffer.clear();
+            let Ok(read) = reader.read_until(b'\n', &mut buffer) else {
+                return;
+            };
+            if read == 0 {
+                return;
+            }
+            let output = redactor.redact(&String::from_utf8_lossy(&buffer));
+            // ponytail: open per line avoids retaining a Windows handle across log rotation;
+            // use a joined writer thread if backend log volume becomes material.
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                let _ = file.write_all(output.as_bytes());
+            }
+        }
+    });
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContractProbe {
+    Supported,
+    Incompatible,
+    Unavailable,
+    TimedOut,
+}
+
+fn probe_kimi_server_contract(
+    kimi_path: &Path,
+    kimi_shell_path: Option<&PathBuf>,
+) -> ContractProbe {
+    let mut command = Command::new(kimi_path);
+    command_utils::configure_kimi_query_command(&mut command);
+    command
+        .args(["server", "run", "--help"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(shell_path) = kimi_shell_path {
+        command.env("KIMI_SHELL_PATH", shell_path);
+    }
+
+    let Ok(mut child) = command.spawn() else {
+        return ContractProbe::Unavailable;
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    ContractProbe::Supported
+                } else {
+                    ContractProbe::Incompatible
+                };
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(_) => return ContractProbe::Unavailable,
+        }
+    }
+    force_terminate(child.id());
+    let _ = child.wait();
+    ContractProbe::TimedOut
+}
+
+fn startup_failure_message(
+    error: &anyhow::Error,
+    probe: ContractProbe,
+    shell_missing: bool,
+) -> String {
+    let reason = error.to_string().chars().take(240).collect::<String>();
+    let guidance = match probe {
+        ContractProbe::Supported => {
+            "已确认当前 Kimi 支持 `server run`；请检查登录/API 配置和脱敏后的 backend.log。"
+        }
+        ContractProbe::Incompatible => {
+            "当前可执行文件不支持 `server run`；请配置最新版 Kimi Code 的可执行文件。"
+        }
+        ContractProbe::Unavailable => "无法检查当前可执行文件；请确认 Kimi Code 路径。",
+        ContractProbe::TimedOut => "Kimi 命令检查超时；请查看脱敏后的 backend.log。",
+    };
+    let shell_guidance = if cfg!(windows) && shell_missing {
+        " Windows 还需要 Git Bash；请安装 Git for Windows 或配置 KIMI_SHELL_PATH。"
+    } else {
+        ""
+    };
+    format!("后端启动失败：{reason}。{guidance}{shell_guidance}")
 }
 
 fn build_kimi_server_args(base_port: u16) -> Vec<String> {
@@ -582,6 +702,7 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
 }
 
 fn set_crashed(app: &AppHandle, generation: u64, message: String) {
+    let message = super::redaction::redact_backend_text(&message);
     {
         let state = app.state::<AppState>();
         let mut runtime = match state.runtime.lock() {
@@ -737,5 +858,20 @@ mod tests {
         assert!(!args_joined.contains("--open"));
         assert!(!args_joined.contains("--network"));
         assert!(!args_joined.contains("--public"));
+    }
+
+    #[test]
+    fn startup_failure_guidance_distinguishes_contract_results() {
+        let error = anyhow::anyhow!("backend exited");
+        let supported = startup_failure_message(&error, ContractProbe::Supported, false);
+        let incompatible = startup_failure_message(&error, ContractProbe::Incompatible, false);
+        let unavailable = startup_failure_message(&error, ContractProbe::Unavailable, false);
+        let timed_out = startup_failure_message(&error, ContractProbe::TimedOut, false);
+
+        assert!(supported.contains("支持 `server run`"));
+        assert!(incompatible.contains("不支持 `server run`"));
+        assert!(unavailable.contains("无法检查"));
+        assert!(timed_out.contains("检查超时"));
+        assert!(supported.len() < 400);
     }
 }

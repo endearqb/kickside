@@ -525,18 +525,26 @@ fn sync_provider_api_snapshot_after_config_change(app: &AppHandle) -> Result<(),
 }
 
 #[tauri::command]
-fn load_kimi_code_access_config(app: AppHandle) -> Result<KimiCodeAccessConfigView, String> {
-    backend_manager::load_kimi_code_access_config(&app)
+async fn load_kimi_code_access_config(app: AppHandle) -> Result<KimiCodeAccessConfigView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backend_manager::load_kimi_code_access_config(&app)
+    })
+    .await
+    .map_err(|error| format!("failed to join access config load task: {error}"))?
 }
 
 #[tauri::command]
-fn save_kimi_code_access_config(
+async fn save_kimi_code_access_config(
     app: AppHandle,
     input: KimiCodeAccessConfigInput,
 ) -> Result<KimiCodeAccessConfigView, String> {
-    let view = backend_manager::save_kimi_code_access_config(&app, input)?;
-    sync_provider_api_snapshot_after_config_change(&app)?;
-    Ok(view)
+    tauri::async_runtime::spawn_blocking(move || {
+        let view = backend_manager::save_kimi_code_access_config(&app, input)?;
+        sync_provider_api_snapshot_after_config_change(&app)?;
+        Ok(view)
+    })
+    .await
+    .map_err(|error| format!("failed to join access config save task: {error}"))?
 }
 
 #[tauri::command]
@@ -732,9 +740,18 @@ fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsInfo, String> {
         startup_trace,
         app_log_path: app_log_path.to_string_lossy().to_string(),
         backend_log_path: backend_log_path.to_string_lossy().to_string(),
-        app_log_tail: log_manager::read_log_tail(&app_log_path, 60),
-        backend_log_tail: log_manager::read_log_tail(&backend_log_path, 60),
-        log_tail: log_manager::read_log_tail(&backend_log_path, 80),
+        app_log_tail: backend_manager::redact_backend_lines(log_manager::read_log_tail(
+            &app_log_path,
+            60,
+        )),
+        backend_log_tail: backend_manager::redact_backend_lines(log_manager::read_log_tail(
+            &backend_log_path,
+            60,
+        )),
+        log_tail: backend_manager::redact_backend_lines(log_manager::read_log_tail(
+            &backend_log_path,
+            80,
+        )),
         logs_dir: logs_dir.to_string_lossy().to_string(),
     })
 }
@@ -1542,6 +1559,7 @@ fn redact_and_limit_doctor_output(output: &str, secrets: &[String]) -> String {
     for secret in secrets {
         redacted = redacted.replace(secret, "[REDACTED]");
     }
+    redacted = backend_manager::redact_backend_text(&redacted);
 
     let max_chars = 12_000usize;
     if redacted.chars().count() <= max_chars {

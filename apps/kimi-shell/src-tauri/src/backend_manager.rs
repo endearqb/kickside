@@ -32,6 +32,7 @@ use crate::{
 #[allow(dead_code)]
 mod config;
 mod lifecycle;
+mod redaction;
 mod system_open;
 #[allow(dead_code)]
 mod workspace_injection;
@@ -46,6 +47,18 @@ pub use config::{
 };
 pub use lifecycle::{restart_backend, set_session_work_dir, start_backend, stop_backend};
 pub use system_open::{open_external_url, open_folder, open_kimi_config_dir, open_logs_folder};
+
+pub fn redact_backend_text(input: &str) -> String {
+    redaction::redact_backend_text(input)
+}
+
+pub fn redact_backend_lines(lines: Vec<String>) -> Vec<String> {
+    let redactor = redaction::SecretRedactor::from_system();
+    lines
+        .into_iter()
+        .map(|line| redactor.redact(&line))
+        .collect()
+}
 
 const SHUTDOWN_TIMEOUT_SECS: u64 = 4;
 #[allow(dead_code)]

@@ -122,6 +122,7 @@ export function KimiCodeAccessTaskContent({
     Partial<Record<"search" | "fetch", boolean>>
   >({});
   const blockingErrors = buildBlockingErrors(draft);
+  const warnings = buildWarnings(draft, view?.warnings);
 
   function updateDraft(patch: Partial<KimiCodeAccessConfigInput>) {
     onDraftChange({ ...draft, ...patch });
@@ -326,7 +327,16 @@ export function KimiCodeAccessTaskContent({
             </ul>
           ) : null}
           {view?.configError ? (
-            <p className="hint danger">配置文件无法解析：{view.configError}</p>
+            <p className="hint danger" role="alert">
+              {view.configError}
+            </p>
+          ) : null}
+          {warnings.length ? (
+            <ul className="cc-config-warning-list" aria-live="polite">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
           ) : null}
           {testResult ? (
             <div className="cc-config-summary-grid">

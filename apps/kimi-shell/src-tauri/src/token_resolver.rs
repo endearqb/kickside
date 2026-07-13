@@ -88,7 +88,7 @@ pub fn build_workspace_url(origin: &str, token: Option<&str>) -> String {
     }
 }
 
-fn percent_encode_fragment_value(value: &str) -> String {
+pub(crate) fn percent_encode_fragment_value(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {

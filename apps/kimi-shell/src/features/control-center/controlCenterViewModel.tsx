@@ -76,6 +76,30 @@ export function focusDomId(id: string) {
   return `cc-focus-${id}`;
 }
 
+export function isAssistantSettingsSection(section: ControlSectionId): boolean {
+  return section === "overview" || section === "onboarding" || section === "runtime_center";
+}
+
+export function shouldShowStartupFailureDiagnostics(
+  status: AppStatus | null,
+  diagnostics: DiagnosticsInfo | null,
+): boolean {
+  return Boolean(
+    status?.state === "crashed" ||
+      diagnostics?.state === "crashed" ||
+      status?.startupPhase === "failed" ||
+      status?.startupFailureDetail ||
+      diagnostics?.startupFailureDetail,
+  );
+}
+
+export function getStartupFailureMessage(
+  status: AppStatus | null,
+  diagnostics: DiagnosticsInfo | null,
+): string | null {
+  return status?.message ?? diagnostics?.lastError ?? diagnostics?.startupFailureDetail ?? null;
+}
+
 export type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 export type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 export type OnboardingCardId =

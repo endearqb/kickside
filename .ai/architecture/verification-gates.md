@@ -33,5 +33,5 @@ P5 发布前仍需要人工或专用环境验证：
 - Feishu DM/group/thread prompt、streaming card、approval card 与 Bridge 重启后的 pending approval 恢复。
 - Weixin 若继续保留在发布范围内，至少验证最小 inbound/outbound 链路；当前不提供 in-chat approval callback。
 - NSIS/MSI 安装版 Bridge lifecycle buttons、bundled sidecar 路径、token-file 启动和日志脱敏。
-- 诊断包脱敏：server token、Bridge admin/host-control token、平台密钥和 API key 均不可见。
+- 日志与诊断脱敏：`backend.log`、`app.log`、诊断页复制内容和诊断包中，server token（含 URL 编码形式）、Bridge admin/host-control token、平台密钥和 API key 均不可见。
 - OpenAPI/AsyncAPI 快照与回退路径在 CI 或发布脚本中固定。

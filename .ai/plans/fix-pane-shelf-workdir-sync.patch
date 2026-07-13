@@ -1,0 +1,368 @@
+diff --git a/apps/kimi-shell/src/App.tsx b/apps/kimi-shell/src/App.tsx
+index 9c15091..d87a9ad 100644
+--- a/apps/kimi-shell/src/App.tsx
++++ b/apps/kimi-shell/src/App.tsx
+@@ -327,6 +327,7 @@ function App() {
+             onRetry={shell.handleRuntimeOnlyRetry}
+             onOpenLogs={shell.handleOpenLogs}
+             onOpenPaneFolder={shell.handleOpenPaneFolder}
++            onPaneSessionObserved={shell.handlePaneSessionObserved}
+             onOpenExternalUrl={shell.handleOpenExternalUrl}
+             onSplitRatioChange={shell.handleWorkspaceSplitRatioChange}
+             onSplitDragStateChange={shell.handleWorkspaceSplitDragStateChange}
+diff --git a/apps/kimi-shell/src/app/useShellController.ts b/apps/kimi-shell/src/app/useShellController.ts
+index 9722db8..3194859 100644
+--- a/apps/kimi-shell/src/app/useShellController.ts
++++ b/apps/kimi-shell/src/app/useShellController.ts
+@@ -112,7 +112,10 @@ import { useShellPollingController } from "@/app/useShellPollingController";
+ import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
+ import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
+ import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+-import { resolveCurrentPaneWorkDir } from "@/services/workspaceGridService";
++import {
++  getGridSession,
++  resolveCurrentPaneWorkDir,
++} from "@/services/workspaceGridService";
+ import {
+   applySkill,
+   addInstalledSkillToWorkspaceTarget,
+@@ -332,6 +335,9 @@ export function useShellController() {
+   const setWorkspaceGridSessionWorkDir = useWorkspaceGridStore(
+     (state) => state.setSessionWorkDir,
+   );
++  const setWorkspaceGridPaneActiveSession = useWorkspaceGridStore(
++    (state) => state.setPaneActiveSession,
++  );
+   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
+ 
+   const tauriRuntime = useMemo(() => isTauri(), []);
+@@ -718,6 +724,30 @@ export function useShellController() {
+     ],
+   );
+ 
++  const handlePaneSessionObserved = useCallback(
++    (paneId: string, sessionId: string | null) => {
++      const normalizedSessionId = sessionId?.trim() || null;
++      // 先记录观测到的会话(即便目录还未知),供 store 侧做过期回写判断。
++      setWorkspaceGridPaneActiveSession(paneId, normalizedSessionId);
++      if (!normalizedSessionId) {
++        return;
++      }
++      void getGridSession(normalizedSessionId)
++        .then((session) => {
++          const workDir = session.workDir?.trim();
++          if (session.sessionId.trim() !== normalizedSessionId || !workDir) {
++            return;
++          }
++          // store 内部会校验 activeSessionId 是否仍等于该会话,过期结果会被丢弃。
++          setWorkspaceGridPaneActiveSession(paneId, normalizedSessionId, workDir);
++        })
++        .catch(() => {
++          // 目录暂不可得(会话刚创建/后端未就绪):保留窗格上一次的目录名即可。
++        });
++    },
++    [setWorkspaceGridPaneActiveSession],
++  );
++
+   const syncCodePaneWorkDir = useCallback(
+     (sessionId?: string, workDir?: string) => {
+       const normalizedSessionId = sessionId?.trim();
+@@ -3756,6 +3786,7 @@ export function useShellController() {
+     handleOpenExternalUrl,
+     handleOpenFolder,
+     handleOpenPaneFolder,
++    handlePaneSessionObserved,
+     handleOpenKimiConfigDir,
+     handleOpenKimiCodeAccessPanel,
+     handleOpenControlTask,
+diff --git a/apps/kimi-shell/src/features/workspace-grid/PaneFrame.tsx b/apps/kimi-shell/src/features/workspace-grid/PaneFrame.tsx
+index 1217e1f..8c63abc 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/PaneFrame.tsx
++++ b/apps/kimi-shell/src/features/workspace-grid/PaneFrame.tsx
+@@ -57,6 +57,7 @@ interface PaneFrameProps {
+   onRetry: () => void;
+   onOpenLogs: () => void;
+   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
++  onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
+   onOpenExternalUrl: (url: string) => void;
+   onOpenTauriWebviewUrl: (
+     url: string,
+@@ -96,6 +97,7 @@ export function PaneFrame({
+   onRetry,
+   onOpenLogs,
+   onOpenPaneFolder,
++  onPaneSessionObserved,
+   onOpenExternalUrl,
+   onOpenTauriWebviewUrl,
+   onCodeFrameLoad,
+@@ -115,6 +117,7 @@ export function PaneFrame({
+   const folderBusyRef = useRef(false);
+   const [observedSessionId, setObservedSessionId] = useState<string | null>();
+   const [folderBusy, setFolderBusy] = useState(false);
++  const paneId = pane?.id ?? null;
+   const codeOrigin = pane?.kind === "code" ? urlOrigin(codeRemoteUrl) : "";
+   const codeFrameMounted = Boolean(
+     pane?.kind === "code" && codeRemoteUrl && isPaneContentMounted(pane, active),
+@@ -126,7 +129,7 @@ export function PaneFrame({
+   }, [codeFrameKey, codeFrameMounted, codeOrigin]);
+ 
+   useEffect(() => {
+-    if (!codeFrameMounted || !codeOrigin) {
++    if (!codeFrameMounted || !codeOrigin || !paneId) {
+       return;
+     }
+     const handleMessage = (event: MessageEvent) => {
+@@ -138,11 +141,12 @@ export function PaneFrame({
+       if (message?.action === "pane_session_changed") {
+         sessionObservationGenerationRef.current += 1;
+         setObservedSessionId(message.sessionId);
++        onPaneSessionObserved(paneId, message.sessionId);
+       }
+     };
+     window.addEventListener("message", handleMessage);
+     return () => window.removeEventListener("message", handleMessage);
+-  }, [codeFrameMounted, codeOrigin]);
++  }, [codeFrameMounted, codeOrigin, onPaneSessionObserved, paneId]);
+ 
+   if (!pane) {
+     return (
+diff --git a/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.test.tsx b/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.test.tsx
+index 5a3966e..c6978b2 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.test.tsx
++++ b/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.test.tsx
+@@ -50,6 +50,7 @@ const props: WorkspaceViewProps = {
+   onRetry: vi.fn(),
+   onOpenLogs: vi.fn(),
+   onOpenPaneFolder: vi.fn(async () => undefined),
++  onPaneSessionObserved: vi.fn(),
+   onOpenExternalUrl: vi.fn(),
+   onSplitRatioChange: vi.fn(),
+   onSplitDragStateChange: vi.fn(),
+diff --git a/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.tsx b/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.tsx
+index 1883e4c..e7c3fcd 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.tsx
++++ b/apps/kimi-shell/src/features/workspace-grid/WorkspaceGridView.tsx
+@@ -385,6 +385,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
+                 onRetry={props.onRetry}
+                 onOpenLogs={props.onOpenLogs}
+                 onOpenPaneFolder={props.onOpenPaneFolder}
++                onPaneSessionObserved={props.onPaneSessionObserved}
+                 onOpenExternalUrl={props.onOpenExternalUrl}
+                 onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
+                   void handleOpenTauriWebviewUrl(url, title, storageNamespace);
+diff --git a/apps/kimi-shell/src/features/workspace-grid/grid.test.ts b/apps/kimi-shell/src/features/workspace-grid/grid.test.ts
+index 02d1967..506e884 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/grid.test.ts
++++ b/apps/kimi-shell/src/features/workspace-grid/grid.test.ts
+@@ -276,6 +276,79 @@ describe("workspace grid store", () => {
+     );
+   });
+ 
++  it("tracks observed pane sessions and keeps workDir in sync", () => {
++    const store = createWorkspaceGridStore(undefined, null);
++    store.getState().configurePane("pane-code", {
++      kind: "code",
++      sessionId: "session-a",
++      workDir: "D:/repo-a",
++    });
++
++    // 用户在窗格内切换到 session-b:先记录观测,再异步回写目录
++    store.getState().setPaneActiveSession("pane-code", "session-b");
++    store.getState().setPaneActiveSession("pane-code", "session-b", "D:/repo-b");
++
++    const pane = store.getState().panes.find((item) => item.id === "pane-code");
++    expect(pane?.activeSessionId).toBe("session-b");
++    expect(pane?.workDir).toBe("D:/repo-b");
++    // 启动/深链会话保持不变,避免 iframe 因 frameKey 变化被重挂载
++    expect(pane?.sessionId).toBe("session-a");
++  });
++
++  it("drops stale workDir writes after the observed session moved on", () => {
++    const store = createWorkspaceGridStore(undefined, null);
++    store.getState().configurePane("pane-code", {
++      kind: "code",
++      sessionId: "session-a",
++      workDir: "D:/repo-a",
++    });
++
++    store.getState().setPaneActiveSession("pane-code", "session-b");
++    store.getState().setPaneActiveSession("pane-code", "session-c");
++    // session-b 的目录解析此刻才返回,应被丢弃
++    store.getState().setPaneActiveSession("pane-code", "session-b", "D:/repo-b");
++
++    const pane = store.getState().panes.find((item) => item.id === "pane-code");
++    expect(pane?.activeSessionId).toBe("session-c");
++    expect(pane?.workDir).toBe("D:/repo-a");
++  });
++
++  it("matches setSessionWorkDir against the observed session first", () => {
++    const store = createWorkspaceGridStore(undefined, null);
++    store.getState().configurePane("pane-code", {
++      kind: "code",
++      sessionId: "session-a",
++      workDir: "D:/repo-a",
++    });
++    store.getState().setPaneActiveSession("pane-code", "session-b");
++
++    // 旧的 sessionId 不应再命中该窗格
++    store.getState().setSessionWorkDir("session-a", "D:/wrong");
++    // 观测到的会话应命中
++    store.getState().setSessionWorkDir("session-b", "D:/repo-b");
++
++    const pane = store.getState().panes.find((item) => item.id === "pane-code");
++    expect(pane?.workDir).toBe("D:/repo-b");
++  });
++
++  it("keeps activeSessionId as a runtime-only field", () => {
++    const store = createWorkspaceGridStore(undefined, null);
++    store.getState().configurePane("pane-code", {
++      kind: "code",
++      sessionId: "session-a",
++      workDir: "D:/repo-a",
++    });
++    store.getState().setPaneActiveSession("pane-code", "session-b", undefined);
++
++    const persisted = toPersistedWorkspaceGridState(store.getState());
++    const persistedPane = persisted.panes.find((item) => item.id === "pane-code");
++    expect(persistedPane?.activeSessionId).toBeUndefined();
++    // 运行期状态仍保留观测值
++    expect(
++      store.getState().panes.find((item) => item.id === "pane-code")?.activeSessionId,
++    ).toBe("session-b");
++  });
++
+   it("does not persist URL fragments", () => {
+     const store = createWorkspaceGridStore(undefined, null);
+     const paneId = store.getState().addPane({
+diff --git a/apps/kimi-shell/src/features/workspace-grid/gridStore.ts b/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
+index 9a8f071..260f9fa 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
++++ b/apps/kimi-shell/src/features/workspace-grid/gridStore.ts
+@@ -53,6 +53,11 @@ export interface WorkspaceGridActions {
+   ) => void;
+   setPaneTheme: (paneId: string, theme: WorkspacePaneTheme | undefined) => void;
+   setPaneWorkDir: (paneId: string, workDir: string | undefined) => void;
++  setPaneActiveSession: (
++    paneId: string,
++    sessionId: string | null,
++    workDir?: string,
++  ) => void;
+   setSessionWorkDir: (sessionId: string, workDir: string) => void;
+   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
+   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
+@@ -522,24 +527,55 @@ function createWorkspaceGridSlice(
+         updatedAt: Date.now(),
+       }));
+     },
++    setPaneActiveSession(paneId, sessionId, workDir) {
++      const normalizedSessionId = sessionId?.trim() || undefined;
++      const normalizedWorkDir = sanitizeWorkDir(workDir);
++      const pane = get().panes.find((item) => item.id === paneId);
++      if (!pane || pane.kind !== "code") {
++        return;
++      }
++      // 带目录的回写来自异步解析;若期间会话又切换了,丢弃过期结果,
++      // 避免把旧会话的目录写到新会话上。
++      if (normalizedWorkDir && pane.activeSessionId !== normalizedSessionId) {
++        return;
++      }
++      if (
++        pane.activeSessionId === normalizedSessionId &&
++        (!normalizedWorkDir || pane.workDir === normalizedWorkDir)
++      ) {
++        return;
++      }
++      update(set, storage, (state) => ({
++        ...state,
++        panes: state.panes.map((item) =>
++          item.id === paneId
++            ? {
++                ...item,
++                activeSessionId: normalizedSessionId,
++                workDir: normalizedWorkDir ?? item.workDir,
++                updatedAt: Date.now(),
++              }
++            : item,
++        ),
++        updatedAt: Date.now(),
++      }));
++    },
+     setSessionWorkDir(sessionId, workDir) {
+       const normalizedSessionId = sessionId.trim();
+       const normalizedWorkDir = sanitizeWorkDir(workDir);
+       if (!normalizedSessionId || !normalizedWorkDir) {
+         return;
+       }
+-      if (
+-        !get().panes.some(
+-          (pane) =>
+-            pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId,
+-        )
+-      ) {
++      const matchesSession = (pane: WorkspacePane) =>
++        pane.kind === "code" &&
++        (pane.activeSessionId ?? pane.sessionId)?.trim() === normalizedSessionId;
++      if (!get().panes.some(matchesSession)) {
+         return;
+       }
+       update(set, storage, (state) => ({
+         ...state,
+         panes: state.panes.map((pane) =>
+-          pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId
++          matchesSession(pane)
+             ? { ...pane, workDir: normalizedWorkDir, updatedAt: Date.now() }
+             : pane,
+         ),
+@@ -556,6 +592,7 @@ function createWorkspaceGridSlice(
+                 kind,
+                 title: defaultPaneTitle(kind),
+                 sessionId: undefined,
++                activeSessionId: undefined,
+                 url: undefined,
+                 workDir: undefined,
+                 storageNamespace:
+@@ -578,6 +615,7 @@ function createWorkspaceGridSlice(
+                 kind: input.kind,
+                 title: input.title ?? defaultPaneTitle(input.kind),
+                 sessionId: input.sessionId,
++                activeSessionId: undefined,
+                 url: sanitizeUrl(input.url),
+                 workDir: sanitizeWorkDir(input.workDir),
+                 theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
+@@ -768,6 +806,8 @@ function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
+ function sanitizePane(pane: WorkspacePane): WorkspacePane {
+   return {
+     ...pane,
++    // 运行期观测值:不写入 localStorage,也不从持久化状态还原。
++    activeSessionId: undefined,
+     title: normalizePaneTitle(pane.kind, pane.title),
+     url: sanitizeUrl(pane.url),
+     workDir: sanitizeWorkDir(pane.workDir),
+diff --git a/apps/kimi-shell/src/features/workspace-grid/gridTypes.ts b/apps/kimi-shell/src/features/workspace-grid/gridTypes.ts
+index 122fc54..9ff356d 100644
+--- a/apps/kimi-shell/src/features/workspace-grid/gridTypes.ts
++++ b/apps/kimi-shell/src/features/workspace-grid/gridTypes.ts
+@@ -31,6 +31,11 @@ export interface WorkspacePane {
+   carrier: WorkspacePaneCarrier;
+   title: string;
+   sessionId?: string;
++  /**
++   * 运行期由 iframe 桥(pane_session_changed)观测到的当前会话。
++   * 仅存在于内存,不持久化;不参与 frameKey/导航,避免触发 iframe 重挂载。
++   */
++  activeSessionId?: string;
+   url?: string;
+   workDir?: string;
+   theme?: WorkspacePaneTheme;
+diff --git a/apps/kimi-shell/src/features/workspace/WorkspaceView.tsx b/apps/kimi-shell/src/features/workspace/WorkspaceView.tsx
+index 1b779c7..9b7c9e1 100644
+--- a/apps/kimi-shell/src/features/workspace/WorkspaceView.tsx
++++ b/apps/kimi-shell/src/features/workspace/WorkspaceView.tsx
+@@ -28,6 +28,7 @@ export type WorkspaceViewProps = {
+   onRetry: () => void;
+   onOpenLogs: () => void;
+   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
++  onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
+   onOpenExternalUrl: (url: string) => void;
+   onSplitRatioChange: (nextRatio: number) => void;
+   onSplitDragStateChange: (isDragging: boolean) => void;

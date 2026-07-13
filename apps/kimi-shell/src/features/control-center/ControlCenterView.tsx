@@ -284,7 +284,6 @@ export function ControlCenterView({
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
-  const [workspaceHubFocusPath, setWorkspaceHubFocusPath] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsTaskReturnCardRef = useRef<OnboardingCardId | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
@@ -2016,10 +2015,6 @@ export function ControlCenterView({
               onSelectWorkspaceSkillContainer(containerKind);
             }}
             onOpenFolder={onOpenFolder}
-            onOpenWorkspaceDetail={(path) => {
-              setWorkspaceHubFocusPath(path);
-              setActiveControlSection("workspace_hub");
-            }}
             onAddInstalledSkillToWorkspaceTarget={(skillId, targetId, containerKind) => {
               void onAddInstalledSkillToWorkspaceTarget(skillId, targetId, containerKind);
             }}
@@ -3039,7 +3034,6 @@ export function ControlCenterView({
                       setActiveControlSection("skill_center");
                       void onSelectSkill(skillId);
                     }}
-                    focusWorkspacePath={workspaceHubFocusPath}
                     detailOnly
                     activeFocusId={activeFocusId}
                   />

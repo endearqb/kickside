@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { DiscoveredSkillRecord, InstalledSkill } from "@/app/types";
@@ -168,5 +168,67 @@ describe("SkillCenterPanel detail", () => {
     for (const title of removedDetailTitles) {
       expect(screen.queryByText(title)).toBeNull();
     }
+  });
+
+  it("switches between scanned workspaces without listing the user home target", () => {
+    const onSelectWorkspaceSkillTarget = vi.fn();
+    const { container } = render(
+      <SkillCenterPanel
+        {...baseProps()}
+        section="workspace_insights"
+        selectedWorkspaceSkillTargetId="workspace-a"
+        onSelectWorkspaceSkillTarget={onSelectWorkspaceSkillTarget}
+        workspaceSkillTargets={[
+          {
+            id: "home",
+            scope: "user_home",
+            label: "主目录",
+            rootPath: "C:/Users/demo",
+            readOnly: true,
+            isCurrent: false,
+            containerRoots: [],
+          },
+          {
+            id: "workspace-a",
+            scope: "workspace",
+            label: "Workspace A",
+            rootPath: "C:/workspace-a",
+            readOnly: false,
+            isCurrent: true,
+            containerRoots: [{ containerKind: "agents", containerPath: "C:/workspace-a/.agents/skills" }],
+          },
+          {
+            id: "workspace-b",
+            scope: "workspace",
+            label: "Workspace B",
+            rootPath: "C:/workspace-b",
+            readOnly: false,
+            isCurrent: false,
+            containerRoots: [{ containerKind: "kimi_code", containerPath: "C:/workspace-b/.kimi-code/skills" }],
+          },
+        ]}
+        workspaceSkillInventory={{
+          target: {
+            id: "workspace-a",
+            scope: "workspace",
+            label: "Workspace A",
+            rootPath: "C:/workspace-a",
+            readOnly: false,
+            isCurrent: true,
+            containerRoots: [{ containerKind: "agents", containerPath: "C:/workspace-a/.agents/skills" }],
+          },
+          scannedAt: "2026-07-13T00:00:00.000Z",
+          containers: [{ containerKind: "agents", containerPath: "C:/workspace-a/.agents/skills", readOnly: false, skills: [] }],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看工作区" }));
+    const workspaceMenu = screen.getByRole("menu", { name: "查看工作区" });
+    expect(within(workspaceMenu).queryByText("主目录")).toBeNull();
+    expect(within(workspaceMenu).getByText("当前 · C:/workspace-a")).toBeTruthy();
+    fireEvent.click(within(workspaceMenu).getByRole("menuitem", { name: /Workspace B/ }));
+    expect(onSelectWorkspaceSkillTarget).toHaveBeenCalledWith("workspace-b");
+    expect(container.querySelector(".skill-center-container-switch.skill-center-compact-tabs")).toBeTruthy();
   });
 });

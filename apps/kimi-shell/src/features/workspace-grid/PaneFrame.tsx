@@ -57,6 +57,7 @@ interface PaneFrameProps {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
+  onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
   onOpenExternalUrl: (url: string) => void;
   onOpenTauriWebviewUrl: (
     url: string,
@@ -96,6 +97,7 @@ export function PaneFrame({
   onRetry,
   onOpenLogs,
   onOpenPaneFolder,
+  onPaneSessionObserved,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
   onCodeFrameLoad,
@@ -115,6 +117,7 @@ export function PaneFrame({
   const folderBusyRef = useRef(false);
   const [observedSessionId, setObservedSessionId] = useState<string | null>();
   const [folderBusy, setFolderBusy] = useState(false);
+  const paneId = pane?.id ?? null;
   const codeOrigin = pane?.kind === "code" ? urlOrigin(codeRemoteUrl) : "";
   const codeFrameMounted = Boolean(
     pane?.kind === "code" && codeRemoteUrl && isPaneContentMounted(pane, active),
@@ -126,7 +129,7 @@ export function PaneFrame({
   }, [codeFrameKey, codeFrameMounted, codeOrigin]);
 
   useEffect(() => {
-    if (!codeFrameMounted || !codeOrigin) {
+    if (!codeFrameMounted || !codeOrigin || !paneId) {
       return;
     }
     const handleMessage = (event: MessageEvent) => {
@@ -138,11 +141,12 @@ export function PaneFrame({
       if (message?.action === "pane_session_changed") {
         sessionObservationGenerationRef.current += 1;
         setObservedSessionId(message.sessionId);
+        onPaneSessionObserved(paneId, message.sessionId);
       }
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [codeFrameMounted, codeOrigin]);
+  }, [codeFrameMounted, codeOrigin, onPaneSessionObserved, paneId]);
 
   if (!pane) {
     return (

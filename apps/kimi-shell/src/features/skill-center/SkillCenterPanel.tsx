@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Eraser, FolderOpen, Plus, Sparkles } from "lucide-react";
+import { ChevronDown, Eraser, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
   DiscoveredSkillRecord,
@@ -91,7 +91,6 @@ type SkillCenterPanelProps = {
   onSelectWorkspaceSkillTarget: (targetId: string) => void;
   onSelectWorkspaceSkillContainer: (containerKind: SkillDiscoveryContainerKind) => void;
   onOpenFolder: (path: string) => Promise<void>;
-  onOpenWorkspaceDetail?: (path: string) => void;
   onAddInstalledSkillToWorkspaceTarget: (
     skillId: string,
     targetId?: string | null,
@@ -287,7 +286,6 @@ export function SkillCenterPanel({
   onSelectWorkspaceSkillTarget,
   onSelectWorkspaceSkillContainer,
   onOpenFolder,
-  onOpenWorkspaceDetail,
   onAddInstalledSkillToWorkspaceTarget,
   onSetTrust,
   onApplySkill,
@@ -530,6 +528,9 @@ export function SkillCenterPanel({
 
   const selectedWorkspaceTarget =
     workspaceSkillTargets.find((target) => target.id === selectedWorkspaceSkillTargetId) ?? null;
+  const scannedWorkspaceTargets = workspaceSkillTargets.filter(
+    (target) => target.scope === "workspace",
+  );
   const selectedWorkspaceRootPath = selectedWorkspaceTarget?.rootPath.trim() ?? "";
   const selectedWorkspaceContainer =
     workspaceSkillInventory?.containers.find(
@@ -847,7 +848,7 @@ export function SkillCenterPanel({
           <div className="skill-center-directory-surface">
             <ControlCenterSegmentedControl<SkillDirectoryPrimarySource>
               ariaLabel="Skill 来源"
-              className="skill-center-directory-tabs skill-center-directory-primary-tabs"
+              className="skill-center-directory-tabs skill-center-compact-tabs"
               value={directoryPrimarySource}
               onChange={(value) => {
                 setDirectoryPrimarySource(value);
@@ -1215,23 +1216,27 @@ export function SkillCenterPanel({
                         aria-label="在资源管理器中打开工作区"
                         title="在资源管理器中打开工作区"
                       />
-                      {!selectedWorkspaceTarget.readOnly && onOpenWorkspaceDetail ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onOpenWorkspaceDetail(selectedWorkspaceTarget.rootPath)}
-                        >
-                          查看工作区
-                        </Button>
-                      ) : null}
+                      <ControlCenterActionMenu
+                        label="查看工作区"
+                        triggerContent="查看工作区"
+                        triggerIcon={<ChevronDown size={14} />}
+                        className="skill-center-workspace-picker"
+                        disabled={busy}
+                        items={scannedWorkspaceTargets.map((target) => ({
+                          label: target.label,
+                          description:
+                            target.id === selectedWorkspaceSkillTargetId
+                              ? `当前 · ${target.rootPath}`
+                              : target.rootPath,
+                          onSelect: () => onSelectWorkspaceSkillTarget(target.id),
+                        }))}
+                      />
                     </div>
                   </div>
 
                   <ControlCenterSegmentedControl
                     ariaLabel="工作区 Skill 容器"
-                    className="skill-center-container-switch"
-                    itemClassName="skill-center-container-switch-btn"
+                    className="skill-center-container-switch skill-center-compact-tabs"
                     value={selectedWorkspaceSkillContainerKind}
                     onChange={(containerKind) => onSelectWorkspaceSkillContainer(containerKind)}
                     disabled={busy}

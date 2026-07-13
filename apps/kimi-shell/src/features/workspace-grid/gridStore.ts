@@ -53,6 +53,11 @@ export interface WorkspaceGridActions {
   ) => void;
   setPaneTheme: (paneId: string, theme: WorkspacePaneTheme | undefined) => void;
   setPaneWorkDir: (paneId: string, workDir: string | undefined) => void;
+  setPaneActiveSession: (
+    paneId: string,
+    sessionId: string | null,
+    workDir?: string,
+  ) => void;
   setSessionWorkDir: (sessionId: string, workDir: string) => void;
   changePaneKind: (paneId: string, kind: WorkspacePaneKind) => void;
   configurePane: (paneId: string, input: AddWorkspacePaneInput) => void;
@@ -522,24 +527,55 @@ function createWorkspaceGridSlice(
         updatedAt: Date.now(),
       }));
     },
+    setPaneActiveSession(paneId, sessionId, workDir) {
+      const normalizedSessionId = sessionId?.trim() || undefined;
+      const normalizedWorkDir = sanitizeWorkDir(workDir);
+      const pane = get().panes.find((item) => item.id === paneId);
+      if (!pane || pane.kind !== "code") {
+        return;
+      }
+      // 带目录的回写来自异步解析;若期间会话又切换了,丢弃过期结果,
+      // 避免把旧会话的目录写到新会话上。
+      if (normalizedWorkDir && pane.activeSessionId !== normalizedSessionId) {
+        return;
+      }
+      if (
+        pane.activeSessionId === normalizedSessionId &&
+        (!normalizedWorkDir || pane.workDir === normalizedWorkDir)
+      ) {
+        return;
+      }
+      update(set, storage, (state) => ({
+        ...state,
+        panes: state.panes.map((item) =>
+          item.id === paneId
+            ? {
+                ...item,
+                activeSessionId: normalizedSessionId,
+                workDir: normalizedWorkDir ?? item.workDir,
+                updatedAt: Date.now(),
+              }
+            : item,
+        ),
+        updatedAt: Date.now(),
+      }));
+    },
     setSessionWorkDir(sessionId, workDir) {
       const normalizedSessionId = sessionId.trim();
       const normalizedWorkDir = sanitizeWorkDir(workDir);
       if (!normalizedSessionId || !normalizedWorkDir) {
         return;
       }
-      if (
-        !get().panes.some(
-          (pane) =>
-            pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId,
-        )
-      ) {
+      const matchesSession = (pane: WorkspacePane) =>
+        pane.kind === "code" &&
+        (pane.activeSessionId ?? pane.sessionId)?.trim() === normalizedSessionId;
+      if (!get().panes.some(matchesSession)) {
         return;
       }
       update(set, storage, (state) => ({
         ...state,
         panes: state.panes.map((pane) =>
-          pane.kind === "code" && pane.sessionId?.trim() === normalizedSessionId
+          matchesSession(pane)
             ? { ...pane, workDir: normalizedWorkDir, updatedAt: Date.now() }
             : pane,
         ),
@@ -556,6 +592,7 @@ function createWorkspaceGridSlice(
                 kind,
                 title: defaultPaneTitle(kind),
                 sessionId: undefined,
+                activeSessionId: undefined,
                 url: undefined,
                 workDir: undefined,
                 storageNamespace:
@@ -578,6 +615,7 @@ function createWorkspaceGridSlice(
                 kind: input.kind,
                 title: input.title ?? defaultPaneTitle(input.kind),
                 sessionId: input.sessionId,
+                activeSessionId: undefined,
                 url: sanitizeUrl(input.url),
                 workDir: sanitizeWorkDir(input.workDir),
                 theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
@@ -768,6 +806,8 @@ function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
 function sanitizePane(pane: WorkspacePane): WorkspacePane {
   return {
     ...pane,
+    // 运行期观测值:不写入 localStorage,也不从持久化状态还原。
+    activeSessionId: undefined,
     title: normalizePaneTitle(pane.kind, pane.title),
     url: sanitizeUrl(pane.url),
     workDir: sanitizeWorkDir(pane.workDir),

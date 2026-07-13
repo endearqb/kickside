@@ -28,6 +28,7 @@ export type WorkspaceViewProps = {
   onRetry: () => void;
   onOpenLogs: () => void;
   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
+  onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
   onOpenExternalUrl: (url: string) => void;
   onSplitRatioChange: (nextRatio: number) => void;
   onSplitDragStateChange: (isDragging: boolean) => void;

@@ -50,6 +50,7 @@ const props: WorkspaceViewProps = {
   onRetry: vi.fn(),
   onOpenLogs: vi.fn(),
   onOpenPaneFolder: vi.fn(async () => undefined),
+  onPaneSessionObserved: vi.fn(),
   onOpenExternalUrl: vi.fn(),
   onSplitRatioChange: vi.fn(),
   onSplitDragStateChange: vi.fn(),

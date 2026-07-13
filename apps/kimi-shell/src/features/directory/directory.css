@@ -35,6 +35,7 @@
 
 .directory-card {
   position: relative;
+  display: flex;
   min-height: 132px;
   overflow: visible;
   border: 1px solid #dededb;
@@ -46,7 +47,8 @@
 .directory-card-open {
   width: 100%;
   min-height: 132px;
-  display: block;
+  display: flex;
+  flex: 1 1 auto;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -110,7 +112,8 @@
 
 .directory-card-main {
   display: flex;
-  min-height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
 }

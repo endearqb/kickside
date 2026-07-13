@@ -31,6 +31,11 @@ export interface WorkspacePane {
   carrier: WorkspacePaneCarrier;
   title: string;
   sessionId?: string;
+  /**
+   * 运行期由 iframe 桥(pane_session_changed)观测到的当前会话。
+   * 仅存在于内存,不持久化;不参与 frameKey/导航,避免触发 iframe 重挂载。
+   */
+  activeSessionId?: string;
   url?: string;
   workDir?: string;
   theme?: WorkspacePaneTheme;

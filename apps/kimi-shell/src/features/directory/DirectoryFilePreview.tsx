@@ -511,7 +511,7 @@ function renderMarkdownBlocks(text: string, onOpenLink?: (href: string) => void)
 
 function renderInline(text: string, onOpenLink?: (href: string) => void) {
   const parts: ReactNode[] = [];
-  const pattern = /(!\[([^\]]*)\]\(([^)]+)\)|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  const pattern = /(!\[([^\]]*)\]\(([^)]+)\)|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|__(.+?)__)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -535,6 +535,10 @@ function renderInline(text: string, onOpenLink?: (href: string) => void) {
       );
     } else if (match[4]) {
       parts.push(<code key={parts.length}>{match[4]}</code>);
+    } else if (match[7] !== undefined || match[8] !== undefined) {
+      parts.push(
+        <strong key={parts.length}>{renderInline(match[7] ?? match[8] ?? "", onOpenLink)}</strong>,
+      );
     } else {
       const label = match[5] ?? match[6] ?? "";
       const href = match[6] ?? "";

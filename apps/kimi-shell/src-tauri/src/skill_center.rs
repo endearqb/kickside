@@ -384,26 +384,32 @@ fn relative_file_path(root: &Path, path: &Path) -> anyhow::Result<String> {
         .join("/"))
 }
 
-fn file_entry_sort_key(entry: &SkillFileEntry) -> (u8, String) {
-    let file_name = entry
-        .rel_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(entry.rel_path.as_str())
-        .to_ascii_uppercase();
-    let is_root = !entry.rel_path.contains('/');
-    let rank = if is_root && file_name == "SKILL.MD" {
-        0
-    } else if is_root && (file_name.starts_with("README.") || file_name == "README") {
-        1
-    } else if is_root && file_name.starts_with("LICENSE") {
-        9
-    } else if entry.is_dir {
-        2
-    } else {
-        3
-    };
-    (rank, entry.rel_path.to_ascii_lowercase())
+fn file_entry_sort_key(entry: &SkillFileEntry) -> Vec<(u8, String)> {
+    let parts = entry.rel_path.split('/').collect::<Vec<_>>();
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let is_leaf = index + 1 == parts.len();
+            let upper_name = name.to_ascii_uppercase();
+            let rank = if index == 0 && is_leaf && !entry.is_dir && upper_name == "SKILL.MD" {
+                0
+            } else if index == 0
+                && is_leaf
+                && !entry.is_dir
+                && (upper_name.starts_with("README.") || upper_name == "README")
+            {
+                1
+            } else if index == 0 && is_leaf && !entry.is_dir && upper_name.starts_with("LICENSE") {
+                9
+            } else if !is_leaf || entry.is_dir {
+                2
+            } else {
+                3
+            };
+            (rank, name.to_ascii_lowercase())
+        })
+        .collect()
 }
 
 pub fn set_skill_trust(app: &AppHandle, skill_id: &str, trusted: bool) -> anyhow::Result<()> {
@@ -2522,6 +2528,48 @@ mod tests {
                     SkillDiscoveryContainerKind::KimiCode,
                     root.join(".kimi-code").join("skills")
                 ),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_safe_file_entries_keeps_each_directory_subtree_together() {
+        let temp = TempDir::new("file-preview-order");
+        fs::create_dir_all(temp.path.join("assets").join("viewer")).expect("assets dir");
+        fs::create_dir_all(temp.path.join("references")).expect("references dir");
+        fs::create_dir_all(temp.path.join("scripts")).expect("scripts dir");
+        fs::write(temp.path.join("SKILL.md"), "# Skill").expect("skill file");
+        fs::write(temp.path.join("README.md"), "# Readme").expect("readme file");
+        fs::write(
+            temp.path.join("assets").join("viewer").join("index.html"),
+            "viewer",
+        )
+        .expect("viewer file");
+        fs::write(temp.path.join("references").join("agent.md"), "agent").expect("reference file");
+        fs::write(temp.path.join("scripts").join("tool.py"), "tool").expect("script file");
+        fs::write(temp.path.join("notes.md"), "notes").expect("notes file");
+        fs::write(temp.path.join("LICENSE"), "license").expect("license file");
+
+        let paths = list_safe_file_entries(&temp.path)
+            .expect("file listing")
+            .into_iter()
+            .map(|entry| entry.rel_path)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            vec![
+                "SKILL.md",
+                "README.md",
+                "assets",
+                "assets/viewer",
+                "assets/viewer/index.html",
+                "references",
+                "references/agent.md",
+                "scripts",
+                "scripts/tool.py",
+                "notes.md",
+                "LICENSE",
             ]
         );
     }

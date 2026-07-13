@@ -276,6 +276,79 @@ describe("workspace grid store", () => {
     );
   });
 
+  it("tracks observed pane sessions and keeps workDir in sync", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/repo-a",
+    });
+
+    // 用户在窗格内切换到 session-b:先记录观测,再异步回写目录
+    store.getState().setPaneActiveSession("pane-code", "session-b");
+    store.getState().setPaneActiveSession("pane-code", "session-b", "D:/repo-b");
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-code");
+    expect(pane?.activeSessionId).toBe("session-b");
+    expect(pane?.workDir).toBe("D:/repo-b");
+    // 启动/深链会话保持不变,避免 iframe 因 frameKey 变化被重挂载
+    expect(pane?.sessionId).toBe("session-a");
+  });
+
+  it("drops stale workDir writes after the observed session moved on", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/repo-a",
+    });
+
+    store.getState().setPaneActiveSession("pane-code", "session-b");
+    store.getState().setPaneActiveSession("pane-code", "session-c");
+    // session-b 的目录解析此刻才返回,应被丢弃
+    store.getState().setPaneActiveSession("pane-code", "session-b", "D:/repo-b");
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-code");
+    expect(pane?.activeSessionId).toBe("session-c");
+    expect(pane?.workDir).toBe("D:/repo-a");
+  });
+
+  it("matches setSessionWorkDir against the observed session first", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/repo-a",
+    });
+    store.getState().setPaneActiveSession("pane-code", "session-b");
+
+    // 旧的 sessionId 不应再命中该窗格
+    store.getState().setSessionWorkDir("session-a", "D:/wrong");
+    // 观测到的会话应命中
+    store.getState().setSessionWorkDir("session-b", "D:/repo-b");
+
+    const pane = store.getState().panes.find((item) => item.id === "pane-code");
+    expect(pane?.workDir).toBe("D:/repo-b");
+  });
+
+  it("keeps activeSessionId as a runtime-only field", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/repo-a",
+    });
+    store.getState().setPaneActiveSession("pane-code", "session-b", undefined);
+
+    const persisted = toPersistedWorkspaceGridState(store.getState());
+    const persistedPane = persisted.panes.find((item) => item.id === "pane-code");
+    expect(persistedPane?.activeSessionId).toBeUndefined();
+    // 运行期状态仍保留观测值
+    expect(
+      store.getState().panes.find((item) => item.id === "pane-code")?.activeSessionId,
+    ).toBe("session-b");
+  });
+
   it("does not persist URL fragments", () => {
     const store = createWorkspaceGridStore(undefined, null);
     const paneId = store.getState().addPane({

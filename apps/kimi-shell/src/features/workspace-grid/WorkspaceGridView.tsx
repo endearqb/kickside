@@ -385,6 +385,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
                 onOpenPaneFolder={props.onOpenPaneFolder}
+                onPaneSessionObserved={props.onPaneSessionObserved}
                 onOpenExternalUrl={props.onOpenExternalUrl}
                 onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
                   void handleOpenTauriWebviewUrl(url, title, storageNamespace);

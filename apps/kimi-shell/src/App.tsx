@@ -327,6 +327,7 @@ function App() {
             onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
             onOpenPaneFolder={shell.handleOpenPaneFolder}
+            onPaneSessionObserved={shell.handlePaneSessionObserved}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
             onSplitRatioChange={shell.handleWorkspaceSplitRatioChange}
             onSplitDragStateChange={shell.handleWorkspaceSplitDragStateChange}

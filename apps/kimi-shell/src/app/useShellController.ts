@@ -112,7 +112,10 @@ import { useShellPollingController } from "@/app/useShellPollingController";
 import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
 import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
-import { resolveCurrentPaneWorkDir } from "@/services/workspaceGridService";
+import {
+  getGridSession,
+  resolveCurrentPaneWorkDir,
+} from "@/services/workspaceGridService";
 import {
   applySkill,
   addInstalledSkillToWorkspaceTarget,
@@ -331,6 +334,9 @@ export function useShellController() {
   );
   const setWorkspaceGridSessionWorkDir = useWorkspaceGridStore(
     (state) => state.setSessionWorkDir,
+  );
+  const setWorkspaceGridPaneActiveSession = useWorkspaceGridStore(
+    (state) => state.setPaneActiveSession,
   );
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
@@ -716,6 +722,30 @@ export function useShellController() {
       workspaceGridActivePaneId,
       workspaceGridPanes,
     ],
+  );
+
+  const handlePaneSessionObserved = useCallback(
+    (paneId: string, sessionId: string | null) => {
+      const normalizedSessionId = sessionId?.trim() || null;
+      // 先记录观测到的会话(即便目录还未知),供 store 侧做过期回写判断。
+      setWorkspaceGridPaneActiveSession(paneId, normalizedSessionId);
+      if (!normalizedSessionId) {
+        return;
+      }
+      void getGridSession(normalizedSessionId)
+        .then((session) => {
+          const workDir = session.workDir?.trim();
+          if (session.sessionId.trim() !== normalizedSessionId || !workDir) {
+            return;
+          }
+          // store 内部会校验 activeSessionId 是否仍等于该会话,过期结果会被丢弃。
+          setWorkspaceGridPaneActiveSession(paneId, normalizedSessionId, workDir);
+        })
+        .catch(() => {
+          // 目录暂不可得(会话刚创建/后端未就绪):保留窗格上一次的目录名即可。
+        });
+    },
+    [setWorkspaceGridPaneActiveSession],
   );
 
   const syncCodePaneWorkDir = useCallback(
@@ -3756,6 +3786,7 @@ export function useShellController() {
     handleOpenExternalUrl,
     handleOpenFolder,
     handleOpenPaneFolder,
+    handlePaneSessionObserved,
     handleOpenKimiConfigDir,
     handleOpenKimiCodeAccessPanel,
     handleOpenControlTask,

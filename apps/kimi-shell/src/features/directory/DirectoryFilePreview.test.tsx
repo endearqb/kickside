@@ -33,6 +33,18 @@ describe("MarkdownPreview", () => {
     expect(container.textContent).toContain("图片已隐藏");
   });
 
+  it("renders strong markdown without parsing markers inside inline code", () => {
+    const { container } = render(
+      <MarkdownPreview text={"这是**融合**与__重度__，`**literal**`"} />,
+    );
+
+    expect([...container.querySelectorAll("strong")].map((node) => node.textContent)).toEqual([
+      "融合",
+      "重度",
+    ]);
+    expect(screen.getByText("**literal**", { selector: "code" })).toBeTruthy();
+  });
+
   it("moves selected files with arrow keys", async () => {
     const readFile = vi.fn(async (relPath: string) => ({
       relPath,

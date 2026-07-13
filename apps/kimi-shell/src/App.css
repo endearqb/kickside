@@ -5318,6 +5318,17 @@ input:focus {
   justify-content: flex-start;
 }
 
+.skill-center-compact-tabs .cc-segmented-control-item,
+.skill-center-compact-tabs .cc-segmented-control-item.has-description {
+  min-width: 0;
+  min-height: 34px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
 .skill-center-directory-toolbar {
   flex: 0 0 auto;
   grid-template-columns: minmax(220px, 1fr) minmax(0, auto) minmax(138px, auto) minmax(138px, auto) auto;
@@ -5783,7 +5794,11 @@ input:focus {
 
 .skill-center-workspace-shell {
   display: grid;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 18px;
+  overflow: hidden;
 }
 
 .skill-center-container-switch {
@@ -5792,39 +5807,37 @@ input:focus {
   gap: 8px;
 }
 
-.skill-center-container-switch-btn {
-  min-width: 110px;
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 14px;
+.skill-center-workspace-picker .cc-action-menu-trigger {
   border: 1px solid var(--cc-line);
-  background: color-mix(in srgb, var(--surface) 92%, rgba(255, 255, 255, 0.08));
+  background: transparent;
   color: inherit;
-  text-align: left;
 }
 
-.skill-center-container-switch-btn.active {
-  border-color: color-mix(in srgb, var(--warning) 46%, var(--cc-line));
-  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
-}
-
-.skill-center-container-switch-btn small {
-  color: var(--text-secondary);
+.skill-center-workspace-picker .cc-action-menu-popover {
+  max-height: min(56dvh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .skill-center-workspace-grid {
   display: grid;
+  min-height: 0;
+  height: 100%;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .skill-center-workspace-section {
   display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   align-content: start;
   min-width: 0;
+  overflow: hidden;
   padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--cc-line);
@@ -5833,19 +5846,26 @@ input:focus {
 
 .skill-center-workspace-list {
   display: grid;
+  min-height: 0;
+  grid-auto-rows: 72px;
+  align-content: start;
   gap: 10px;
   min-width: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
 }
 
 .skill-center-workspace-item {
   display: grid;
+  height: 72px;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   min-width: 0;
   overflow: hidden;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--cc-line);
   background: color-mix(in srgb, var(--surface) 88%, rgba(255, 255, 255, 0.12));
 }
@@ -5853,6 +5873,7 @@ input:focus {
 .skill-center-workspace-copy {
   min-width: 0;
   display: grid;
+  align-content: center;
   gap: 8px;
 }
 
@@ -5878,7 +5899,7 @@ input:focus {
   justify-content: flex-end;
   gap: 8px;
   flex: 0 0 auto;
-  align-self: flex-start;
+  align-self: center;
 }
 
 @media (max-width: 1180px) {
@@ -5902,9 +5923,6 @@ input:focus {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .skill-center-workspace-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 820px) {
@@ -7954,13 +7972,20 @@ input:focus {
   max-width: 1120px;
 }
 
-.control-center-shell .workspace-hub-panel-detail-only,
+.control-center-shell .workspace-hub-panel-detail-only {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  padding-bottom: 12px;
+}
+
 .control-center-shell .skill-center-page {
   min-height: 0;
   height: 100%;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  padding-bottom: 18px;
+  padding-bottom: 12px;
 }
 
 .control-center-shell .skill-center-page-surface,
@@ -9847,6 +9872,31 @@ input:focus {
 }
 
 @media (max-width: 900px) {
+  .control-center-shell .skill-center-detail-only .cc-workbench-detail-body {
+    overflow-y: auto;
+  }
+
+  .skill-center-workspace-shell {
+    height: auto;
+    grid-template-rows: none;
+    overflow: visible;
+  }
+
+  .skill-center-workspace-grid {
+    height: auto;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .skill-center-workspace-section {
+    grid-template-rows: none;
+    overflow: visible;
+  }
+
+  .skill-center-workspace-list {
+    overflow: visible;
+  }
+
   .control-center-shell .workspace-hub-directory-panel > .directory-toolbar,
   .control-center-shell .skill-center-directory-toolbar {
     grid-template-columns: 1fr;

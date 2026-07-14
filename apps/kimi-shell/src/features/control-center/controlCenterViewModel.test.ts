@@ -3,6 +3,8 @@ import {
   controlSections,
   formatBridgeConnectorStateLabel,
   getStartupFailureMessage,
+  getKimiDoctorSummary,
+  getLegacySettingsCard,
   getKimiInstallPrerequisiteIssues,
   isAssistantSettingsSection,
   shouldShowStartupFailureDiagnostics,
@@ -74,5 +76,27 @@ describe("startup failure diagnostics", () => {
 
     expect(shouldShowStartupFailureDiagnostics(status, diagnostics)).toBe(true);
     expect(getStartupFailureMessage(status, diagnostics)).toBe("后端启动失败");
+  });
+});
+
+describe("Kimi Doctor summary", () => {
+  const result = {
+    succeeded: true,
+    command: "kimi doctor",
+    kimiPath: "kimi.cmd",
+    stdout: "OK config.toml",
+    stderr: "",
+  };
+
+  it("distinguishes not run, valid config, check failure, and backend failure", () => {
+    expect(getKimiDoctorSummary(null).label).toBe("尚未运行");
+    expect(getKimiDoctorSummary(result).label).toBe("配置文件有效");
+    expect(getKimiDoctorSummary({ ...result, succeeded: false }).label).toBe("检查失败");
+    expect(getKimiDoctorSummary(result, true).label).toBe("后端启动失败");
+  });
+
+  it("maps the legacy diagnostics route to the Doctor setting", () => {
+    expect(getLegacySettingsCard("runtime_center")).toBe("doctor");
+    expect(getLegacySettingsCard("onboarding")).toBeNull();
   });
 });

@@ -16,6 +16,14 @@ pub enum BackendState {
     MissingKimi,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOwnership {
+    OwnedByShell,
+    ReusedExternal,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgePlatform {
@@ -220,6 +228,7 @@ pub struct AppStatus {
     pub is_hotkey_owner: bool,
     pub start_cycle_id: u64,
     pub state: BackendState,
+    pub runtime_ownership: RuntimeOwnership,
     pub active_port: Option<u16>,
     pub workspace_port: Option<u16>,
     pub base_port: Option<u16>,

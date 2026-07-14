@@ -9043,6 +9043,28 @@ input:focus {
   border-top: 1px solid color-mix(in srgb, var(--cc-border) 72%, transparent);
 }
 
+.cc-doctor-detail {
+  padding-top: 14px;
+}
+
+.cc-doctor-trace-table {
+  table-layout: fixed;
+}
+
+.cc-doctor-trace-table th:first-child,
+.cc-doctor-trace-table td:first-child {
+  width: 52px;
+}
+
+.cc-doctor-trace-table th:last-child,
+.cc-doctor-trace-table td:last-child {
+  width: 104px;
+}
+
+.cc-doctor-trace-table td:nth-child(2) {
+  overflow-wrap: anywhere;
+}
+
 .cc-settings-bar-head > .cc-image-row-actions {
   justify-self: end;
   justify-content: flex-end;
@@ -9761,6 +9783,16 @@ input:focus {
 }
 
 @media (max-width: 820px) {
+  .cc-doctor-trace-table th:first-child,
+  .cc-doctor-trace-table td:first-child {
+    width: 42px;
+  }
+
+  .cc-doctor-trace-table th:last-child,
+  .cc-doctor-trace-table td:last-child {
+    width: 84px;
+  }
+
   .cc-settings-bar .cc-action-btn,
   .cc-install-advanced-panel .cc-action-btn {
     min-height: 44px;

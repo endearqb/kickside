@@ -2,6 +2,8 @@ use std::{fs, path::Path};
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::RuntimeOwnership;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct KimiRuntimeLocatorSnapshot {
@@ -11,13 +13,6 @@ pub struct KimiRuntimeLocatorSnapshot {
     pub generation: u64,
     pub ownership: RuntimeOwnership,
     pub health: RuntimeHealth,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeOwnership {
-    OwnedByShell,
-    Unavailable,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,6 +28,7 @@ pub fn write_ready(
     token_path: &Path,
     token_redacted: &str,
     generation: u64,
+    ownership: RuntimeOwnership,
 ) -> anyhow::Result<()> {
     write_snapshot(
         path,
@@ -41,7 +37,7 @@ pub fn write_ready(
             token_path: Some(token_path.to_string_lossy().to_string()),
             token_redacted: Some(token_redacted.to_string()),
             generation,
-            ownership: RuntimeOwnership::OwnedByShell,
+            ownership,
             health: RuntimeHealth::Ready,
         },
     )
@@ -88,5 +84,21 @@ mod tests {
 
         assert!(raw.contains("abcd***xyz"));
         assert!(!raw.contains("plain-secret-token"));
+    }
+
+    #[test]
+    fn reused_external_ownership_is_serialized_incrementally() {
+        let snapshot = KimiRuntimeLocatorSnapshot {
+            origin: Some("http://127.0.0.1:55000".to_string()),
+            token_path: Some("C:/Users/example/.kimi-code/server.token".to_string()),
+            token_redacted: Some("abcd***xyz".to_string()),
+            generation: 8,
+            ownership: RuntimeOwnership::ReusedExternal,
+            health: RuntimeHealth::Ready,
+        };
+
+        assert!(serde_json::to_string(&snapshot)
+            .expect("json")
+            .contains("reused_external"));
     }
 }

@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, fs, path::Path};
 
 use crate::token_resolver;
 
@@ -56,6 +56,19 @@ impl SecretRedactor {
 
 pub(crate) fn redact_backend_text(input: &str) -> String {
     SecretRedactor::from_system().redact(input)
+}
+
+pub(crate) fn redact_existing_log(path: &Path) -> anyhow::Result<()> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let redacted = SecretRedactor::from_system().redact(&raw);
+    if redacted != raw {
+        fs::write(path, redacted)?;
+    }
+    Ok(())
 }
 
 fn is_sensitive_env_name(name: &str) -> bool {
@@ -138,5 +151,19 @@ mod tests {
         assert!(is_sensitive_env_name("KIMI_CODE_PASSWORD"));
         assert!(is_sensitive_env_name("OPENAI_API_KEY"));
         assert!(!is_sensitive_env_name("KIMI_SHELL_PATH"));
+    }
+
+    #[test]
+    fn existing_log_marker_values_are_redacted() {
+        let path =
+            std::env::temp_dir().join(format!("kimi-shell-redaction-{}.log", std::process::id(),));
+        fs::write(&path, "Token: old-secret\n/#token=old-url-secret\n").expect("write");
+
+        redact_existing_log(&path).expect("redact");
+        let output = fs::read_to_string(&path).expect("read");
+        let _ = fs::remove_file(path);
+
+        assert!(!output.contains("old-secret"));
+        assert!(!output.contains("old-url-secret"));
     }
 }

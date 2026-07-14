@@ -112,7 +112,12 @@ export type OnboardingCardId =
   | "auth"
   | "work_dir"
   | "bridge"
+  | "doctor"
   | "logs";
+
+export function getLegacySettingsCard(section: ControlSectionId): OnboardingCardId | null {
+  return section === "runtime_center" ? "doctor" : null;
+}
 
 export type BridgeConnectorSecretDraft = {
   botToken: string;
@@ -515,6 +520,17 @@ export function formatKimiDoctorOutput(result: KimiDoctorResult): string {
     result.stderr ? `stderr\n${result.stderr}` : "",
   ].filter(Boolean);
   return chunks.join("\n\n") || "Kimi Code Doctor 未返回输出。";
+}
+
+export function getKimiDoctorSummary(
+  result: KimiDoctorResult | null,
+  backendFailed = false,
+): { label: string; tone: "success" | "danger" | "neutral" } {
+  if (backendFailed) return { label: "后端启动失败", tone: "danger" };
+  if (!result) return { label: "尚未运行", tone: "neutral" };
+  return result.succeeded
+    ? { label: "配置文件有效", tone: "success" }
+    : { label: "检查失败", tone: "danger" };
 }
 
 export function isFeishuOnboardingActive(

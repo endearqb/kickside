@@ -63,6 +63,8 @@ import {
   formatWeixinOnboardingStateLabel,
   formatWeixinOnboardingTone,
   generateUniqueBridgeConnectorId,
+  getKimiDoctorSummary,
+  getLegacySettingsCard,
   getStartupFailureMessage,
   getKimiInstallPrerequisiteIssues,
   hasBridgeConnectorSecretsConfigured,
@@ -475,6 +477,14 @@ export function ControlCenterView({
   const workDirStatusTone = effectiveWorkDir ? "success" : "warning";
 
   useEffect(() => {
+    const legacyCard = getLegacySettingsCard(activeControlSection);
+    if (!legacyCard) return;
+    setExpandedOnboardingCard(legacyCard);
+    setActiveControlSection("onboarding");
+    void onRefreshDiagnostics();
+  }, [activeControlSection, onRefreshDiagnostics, setActiveControlSection]);
+
+  useEffect(() => {
     if (
       (activeTask !== "bridge_connector_secrets" && expandedOnboardingCard !== "bridge") ||
       !selectedFeishuOnboarding ||
@@ -756,7 +766,8 @@ export function ControlCenterView({
         await onRefreshDiagnostics();
       }
     } finally {
-      setActiveControlSection("runtime_center");
+      setExpandedOnboardingCard("doctor");
+      setActiveControlSection("onboarding");
       setActiveRuntimePanel(panel);
     }
   }
@@ -1231,6 +1242,9 @@ export function ControlCenterView({
     );
   }
 
+  const showStartupFailureDiagnostics = shouldShowStartupFailureDiagnostics(status, diagnostics);
+  const startupFailureMessage = getStartupFailureMessage(status, diagnostics);
+  const doctorSummary = getKimiDoctorSummary(kimiDoctorResult, showStartupFailureDiagnostics);
   const onboardingSteps: Array<{
     id: OnboardingCardId;
     index: string;
@@ -1298,8 +1312,17 @@ export function ControlCenterView({
       primaryAction: bridgePrimaryAction,
     },
     {
-      id: "logs",
+      id: "doctor",
       index: "07",
+      title: "Kimi Doctor",
+      actionLabel: doctorSummary.label,
+      statusTone: doctorSummary.tone,
+      complete: Boolean(kimiDoctorResult?.succeeded) && !showStartupFailureDiagnostics,
+      primaryAction: null,
+    },
+    {
+      id: "logs",
+      index: "08",
       title: "日志",
       actionLabel: "app.log · backend.log · bridge.log",
       statusTone: "neutral",
@@ -1307,22 +1330,6 @@ export function ControlCenterView({
       primaryAction: logsPrimaryAction,
     },
   ];
-  const showStartupFailureDiagnostics = shouldShowStartupFailureDiagnostics(status, diagnostics);
-  const startupFailureMessage = getStartupFailureMessage(status, diagnostics);
-  const runtimeIssues = [
-    diagnostics?.lastError ? `最近错误：${diagnostics.lastError}` : null,
-    diagnostics?.startupFailureDetail ? `启动失败详情：${diagnostics.startupFailureDetail}` : null,
-    diagnostics?.versionError ? `版本检查：${diagnostics.versionError}` : null,
-    bridgeRecentErrors[0] ? `Bridge：${bridgeRecentErrors[0]}` : null,
-  ]
-    .filter((item): item is string => Boolean(item))
-    .filter((item) => !/telegram/i.test(item));
-  const condensedLogPreview =
-    diagnostics?.backendLogTail && diagnostics.backendLogTail.length > 0
-      ? diagnostics.backendLogTail.slice(-2).join("\n")
-      : diagnostics?.appLogTail && diagnostics.appLogTail.length > 0
-        ? diagnostics.appLogTail.slice(-2).join("\n")
-        : "暂无最新日志摘录。";
   const unifiedRailGroups = useMemo<UnifiedRailGroup[]>(() => {
     const topLevelItems: UnifiedRailItem[] = controlSections.map((section) => ({
       id: section.id,
@@ -1449,6 +1456,67 @@ export function ControlCenterView({
       if (stepId === "bridge") {
         return renderBridgeStepContent();
       }
+      if (stepId === "doctor") {
+        const startupTraceRows = diagnostics?.startupTrace ?? [];
+        return (
+          <div className="cc-settings-detail-stack cc-doctor-detail">
+            {startupFailureMessage ? (
+              <p className="cc-settings-error" role="alert">
+                {startupFailureMessage}
+              </p>
+            ) : null}
+            <div className="cc-settings-more-actions">
+              <Button
+                type="button"
+                className="cc-action-btn"
+                onClick={() => void onRunKimiDoctor()}
+                disabled={kimiDoctorBusy}
+              >
+                {kimiDoctorBusy ? "正在运行" : "运行 Kimi Doctor"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="cc-action-btn"
+                onClick={() => void onRefreshDiagnostics()}
+                disabled={diagnosticsBusy}
+              >
+                {diagnosticsBusy ? "正在刷新" : "刷新诊断"}
+              </Button>
+              {kimiDoctorResult ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="cc-action-btn"
+                  onClick={() => copyText(formatKimiDoctorOutput(kimiDoctorResult))}
+                >
+                  复制结果
+                </Button>
+              ) : null}
+            </div>
+            <table className="cc-image-table cc-doctor-trace-table">
+              <thead>
+                <tr><th>#</th><th>阶段</th><th>状态</th></tr>
+              </thead>
+              <tbody>
+                {(startupTraceRows.length > 0 ? startupTraceRows : ["暂无启动轨迹"]).map((line, index) => (
+                  <tr key={`${index}-${line}`}>
+                    <td>{String(index + 1).padStart(2, "0")}</td>
+                    <td>{line}</td>
+                    <td>{index === startupTraceRows.length - 1 && showStartupFailureDiagnostics ? "需要关注" : "ok"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {kimiDoctorResult ? (
+              <div className="cc-image-code-card">
+                <div className="cc-image-code-toolbar"><span>Kimi Doctor</span></div>
+                <pre>{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
+              </div>
+            ) : null}
+          </div>
+        );
+      }
       if (stepId === "logs") {
         return renderLogsStepContent();
       }
@@ -1478,6 +1546,7 @@ export function ControlCenterView({
                         const next = expanded ? null : step.id;
                         setExpandedOnboardingCard(next);
                         if (next === "auth") void onRefreshKimiCodeAccessConfig();
+                        if (next === "doctor") void onRefreshDiagnostics();
                         if (next === "logs") {
                           void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()]);
                         }
@@ -1508,107 +1577,6 @@ export function ControlCenterView({
               );
             })}
           </ul>
-        </section>
-      </section>
-    );
-  }
-
-  function renderRuntimeSection() {
-    const startupTraceRows = diagnostics?.startupTrace ?? [];
-
-    return (
-      <section className="cc-image-detail-page">
-        <div
-          id={focusDomId("runtime_center")}
-          className={`cc-image-detail-top ${activeFocusId === "runtime_center" ? "is-focus" : ""}`}
-        >
-          <div>
-            <h1>运行诊断</h1>
-          </div>
-          <div className="cc-image-top-controls">
-            <Button
-              type="button"
-              className="cc-action-btn"
-              onClick={() => void onRunKimiDoctor()}
-              disabled={kimiDoctorBusy}
-            >
-              运行 Kimi Doctor
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="cc-action-btn"
-              onClick={() => void onRefreshDiagnostics()}
-              disabled={diagnosticsBusy}
-            >
-              刷新诊断
-            </Button>
-          </div>
-        </div>
-
-        <section
-          id={focusDomId("runtime:core")}
-          className={`cc-image-card ${activeFocusId === "runtime:core" ? "is-focus" : ""}`}
-        >
-          <h2>启动链路</h2>
-          {startupFailureMessage ? (
-            <p className="cc-settings-error" role="alert">
-              {startupFailureMessage}
-            </p>
-          ) : null}
-          <table className="cc-image-table">
-            <thead>
-              <tr><th>#</th><th>阶段</th><th>状态</th></tr>
-            </thead>
-            <tbody>
-              {(startupTraceRows.length > 0 ? startupTraceRows : ["暂无启动轨迹"]).map((line, index) => (
-                <tr key={`${index}-${line}`}>
-                  <td>{String(index + 1).padStart(2, "0")}</td>
-                  <td>{line}</td>
-                  <td>{index === startupTraceRows.length - 1 && runtimeIssues.length > 0 ? "需要关注" : "ok"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {kimiDoctorResult ? (
-            <div className="cc-image-code-card">
-              <div className="cc-image-code-toolbar">
-                <span>Kimi Doctor</span>
-                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(formatKimiDoctorOutput(kimiDoctorResult))}>复制</Button>
-              </div>
-              <pre>{formatKimiDoctorOutput(kimiDoctorResult)}</pre>
-            </div>
-          ) : null}
-        </section>
-
-        <section
-          id={focusDomId("runtime:logs")}
-          className={`cc-image-card ${activeFocusId === "runtime:logs" ? "is-focus" : ""}`}
-        >
-          <h2>日志与 Doctor</h2>
-          <div className="cc-image-code-card">
-            <div className="cc-image-code-toolbar">
-              <span>recent.log</span>
-              <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(condensedLogPreview)}>复制</Button>
-            </div>
-            <pre>{condensedLogPreview}</pre>
-          </div>
-          <div className="cc-image-code-grid">
-            <div className="cc-image-code-card">
-              <div className="cc-image-code-toolbar">
-                <span>app.log</span>
-                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(appLogText)}>复制</Button>
-              </div>
-              <pre>{appLogText}</pre>
-            </div>
-            <div className="cc-image-code-card">
-              <div className="cc-image-code-toolbar">
-                <span>backend.log</span>
-                <Button type="button" variant="ghost" className="cc-action-btn" onClick={() => copyText(backendLogText)}>复制</Button>
-              </div>
-              <pre>{backendLogText}</pre>
-            </div>
-          </div>
         </section>
       </section>
     );
@@ -3096,7 +3064,7 @@ export function ControlCenterView({
           onClick={() => void onRetry()}
           disabled={actionBusy}
         >
-          重启后端
+          {status?.runtimeOwnership === "reused_external" ? "重新连接后端" : "重启后端"}
         </Button>
       </div>
     );
@@ -3147,10 +3115,7 @@ export function ControlCenterView({
                   />
                 ) : null}
                 {assistantSettingsSectionActive ? (
-                  <>
-                    {renderOnboardingSection()}
-                    {showStartupFailureDiagnostics ? renderRuntimeSection() : null}
-                  </>
+                  renderOnboardingSection()
                 ) : null}
                 {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
               </>

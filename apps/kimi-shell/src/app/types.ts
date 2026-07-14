@@ -160,6 +160,7 @@ export interface AppStatus {
   activeSessionWorkDir?: string;
   sessionSource?: string;
   runtimeOrigin?: string;
+  runtimeOwnership?: "owned_by_shell" | "reused_external" | "unavailable";
   serverTokenPath?: string;
   serverTokenRedacted?: string;
   workspaceUrl?: string;

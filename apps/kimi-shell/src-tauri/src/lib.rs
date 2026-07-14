@@ -81,6 +81,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
 
     let (
         state,
+        runtime_ownership,
         start_cycle_id,
         active_port,
         workspace_port,
@@ -119,6 +120,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
             diff_millis(runtime.start_requested_at_ms, runtime.backend_ready_at_ms);
         (
             runtime.state,
+            runtime.runtime_ownership,
             runtime.start_cycle_id,
             runtime.active_port,
             runtime.workspace_port,
@@ -168,6 +170,7 @@ fn get_app_status(app: AppHandle) -> Result<AppStatus, String> {
         is_hotkey_owner,
         start_cycle_id,
         state,
+        runtime_ownership,
         active_port,
         workspace_port,
         base_port,

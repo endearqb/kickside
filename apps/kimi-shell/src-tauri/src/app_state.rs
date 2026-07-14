@@ -15,8 +15,9 @@ use tauri::{AppHandle, Manager};
 use crate::types::{
     AuthMode, BackendState, BridgeChannelStatus, BridgeRuntimeState,
     FeishuConnectorOnboardingState, KimiCodeAuthState, KimiLoginHealth, MainCreateMode,
-    StartupFailureKind, StartupMonitorReason, StartupMonitorState, StartupMonitorTargetRoute,
-    StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState, WorkspaceSessionDisposition,
+    RuntimeOwnership, StartupFailureKind, StartupMonitorReason, StartupMonitorState,
+    StartupMonitorTargetRoute, StartupPhase, WebviewRuntimeKind, WeixinConnectorOnboardingState,
+    WorkspaceSessionDisposition,
 };
 
 #[allow(dead_code)]
@@ -32,6 +33,7 @@ pub struct PendingWorkspaceBootstrap {
 #[derive(Debug)]
 pub struct RuntimeState {
     pub state: BackendState,
+    pub runtime_ownership: RuntimeOwnership,
     pub active_port: Option<u16>,
     pub workspace_port: Option<u16>,
     pub base_port: Option<u16>,
@@ -86,6 +88,7 @@ impl Default for RuntimeState {
     fn default() -> Self {
         Self {
             state: BackendState::Stopped,
+            runtime_ownership: RuntimeOwnership::Unavailable,
             active_port: None,
             workspace_port: None,
             base_port: None,

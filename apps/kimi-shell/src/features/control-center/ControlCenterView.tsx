@@ -3,6 +3,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eraser,
   FolderOpen,
   Minus,
@@ -89,6 +90,14 @@ function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
 }
 
+function formatAppUpdateProgress(progress: import("@/app/types").AppUpdateProgress | null) {
+  if (!progress) return "正在下载";
+  if (progress.total && progress.total > 0) {
+    return `正在下载 ${Math.min(100, Math.round((progress.downloaded / progress.total) * 100))}%`;
+  }
+  return `已下载 ${(progress.downloaded / 1024 / 1024).toFixed(1)} MB`;
+}
+
 const CONTEXT_MENU_LABEL_FIELDS: Array<{
   key: keyof ContextMenuLabelsInput;
   label: string;
@@ -117,6 +126,11 @@ export function ControlCenterView({
   kimiDoctorBusy,
   contextMenuBusy,
   installBusy,
+  appUpdateSupported,
+  appUpdateStatus,
+  appUpdateInfo,
+  appUpdateProgress,
+  appUpdateError,
   bridgeSettings,
   bridgeStatus,
   bridgeOnboardingDraft,
@@ -263,6 +277,8 @@ export function ControlCenterView({
   onInstallNodejs,
   onStartInstallTask,
   onCancelInstallTask,
+  onCheckAppUpdate,
+  onInstallAppUpdate,
   onOpenExternalUrl,
   installMessage,
 }: ControlCenterViewProps) {
@@ -300,6 +316,31 @@ export function ControlCenterView({
   void onInstallNodejs;
   void onRefreshSkillCenterState;
   void onRefreshSkillDiscoveryState;
+  const appUpdateBusy =
+    appUpdateStatus === "checking" ||
+    appUpdateStatus === "downloading" ||
+    appUpdateStatus === "installing";
+  const appUpdateAvailable = appUpdateStatus === "available" && Boolean(appUpdateInfo?.version);
+  const appUpdateActionLabel = !appUpdateSupported
+    ? "仅安装版支持"
+    : appUpdateStatus === "checking"
+      ? "正在检测"
+      : appUpdateStatus === "downloading"
+        ? formatAppUpdateProgress(appUpdateProgress)
+        : appUpdateStatus === "installing"
+          ? "正在安装"
+          : appUpdateAvailable
+            ? `v${appUpdateInfo?.version} 可更新`
+            : appUpdateStatus === "up_to_date"
+              ? `v${appUpdateInfo?.currentVersion} · 已是最新版本`
+              : appUpdateStatus === "error"
+                ? "检测失败"
+                : "检测新版本";
+  const appUpdateStatusTone = appUpdateStatus === "error"
+    ? "danger"
+    : appUpdateAvailable
+      ? "warning"
+      : "neutral";
   const installPathDisplay =
     onboarding?.detectedKimiPath?.trim() ?? kimiPathInput.trim();
   const effectiveWorkDir = status?.effectiveWorkDir ?? onboarding?.workDir ?? "";
@@ -567,6 +608,17 @@ export function ControlCenterView({
       disabled={installBusy || installProbeBusy}
     >
       重新检测
+    </Button>
+  );
+  const appUpdatePrimaryAction = (
+    <Button
+      type="button"
+      icon={appUpdateAvailable ? <Download size={15} /> : <RefreshCcw size={15} />}
+      className="cc-action-btn"
+      onClick={() => void (appUpdateAvailable ? onInstallAppUpdate() : onCheckAppUpdate())}
+      disabled={!appUpdateSupported || appUpdateBusy}
+    >
+      {appUpdateAvailable ? "下载并更新" : "检测更新"}
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
@@ -1189,8 +1241,17 @@ export function ControlCenterView({
     primaryAction: ReactNode;
   }> = [
     {
-      id: "install",
+      id: "app_update",
       index: "01",
+      title: "小助手更新",
+      actionLabel: appUpdateActionLabel,
+      statusTone: appUpdateStatusTone,
+      complete: appUpdateStatus === "up_to_date",
+      primaryAction: appUpdatePrimaryAction,
+    },
+    {
+      id: "install",
+      index: "02",
       title: "安装 / 升级 Kimi Code",
       actionLabel: installPrimaryActionLabel,
       statusTone: installStatusTone,
@@ -1199,7 +1260,7 @@ export function ControlCenterView({
     },
     {
       id: "context_menu",
-      index: "02",
+      index: "03",
       title: "资源管理器右键菜单",
       actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
       statusTone: contextMenuStatusTone,
@@ -1208,7 +1269,7 @@ export function ControlCenterView({
     },
     {
       id: "auth",
-      index: "03",
+      index: "04",
       title: "API 配置",
       actionLabel: providerApiConfigured ? "查看配置" : "按需配置",
       statusTone: optionalApiStatusTone,
@@ -1217,7 +1278,7 @@ export function ControlCenterView({
     },
     {
       id: "work_dir",
-      index: "04",
+      index: "05",
       title: "默认工作目录",
       actionLabel: workDirReady ? "已设置" : "设置默认工作目录",
       statusTone: workDirStatusTone,
@@ -1226,7 +1287,7 @@ export function ControlCenterView({
     },
     {
       id: "bridge",
-      index: "05",
+      index: "06",
       title: "外部 IM 通道",
       actionLabel:
         visibleBridgeConnectors.length === 0
@@ -1238,7 +1299,7 @@ export function ControlCenterView({
     },
     {
       id: "logs",
-      index: "06",
+      index: "07",
       title: "日志",
       actionLabel: "app.log · backend.log · bridge.log",
       statusTone: "neutral",
@@ -1291,6 +1352,45 @@ export function ControlCenterView({
 
   function renderOnboardingSection() {
     function renderStepDetail(stepId: OnboardingCardId) {
+      if (stepId === "app_update") {
+        return (
+          <div className="cc-settings-detail-stack">
+            <div className="cc-settings-live-row" aria-live="polite">
+              {appUpdateActionLabel}
+            </div>
+            <dl className="cc-app-update-meta">
+              <div>
+                <dt>当前版本</dt>
+                <dd>{appUpdateInfo?.currentVersion ? `v${appUpdateInfo.currentVersion}` : "检测后显示"}</dd>
+              </div>
+              {appUpdateInfo?.version ? (
+                <div>
+                  <dt>最新版本</dt>
+                  <dd>v{appUpdateInfo.version}</dd>
+                </div>
+              ) : null}
+            </dl>
+            {appUpdateInfo?.body ? (
+              <pre className="cc-app-update-notes">{appUpdateInfo.body}</pre>
+            ) : null}
+            {appUpdateError ? <p className="cc-config-error">{appUpdateError}</p> : null}
+            <p className="hint">安装时小助手将退出，下载或校验失败不会改变当前安装。</p>
+            <div className="cc-step-secondary-actions">
+              <Button
+                type="button"
+                variant="ghost"
+                icon={<RefreshCcw size={15} />}
+                className="cc-action-btn"
+                onClick={() => void onCheckAppUpdate()}
+                disabled={!appUpdateSupported || appUpdateBusy}
+              >
+                重新检测
+              </Button>
+              {appUpdateAvailable ? appUpdatePrimaryAction : null}
+            </div>
+          </div>
+        );
+      }
       if (stepId === "install") {
         return (
           <div className="cc-onboarding-install-stack">

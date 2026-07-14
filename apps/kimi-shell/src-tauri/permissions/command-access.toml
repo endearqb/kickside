@@ -8,6 +8,7 @@ commands.allow = [
   "quit_app_gracefully", "get_main_window_close_behavior", "save_main_window_close_behavior",
   "get_workspace_web_settings", "save_workspace_web_settings", "fallback_workspace_web_to_official",
   "mark_enhanced_web_ready", "submit_main_window_close_decision", "save_kimi_path", "save_work_dir",
+  "check_app_update", "install_app_update",
   "grid_list_sessions", "grid_get_session", "grid_create_session", "get_bridge_settings", "save_bridge_settings",
   "delete_bridge_connector", "save_bridge_onboarding_config", "get_bridge_status", "start_bridge",
   "stop_bridge", "restart_bridge", "list_bridge_bindings", "list_bridge_sessions",

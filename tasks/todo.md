@@ -608,3 +608,20 @@
 - Webview：删除 pane、换 URL、挂起或重复打开都会使旧 generation 失效，迟到 controller 只关闭一次。
 - 已验证：固定 pnpm 10.34.4 frozen install；前端 `verify` 16 files / 105 tests、Web build、安全门禁；Rust fmt/check/clippy/test-no-run；Go vet/test；Tauri release build 及 MSI/NSIS bundle；`git diff --check`。
 - Blocked：完整 Rust test binary 在本机以 `0xc0000139 (STATUS_ENTRYPOINT_NOT_FOUND)` 退出；Go race 需要 CGO/GCC 或 Linux CI；真实 Prefill/Picker/Bridge/Webview 点击回归仍需桌面人工执行。
+
+## Kimi 小助手本体自动更新
+
+### Checklist
+- [x] 接入 Tauri Updater 的应用内检测、下载进度与用户确认安装入口
+- [x] 安装前复用退出协调停止 Kimi 后端与 IM Bridge
+- [x] 新增 `v*` tag Windows 发布 workflow，校验 tag/version 并生成签名安装包与 `latest.json`
+- [x] 固定 Node 22、pnpm 10.34.4、Rust stable 与 `go.mod` Go 版本
+- [x] 新增 accepted ADR、README、架构事实、验证门与变更记录
+- [x] 配置长期 Tauri 签名密钥的两个 GitHub Actions Secrets
+- [ ] 将签名私钥与密码分别离线备份
+- [ ] 从旧 NSIS/MSI 安装版完成自动更新与失败场景 G3 矩阵
+
+### Review
+- 自动发布在签名 Secrets 缺失或 tag 与 `apps/kimi-shell/package.json` 版本不一致时 fail-fast；workflow 不包含任何密钥值。
+- `0.1.13` 是首个支持本体更新的目标版本，`0.1.12` 及更早版本需手动安装一次。
+- 当前状态：代码、发布配置与签名 Secrets 已完成；真实 Release 资产、签名信任链及 NSIS/MSI 安装回归在完成 G3 前为 blocked。

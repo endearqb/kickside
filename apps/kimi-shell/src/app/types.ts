@@ -1042,6 +1042,30 @@ export interface InstallProbeStatus {
   coreReady: boolean;
 }
 
+export type AppUpdateStatus =
+  | "idle"
+  | "checking"
+  | "up_to_date"
+  | "available"
+  | "downloading"
+  | "installing"
+  | "error";
+
+export interface AppUpdateInfo {
+  currentVersion: string;
+  available: boolean;
+  version?: string;
+  date?: string;
+  body?: string;
+}
+
+export interface AppUpdateProgress {
+  stage: "downloading" | "installing";
+  downloaded: number;
+  total?: number;
+  message?: string;
+}
+
 export type InstallTaskId =
   | "quick_install_core"
   | "install_uv"

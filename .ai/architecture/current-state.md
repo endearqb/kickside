@@ -27,6 +27,8 @@
 - Kimi API 配置 command 在异步阻塞任务中读写 `config.toml`；加载视图携带可选 opaque revision，保存会在写入前和原子替换前拒绝过期 revision，冲突时不覆盖外部文件。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。
+- Shell 已接入 Tauri v2 Updater：每个应用进程启动后后台检测一次，设置页支持手动重检和用户确认后的签名下载/安装；安装开始前走退出协调并停止 Kimi 后端与 IM Bridge，检查或下载失败不停止现有服务。
+- GitHub `v*` tag 发布 workflow 校验 tag 与 `apps/kimi-shell/package.json` 版本一致，复用 Tauri `beforeBuildCommand` 构建 Bridge sidecar，并发布 NSIS/MSI、签名与 `latest.json`。installer-specific manifest 保留原安装器类型，legacy Windows 项优先 NSIS。
 
 ## IM Bridge
 - `apps/kimi-im-bridge` 仍是 Shell 托管的 Go sidecar。
@@ -51,3 +53,4 @@
 - Shell 自有 UI 仍不提供独立 prompt composer 或全局 approval inbox；桌面主交互依赖官方 Kimi Code Web，Bridge approval 由 IM card 与 Bridge runtime panel 承载。
 - ACPAdapter manual approval 仍无跨重启恢复，只能在当前 prompt/Bridge 进程存活期间异步 resolve；跨重启 approval 以 ServerAdapter 为主路径。
 - P5 发布门禁仍需要真实 Telegram/Feishu/Weixin 凭证和安装包环境做手工验证。
+- `0.1.12` 及更早安装版没有 Updater，必须手动安装首个支持版本；签名密钥 Secrets 未配置或 NSIS/MSI 更新矩阵未通过 G3 时，不得声明自动更新可发布。

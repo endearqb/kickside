@@ -16,11 +16,12 @@ operations, diagnostics, and Windows packaging into one workspace-oriented app.
 
 - Persistent desktop shell for `Kimi Code Web` and `Kimi Chat`, with Workspace Grid presets, resizable saved layouts, embedded external Webview panes, WebviewWindow fallback, and view switching
 - Windows Explorer context-menu launch for folders, single files, and multi-file selections, creating independent sessions without restarting a running backend
-- Compact assistant settings with four expandable setup bars for install/upgrade, Explorer context menu, Provider API, and default work directory
+- Compact assistant settings with app self-update plus focused setup bars for install/upgrade, Explorer context menu, Provider API, default work directory, and IM channels
 - Built-in npm-based Kimi Code install and upgrade center with PowerShell preflight checks and dependency status
 - Unified Control Center for overview, quick setup, runtime diagnostics, and IM Bridge operations
 - IM Bridge workspace with Feishu-focused controls for channel status, work directory, approvals, and session switching
 - Windows-native tray behavior, close-to-tray flow, diagnostics access, and NSIS/MSI installer outputs
+- Signed, user-confirmed desktop self-updates from GitHub Releases
 
 ## What The App Does
 
@@ -59,7 +60,7 @@ IM Bridge provides channel controls, current binding/session switching, and work
 
 Requirements:
 
-- Node.js 18+
+- Node.js 22+
 - pnpm 10.34.4
 - Rust stable
 - WebView2 Runtime on Windows
@@ -83,6 +84,8 @@ Production installer artifacts are generated under:
 Release notes are stored under:
 
 - `apps/kimi-shell/docs`
+
+Pushing a `vX.Y.Z` tag matching `apps/kimi-shell/package.json` runs the Windows release workflow. It publishes NSIS/MSI installers, updater signatures, and `latest.json`; the two Tauri signing Secrets must be configured before tagging.
 
 ## License
 

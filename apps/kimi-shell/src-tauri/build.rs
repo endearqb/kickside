@@ -19,6 +19,8 @@ const APP_COMMANDS: &[&str] = &[
     "submit_main_window_close_decision",
     "save_kimi_path",
     "save_work_dir",
+    "check_app_update",
+    "install_app_update",
     "grid_list_sessions",
     "grid_get_session",
     "grid_create_session",

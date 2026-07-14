@@ -52,6 +52,10 @@ const commandRegistry = {
     "save_kimi_path",
     "save_work_dir",
   ],
+  app_update: [
+    "app_update::check_app_update",
+    "app_update::install_app_update",
+  ],
   workspace_grid: [
     "workspace_grid::grid_list_sessions",
     "workspace_grid::grid_get_session",
@@ -239,6 +243,11 @@ const commandDomainMetadata = {
     owner: "install-center",
     windowCapability: "main",
     purpose: "install task catalog, session controls, settings, probes, mirrors, and PowerShell preflight",
+  },
+  app_update: {
+    owner: "desktop-release",
+    windowCapability: "main",
+    purpose: "signed desktop update checks, download progress, and installer handoff",
   },
   install_compat: {
     owner: "install-center",

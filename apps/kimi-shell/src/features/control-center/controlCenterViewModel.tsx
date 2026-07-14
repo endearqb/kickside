@@ -2,6 +2,9 @@ import type { ReactNode } from "react";
 import { Boxes, CalendarClock, SlidersHorizontal, Sparkles } from "lucide-react";
 import type {
   ActionableOnboardingStep,
+  AppUpdateInfo,
+  AppUpdateProgress,
+  AppUpdateStatus,
   AppStatus,
   BindingRecord,
   BridgeApprovalRecord,
@@ -103,6 +106,7 @@ export function getStartupFailureMessage(
 export type StepCompletion = Record<ActionableOnboardingStep, boolean>;
 export type BridgePrimaryActionMode = "save_enable" | "start" | "apply_restart";
 export type OnboardingCardId =
+  | "app_update"
   | "install"
   | "context_menu"
   | "auth"
@@ -143,6 +147,11 @@ export type ControlCenterViewProps = {
   contextMenuBusy: boolean;
   mainWindowCloseBehavior: MainWindowCloseBehavior;
   installBusy: boolean;
+  appUpdateSupported: boolean;
+  appUpdateStatus: AppUpdateStatus;
+  appUpdateInfo: AppUpdateInfo | null;
+  appUpdateProgress: AppUpdateProgress | null;
+  appUpdateError: string | null;
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
@@ -316,6 +325,8 @@ export type ControlCenterViewProps = {
   onInstallNodejs: () => Promise<void>;
   onStartInstallTask: (taskId: InstallTaskId) => Promise<void>;
   onCancelInstallTask: () => Promise<void>;
+  onCheckAppUpdate: () => Promise<AppUpdateInfo | null>;
+  onInstallAppUpdate: () => Promise<void>;
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;

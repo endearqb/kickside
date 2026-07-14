@@ -1,5 +1,6 @@
 use tauri::{ipc::Invoke, Wry};
 
+pub(crate) mod app_update;
 pub(crate) mod bridge;
 pub(crate) mod context_menu;
 pub(crate) mod install;
@@ -30,6 +31,8 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::submit_main_window_close_decision,
         super::save_kimi_path,
         super::save_work_dir,
+        app_update::check_app_update,
+        app_update::install_app_update,
         // workspace grid
         workspace_grid::grid_list_sessions,
         workspace_grid::grid_get_session,

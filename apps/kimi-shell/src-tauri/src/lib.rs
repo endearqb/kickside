@@ -992,6 +992,7 @@ pub fn run() {
             open_request::handle_external_cli_request(app.clone(), args, Some(cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, active_shortcut, event| {

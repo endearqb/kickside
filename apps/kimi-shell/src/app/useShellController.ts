@@ -107,6 +107,7 @@ import type {
 } from "@/app/types";
 import { useWorkspaceThemeBridge } from "@/app/useWorkspaceThemeBridge";
 import { useBridgeRuntimeController } from "@/app/useBridgeRuntimeController";
+import { useAppUpdateController } from "@/app/useAppUpdateController";
 import { useInstallController } from "@/app/useInstallController";
 import { useSkillCenterController } from "@/app/useSkillCenterController";
 import { useShellPollingController } from "@/app/useShellPollingController";
@@ -342,6 +343,18 @@ export function useShellController() {
   const moveWorkspaceGridPane = useWorkspaceGridStore((state) => state.movePane);
 
   const tauriRuntime = useMemo(() => isTauri(), []);
+  const {
+    appUpdateSupported,
+    appUpdateStatus,
+    appUpdateInfo,
+    appUpdateProgress,
+    appUpdateError,
+    checkAppUpdate,
+    installAppUpdate,
+  } = useAppUpdateController({
+    tauriRuntime,
+    enabled: !isWorkspaceImportPickerRoute,
+  });
   const {
     installProbe,
     installProbeBusy,
@@ -3759,6 +3772,11 @@ export function useShellController() {
     installSessionSnapshot,
     installMirrorHealthReport,
     installMirrorHealthBusy,
+    appUpdateSupported,
+    appUpdateStatus,
+    appUpdateInfo,
+    appUpdateProgress,
+    appUpdateError,
     installCommandsOpen,
     installCommandsBusy,
     installCommandCatalog,
@@ -3846,6 +3864,8 @@ export function useShellController() {
     handleInstallNodejs,
     handleStartInstallTask,
     handleCancelInstallTask,
+    checkAppUpdate,
+    installAppUpdate,
     handleOpenInstallCommands,
     handleEnableContextMenu,
     handleDisableContextMenu,

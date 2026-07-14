@@ -550,7 +550,18 @@ fn try_reuse_existing_server(app: &AppHandle) -> ReuseAttempt {
     };
     match probe_liveness(&origin) {
         Ok(()) => {}
-        Err(error) if error.is_connect() => return ReuseAttempt::Stale,
+        Err(error) if is_stale_liveness_error(&error) => {
+            log_manager::append_line(
+                app,
+                format!(
+                    "ignored stale kimi server lock (pid={}, port={}): {}",
+                    lock.pid,
+                    lock.port,
+                    super::redaction::redact_backend_text(&error.to_string())
+                ),
+            );
+            return ReuseAttempt::Stale;
+        }
         Err(error) => {
             return ReuseAttempt::Blocked {
                 message: format!(
@@ -630,6 +641,10 @@ fn probe_liveness(origin: &str) -> Result<(), reqwest::Error> {
         .send()?
         .error_for_status()?;
     Ok(())
+}
+
+fn is_stale_liveness_error(error: &reqwest::Error) -> bool {
+    error.is_connect() || (!error.is_timeout() && error.status().is_none())
 }
 
 fn probe_bearer_auth(origin: &str, token: &str) -> Result<(), reqwest::Error> {
@@ -1292,6 +1307,19 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("port");
         let stale_origin = format!("http://{}", listener.local_addr().expect("address"));
         drop(listener);
-        assert!(probe_liveness(&stale_origin).is_err());
+        let error = probe_liveness(&stale_origin).expect_err("stale server must fail");
+        assert!(is_stale_liveness_error(&error));
+
+        let server = Server::http("127.0.0.1:0").expect("server");
+        let origin = format!("http://{}", server.server_addr());
+        thread::spawn(move || {
+            server
+                .recv()
+                .expect("request")
+                .respond(Response::empty(503))
+                .expect("response");
+        });
+        let error = probe_liveness(&origin).expect_err("unhealthy server must fail");
+        assert!(!is_stale_liveness_error(&error));
     }
 }

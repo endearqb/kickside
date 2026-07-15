@@ -36,6 +36,7 @@ pub fn choose_start_port() -> anyhow::Result<u16> {
 
 pub fn wait_for_ready_port(base_port: u16, child: &mut Child) -> anyhow::Result<u16> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_millis(HEALTH_REQUEST_TIMEOUT_MS))
         .build()
         .map_err(|error| anyhow!("failed to create health client: {error}"))?;

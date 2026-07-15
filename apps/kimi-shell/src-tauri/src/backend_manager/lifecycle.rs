@@ -633,6 +633,7 @@ fn local_server_origin(host: &str, port: u64) -> anyhow::Result<String> {
 
 fn probe_liveness(origin: &str) -> Result<(), reqwest::Error> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(EXTERNAL_HEALTH_TIMEOUT)
         .build()?;
     let origin = origin.trim_end_matches('/');
@@ -644,11 +645,12 @@ fn probe_liveness(origin: &str) -> Result<(), reqwest::Error> {
 }
 
 fn is_stale_liveness_error(error: &reqwest::Error) -> bool {
-    error.is_connect() || (!error.is_timeout() && error.status().is_none())
+    error.status().is_none()
 }
 
 fn probe_bearer_auth(origin: &str, token: &str) -> Result<(), reqwest::Error> {
     let client = reqwest::blocking::Client::builder()
+        .no_proxy()
         .timeout(EXTERNAL_HEALTH_TIMEOUT)
         .build()?;
     client
@@ -1308,6 +1310,16 @@ mod tests {
         let stale_origin = format!("http://{}", listener.local_addr().expect("address"));
         drop(listener);
         let error = probe_liveness(&stale_origin).expect_err("stale server must fail");
+        assert!(is_stale_liveness_error(&error));
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("port");
+        let stalled_origin = format!("http://{}", listener.local_addr().expect("address"));
+        thread::spawn(move || {
+            let _connection = listener.accept().expect("connection");
+            thread::sleep(EXTERNAL_HEALTH_TIMEOUT + Duration::from_millis(100));
+        });
+        let error = probe_liveness(&stalled_origin).expect_err("stalled server must time out");
+        assert!(error.is_timeout());
         assert!(is_stale_liveness_error(&error));
 
         let server = Server::http("127.0.0.1:0").expect("server");

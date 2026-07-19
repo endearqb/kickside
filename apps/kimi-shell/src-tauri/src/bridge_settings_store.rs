@@ -345,6 +345,9 @@ fn delete_connector_files(
     }
 
     bridge_secrets.connectors.remove(target_connector_id);
+    bridge_secrets.telegram = BridgeTelegramSecrets::default();
+    bridge_secrets.feishu = BridgeFeishuSecrets::default();
+    bridge_secrets.weixin = BridgeWeixinSecrets::default();
 
     bridge_settings = normalize_bridge_settings(bridge_settings);
     sync_bridge_default_work_dir_from_app(
@@ -1010,7 +1013,7 @@ mod tests {
         assert_eq!(bridge_settings.admin_port, DEFAULT_BRIDGE_ADMIN_PORT);
         assert_eq!(
             bridge_settings.feishu_reply_renderer,
-            FeishuReplyRenderer::Interactive
+            FeishuReplyRenderer::Streaming
         );
         assert!(!bridge_settings.feishu_auto_approve);
         assert!(bridge_settings.reset_binding_session_on_bridge_start);
@@ -1437,7 +1440,7 @@ mod tests {
         assert!(bridge_settings.enabled);
         assert!(bridge_settings.auto_start);
         assert!(app_settings.bridge_auto_start);
-        assert_eq!(bridge_settings.connectors.len(), 3);
+        assert_eq!(bridge_settings.connectors.len(), 2);
         assert!(
             bridge_settings
                 .connectors

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ const adminTokenFileEnv = "KIMI_IM_BRIDGE_ADMIN_TOKEN_FILE"
 const hostControlTokenEnv = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN"
 const hostControlTokenFileEnv = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN_FILE"
 const kimiRuntimeLocatorFileEnv = "KIMI_APP_RUNTIME_LOCATOR_FILE"
+const agentRoomEnabledEnv = "KIMI_AGENT_ROOM_ENABLED"
 
 func main() {
 	options, err := parseFlags()
@@ -113,6 +115,13 @@ func parseFlagsFrom(args []string, getenv func(string) string, readFile func(str
 	}
 	if options.KimiRuntimeLocatorPath == "" {
 		options.KimiRuntimeLocatorPath = strings.TrimSpace(getenv(kimiRuntimeLocatorFileEnv))
+	}
+	if raw := strings.TrimSpace(getenv(agentRoomEnabledEnv)); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return options, fmt.Errorf("%s must be true or false", agentRoomEnabledEnv)
+		}
+		options.AgentRoomEnabled = enabled
 	}
 
 	return options, nil

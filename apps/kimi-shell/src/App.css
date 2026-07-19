@@ -2755,6 +2755,961 @@ input:focus {
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 
+.agent-room-pane {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  color: var(--text-primary);
+  background: var(--surface);
+}
+
+.agent-room-pane-toolbar {
+  min-width: 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--chrome-border);
+  background: var(--surface-muted);
+}
+
+.agent-room-pane-toolbar label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-room-pane-toolbar select {
+  min-width: 160px;
+  max-width: 320px;
+  height: 30px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  background: var(--surface);
+  font: inherit;
+}
+
+.agent-room-health {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-room-health.is-ready {
+  color: var(--accent);
+}
+
+.agent-room-health.is-degraded,
+.agent-room-health.is-resync_required {
+  color: var(--warning);
+}
+
+.agent-room-toolbar-actions,
+.agent-room-view-tabs,
+.agent-room-form-heading,
+.agent-room-form-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-room-view-tabs button,
+.agent-room-object-list button,
+.agent-room-agent-form button {
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  color: var(--text-primary);
+  background: var(--surface-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-room-view-tabs button[aria-selected="true"],
+.agent-room-object-list button.is-selected {
+  background: var(--surface-hover);
+}
+
+.agent-room-management {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+}
+
+.agent-room-object-list {
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--chrome-border);
+  background: var(--surface-muted);
+}
+
+.agent-room-object-list > div,
+.agent-room-object-list li button,
+.agent-room-form-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-room-object-list ul {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-object-section {
+  margin-top: 16px;
+}
+
+.agent-room-object-section h4 {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-object-section ul {
+  margin-top: 0;
+}
+
+.agent-room-object-list li button {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.agent-room-object-list li span,
+.agent-room-object-list p,
+.agent-room-agent-form p {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-agent-form {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.agent-room-form-heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.agent-room-form-heading h3,
+.agent-room-agent-form h4 {
+  margin: 0;
+}
+
+.agent-room-agent-form section + section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--chrome-border);
+}
+
+.agent-room-agent-form section > label:not(.agent-room-check),
+.agent-room-control-grid label {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.agent-room-agent-form input:not([type="checkbox"]),
+.agent-room-agent-form textarea,
+.agent-room-agent-form select {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  background: var(--surface);
+  font: inherit;
+}
+
+.agent-room-agent-form textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.agent-room-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 12px;
+}
+
+.agent-room-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.agent-room-agent-form .is-danger,
+.agent-room-agent-form .agent-room-risk {
+  color: var(--destructive);
+}
+
+.agent-room-pane-layout {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+}
+
+.agent-room-member-rail {
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--chrome-border);
+  background: var(--surface-muted);
+}
+
+.agent-room-member-rail > span,
+.agent-room-member-rail p,
+.agent-room-member-rail small,
+.agent-room-pane-main p,
+.agent-room-empty p {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-member-rail ul {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-member-rail li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--chrome-border);
+  font-size: 13px;
+}
+
+.agent-room-member-rail li > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agent-room-member-rail li button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 4px 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-room-member-rail li button:hover,
+.agent-room-member-rail li button:focus-visible {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.agent-room-pane-main {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.agent-room-pane-main section + section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--chrome-border);
+}
+
+.agent-room-pane-main h3,
+.agent-room-empty h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.agent-room-pane-main p,
+.agent-room-empty p {
+  margin: 0;
+}
+
+.agent-room-empty {
+  align-self: center;
+  justify-self: center;
+  max-width: 360px;
+  padding: 24px;
+  text-align: center;
+}
+
+.agent-room-empty .cc-action-btn {
+  margin-top: 12px;
+}
+
+.agent-room-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-room-section-heading span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-session-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-session-item {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.agent-room-session-item > div:first-child,
+.agent-room-session-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-room-session-item > div:first-child span {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-session-item dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 10px 0;
+}
+
+.agent-room-session-item dl > div {
+  min-width: 0;
+}
+
+.agent-room-session-item dt {
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.agent-room-session-item dd {
+  overflow: hidden;
+  margin: 2px 0 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-room-last-reply {
+  max-height: 4.2em;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.agent-room-session-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.agent-room-session-actions button {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 0 7px;
+  color: var(--text-primary);
+  background: var(--surface-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-room-session-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-room-action-error {
+  margin-top: 10px !important;
+  color: var(--destructive) !important;
+}
+
+.agent-room-composer {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.agent-room-composer > header,
+.agent-room-composer-actions,
+.agent-room-send-preview,
+.agent-room-composer-options,
+.agent-room-targets,
+.agent-room-mentions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-room-composer > header,
+.agent-room-composer-actions {
+  justify-content: space-between;
+}
+
+.agent-room-composer h3,
+.agent-room-composer p {
+  margin: 0;
+}
+
+.agent-room-composer p,
+.agent-room-composer-actions > span,
+.agent-room-send-preview span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-composer fieldset {
+  margin: 0;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.agent-room-targets,
+.agent-room-mentions,
+.agent-room-shared-runs {
+  flex-wrap: wrap;
+}
+
+.agent-room-targets label,
+.agent-room-composer > label,
+.agent-room-composer-options label {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-room-targets label {
+  grid-auto-flow: column;
+  align-items: center;
+}
+
+.agent-room-shared-runs {
+  display: flex;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-shared-runs label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-room-composer textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.agent-room-composer textarea,
+.agent-room-composer select {
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  padding: 9px 11px;
+}
+
+.agent-room-composer-options {
+  align-items: end;
+}
+
+.agent-room-composer-options label {
+  flex: 1;
+}
+
+.agent-room-mentions button,
+.agent-room-composer-attachments button,
+.agent-room-composer-actions button {
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  padding: 7px 10px;
+}
+
+.agent-room-composer-attachments,
+.agent-room-composer-attachments ul,
+.agent-room-composer-attachments li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-room-composer-attachments {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-composer-attachments ul {
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-composer-attachments li {
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  padding-left: 8px;
+}
+
+.agent-room-composer-attachments li button {
+  border: 0;
+  background: transparent;
+}
+
+.agent-room-composer-actions button:disabled {
+  opacity: 0.45;
+}
+
+.agent-room-composer .agent-room-risk {
+  color: var(--destructive);
+}
+
+.agent-room-workflow,
+.agent-room-connectors {
+  min-width: 0;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.agent-room-workflow > header,
+.agent-room-connectors > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-room-workflow h3,
+.agent-room-workflow h4,
+.agent-room-workflow p,
+.agent-room-connectors h3,
+.agent-room-connectors p {
+  margin: 0;
+}
+
+.agent-room-workflow p,
+.agent-room-connectors p,
+.agent-room-connectors li span,
+.agent-room-workflow-progress small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-workflow-builder,
+.agent-room-workflow-builder label,
+.agent-room-workflow-progress,
+.agent-room-workflow-progress article,
+.agent-room-workflow-progress li {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-room-workflow-builder fieldset,
+.agent-room-workflow-progress article,
+.agent-room-connectors li {
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-muted);
+}
+
+.agent-room-workflow select,
+.agent-room-workflow textarea,
+.agent-room-connectors select {
+  min-height: 34px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--text-primary);
+  background: var(--surface);
+  font: inherit;
+}
+
+.agent-room-workflow textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.agent-room-workflow button,
+.agent-room-connectors button {
+  justify-self: start;
+  border: 1px solid var(--chrome-border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  background: var(--surface-muted);
+}
+
+.agent-room-workflow-progress ol,
+.agent-room-connectors ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-workflow-progress li > div,
+.agent-room-connectors li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-room-connectors li > div {
+  min-width: 180px;
+  display: grid;
+  gap: 3px;
+  margin-right: auto;
+}
+
+.agent-room-connectors li label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-busy-dialog {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.agent-room-busy-dialog p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.agent-room-busy-dialog button {
+  justify-self: start;
+}
+
+.agent-room-send-preview {
+  min-height: 34px;
+  border-left: 2px solid var(--chrome-border);
+  padding-left: 10px;
+}
+
+.agent-room-timeline {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.agent-room-timeline > ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-timeline-message > article,
+.agent-room-run-card {
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.agent-room-timeline-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-timeline-controls label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.agent-room-timeline-message > article header,
+.agent-room-run-card header,
+.agent-room-run-card dl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-room-timeline-message time,
+.agent-room-run-card header span,
+.agent-room-run-card dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-run-card {
+  margin: 8px 0 0 20px;
+}
+
+.agent-room-run-card dl div {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-room-run-card button {
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  cursor: pointer;
+}
+
+.agent-room-run-diagnostics {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-run-diagnostics summary {
+  cursor: pointer;
+}
+
+.agent-room-run-diagnostics dl {
+  display: grid;
+  justify-content: stretch;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.agent-room-run-diagnostics dl div {
+  justify-content: start;
+}
+
+.agent-room-run-diagnostics dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-room-run-actions,
+.agent-room-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-room-approval-panel {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.agent-room-approval-panel > ol {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-room-permission-warning {
+  color: var(--warning);
+}
+
+.agent-room-approval-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.agent-room-approval-card.is-compact {
+  margin-top: 8px;
+  background: var(--surface);
+}
+
+.agent-room-approval-card header,
+.agent-room-approval-card dl,
+.agent-room-approval-card dl div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-room-approval-card header {
+  justify-content: space-between;
+}
+
+.agent-room-approval-card dl {
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.agent-room-approval-card dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-approval-card dd,
+.agent-room-approval-card p {
+  margin: 0;
+}
+
+.agent-room-approval-card button {
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  cursor: pointer;
+}
+
+.agent-room-approval-card button.is-destructive {
+  color: var(--destructive);
+}
+
+.agent-room-approval-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.agent-room-approval-resolved {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.agent-room-diagnostics {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.agent-room-diagnostics > dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px 16px;
+}
+
+.agent-room-diagnostics > dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-room-diagnostics dt {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-diagnostics dd {
+  margin: 0;
+}
+
+.agent-room-capability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.agent-room-capability-badges span {
+  border: 1px solid var(--chrome-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.agent-room-diagnostics > button {
+  border: 1px solid var(--chrome-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  cursor: pointer;
+}
+
+.agent-room-diagnostics pre {
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font: 12px/1.65 "JetBrains Mono", Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 760px) {
+  .agent-room-management,
+  .agent-room-pane-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .agent-room-object-list,
+  .agent-room-member-rail {
+    max-height: 150px;
+    border-right: 0;
+    border-bottom: 1px solid var(--chrome-border);
+  }
+
+  .agent-room-control-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .workspace-stage-single {
   display: block;
 }

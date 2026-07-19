@@ -7,6 +7,7 @@ export type BackendState =
   | "missing_kimi";
 
 export type BridgePlatform = "telegram" | "feishu" | "weixin";
+export type BridgeApprovalPlatform = BridgePlatform | "agent_room";
 
 export type MainWindowCloseBehavior = "ask" | "exit" | "minimize_to_tray";
 
@@ -250,11 +251,325 @@ export interface BridgeStatus {
   version?: string;
   kimiRuntimeLocator: BridgeRuntimeLocatorStatus;
   runtimeAdapter: BridgeRuntimeAdapterStatus;
+  agentRoom: AgentRoomStatus;
   connectors: BridgeConnectorStatus[];
   pendingApprovals: number;
   bindings: number;
   lastErrorCode?: string;
   lastError?: string;
+}
+
+export interface AgentRoomStatus {
+  enabled: boolean;
+  core: string;
+  observer: string;
+  activeRuns: number;
+  queueDepth: number;
+  observedSessions: number;
+  databaseVersion: number;
+  activeLeases: number;
+  pendingApprovals: number;
+  paneGeneration: number;
+  degradations: string[];
+}
+
+export type AgentSessionPolicy =
+  | "per_room"
+  | "persistent"
+  | "new_per_task"
+  | "resume_selected";
+
+export interface AgentProfile {
+  agentId: string;
+  name: string;
+  avatar?: string;
+  description?: string;
+  rolePrompt: string;
+  defaultWorkDir: string;
+  sessionPolicy: AgentSessionPolicy;
+  pinnedSessionId?: string;
+  autoApprove: boolean;
+  runtimeControls?: unknown;
+  enabled: boolean;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentProfileInput {
+  name: string;
+  avatar?: string;
+  description?: string;
+  rolePrompt: string;
+  defaultWorkDir: string;
+  sessionPolicy: AgentSessionPolicy;
+  pinnedSessionId?: string;
+  autoApprove: boolean;
+  runtimeControls?: unknown;
+  enabled: boolean;
+}
+
+export interface AgentProfilePatchInput {
+  revision: number;
+  name?: string;
+  avatar?: string;
+  description?: string;
+  rolePrompt?: string;
+  defaultWorkDir?: string;
+  sessionPolicy?: AgentSessionPolicy;
+  pinnedSessionId?: string;
+  autoApprove?: boolean;
+  runtimeControls?: unknown;
+  enabled?: boolean;
+}
+
+export interface AgentRoom {
+  roomId: string;
+  title: string;
+  description?: string;
+  sharedBrief?: string;
+  orchestrationMode: string;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentRoomInput {
+  title: string;
+  description?: string;
+  sharedBrief?: string;
+  orchestrationMode: string;
+  archived?: boolean;
+}
+
+export interface AgentRoomPatchInput {
+  title?: string;
+  description?: string;
+  sharedBrief?: string;
+  orchestrationMode?: string;
+  archived?: boolean;
+}
+
+export interface AgentRoomMember {
+  memberId: string;
+  roomId: string;
+  memberKind: string;
+  agentId?: string;
+  displayName: string;
+  workspaceRoot?: string;
+  sessionPolicy: AgentSessionPolicy;
+  followMode: string;
+  followedPaneId?: string;
+  pinnedSessionId?: string;
+  effectiveSessionId?: string;
+  rolePromptSnapshot?: string;
+  runtimeControls?: unknown;
+  autoApprove: boolean;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentRoomMemberInput {
+  memberKind: string;
+  agentId?: string;
+  displayName?: string;
+  pinnedSessionId?: string;
+  workspaceRoot?: string;
+  followedPaneId?: string;
+  autoApprove?: boolean;
+  runtimeControls?: unknown;
+}
+
+export interface AgentRoomMemberPatchInput {
+  displayName?: string;
+  autoApprove?: boolean;
+  runtimeControls?: unknown;
+  binding?: AgentRoomMemberBindingInput;
+}
+
+export interface AgentRoomMemberBindingInput {
+  followMode: "pin_session" | "follow_pane";
+  followedPaneId?: string;
+  pinnedSessionId?: string;
+  workspaceRoot?: string;
+}
+
+export interface AgentRoomMutationResult {
+  status: string;
+}
+
+export interface AgentRoomMessage {
+  messageId: string;
+  roomId: string;
+  senderKind: string;
+  senderId?: string;
+  content: string;
+  replyToMessageId?: string;
+  targetMemberIds?: string[];
+  attachments?: unknown;
+  metadata?: unknown;
+  createdAt: string;
+}
+
+export interface AgentRun {
+  runId: string;
+  roomId: string;
+  sourceMessageId: string;
+  memberId: string;
+  agentId?: string;
+  sessionId?: string;
+  workDir?: string;
+  turnId?: string;
+  promptId?: string;
+  originKind: string;
+  queuePolicy: string;
+  queuePosition?: number;
+  status: string;
+  errorCode?: string;
+  errorMessage?: string;
+  controls?: unknown;
+  promptAssembly?: unknown;
+  workflowStageId?: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+export interface WorkflowStage {
+  stageId: string;
+  targetMemberIds: string[];
+  dependsOn?: string[];
+  aggregation: "all";
+  promptTemplate: string;
+  failurePolicy: "continue" | "stop" | "require_user";
+}
+
+export interface WorkflowDefinition {
+  version: "1";
+  stages: WorkflowStage[];
+}
+
+export interface AgentConnectorBinding {
+  connectorId: string;
+  agentId: string;
+  sessionMode: "independent_session" | "same_session";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentConnectorBindingInput {
+  agentId: string;
+  sessionMode: "independent_session" | "same_session";
+}
+
+export interface AgentRoomEvent {
+  seq: number;
+  eventId: string;
+  roomId?: string;
+  memberId?: string;
+  agentId?: string;
+  runId?: string;
+  sessionId?: string;
+  turnId?: string;
+  promptId?: string;
+  kind: string;
+  status?: string;
+  textDelta?: string;
+  displayText?: string;
+  artifact?: unknown;
+  approvalId?: string;
+  payload?: unknown;
+  createdAt: string;
+}
+
+export interface AgentRoomTimeline {
+  messages: AgentRoomMessage[];
+  runs: AgentRun[];
+  events: AgentRoomEvent[];
+}
+
+export interface SessionObservation {
+  sessionId: string;
+  generation: number;
+  workDir?: string;
+  lastSeq: number;
+  epoch?: string;
+  lastEventAt?: string;
+  sessionState: string;
+  controlOrigin: string;
+  currentTurnId?: string;
+  currentPromptId?: string;
+  lastReply?: string;
+  pendingApprovals: number;
+  updatedAt: string;
+}
+
+export interface PaneSessionObservation {
+  paneId: string;
+  persistedSessionId?: string;
+  activeSessionId?: string;
+  effectiveSessionId?: string;
+  workDir?: string;
+  visible: boolean;
+  active: boolean;
+  maximized: boolean;
+  mountPolicy: string;
+  loadState: string;
+  generation: number;
+  updatedAt: string;
+}
+
+export interface AgentRoomCapabilities {
+  runtimeProvider: string;
+  core: boolean;
+  observer: boolean;
+  multiSessionObservation: boolean;
+  sessionTranscript: boolean;
+  userPromptEvents: boolean;
+  abort: boolean;
+  approval: boolean;
+  nativeFollowUp: boolean;
+  degradations: string[];
+}
+
+export interface AgentRoomCommandError {
+  code: string;
+  message: string;
+  details?: unknown;
+  requestId?: string;
+  httpStatus?: number;
+}
+
+export interface AgentRoomEventPage {
+  items: AgentRoomEvent[];
+  nextSeq: number;
+  hasMore: boolean;
+  serverTime: string;
+}
+
+export interface AgentRoomEventsPayload extends AgentRoomEventPage {
+  generation: number;
+}
+
+export interface AgentRoomPumpStatus {
+  state: "idle" | "connecting" | "ready" | "degraded" | "resync_required";
+  generation: number;
+  cursor: number;
+  retryCount: number;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export interface AgentRoomObservationPinResult {
+  sessionId: string;
+  pinned: boolean;
+  observerRunning: boolean;
+}
+
+export interface AgentRunRetryInput {
+  sessionMode?: string;
 }
 
 export interface BridgeRuntimeLocatorStatus {
@@ -324,7 +639,7 @@ export interface BridgeApprovalRecord {
   stepId?: string;
   requestKind: string;
   prompt: string;
-  platform: BridgePlatform;
+  platform: BridgeApprovalPlatform;
   chatId: string;
   threadId?: string;
   status: string;
@@ -788,7 +1103,7 @@ export interface WorkspaceSessionBridgePayload {
   sessionId?: string;
   workDir?: string;
   routeTemplate?: string;
-  disposition?: "replace_active" | "new_pane";
+  disposition?: "focus_existing" | "replace_active" | "new_pane";
   targetWindowLabel?: string;
   applied?: boolean;
   reason?: string;

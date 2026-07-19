@@ -183,6 +183,11 @@ type ApprovalTicket struct {
 	CreatedAt             string `json:"createdAt"`
 	UpdatedAt             string `json:"updatedAt"`
 	ResolvedAt            string `json:"resolvedAt,omitempty"`
+	OriginKind            string `json:"-"`
+	RoomID                string `json:"-"`
+	MemberID              string `json:"-"`
+	AgentID               string `json:"-"`
+	RunID                 string `json:"-"`
 }
 
 type OutboundMessage struct {
@@ -241,11 +246,26 @@ type BridgeStatus struct {
 	Version            string               `json:"version,omitempty"`
 	KimiRuntimeLocator RuntimeLocatorStatus `json:"kimiRuntimeLocator"`
 	RuntimeAdapter     RuntimeAdapterStatus `json:"runtimeAdapter"`
+	AgentRoom          AgentRoomStatus      `json:"agentRoom"`
 	Channels           []ChannelStatus      `json:"channels"`
 	PendingApprovals   int                  `json:"pendingApprovals"`
 	Bindings           int                  `json:"bindings"`
 	LastErrorCode      string               `json:"lastErrorCode,omitempty"`
 	LastError          string               `json:"lastError,omitempty"`
+}
+
+type AgentRoomStatus struct {
+	Enabled          bool     `json:"enabled"`
+	Core             string   `json:"core"`
+	Observer         string   `json:"observer"`
+	ActiveRuns       int      `json:"activeRuns"`
+	QueueDepth       int      `json:"queueDepth"`
+	ObservedSessions int      `json:"observedSessions"`
+	DatabaseVersion  int      `json:"databaseVersion"`
+	ActiveLeases     int      `json:"activeLeases"`
+	PendingApprovals int      `json:"pendingApprovals"`
+	PaneGeneration   int64    `json:"paneGeneration"`
+	Degradations     []string `json:"degradations,omitempty"`
 }
 
 type RuntimeLocatorStatus struct {
@@ -327,6 +347,16 @@ type BridgeTurn struct {
 	ErrorMessage     string `json:"errorMessage,omitempty"`
 	CreatedAt        string `json:"createdAt"`
 	UpdatedAt        string `json:"updatedAt"`
+	OriginKind       string `json:"originKind,omitempty"`
+	AgentID          string `json:"agentId,omitempty"`
+}
+
+type BridgeTurnOrigin struct {
+	TurnID      string `json:"turnId"`
+	OriginKind  string `json:"originKind"`
+	ConnectorID string `json:"connectorId,omitempty"`
+	AgentID     string `json:"agentId,omitempty"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type TurnEventRecord struct {

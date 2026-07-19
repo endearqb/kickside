@@ -1,5 +1,6 @@
 use tauri::{ipc::Invoke, Wry};
 
+pub(crate) mod agent_room;
 pub(crate) mod app_update;
 pub(crate) mod bridge;
 pub(crate) mod context_menu;
@@ -63,6 +64,36 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         bridge::start_weixin_connector_onboarding,
         bridge::get_weixin_connector_onboarding_status,
         bridge::cancel_weixin_connector_onboarding,
+        // agent room
+        agent_room::agent_room_list_agents,
+        agent_room::agent_room_create_agent,
+        agent_room::agent_room_update_agent,
+        agent_room::agent_room_delete_agent,
+        agent_room::agent_room_list_rooms,
+        agent_room::agent_room_get_room,
+        agent_room::agent_room_create_room,
+        agent_room::agent_room_update_room,
+        agent_room::agent_room_delete_room,
+        agent_room::agent_room_list_members,
+        agent_room::agent_room_add_member,
+        agent_room::agent_room_update_member,
+        agent_room::agent_room_delete_member,
+        agent_room::agent_room_get_timeline,
+        agent_room::agent_room_get_run,
+        agent_room::agent_room_post_message,
+        agent_room::agent_room_resolve_workflow,
+        agent_room::agent_room_list_connector_bindings,
+        agent_room::agent_room_put_connector_binding,
+        agent_room::agent_room_delete_connector_binding,
+        agent_room::agent_room_abort_run,
+        agent_room::agent_room_retry_run,
+        agent_room::agent_room_resolve_approval,
+        agent_room::agent_room_sync_pane_sessions,
+        agent_room::agent_room_get_capabilities,
+        agent_room::agent_room_list_observations,
+        agent_room::agent_room_set_observation_pin,
+        agent_room::agent_room_poll_events,
+        agent_room::agent_room_open_session,
         // skills
         skills::install_skill_from_git,
         skills::import_skill_from_path,

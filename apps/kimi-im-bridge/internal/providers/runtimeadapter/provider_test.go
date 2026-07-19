@@ -14,6 +14,7 @@ import (
 type fakeAdapter struct {
 	mu                 sync.Mutex
 	ensureRequests     []bridgeruntime.EnsureSessionRequest
+	ensureErrors       []error
 	promptRequests     []bridgeruntime.AdapterPromptRequest
 	approvalsBySession map[string][]bridgeruntime.RuntimeApproval
 	approvalListErrors map[string]error
@@ -27,6 +28,13 @@ func (f *fakeAdapter) EnsureSession(_ context.Context, request bridgeruntime.Ens
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensureRequests = append(f.ensureRequests, request)
+	if len(f.ensureErrors) > 0 {
+		err := f.ensureErrors[0]
+		f.ensureErrors = f.ensureErrors[1:]
+		if err != nil {
+			return bridgeruntime.SessionRef{}, err
+		}
+	}
 	return bridgeruntime.SessionRef{
 		KimiCodeSessionID: "server-session-1",
 		WorkspaceRoot:     request.WorkspaceRoot,
@@ -160,10 +168,10 @@ func TestProviderRunTurnUsesServerSessionAndMapsEvents(t *testing.T) {
 		t.Fatalf("RunTurn returned error: %v", err)
 	}
 
-	if result.KimiSessionID != "server-session-1" || result.Status != "completed" {
+	if result.KimiSessionID != "server-session-1" || result.PromptID != "prompt_1" || result.Status != "completed" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if len(adapter.ensureRequests) != 1 || adapter.ensureRequests[0].KimiCodeSessionID != "synthetic-session" {
+	if len(adapter.ensureRequests) != 1 || adapter.ensureRequests[0].KimiCodeSessionID != "synthetic-session" || adapter.ensureRequests[0].CreateMode != bridgeruntime.SessionCreateIfMissing {
 		t.Fatalf("expected ensure call with prior session id, got %+v", adapter.ensureRequests)
 	}
 	if len(adapter.promptRequests) != 1 || adapter.promptRequests[0].SessionID != "server-session-1" {
@@ -180,6 +188,80 @@ func TestProviderRunTurnUsesServerSessionAndMapsEvents(t *testing.T) {
 	}
 	if len(sessions.sessions) != 1 || sessions.sessions[0].KimiSessionID != "server-session-1" {
 		t.Fatalf("expected server session upsert, got %+v", sessions.sessions)
+	}
+}
+
+func TestProviderRunTurnUsesResumeExactWhenRequired(t *testing.T) {
+	adapter := &fakeAdapter{}
+	provider := NewProvider(adapter, nil, nil)
+	_, err := provider.RunTurn(context.Background(), bridgecore.RuntimeTarget{}, bridgecore.TurnRequest{
+		KimiSessionID:       "session-exact",
+		WorkDir:             "D:/repo",
+		Prompt:              "hello",
+		RequireExactSession: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunTurn returned error: %v", err)
+	}
+	if len(adapter.ensureRequests) != 1 || adapter.ensureRequests[0].CreateMode != bridgeruntime.SessionResumeExact {
+		t.Fatalf("strict execution did not use resume_exact: %+v", adapter.ensureRequests)
+	}
+}
+
+func TestProviderMapsPromptIDToTurnEvent(t *testing.T) {
+	provider := NewProvider(&fakeAdapter{}, nil, nil)
+	events := []bridgecore.TurnEvent{}
+	err := provider.emitAdapterEvent(func(event bridgecore.TurnEvent) error {
+		events = append(events, event)
+		return nil
+	}, bridgecore.RuntimeTarget{}, "session-1", bridgeruntime.AdapterEvent{Type: "prompt_submitted", PromptID: "prompt-1"})
+	if err != nil || len(events) != 1 || events[0].PromptID != "prompt-1" {
+		t.Fatalf("prompt id was not mapped: events=%+v err=%v", events, err)
+	}
+}
+
+func TestProviderDoesNotRebindResumeExactFailure(t *testing.T) {
+	adapter := &fakeAdapter{ensureErrors: []error{fmt.Errorf("session not found")}}
+	provider := NewProvider(adapter, nil, nil)
+	_, err := provider.ensureSession(context.Background(), bridgeruntime.EnsureSessionRequest{
+		KimiCodeSessionID: "missing-session",
+		WorkspaceRoot:     "D:/repo",
+		CreateMode:        bridgeruntime.SessionResumeExact,
+	})
+	if err == nil {
+		t.Fatal("expected resume_exact failure")
+	}
+	if len(adapter.ensureRequests) != 1 || adapter.ensureRequests[0].KimiCodeSessionID != "missing-session" {
+		t.Fatalf("resume_exact unexpectedly rebound: %+v", adapter.ensureRequests)
+	}
+}
+
+func TestProviderEnsureSessionAlwaysCreatesForNewBinding(t *testing.T) {
+	adapter := &fakeAdapter{}
+	provider := NewProvider(adapter, nil, nil)
+	_, err := provider.EnsureSession(context.Background(), bridgecore.RuntimeTarget{}, bridgecore.RuntimeSessionRequest{WorkDir: "D:/repo"})
+	if err != nil {
+		t.Fatalf("EnsureSession returned error: %v", err)
+	}
+	if len(adapter.ensureRequests) != 1 || adapter.ensureRequests[0].CreateMode != bridgeruntime.SessionCreateAlways || adapter.ensureRequests[0].KimiCodeSessionID != "" {
+		t.Fatalf("new binding did not request an isolated session: %+v", adapter.ensureRequests)
+	}
+}
+
+func TestProviderRetainsIfMissingCompatibilityRebind(t *testing.T) {
+	adapter := &fakeAdapter{ensureErrors: []error{fmt.Errorf("old session not found")}}
+	provider := NewProvider(adapter, nil, nil)
+	session, err := provider.ensureSession(context.Background(), bridgeruntime.EnsureSessionRequest{
+		KimiCodeSessionID: "old-session",
+		WorkspaceRoot:     "D:/repo",
+		SessionSource:     "server",
+		CreateMode:        bridgeruntime.SessionCreateIfMissing,
+	})
+	if err != nil || session.KimiCodeSessionID != "server-session-1" {
+		t.Fatalf("if_missing compatibility rebind returned session=%+v err=%v", session, err)
+	}
+	if len(adapter.ensureRequests) != 2 || adapter.ensureRequests[0].KimiCodeSessionID != "old-session" || adapter.ensureRequests[1].KimiCodeSessionID != "" || adapter.ensureRequests[1].CreateMode != bridgeruntime.SessionCreateIfMissing || adapter.ensureRequests[1].SessionSource != "server" {
+		t.Fatalf("unexpected if_missing rebind requests: %+v", adapter.ensureRequests)
 	}
 }
 

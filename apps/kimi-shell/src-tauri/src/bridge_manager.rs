@@ -20,11 +20,12 @@ use crate::{
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
     log_manager, settings_store,
     types::{
-        BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
-        BridgeChannelStatus, BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView,
-        BridgeMaskedSecretValue, BridgeRuntimeAdapterStatus, BridgeRuntimeLocatorStatus,
-        BridgeRuntimeState, BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord,
-        BridgeSettings, BridgeStatus, BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
+        AgentRoomCommandError, BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput,
+        BridgeChannelState, BridgeChannelStatus, BridgeConnectorSecretsMaskView,
+        BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue, BridgeRuntimeAdapterStatus,
+        BridgeRuntimeLocatorStatus, BridgeRuntimeState, BridgeSecretsMaskView,
+        BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings, BridgeStatus,
+        BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
     },
 };
 
@@ -38,6 +39,7 @@ const BRIDGE_ADMIN_TOKEN_FILE_ENV: &str = "KIMI_IM_BRIDGE_ADMIN_TOKEN_FILE";
 const BRIDGE_HOST_CONTROL_TOKEN_ENV: &str = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN";
 const BRIDGE_HOST_CONTROL_TOKEN_FILE_ENV: &str = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN_FILE";
 const KIMI_APP_RUNTIME_LOCATOR_FILE_ENV: &str = "KIMI_APP_RUNTIME_LOCATOR_FILE";
+const KIMI_AGENT_ROOM_ENABLED_ENV: &str = "KIMI_AGENT_ROOM_ENABLED";
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -263,6 +265,59 @@ pub fn stop_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
 pub fn restart_bridge(app: &AppHandle) -> anyhow::Result<BridgeStatus> {
     let _ = stop_bridge(app);
     start_bridge(app)
+}
+
+pub(crate) fn agent_room_client(
+    app: &AppHandle,
+) -> Result<BridgeHttpClient, AgentRoomCommandError> {
+    refresh_child_state(app).map_err(|_| {
+        AgentRoomCommandError::local("bridge_unavailable", "IM Bridge state is unavailable")
+    })?;
+    let mut snapshot = {
+        let state = app.state::<AppState>();
+        let runtime = state.bridge_runtime.lock().map_err(|_| {
+            AgentRoomCommandError::local("bridge_unavailable", "IM Bridge state is unavailable")
+        })?;
+        (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        )
+    };
+    if !matches!(
+        snapshot.0,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) && agent_room_feature_enabled()
+    {
+        start_bridge(app).map_err(|_| {
+            AgentRoomCommandError::local("bridge_unavailable", "IM Bridge failed to start")
+        })?;
+        let state = app.state::<AppState>();
+        let runtime = state.bridge_runtime.lock().map_err(|_| {
+            AgentRoomCommandError::local("bridge_unavailable", "IM Bridge state is unavailable")
+        })?;
+        snapshot = (
+            runtime.state,
+            runtime.admin_port,
+            runtime.admin_token.clone(),
+        );
+    }
+    if !matches!(
+        snapshot.0,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        return Err(AgentRoomCommandError::local(
+            "bridge_not_running",
+            "IM Bridge is not running",
+        ));
+    }
+    BridgeHttpClient::for_local_admin_port(snapshot.1, snapshot.2).map_err(|_| {
+        AgentRoomCommandError::local("bridge_unavailable", "IM Bridge client is unavailable")
+    })
+}
+
+pub(crate) fn agent_room_feature_enabled() -> bool {
+    env_flag_enabled(env::var(KIMI_AGENT_ROOM_ENABLED_ENV).ok().as_deref())
 }
 
 pub fn list_bridge_bindings(app: &AppHandle) -> anyhow::Result<Vec<BindingRecord>> {
@@ -1202,6 +1257,7 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         version: runtime.version.clone(),
         kimi_runtime_locator: BridgeRuntimeLocatorStatus::default(),
         runtime_adapter: BridgeRuntimeAdapterStatus::default(),
+        agent_room: Default::default(),
         connectors,
         pending_approvals: runtime.pending_approvals,
         bindings: runtime.bindings,
@@ -1345,51 +1401,48 @@ fn default_channel_state(enabled: bool, runtime_state: BridgeRuntimeState) -> Br
 
 fn refresh_child_state(app: &AppHandle) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
-    let mut runtime = state
-        .bridge_runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
-
-    let mut exit_message = None;
-    let mut stopping_exit = false;
-    if let Some(child) = runtime.child.as_mut() {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                runtime.child = None;
-                runtime.pid = None;
-                if runtime.state == BridgeRuntimeState::Stopping {
-                    stopping_exit = true;
-                } else {
-                    exit_message = Some(enrich_bridge_failure_message(
-                        app,
-                        &format!("bridge sidecar exited: {status}"),
-                    ));
+    let exit_reason = {
+        let mut runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        let mut exit_reason = None;
+        if let Some(child) = runtime.child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    runtime.child = None;
+                    runtime.pid = None;
+                    if runtime.state == BridgeRuntimeState::Stopping {
+                        finish_stop_transition(&mut runtime);
+                    } else {
+                        exit_reason = Some(format!("bridge sidecar exited: {status}"));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    exit_reason = Some(format!("failed to inspect bridge process: {error}"));
+                    runtime.child = None;
+                    runtime.pid = None;
                 }
             }
-            Ok(None) => {}
-            Err(error) => {
-                exit_message = Some(enrich_bridge_failure_message(
-                    app,
-                    &format!("failed to inspect bridge process: {error}"),
-                ));
-                runtime.child = None;
-                runtime.pid = None;
-            }
         }
-    }
+        exit_reason
+    };
 
-    if stopping_exit {
-        finish_stop_transition(&mut runtime);
-    } else if let Some(message) = exit_message {
-        runtime.state = BridgeRuntimeState::Crashed;
-        runtime.last_error_code = Some("platform_unavailable".to_string());
-        runtime.last_error = Some(message);
+    if let Some(reason) = exit_reason {
+        let message = enrich_bridge_failure_message(app, &reason);
+        let mut runtime = state
+            .bridge_runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge runtime mutex is poisoned"))?;
+        mark_crashed_if_not_restarted(&mut runtime, message);
     }
 
     Ok(())
 }
 
 fn record_failure(app: &AppHandle, message: &str) -> anyhow::Result<()> {
+    let message = enrich_bridge_failure_message(app, message);
     let state = app.state::<AppState>();
     let mut runtime = state
         .bridge_runtime
@@ -1399,8 +1452,17 @@ fn record_failure(app: &AppHandle, message: &str) -> anyhow::Result<()> {
     runtime.child = None;
     runtime.pid = None;
     runtime.last_error_code = Some("platform_unavailable".to_string());
-    runtime.last_error = Some(enrich_bridge_failure_message(app, message));
+    runtime.last_error = Some(message);
     Ok(())
+}
+
+fn mark_crashed_if_not_restarted(runtime: &mut BridgeProcessState, message: String) {
+    if runtime.child.is_some() || runtime.pid.is_some() {
+        return;
+    }
+    runtime.state = BridgeRuntimeState::Crashed;
+    runtime.last_error_code = Some("platform_unavailable".to_string());
+    runtime.last_error = Some(message);
 }
 
 fn cleanup_failed_start(app: &AppHandle, message: String) -> anyhow::Result<()> {
@@ -1937,6 +1999,7 @@ mod tests {
             version: Some("0.1.0".to_string()),
             kimi_runtime_locator: BridgeRuntimeLocatorStatus::default(),
             runtime_adapter: BridgeRuntimeAdapterStatus::default(),
+            agent_room: Default::default(),
             connectors: vec![BridgeChannelStatus {
                 connector_id: "telegram-default".to_string(),
                 connector_label: "Telegram 机器人 01".to_string(),
@@ -1973,6 +2036,21 @@ mod tests {
         finish_stop_transition(&mut runtime);
         assert_eq!(runtime.state, BridgeRuntimeState::Stopped);
         assert_eq!(runtime.pid, None);
+    }
+
+    #[test]
+    fn delayed_exit_diagnostic_does_not_overwrite_a_restarted_bridge() {
+        let mut stopped = BridgeProcessState::new("token".to_string());
+        mark_crashed_if_not_restarted(&mut stopped, "old process exited".to_string());
+        assert_eq!(stopped.state, BridgeRuntimeState::Crashed);
+        assert_eq!(stopped.last_error.as_deref(), Some("old process exited"));
+
+        let mut restarted = BridgeProcessState::new("token".to_string());
+        begin_start_transition(&mut restarted, 60_111, PathBuf::from("bridge.exe"), 5252);
+        mark_crashed_if_not_restarted(&mut restarted, "stale exit".to_string());
+        assert_eq!(restarted.state, BridgeRuntimeState::Starting);
+        assert_eq!(restarted.pid, Some(5252));
+        assert!(restarted.last_error.is_none());
     }
 
     #[test]

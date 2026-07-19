@@ -36,6 +36,7 @@ type Service struct {
 	recoveryPending   bool
 	recentEvents      map[string]struct{}
 	recentEventOrder  []string
+	botOpenID         string
 }
 
 func NewService(options Options) *Service {
@@ -111,6 +112,17 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 		return s.failAfterStart(ctx, "credential_probe", code, err)
 	}
+	identityGateway, ok := s.gateway.(BotIdentityGateway)
+	if !ok {
+		return s.failAfterStart(ctx, "bot_identity", "bot_identity_unavailable", fmt.Errorf("feishu gateway cannot resolve bot identity"))
+	}
+	botOpenID, err := identityGateway.BotOpenID(ctx)
+	if err != nil || strings.TrimSpace(botOpenID) == "" {
+		return s.failAfterStart(ctx, "bot_identity", "bot_identity_unavailable", firstServiceError(err, fmt.Errorf("feishu bot identity is empty")))
+	}
+	s.mu.Lock()
+	s.botOpenID = strings.TrimSpace(botOpenID)
+	s.mu.Unlock()
 
 	checkpoint, err := s.loadCheckpoint(ctx)
 	if err != nil {
@@ -239,6 +251,9 @@ func (s *Service) OnCardAction(ctx context.Context, event *CardActionEvent) (*Ca
 }
 
 func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) (bool, error) {
+	if !s.acceptMessageIdentity(event) {
+		return true, nil
+	}
 	if command, key, ok := parseBridgeCommand(event); ok {
 		key.ConnectorID = s.connectorID()
 		if err := s.handleBridgeCommand(ctx, event, key, command); err != nil {
@@ -425,6 +440,64 @@ func (s *Service) processMessageEvent(ctx context.Context, event *MessageEvent) 
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Service) acceptMessageIdentity(event *MessageEvent) bool {
+	if event == nil {
+		return false
+	}
+	senderType := strings.TrimSpace(strings.ToLower(event.SenderType))
+	if senderType != "" && senderType != "user" {
+		return false
+	}
+	s.mu.RLock()
+	botOpenID := s.botOpenID
+	s.mu.RUnlock()
+	if botOpenID != "" && strings.EqualFold(strings.TrimSpace(event.SenderID), botOpenID) {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(event.ChatType)) {
+	case "p2p":
+		return true
+	case "group", "topic_group":
+		if strings.TrimSpace(strings.ToLower(event.MessageType)) != "text" {
+			return true // Attachments are cached but never execute by themselves.
+		}
+		text, ok := decodeTextContent(event.Content)
+		if !ok {
+			return false
+		}
+		text = strings.TrimSpace(text)
+		for _, mention := range event.Mentions {
+			if strings.TrimSpace(mention.ID) != botOpenID {
+				continue
+			}
+			key := strings.TrimSpace(mention.Key)
+			if key != "" && strings.HasPrefix(text, key) {
+				return true
+			}
+			if strings.HasPrefix(text, "<at") && strings.Contains(text[:minInt(len(text), 256)], botOpenID) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func firstServiceError(err, fallback error) error {
+	if err != nil {
+		return err
+	}
+	return fallback
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func (s *Service) applyBridgeSkillPromptContext(prompt string, binding domain.SessionBinding) string {

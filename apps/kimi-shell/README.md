@@ -12,7 +12,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
-- Workspace Grid 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持 1/2/3/4/5/6 个可见窗格、最多 12 个总窗格与 Pane Shelf 收纳、窗格切换、最大化、拖拽调宽/调高、命名布局保存/恢复、外部页降级、嵌入式子 Webview 承载、native Webview per-pane 存储目录与独立应用 WebviewWindow 打开
+- Workspace Grid V2 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持 1/2/3/4/5/6 个可见窗格、最多 12 个总窗格与 Pane Shelf 收纳；`Agent Room` 以无 iframe 的本地 Pane 承载。V2 使用独立 state/saved-layout keys，从 V1 只读迁移并保留旧键回滚。
 - 后端守护与健康探测：优先复用同一 `KIMI_CODE_HOME` 下健康的既有 Kimi Server，否则拉起 `kimi server run --foreground --port <port>`；读取 `server.token` 并用 `#token=` 接入 workspace
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
 - 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、API 配置、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；API 配置与微信/飞书扫码均在设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
@@ -66,13 +66,17 @@ pnpm check:nfr:reliability
 - `src/app/useShellController.ts` 保留窗口、workspace、prefill、Skill 动作 handler 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，轮询放在 `src/app/useShellPollingController.ts`，Bridge 运行态刷新放在 `src/app/useBridgeRuntimeController.ts`，Skill Center 状态和刷新放在 `src/app/useSkillCenterController.ts`，workspace embed URL 与 import picker 状态分别放在 `src/app/useWorkspaceEmbedUrl.ts`、`src/app/useWorkspaceImportController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`。
-- `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/bridge.rs`、`src-tauri/src/commands/install.rs`、`src-tauri/src/commands/skills.rs`、`src-tauri/src/commands/workspace_grid.rs`、`src-tauri/src/commands/context_menu.rs` 和 `src-tauri/src/commands/workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
+- `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/agent_room.rs`、`bridge.rs`、`install.rs`、`skills.rs`、`workspace_grid.rs`、`context_menu.rs` 和 `workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
+- `src-tauri/src/agent_room_event_pump.rs` 负责默认关闭的 Agent Room main-window Event Pump：25 秒长轮询、单调 Cursor、generation 取消、退避、30 秒空闲 grace 与 sidecar 重启恢复；`src/services/agentRoomService.ts` 是 React 唯一的 Agent Room command/event 薄入口。
+- `src/features/workspace-grid/AgentRoomPane.tsx` 是 Agent Room 本地 Pane shell；复用 Grid header、移动/最大化/收纳/挂起机制，不创建 iframe 或 per-pane storage namespace。`AgentRoomAgentPanel.tsx`、`AgentRoomRoomPanel.tsx` 与 `AgentRoomMemberPanel.tsx` 分别承载 Agent、Room、显式 Member/Session 绑定管理；`AgentRoomTimelinePanel.tsx` 显示当前 Message/Run/Event、Queue/Retry/Abort、Prompt Assembly 诊断并从明确 Run Session 打开 Code Pane；`AgentRoomComposer.tsx` 提供显式目标、模式、队列策略、附件与 shared Run；`AgentRoomWorkflowPanel.tsx` 提供受限 DAG 模板、显式 Custom 定义、进度与人工继续/停止；`AgentRoomConnectorPanel.tsx` 管理独立 Agent/Connector 绑定及 Session 策略；`AgentRoomApprovalPanel.tsx` 只操作 Agent Room one-shot approval；`AgentRoomDiagnosticsPanel.tsx` 生成不含 token/raw log 的安全报告。以上 UI 都不接触 token。
+- `src/features/workspace-grid/usePaneSessionRegistry.ts` 在 Agent Room Pane 存在时把 Code Pane 全量快照以 250ms trailing debounce 同步到 Bridge；`agentRoomObservationStore.ts` 只保存去重 Session 观察投影、pin、event seq 与能力/泵状态，不复制完整 Session。generation 冲突使用 Admin error details 恢复，普通断线有界退避。
 - `src-tauri/src/workspaces.rs` 管理已注册工作区，并通过 `workspace_list_file_entries` / `workspace_read_file` 提供受根目录约束的只读文件预览；前端复用 Skill/Harness 的 `SkillFileEntry` 与 `SkillFileContent` 契约。
 
 ## 安全约定
 
 - Tauri CSP、capability 分层、打包资源 allowlist 与 command registry 由 `pnpm check:nfr:security` 守护。
 - 自定义 Tauri commands 通过应用 manifest 和分组 permission 显式授权：`main` 使用完整注册表，`prefill` 只使用启动监控与恢复命令，`workspace-import-picker` 只使用导入请求命令。
+- Agent Room Admin token 只存在于 Rust Bridge 生命周期状态；React 只能调用 main-only `agent_room_*` commands 和监听脱敏事件，不得读取 locator、Runtime Client、HTTP Client 或 token。
 - `main` 窗口保留 webview 创建权限；`prefill` 与 `workspace-import-picker` 不共享这组权限，Picker 仅额外持有目录选择所需的 `dialog:allow-open`。
 - 外部 iframe 只允许内置 Kimi origin 和 `VITE_KIMI_EXTERNAL_FRAME_ALLOWLIST` 中的精确 origin；任意外部 URL 应通过显式“在浏览器打开”或“在应用窗口打开”动作承载。
 - `workspaceUrl` 展示面只能使用 redacted 值；带 `#token=` 的 URL 只用于 iframe/embed 导航，不进入诊断、日志或可见文本。

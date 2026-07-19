@@ -1,3 +1,53 @@
+# Agent Room V1（v1.1）
+
+## 任务契约
+
+- 用户目标：按 `.ai/plans/agent-room-2026-07-18/` 的 v1.1 基线完成并验证 Observer MVP、Forward MVP 与完整 V1 DoD。
+- 直接交付物：Go/Rust/React 实现、只增 migration、accepted ADR、自动化/手工 Gate 证据、同步后的 PRD/SPEC/PLAN/current-state/changes/release notes。
+- 影响范围：`apps/kimi-im-bridge`、`apps/kimi-shell`、`.ai/decisions`、`.ai/architecture/current-state.md`、`.ai/changes` 与 Agent Room 计划文档。
+- 非目标：不重做 Kimi Code Web、不复制完整 Session、不做云端多人协作、不突破 6 个可见 Pane、不 commit/push/PR、不重置或清理用户工作树。
+- 约束：Session 是唯一执行/对话真相；Observer 先于 Forward；React 无 token；同 Session 单一执行所有者；Abort 未确认不替代；Feature Flag 默认关闭；migration 只增不改。
+- 验收：PLAN §25、§26、§27、§31 全部有可追溯证据；G3 环境缺失项必须写明 `blocked` 与解除条件。
+- 已知不确定性：Runtime Phase 0 已收敛；真实 active Abort 确认、Session-scope Approval、真实 Connector 凭据、Runtime model、Windows CGO、签名私钥和隔离安装 VM 仍按证据 blocked。
+- 保守假设：未验证 Runtime 能力一律关闭并明确降级；不以 Draft 代替事实；§28 优先于 Phase 章节中 Lease/Queue 与 migration 的顺序冲突。
+- 架构入口：`.ai/architecture/README.md`、`current-state.md`、`verification-gates.md`；索引已声明其余三个主题文档尚未建立。
+- 验证入口：Go test/race、Rust test、Shell test/build/verify、三个 registry/capability/resource 检查、Tauri build、真实 Runtime/Connector/NSIS/MSI 手工矩阵。
+- 文档触发：每个 Phase 更新 PLAN/PRD/SPEC/current-state/changes；CreateMode、migration、Admin/Tauri 契约、Grid V2 跨门前先 accepted ADR；README 只在长期职责/契约变化时更新。
+
+## Phase / AR Checklist
+
+- [x] Phase 0：AR-000 基线、AR-001 Runtime Capability Probe、AR-002 Fake Runtime（桌面截图与本机 race/Rust binary 按证据 blocked，不冒充通过）。
+- [x] Phase 1：AR-100 WorkDir、AR-101 CreateMode、AR-102 Session 唯一性、AR-103 Sidecar 语义、AR-104 附件（附件 wire 未验证时显式失败）。
+  - [x] AR-100：per-connector WorkDir / reset JSON 契约、三 Adapter override/global fallback、4 Connector round-trip 与 legacy fixture。
+  - [x] AR-101：Accepted CreateMode ADR；Server `always` / `resume_exact` / `reuse_latest` / compatibility `if_missing` 与 Workspace mismatch 测试。
+  - [x] AR-102：用户库重复 Session 只读审计、IM 跨 Connector 禁止共享、Store 事务级 Create/Rebind 防重与并发测试；Agent Room 独立表约束冻结，实体表留待 AR-300。
+- [x] Phase 2a：AR-200 ExecutionService。
+  - [x] AR-200：共享执行主链、Room target projection、strict exact、PromptID、Approval 内存关联、Duplicate/Rebind 边界与三 Adapter 回归。
+- [x] Phase 3a：AR-300～304 migrations/store。
+- [x] Phase 2b：AR-201～203 Lease/Queue/Busy（真实 Abort 确认仍 capability-blocked；替代 Run fail closed）。
+- [x] Phase 3b：AR-305～306 Admin API/Diagnostics（flag 默认关闭；Observer/Forward 未开放）。
+- [x] Phase 4：AR-400～405 Multi Session Observer（Fake 1/6 全矩阵；真实 0.27.0 只读 1/6 transport）。
+- [x] Phase 5～7：Rust Pump、Grid V2、Native Pane、Reverse Mirror；Observer MVP Gate 已通过后才开放 Forward。
+- [x] Phase 8～10：Forward Dispatch、Approval/Recovery、Workflow/Connector（真实 Connector matrix 单独 blocked）。
+- [ ] Release：本地 Product/Architecture/Security/Reliability、NSIS/MSI 构建与静态升级兼容已验证；签名 updater、隔离安装升级与真实 Connector G3 blocked。
+
+## Phase 0 基线
+
+- [x] 起始 commit：`1cc7dbaca9405d055bd237e2b6f6db83b1cc86cf`；分支 `main`，未切换或重置。
+- [x] `go test ./...`：通过。
+- [x] `pnpm -C apps/kimi-shell test`：18 files / 134 tests 通过。
+- [x] `pnpm -C apps/kimi-shell build`：通过。
+- [x] `cargo test --manifest-path apps/kimi-shell/src-tauri/Cargo.toml`：Windows manifest 修复后 235 tests 通过。
+- [ ] `go test -race ./...`：blocked，当前 `CGO_ENABLED=0`；需 CGO+GCC 或 Linux CI。
+- [x] 1/2/6 Pane：Fake Runtime 全矩阵、真实 Runtime 1/6 transport 与独立 Tauri Native Pane/Sidecar 恢复 Gate 通过。
+
+## Final Review
+
+- 已实现：Observer/Forward/Workflow/Connector 本地 V1；Feature Flag 继续默认关闭，未 commit/push/release。
+- 已验证：Go 全量/vet、Rust 235 tests、前端 175 tests、正式 release binary、NSIS/MSI、bundled sidecar smoke、Grid/DB migration 与安全 Gate。
+- blocked：Go race 需 CGO；真实 Forward 需 Runtime model；真实 Feishu/Weixin 需隔离凭据；updater/安装升级 G3 需签名私钥与隔离 Windows VM。
+- 已发布：否。
+
 # Explorer 右键打开独立 Session 与 Pane Shelf
 
 ## Checklist

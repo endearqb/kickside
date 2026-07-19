@@ -23,15 +23,17 @@ import (
 type fakeGateway struct {
 	mu sync.Mutex
 
-	probeErr      error
-	runFunc       func(context.Context, EventHandler) error
-	replyFunc     func(context.Context, SendMessageRequest) (*SendMessageResult, error)
-	createFunc    func(context.Context, SendMessageRequest) (*SendMessageResult, error)
-	patchFunc     func(context.Context, string, string) error
-	uploadImage   func(context.Context, string) (*UploadedResource, error)
-	uploadFile    func(context.Context, string, string) (*UploadedResource, error)
-	downloadImage func(context.Context, string) (*DownloadedResource, error)
-	downloadFile  func(context.Context, string) (*DownloadedResource, error)
+	probeErr       error
+	botOpenID      string
+	botIdentityErr error
+	runFunc        func(context.Context, EventHandler) error
+	replyFunc      func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	createFunc     func(context.Context, SendMessageRequest) (*SendMessageResult, error)
+	patchFunc      func(context.Context, string, string) error
+	uploadImage    func(context.Context, string) (*UploadedResource, error)
+	uploadFile     func(context.Context, string, string) (*UploadedResource, error)
+	downloadImage  func(context.Context, string) (*DownloadedResource, error)
+	downloadFile   func(context.Context, string) (*DownloadedResource, error)
 
 	replyCalls  []SendMessageRequest
 	createCalls []SendMessageRequest
@@ -43,6 +45,16 @@ type fakeGateway struct {
 
 func (f *fakeGateway) ProbeCredentials(context.Context) error {
 	return f.probeErr
+}
+
+func (f *fakeGateway) BotOpenID(context.Context) (string, error) {
+	if f.botIdentityErr != nil {
+		return "", f.botIdentityErr
+	}
+	if strings.TrimSpace(f.botOpenID) == "" {
+		return "ou_bot", nil
+	}
+	return f.botOpenID, nil
 }
 
 func (f *fakeGateway) Run(ctx context.Context, handler EventHandler) error {
@@ -288,6 +300,37 @@ func TestServiceProcessMessageCreatesBindingAndReusesSession(t *testing.T) {
 	}
 }
 
+func TestServiceAcceptsOnlyExactSelfMentionAndUserSender(t *testing.T) {
+	service := &Service{botOpenID: "ou_self"}
+	self := &MessageEvent{ChatType: "group", MessageType: "text", Content: `{"text":"@_user_1 inspect"}`, Mentions: []Mention{{Key: "@_user_1", ID: "ou_self"}}, SenderID: "ou_user", SenderType: "user"}
+	if !service.acceptMessageIdentity(self) {
+		t.Fatal("exact self mention should be accepted")
+	}
+	otherService := &Service{botOpenID: "ou_other"}
+	if otherService.acceptMessageIdentity(self) {
+		t.Fatal("another bot must not accept the same group event")
+	}
+	plainName := *self
+	plainName.Content = `{"text":"@Kimi inspect"}`
+	plainName.Mentions = []Mention{{Name: "Kimi", ID: "ou_self"}}
+	if service.acceptMessageIdentity(&plainName) {
+		t.Fatal("plain display-name mention must fail closed")
+	}
+	appSender := *self
+	appSender.SenderType = "app"
+	if service.acceptMessageIdentity(&appSender) {
+		t.Fatal("app sender must be ignored")
+	}
+	selfSender := *self
+	selfSender.SenderID = "ou_self"
+	if service.acceptMessageIdentity(&selfSender) {
+		t.Fatal("outbound echo must be ignored")
+	}
+	if !service.acceptMessageIdentity(&MessageEvent{ChatType: "p2p", MessageType: "text", SenderType: "user"}) {
+		t.Fatal("user p2p message should retain compatibility")
+	}
+}
+
 func TestServiceProcessMessagePassesAutoApproveToOrchestrator(t *testing.T) {
 	t.Parallel()
 
@@ -378,7 +421,8 @@ func TestServiceProcessMessageSendFailureDoesNotAdvanceAndDedupesChunks(t *testi
 		ChatID:      "chat-10",
 		ChatType:    "group",
 		MessageType: "text",
-		Content:     `{"text":"@kimi hello"}`,
+		Content:     `{"text":"@_user_1 hello"}`,
+		Mentions:    []Mention{{Key: "@_user_1", ID: "ou_bot", Name: "Kimi"}},
 	}
 
 	advance, err := service.processMessageEvent(context.Background(), event)
@@ -426,7 +470,8 @@ func TestServiceProcessMessageDoesNotAutoOnboardGroupChats(t *testing.T) {
 		ChatID:      "chat-group-1",
 		ChatType:    "group",
 		MessageType: "text",
-		Content:     `{"text":"@kimi hello group"}`,
+		Content:     `{"text":"@_user_1 hello group"}`,
+		Mentions:    []Mention{{Key: "@_user_1", ID: "ou_bot", Name: "Kimi"}},
 	})
 	if err != nil || !advance {
 		t.Fatalf("group processMessageEvent returned advance=%v err=%v", advance, err)
@@ -1076,6 +1121,7 @@ func newTestService(t *testing.T, cfg Config) (*Service, *store.Store, *fakeGate
 		Store:         storeHandle,
 		Logger:        noopLogger{},
 	})
+	service.botOpenID = "ou_bot"
 	return service, storeHandle, gateway, runtimeExec
 }
 

@@ -27,10 +27,58 @@ type KimiCodeServerAdapter struct {
 	wsDialer    *websocket.Dialer
 }
 
+type SessionTranscriptQuery struct {
+	BeforeID string
+	AfterID  string
+	Role     string
+	PageSize int
+}
+
+type SessionTranscriptPage struct {
+	Items   []json.RawMessage `json:"items"`
+	HasMore bool              `json:"has_more"`
+}
+
+func (a *KimiCodeServerAdapter) CurrentGeneration() (int64, error) {
+	locator, err := a.loadLocator()
+	if err != nil {
+		return 0, err
+	}
+	return locator.Generation, nil
+}
+
+func (a *KimiCodeServerAdapter) GetSessionTranscript(ctx context.Context, sessionID string, query SessionTranscriptQuery) (SessionTranscriptPage, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return SessionTranscriptPage{}, fmt.Errorf("session id is required")
+	}
+	values := url.Values{}
+	if value := strings.TrimSpace(query.BeforeID); value != "" {
+		values.Set("before_id", value)
+	}
+	if value := strings.TrimSpace(query.AfterID); value != "" {
+		values.Set("after_id", value)
+	}
+	if value := strings.TrimSpace(query.Role); value != "" {
+		values.Set("role", value)
+	}
+	if query.PageSize <= 0 || query.PageSize > 100 {
+		query.PageSize = 100
+	}
+	values.Set("page_size", fmt.Sprintf("%d", query.PageSize))
+	var page SessionTranscriptPage
+	path := "/sessions/" + url.PathEscape(sessionID) + "/messages?" + values.Encode()
+	if err := a.doJSON(ctx, http.MethodGet, path, nil, &page); err != nil {
+		return SessionTranscriptPage{}, err
+	}
+	return page, nil
+}
+
 type runtimeLocatorSnapshot struct {
-	Origin    string `json:"origin"`
-	TokenPath string `json:"tokenPath"`
-	Health    string `json:"health"`
+	Origin     string `json:"origin"`
+	TokenPath  string `json:"tokenPath"`
+	Health     string `json:"health"`
+	Generation int64  `json:"generation,omitempty"`
 }
 
 type apiEnvelope struct {
@@ -46,12 +94,15 @@ type apiSessionPage struct {
 }
 
 type apiSession struct {
-	ID          string         `json:"id"`
-	WorkspaceID string         `json:"workspace_id"`
-	UpdatedAt   string         `json:"updated_at"`
-	Status      string         `json:"status"`
-	Metadata    map[string]any `json:"metadata"`
-	LastSeq     int            `json:"last_seq"`
+	ID                 string         `json:"id"`
+	WorkspaceID        string         `json:"workspace_id"`
+	UpdatedAt          string         `json:"updated_at"`
+	Status             string         `json:"status"`
+	Busy               bool           `json:"busy"`
+	MainTurnActive     bool           `json:"main_turn_active"`
+	PendingInteraction string         `json:"pending_interaction"`
+	Metadata           map[string]any `json:"metadata"`
+	LastSeq            int            `json:"last_seq"`
 }
 
 type apiWorkspace struct {
@@ -64,6 +115,10 @@ type apiPromptResult struct {
 	PromptID      string `json:"prompt_id"`
 	UserMessageID string `json:"user_message_id"`
 	Status        string `json:"status"`
+}
+
+type apiRuntimeConfig struct {
+	DefaultModel string `json:"default_model"`
 }
 
 type apiApprovalPage struct {
@@ -113,12 +168,37 @@ func (a *KimiCodeServerAdapter) EnsureWorkspace(ctx context.Context, root string
 }
 
 func (a *KimiCodeServerAdapter) EnsureSession(ctx context.Context, request EnsureSessionRequest) (SessionRef, error) {
-	if sessionID := strings.TrimSpace(request.KimiCodeSessionID); sessionID != "" {
+	mode := request.CreateMode
+	if mode == "" {
+		mode = SessionCreateIfMissing
+	}
+	if mode != SessionCreateIfMissing && mode != SessionCreateAlways && mode != SessionResumeExact && mode != SessionReuseLatest {
+		return SessionRef{}, fmt.Errorf("unsupported session create mode %q", mode)
+	}
+
+	sessionID := strings.TrimSpace(request.KimiCodeSessionID)
+	if sessionID != "" {
+		if mode == SessionCreateAlways || mode == SessionReuseLatest {
+			return SessionRef{}, fmt.Errorf("session id cannot be used with create mode %q", mode)
+		}
 		session, err := a.getSession(ctx, sessionID)
 		if err != nil {
 			return SessionRef{}, err
 		}
-		return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "imported")), nil
+		if mode == SessionResumeExact {
+			workspaceID := strings.TrimSpace(request.WorkspaceID)
+			if workspaceID != "" && workspaceID != strings.TrimSpace(session.WorkspaceID) {
+				return SessionRef{}, fmt.Errorf("workspace_mismatch: session %s is not in workspace %s", sessionID, workspaceID)
+			}
+			workspaceRoot := strings.TrimSpace(request.WorkspaceRoot)
+			if workspaceRoot != "" && !samePath(session.workDir(), workspaceRoot) {
+				return SessionRef{}, fmt.Errorf("workspace_mismatch: session %s is not in workspace root %s", sessionID, workspaceRoot)
+			}
+		}
+		return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "imported"), WorkspaceRef{}), nil
+	}
+	if mode == SessionResumeExact {
+		return SessionRef{}, fmt.Errorf("session id is required for create mode %q", mode)
 	}
 
 	workspaceRoot := strings.TrimSpace(request.WorkspaceRoot)
@@ -130,31 +210,54 @@ func (a *KimiCodeServerAdapter) EnsureSession(ctx context.Context, request Ensur
 			workspaceRoot = firstNonEmptyString(workspaceRoot, workspace.Root)
 		}
 	}
+	workspace := WorkspaceRef{WorkspaceID: workspaceID, Root: workspaceRoot}
 
 	if workspaceID != "" {
+		if mode == SessionCreateAlways {
+			session, err := a.createSession(ctx, workspaceID, "")
+			if err != nil {
+				return SessionRef{}, err
+			}
+			return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "server_created"), workspace), nil
+		}
 		sessions, err := a.listSessions(ctx, workspaceID)
 		if err != nil {
 			return SessionRef{}, err
 		}
 		if len(sessions) > 0 {
-			return sessionRefFromAPI(sessions[0], firstNonEmptyString(request.SessionSource, "server_reconciled")), nil
+			source := "server_reconciled"
+			if mode == SessionReuseLatest {
+				source = "server_reused_latest"
+			}
+			return sessionRefFromAPI(sessions[0], firstNonEmptyString(request.SessionSource, source), workspace), nil
 		}
 		session, err := a.createSession(ctx, workspaceID, "")
 		if err != nil {
 			return SessionRef{}, err
 		}
-		return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "auto")), nil
+		return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "auto"), workspace), nil
 	}
 
 	if workspaceRoot == "" {
 		return SessionRef{}, fmt.Errorf("workspace root or workspace id is required")
+	}
+	if mode == SessionCreateAlways {
+		session, err := a.createSession(ctx, "", workspaceRoot)
+		if err != nil {
+			return SessionRef{}, err
+		}
+		return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "server_created"), workspace), nil
 	}
 
 	sessions, err := a.listSessions(ctx, "")
 	if err == nil {
 		for _, session := range sessions {
 			if samePath(session.workDir(), workspaceRoot) {
-				return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "server_reconciled")), nil
+				source := "server_reconciled"
+				if mode == SessionReuseLatest {
+					source = "server_reused_latest"
+				}
+				return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, source), workspace), nil
 			}
 		}
 	}
@@ -163,7 +266,45 @@ func (a *KimiCodeServerAdapter) EnsureSession(ctx context.Context, request Ensur
 	if err != nil {
 		return SessionRef{}, err
 	}
-	return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "auto")), nil
+	return sessionRefFromAPI(session, firstNonEmptyString(request.SessionSource, "auto"), workspace), nil
+}
+
+func (a *KimiCodeServerAdapter) InspectSession(ctx context.Context, sessionID string) (RuntimeSessionState, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return RuntimeSessionState{}, fmt.Errorf("session id is required")
+	}
+	session, err := a.getSession(ctx, sessionID)
+	if err != nil {
+		return RuntimeSessionState{}, err
+	}
+	locator, err := a.loadLocator()
+	if err != nil {
+		return RuntimeSessionState{}, err
+	}
+	return RuntimeSessionState{
+		SessionID:     session.ID,
+		WorkspaceID:   session.WorkspaceID,
+		WorkspaceRoot: session.workDir(),
+		Status:        sessionRuntimeStatus(session),
+		LastSeq:       int64(session.LastSeq),
+		ObservedAt:    time.Now().UTC().Format(time.RFC3339),
+		Generation:    locator.Generation,
+	}, nil
+}
+
+func sessionRuntimeStatus(session apiSession) string {
+	if status := strings.TrimSpace(session.Status); status != "" {
+		return status
+	}
+	pending := strings.ToLower(strings.TrimSpace(session.PendingInteraction))
+	if pending != "" && pending != "none" {
+		return "waiting_approval"
+	}
+	if session.Busy || session.MainTurnActive {
+		return "running"
+	}
+	return "idle"
 }
 
 func (a *KimiCodeServerAdapter) SubmitPrompt(ctx context.Context, request AdapterPromptRequest, sink AdapterEventSink) (AdapterPromptResult, error) {
@@ -174,6 +315,9 @@ func (a *KimiCodeServerAdapter) SubmitPrompt(ctx context.Context, request Adapte
 	}
 	if text == "" {
 		return AdapterPromptResult{}, fmt.Errorf("prompt text is required")
+	}
+	if len(request.Attachments) > 0 {
+		return AdapterPromptResult{}, fmt.Errorf("attachments_unsupported: Kimi Code Server prompt attachment contract is unavailable")
 	}
 	cursor := 0
 	if session, err := a.getSession(ctx, sessionID); err == nil {
@@ -186,7 +330,14 @@ func (a *KimiCodeServerAdapter) SubmitPrompt(ctx context.Context, request Adapte
 	if len(request.Metadata) > 0 {
 		body["metadata"] = request.Metadata
 	}
-	applyPromptControls(body, request.Controls)
+	controls := request.Controls
+	if strings.TrimSpace(controls.Model) == "" {
+		var config apiRuntimeConfig
+		if err := a.doJSON(ctx, http.MethodGet, "/config", nil, &config); err == nil {
+			controls.Model = strings.TrimSpace(config.DefaultModel)
+		}
+	}
+	applyPromptControls(body, controls)
 
 	var result apiPromptResult
 	path := fmt.Sprintf("/sessions/%s/prompts", url.PathEscape(sessionID))
@@ -387,15 +538,48 @@ func handlePromptWSFrame(
 		reason := strings.TrimSpace(payloadString(frame.Payload, "reason"))
 		status := statusFromTurnEndReason(reason)
 		eventType := "turn_completed"
+		code, message := promptFailureFromPayload(frame.Payload)
 		if status == "failed" || status == "aborted" {
 			eventType = "turn_failed"
 		}
-		return status, true, sinkAdapterEvent(sink, AdapterEvent{Type: eventType, PromptID: promptID, Status: status, Error: errorFromReason(status, reason)})
+		if message == "" {
+			message = errorFromReason(status, reason)
+		}
+		if sinkErr := sinkAdapterEvent(sink, AdapterEvent{Type: eventType, PromptID: promptID, Status: status, ErrorCode: code, Error: message}); sinkErr != nil {
+			return status, true, sinkErr
+		}
+		if status == "failed" {
+			return status, true, &PromptFailureError{Code: code, Message: message}
+		}
+		return status, true, nil
 	case "prompt.completed":
-		return "completed", true, sinkAdapterEvent(sink, AdapterEvent{Type: "prompt_completed", PromptID: promptID, Status: "completed"})
+		status := statusFromTurnEndReason(payloadString(frame.Payload, "reason"))
+		if sinkErr := sinkAdapterEvent(sink, AdapterEvent{Type: "prompt_completed", PromptID: promptID, Status: status}); sinkErr != nil {
+			return status, true, sinkErr
+		}
+		if status == "failed" {
+			code, message := promptFailureFromPayload(frame.Payload)
+			return status, true, &PromptFailureError{Code: code, Message: message}
+		}
+		return status, true, nil
 	default:
 		return "", false, nil
 	}
+}
+
+func promptFailureFromPayload(payload json.RawMessage) (string, string) {
+	var value struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(payload, &value) != nil {
+		return "", ""
+	}
+	return firstNonEmptyString(value.Code, value.Error.Code), firstNonEmptyString(value.Message, value.Error.Message)
 }
 
 func writePong(conn *websocket.Conn, frame wsFrame) error {
@@ -731,11 +915,11 @@ func normalizeServerAPIPath(apiPath string) string {
 	return "/api/v1/" + apiPath
 }
 
-func sessionRefFromAPI(session apiSession, source string) SessionRef {
+func sessionRefFromAPI(session apiSession, source string, fallback WorkspaceRef) SessionRef {
 	return SessionRef{
 		KimiCodeSessionID: session.ID,
-		WorkspaceRoot:     session.workDir(),
-		WorkspaceID:       session.WorkspaceID,
+		WorkspaceRoot:     firstNonEmptyString(session.workDir(), fallback.Root),
+		WorkspaceID:       firstNonEmptyString(session.WorkspaceID, fallback.WorkspaceID),
 		SessionSource:     source,
 		RuntimeAdapter:    RuntimeAdapterServer,
 	}

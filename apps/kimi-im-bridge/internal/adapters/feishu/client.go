@@ -134,6 +134,55 @@ func (c *Client) ProbeCredentials(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) BotOpenID(ctx context.Context) (string, error) {
+	tokenBody, _ := json.Marshal(map[string]string{"app_id": c.appID, "app_secret": c.appSecret})
+	tokenRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, c.domain+"/open-apis/auth/v3/tenant_access_token/internal", bytes.NewReader(tokenBody))
+	if err != nil {
+		return "", err
+	}
+	tokenRequest.Header.Set("Content-Type", "application/json")
+	tokenResponse, err := c.httpClient.Do(tokenRequest)
+	if err != nil {
+		return "", err
+	}
+	defer tokenResponse.Body.Close()
+	var tokenPayload struct {
+		Code  int    `json:"code"`
+		Msg   string `json:"msg"`
+		Token string `json:"tenant_access_token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(tokenResponse.Body, 1<<20)).Decode(&tokenPayload); err != nil {
+		return "", err
+	}
+	if tokenResponse.StatusCode != http.StatusOK || tokenPayload.Code != 0 || strings.TrimSpace(tokenPayload.Token) == "" {
+		return "", &APIError{Operation: "bot_identity_token", Code: tokenPayload.Code, Message: tokenPayload.Msg, HTTPStatus: tokenResponse.StatusCode}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.domain+"/open-apis/bot/v3/info", nil)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+tokenPayload.Token)
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	var payload struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Bot  struct {
+			OpenID string `json:"open_id"`
+		} `json:"bot"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
+		return "", err
+	}
+	if response.StatusCode != http.StatusOK || payload.Code != 0 || strings.TrimSpace(payload.Bot.OpenID) == "" {
+		return "", &APIError{Operation: "bot_identity", Code: payload.Code, Message: payload.Msg, HTTPStatus: response.StatusCode}
+	}
+	return strings.TrimSpace(payload.Bot.OpenID), nil
+}
+
 func (c *Client) ReplyMessage(ctx context.Context, request SendMessageRequest) (*SendMessageResult, error) {
 	body := larkim.NewReplyMessageReqBodyBuilder().
 		Content(request.Content).
@@ -641,6 +690,7 @@ func convertMessageEvent(event *larkim.P2MessageReceiveV1) *MessageEvent {
 			continue
 		}
 		mentions = append(mentions, Mention{
+			Key:  stringValue(mention.Key),
 			ID:   userIDOpenID(mention.Id),
 			Name: stringValue(mention.Name),
 		})
@@ -657,6 +707,7 @@ func convertMessageEvent(event *larkim.P2MessageReceiveV1) *MessageEvent {
 		Content:     stringValue(message.Content),
 		Mentions:    mentions,
 		SenderID:    senderOpenID(sender),
+		SenderType:  senderType(sender),
 		SenderName:  "",
 		ReceivedAt:  messageTime(message.CreateTime),
 		RawRef:      stringValue(message.MessageId),
@@ -856,6 +907,13 @@ func senderOpenID(sender *larkim.EventSender) string {
 		return ""
 	}
 	return userIDOpenID(sender.SenderId)
+}
+
+func senderType(sender *larkim.EventSender) string {
+	if sender == nil {
+		return ""
+	}
+	return stringValue(sender.SenderType)
 }
 
 func userIDOpenID(userID *larkim.UserId) string {

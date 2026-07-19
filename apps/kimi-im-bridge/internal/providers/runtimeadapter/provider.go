@@ -39,11 +39,26 @@ func NewProvider(adapter bridgeruntime.RuntimeAdapter, approvals ApprovalStore, 
 	}
 }
 
+func (p *Provider) InspectSession(ctx context.Context, sessionID string) (bridgeruntime.RuntimeSessionState, error) {
+	reader, ok := p.adapter.(interface {
+		InspectSession(context.Context, string) (bridgeruntime.RuntimeSessionState, error)
+	})
+	if !ok {
+		return bridgeruntime.RuntimeSessionState{}, fmt.Errorf("server_provider_required: runtime session inspection is unavailable")
+	}
+	return reader.InspectSession(ctx, strings.TrimSpace(sessionID))
+}
+
+func (p *Provider) AbortPrompt(ctx context.Context, sessionID, promptID string) error {
+	return p.adapter.AbortPrompt(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(promptID))
+}
+
 func (p *Provider) EnsureSession(ctx context.Context, target bridgecore.RuntimeTarget, request bridgecore.RuntimeSessionRequest) (bridgecore.RuntimeSession, error) {
 	session, err := p.ensureSession(ctx, bridgeruntime.EnsureSessionRequest{
 		KimiCodeSessionID: strings.TrimSpace(request.KimiSessionID),
 		WorkspaceRoot:     strings.TrimSpace(request.WorkDir),
 		SessionSource:     "server",
+		CreateMode:        bridgeruntime.SessionCreateAlways,
 	})
 	if err != nil {
 		return bridgecore.RuntimeSession{}, err
@@ -67,10 +82,15 @@ func (p *Provider) RunTurn(
 		return bridgecore.TurnResult{}, fmt.Errorf("prompt is required")
 	}
 
+	createMode := bridgeruntime.SessionCreateIfMissing
+	if request.RequireExactSession {
+		createMode = bridgeruntime.SessionResumeExact
+	}
 	session, err := p.ensureSession(ctx, bridgeruntime.EnsureSessionRequest{
 		KimiCodeSessionID: strings.TrimSpace(request.KimiSessionID),
 		WorkspaceRoot:     strings.TrimSpace(request.WorkDir),
 		SessionSource:     "server",
+		CreateMode:        createMode,
 	})
 	if err != nil {
 		return bridgecore.TurnResult{}, err
@@ -105,6 +125,7 @@ func (p *Provider) RunTurn(
 	status := normalizePromptStatus(result.Status)
 	turnResult := bridgecore.TurnResult{
 		KimiSessionID: sessionID,
+		PromptID:      result.PromptID,
 		Status:        status,
 	}
 	if err != nil {
@@ -281,7 +302,11 @@ func (p *Provider) ensureSession(ctx context.Context, request bridgeruntime.Ensu
 	if err == nil {
 		return session, nil
 	}
-	if strings.TrimSpace(request.KimiCodeSessionID) == "" || strings.TrimSpace(request.WorkspaceRoot) == "" {
+	mode := request.CreateMode
+	if mode == "" {
+		mode = bridgeruntime.SessionCreateIfMissing
+	}
+	if mode != bridgeruntime.SessionCreateIfMissing || strings.TrimSpace(request.KimiCodeSessionID) == "" || strings.TrimSpace(request.WorkspaceRoot) == "" {
 		return bridgeruntime.SessionRef{}, err
 	}
 	request.KimiCodeSessionID = ""
@@ -297,6 +322,7 @@ func (p *Provider) emitAdapterEvent(
 ) error {
 	mapped := bridgecore.TurnEvent{
 		KimiSessionID: sessionID,
+		PromptID:      event.PromptID,
 		Platform:      target.Platform,
 		ChatID:        target.ChatID,
 		ThreadID:      target.ThreadID,
@@ -336,6 +362,7 @@ func (p *Provider) emitAdapterEvent(
 	case "turn_failed":
 		mapped.Kind = bridgecore.EventTurnFailed
 		mapped.Status = firstNonEmpty(event.Status, "failed")
+		mapped.ErrorCode = event.ErrorCode
 		mapped.Error = event.Error
 	default:
 		return nil

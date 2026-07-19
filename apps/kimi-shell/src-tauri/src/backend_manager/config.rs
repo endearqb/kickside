@@ -748,7 +748,7 @@ pub(super) fn ensure_root_table_mut<'a>(
     doc: &'a mut DocumentMut,
     key: &str,
 ) -> Result<&'a mut Table, String> {
-    if !doc[key].is_table() {
+    if !doc.as_table().get(key).is_some_and(Item::is_table) {
         doc[key] = Item::Table(Table::new());
     }
     doc[key]

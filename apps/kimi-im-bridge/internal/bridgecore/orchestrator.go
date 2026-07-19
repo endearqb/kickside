@@ -20,7 +20,7 @@ func (o *Orchestrator) HandleInbound(
 	options HandleOptions,
 	sink TurnEventSink,
 ) (HandleResult, error) {
-	if o == nil || o.bindings == nil || o.runtime == nil || o.turns == nil || o.events == nil {
+	if o == nil || o.bindings == nil || o.runtime == nil || o.execution == nil {
 		return HandleResult{}, fmt.Errorf("bridge orchestrator dependencies are incomplete")
 	}
 
@@ -29,117 +29,62 @@ func (o *Orchestrator) HandleInbound(
 		ChatID:   inbound.ChatID,
 		ThreadID: inbound.ThreadID,
 	}
-	binding, err := o.resolveOrCreateBinding(ctx, inbound.BindingKey, target, options.DefaultWorkDir)
+	agent, err := o.resolveConnectorAgent(ctx, inbound.ConnectorID)
 	if err != nil {
 		return HandleResult{}, err
 	}
+	effectiveWorkDir := strings.TrimSpace(options.DefaultWorkDir)
+	if effectiveWorkDir == "" && agent != nil {
+		effectiveWorkDir = strings.TrimSpace(agent.DefaultWorkDir)
+	}
+	if effectiveWorkDir == "" {
+		effectiveWorkDir = strings.TrimSpace(o.defaultWorkDir)
+	}
+	binding, err := o.resolveAgentBinding(ctx, inbound.BindingKey, target, effectiveWorkDir, agent)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	prompt := inbound.Text
+	agentID := ""
+	if agent != nil {
+		agentID = agent.AgentID
+		if role := strings.TrimSpace(agent.RolePrompt); role != "" {
+			prompt = "Role:\n" + role + "\n\nTask:\n" + strings.TrimSpace(prompt)
+		}
+		options.MetadataJSON = mergeConnectorAgentMetadata(options.MetadataJSON, *agent)
+	}
 
 	turnID := uuid.NewString()
-	now := nowRFC3339()
-	turn := domain.BridgeTurn{
+	result, runErr := o.execution.Run(ctx, ExecutionTarget{
+		OriginKind:  "connector",
+		ConnectorID: inbound.ConnectorID,
+		Platform:    inbound.Platform,
+		ChatID:      inbound.ChatID,
+		ThreadID:    inbound.ThreadID,
+		AgentID:     agentID,
+	}, ExecutionRequest{
 		TurnID:           turnID,
-		ConnectorID:      inbound.ConnectorID,
-		KimiSessionID:    binding.KimiSessionID,
 		BindingID:        binding.BindingID,
-		Platform:         inbound.Platform,
-		ChatID:           inbound.ChatID,
-		ThreadID:         inbound.ThreadID,
 		InboundMessageID: inbound.MessageID,
-		PromptText:       strings.TrimSpace(inbound.Text),
-		Status:           "accepted",
-		ProviderName:     "kimi",
-		StartedAt:        now,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if err := o.turns.CreateTurn(ctx, turn); err != nil {
-		if errors.Is(err, domain.ErrDuplicateInbound) {
-			return HandleResult{
-				Binding:   *binding,
-				SessionID: binding.KimiSessionID,
-				Duplicate: true,
-			}, nil
+		Prompt:           prompt,
+		WorkDir:          binding.WorkDir,
+		KimiSessionID:    binding.KimiSessionID,
+		AutoApprove:      options.AutoApprove,
+		MetadataJSON:     options.MetadataJSON,
+		Attachments:      append([]domain.PromptAttachment(nil), options.Attachments...),
+	}, func(event ExecutionEvent) error {
+		if sink != nil {
+			return sink(event.Event)
 		}
-		return HandleResult{}, err
-	}
-
-	accepted := TurnEvent{
-		EventID:       uuid.NewString(),
-		Kind:          EventTurnAccepted,
-		TurnID:        turnID,
-		KimiSessionID: binding.KimiSessionID,
-		ConnectorID:   inbound.ConnectorID,
-		Platform:      inbound.Platform,
-		ChatID:        inbound.ChatID,
-		ThreadID:      inbound.ThreadID,
-		At:            now,
-	}
-	if err := o.persistAndEmit(ctx, accepted, sink); err != nil {
-		return HandleResult{}, err
-	}
-
-	var reply strings.Builder
-	artifacts := []domain.RuntimeArtifact{}
-	result, runErr := o.runtime.RunTurn(ctx, target, TurnRequest{
-		TurnID:        turnID,
-		Prompt:        strings.TrimSpace(inbound.Text),
-		WorkDir:       binding.WorkDir,
-		KimiSessionID: binding.KimiSessionID,
-		AutoApprove:   options.AutoApprove,
-		MetadataJSON:  options.MetadataJSON,
-		Attachments:   append([]domain.PromptAttachment(nil), options.Attachments...),
-	}, func(event TurnEvent) error {
-		event.TurnID = turnID
-		if event.KimiSessionID == "" {
-			event.KimiSessionID = binding.KimiSessionID
-		}
-		eventSessionID := firstNonEmpty(event.KimiSessionID, binding.KimiSessionID)
-		if event.ConnectorID == "" {
-			event.ConnectorID = inbound.ConnectorID
-		}
-		if event.Platform == "" {
-			event.Platform = inbound.Platform
-		}
-		if event.ChatID == "" {
-			event.ChatID = inbound.ChatID
-		}
-		if event.ThreadID == "" {
-			event.ThreadID = inbound.ThreadID
-		}
-		if strings.TrimSpace(event.At) == "" {
-			event.At = nowRFC3339()
-		}
-		if event.EventID == "" {
-			event.EventID = uuid.NewString()
-		}
-
-		if event.Kind == EventContentDelta && event.TextDelta != "" {
-			reply.WriteString(event.TextDelta)
-		}
-		if event.Kind == EventArtifactReady && event.Artifact != nil {
-			artifacts = append(artifacts, *event.Artifact)
-		}
-		if event.Kind == EventApprovalRequested && o.approvals != nil {
-			if err := o.approvals.CreateApprovalTicket(ctx, domain.ApprovalTicket{
-				ApprovalID:         event.ApprovalID,
-				ConnectorID:        inbound.ConnectorID,
-				KimiSessionID:      eventSessionID,
-				TurnID:             turnID,
-				StepID:             approvalStepID(turnID, event.StepIndex),
-				RequestKind:        defaultString(event.RequestKind, "approval"),
-				Prompt:             strings.TrimSpace(event.Prompt),
-				Platform:           inbound.Platform,
-				ChatID:             inbound.ChatID,
-				ThreadID:           inbound.ThreadID,
-				Status:             "pending",
-				RequestPayloadJSON: defaultString(event.RequestPayloadJSON, "{}"),
-				DedupeKey:          approvalDedupeKey(inbound.Platform, inbound.ChatID, inbound.ThreadID, event.ApprovalID),
-			}); err != nil {
-				return err
-			}
-		}
-		return o.persistAndEmit(ctx, event, sink)
+		return nil
 	})
+	if runErr != nil && errors.Is(runErr, domain.ErrDuplicateInbound) {
+		return HandleResult{
+			Binding:   *binding,
+			SessionID: binding.KimiSessionID,
+			Duplicate: true,
+		}, nil
+	}
 
 	effectiveSessionID := firstNonEmpty(result.KimiSessionID, binding.KimiSessionID)
 	if effectiveSessionID != binding.KimiSessionID {
@@ -147,39 +92,6 @@ func (o *Orchestrator) HandleInbound(
 			return HandleResult{}, err
 		}
 		binding.KimiSessionID = effectiveSessionID
-	}
-	turn.KimiSessionID = effectiveSessionID
-
-	turn.Status = result.Status
-	turn.UpdatedAt = nowRFC3339()
-	if turn.Status == "" {
-		turn.Status = "completed"
-	}
-	if runErr != nil {
-		turn.Status = "failed"
-		turn.ErrorMessage = runErr.Error()
-	}
-	if result.Error != "" {
-		turn.Status = "failed"
-		turn.ErrorMessage = result.Error
-	}
-	if turn.Status == "completed" || turn.Status == "failed" {
-		turn.CompletedAt = turn.UpdatedAt
-	}
-	if err := o.turns.UpdateTurn(ctx, turn); err != nil {
-		return HandleResult{}, err
-	}
-	if err := o.turns.UpsertSession(ctx, domain.BridgeSession{
-		KimiSessionID: effectiveSessionID,
-		WorkDir:       binding.WorkDir,
-		LastTurnID:    turnID,
-		LastMessageAt: turn.UpdatedAt,
-		AutoApprove:   options.AutoApprove,
-		ProviderName:  "kimi",
-		CreatedAt:     turn.CreatedAt,
-		UpdatedAt:     turn.UpdatedAt,
-	}); err != nil {
-		return HandleResult{}, err
 	}
 	if runErr != nil {
 		return HandleResult{}, runErr
@@ -189,11 +101,60 @@ func (o *Orchestrator) HandleInbound(
 		Binding:   *binding,
 		TurnID:    turnID,
 		SessionID: effectiveSessionID,
-		ReplyText: strings.TrimSpace(reply.String()),
-		Artifacts: artifacts,
+		ReplyText: result.ReplyText,
+		Artifacts: result.Artifacts,
 		Renderer:  "interactive",
-		Result:    result,
+		Result:    result.RuntimeResult,
 	}, nil
+}
+
+func (o *Orchestrator) resolveConnectorAgent(ctx context.Context, connectorID string) (*domain.ConnectorAgentContext, error) {
+	if o.agentBindings == nil || strings.TrimSpace(connectorID) == "" {
+		return nil, nil
+	}
+	return o.agentBindings.ResolveConnectorAgent(ctx, connectorID)
+}
+
+func (o *Orchestrator) resolveAgentBinding(ctx context.Context, key domain.BindingKey, target RuntimeTarget, workDir string, agent *domain.ConnectorAgentContext) (*domain.SessionBinding, error) {
+	if agent == nil || agent.SessionMode != "same_session" {
+		return o.resolveOrCreateBinding(ctx, key, target, workDir)
+	}
+	if strings.TrimSpace(agent.PinnedSessionID) == "" || strings.TrimSpace(agent.PinnedWorkDir) == "" {
+		return nil, fmt.Errorf("agent_session_unresolved")
+	}
+	if strings.TrimSpace(workDir) != "" && !sameWorkDir(workDir, agent.PinnedWorkDir) {
+		return nil, fmt.Errorf("workspace_mismatch")
+	}
+	binding, err := o.bindings.ResolveBinding(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if binding != nil {
+		if strings.TrimSpace(binding.KimiSessionID) != strings.TrimSpace(agent.PinnedSessionID) {
+			return nil, fmt.Errorf("agent_session_conflict")
+		}
+		return binding, nil
+	}
+	return o.bindings.CreateBinding(ctx, key, agent.PinnedSessionID, agent.PinnedWorkDir, "agent_binding")
+}
+
+func mergeConnectorAgentMetadata(raw string, agent domain.ConnectorAgentContext) string {
+	payload := map[string]any{}
+	if strings.TrimSpace(raw) != "" {
+		_ = json.Unmarshal([]byte(raw), &payload)
+	}
+	if len(agent.RuntimeControls) > 0 && json.Valid(agent.RuntimeControls) {
+		payload["runtime_controls"] = json.RawMessage(agent.RuntimeControls)
+	}
+	payload["connector_agent"] = map[string]string{"agent_id": agent.AgentID, "session_mode": agent.SessionMode}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded)
+}
+
+func sameWorkDir(left, right string) bool {
+	left = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(left), "\\", "/"), "/")
+	right = strings.TrimRight(strings.ReplaceAll(strings.TrimSpace(right), "\\", "/"), "/")
+	return strings.EqualFold(left, right)
 }
 
 func (o *Orchestrator) ResolveApproval(ctx context.Context, approvalID string, status string, payload string) error {
@@ -234,46 +195,6 @@ func (o *Orchestrator) resolveOrCreateBinding(ctx context.Context, key domain.Bi
 	return o.bindings.CreateBinding(ctx, key, sessionID, workDir, source)
 }
 
-func (o *Orchestrator) persistAndEmit(ctx context.Context, event TurnEvent, sink TurnEventSink) error {
-	if err := o.events.AppendTurnEvent(ctx, domain.TurnEventRecord{
-		EventID:        event.EventID,
-		ConnectorID:    event.ConnectorID,
-		TurnID:         event.TurnID,
-		KimiSessionID:  event.KimiSessionID,
-		Platform:       event.Platform,
-		ChatID:         event.ChatID,
-		ThreadID:       event.ThreadID,
-		Kind:           string(event.Kind),
-		StepIndex:      event.StepIndex,
-		MessageID:      event.MessageID,
-		ApprovalID:     event.ApprovalID,
-		RequestKind:    event.RequestKind,
-		TextDelta:      event.TextDelta,
-		ThinkingDelta:  event.ThinkingDelta,
-		StatusText:     event.Status,
-		PayloadJSON:    firstNonEmpty(event.RequestPayloadJSON, event.ResolutionJSON),
-		ErrorCode:      event.ErrorCode,
-		ErrorMessage:   event.Error,
-		ContextUsage:   event.ContextUsage,
-		TokenUsageJSON: tokenUsageJSON(event.TokenUsage),
-		CreatedAt:      firstNonEmpty(event.At, nowRFC3339()),
-	}); err != nil {
-		return err
-	}
-	if sink != nil {
-		return sink(event)
-	}
-	return nil
-}
-
-func approvalStepID(turnID string, stepIndex int) string {
-	return fmt.Sprintf("%s:step:%d", turnID, stepIndex)
-}
-
-func approvalDedupeKey(platform string, chatID string, threadID string, approvalID string) string {
-	return fmt.Sprintf("%s:%s:%s:%s", strings.TrimSpace(platform), strings.TrimSpace(chatID), strings.TrimSpace(threadID), strings.TrimSpace(approvalID))
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -293,12 +214,4 @@ func defaultString(value string, fallback string) string {
 
 func nowRFC3339() string {
 	return time.Now().UTC().Format(time.RFC3339)
-}
-
-func tokenUsageJSON(usage TokenUsage) string {
-	raw, err := json.Marshal(usage)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }

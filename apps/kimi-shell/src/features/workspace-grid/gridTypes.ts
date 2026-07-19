@@ -1,7 +1,8 @@
-export type WorkspacePaneKind = "code" | "chat" | "external";
+export type WorkspacePaneKind = "code" | "chat" | "external" | "agent_room";
+export type WorkspacePaneKindV1 = Exclude<WorkspacePaneKind, "agent_room">;
 export type WorkspacePaneTheme = "light" | "dark";
 
-export type WorkspacePaneCarrier = "iframe";
+export type WorkspacePaneCarrier = "iframe" | "local";
 
 export type WorkspacePaneMountPolicy =
   | "eager"
@@ -36,10 +37,11 @@ export interface WorkspacePane {
    * 仅存在于内存,不持久化;不参与 frameKey/导航,避免触发 iframe 重挂载。
    */
   activeSessionId?: string;
+  roomId?: string;
   url?: string;
   workDir?: string;
   theme?: WorkspacePaneTheme;
-  storageNamespace: string;
+  storageNamespace?: string;
   mountPolicy: WorkspacePaneMountPolicy;
   loadState: WorkspacePaneLoadState;
   createdAt: number;
@@ -76,6 +78,24 @@ export interface WorkspaceGridTrackSizes {
 export interface WorkspaceGridStateV1 {
   version: 1;
   preset: WorkspaceGridPresetId;
+  panes: Array<
+    Omit<WorkspacePane, "kind" | "carrier" | "roomId"> & {
+      kind: WorkspacePaneKindV1;
+      carrier: "iframe";
+      storageNamespace: string;
+    }
+  >;
+  slots: WorkspaceGridSlot[];
+  activePaneId: string | null;
+  maximizedPaneId: string | null;
+  legacySplitRatio?: number;
+  trackSizes?: WorkspaceGridTrackSizes;
+  updatedAt: number;
+}
+
+export interface WorkspaceGridStateV2 {
+  version: 2;
+  preset: WorkspaceGridPresetId;
   panes: WorkspacePane[];
   slots: WorkspaceGridSlot[];
   activePaneId: string | null;
@@ -85,7 +105,7 @@ export interface WorkspaceGridStateV1 {
   updatedAt: number;
 }
 
-export type WorkspaceGridPersistedState = WorkspaceGridStateV1;
+export type WorkspaceGridPersistedState = WorkspaceGridStateV2;
 
 export interface WorkspaceGridSavedLayout {
   id: string;

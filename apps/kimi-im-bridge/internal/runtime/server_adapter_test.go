@@ -3,14 +3,48 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/gorilla/websocket"
 )
+
+func TestKimiCodeServerAdapterRejectsAttachmentsExplicitly(t *testing.T) {
+	adapter := &KimiCodeServerAdapter{}
+	_, err := adapter.SubmitPrompt(context.Background(), AdapterPromptRequest{
+		SessionID: "session-1", Text: "review", Attachments: []domain.PromptAttachment{{Kind: domain.AttachmentKindFile, LocalPath: `C:\review.txt`}},
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "attachments_unsupported") {
+		t.Fatalf("expected explicit attachments_unsupported error, got %v", err)
+	}
+}
+
+func TestSessionRuntimeStatusSupportsRealServerActivityFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		session apiSession
+		want    string
+	}{
+		{name: "legacy status", session: apiSession{Status: "completed", Busy: true}, want: "completed"},
+		{name: "new session idle", session: apiSession{PendingInteraction: "none"}, want: "idle"},
+		{name: "busy", session: apiSession{Busy: true, PendingInteraction: "none"}, want: "running"},
+		{name: "main turn", session: apiSession{MainTurnActive: true, PendingInteraction: "none"}, want: "running"},
+		{name: "pending interaction", session: apiSession{PendingInteraction: "approval"}, want: "waiting_approval"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := sessionRuntimeStatus(test.session); got != test.want {
+				t.Fatalf("sessionRuntimeStatus()=%q want %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestKimiCodeServerAdapterEnsureSessionUsesWorkspaceID(t *testing.T) {
 	var createdSessionBody map[string]any
@@ -63,6 +97,25 @@ func TestKimiCodeServerAdapterEnsureSessionUsesWorkspaceID(t *testing.T) {
 	}
 }
 
+func TestKimiCodeServerAdapterGetsTranscriptWithExactCursorQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireBearer(t, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sessions/session-1/messages" {
+			t.Fatalf("unexpected transcript request: %s %s", r.Method, r.URL.String())
+		}
+		if r.URL.Query().Get("before_id") != "before-1" || r.URL.Query().Get("after_id") != "after-1" || r.URL.Query().Get("role") != "assistant" || r.URL.Query().Get("page_size") != "25" {
+			t.Fatalf("unexpected transcript query: %s", r.URL.RawQuery)
+		}
+		writeEnvelope(t, w, map[string]any{"items": []any{map[string]any{"id": "message-1", "role": "assistant", "text": "reply"}}, "has_more": true})
+	}))
+	defer server.Close()
+	adapter := newTestServerAdapter(t, server.URL)
+	page, err := adapter.GetSessionTranscript(context.Background(), "session-1", SessionTranscriptQuery{BeforeID: "before-1", AfterID: "after-1", Role: "assistant", PageSize: 25})
+	if err != nil || len(page.Items) != 1 || !page.HasMore || !strings.Contains(string(page.Items[0]), "reply") {
+		t.Fatalf("unexpected transcript: %+v err=%v", page, err)
+	}
+}
+
 func TestKimiCodeServerAdapterEnsureSessionFallsBackToMetadataCwd(t *testing.T) {
 	var createdSessionBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +156,102 @@ func TestKimiCodeServerAdapterEnsureSessionFallsBackToMetadataCwd(t *testing.T) 
 	}
 }
 
+func TestKimiCodeServerAdapterEnsureSessionHonorsExplicitCreateModes(t *testing.T) {
+	var created int
+	var listed int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireBearer(t, r)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/workspaces":
+			writeEnvelope(t, w, map[string]any{"id": "ws_repo", "root": "D:/repo"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions":
+			listed++
+			writeEnvelope(t, w, map[string]any{"items": []map[string]any{
+				{"id": "sess_latest", "workspace_id": "ws_repo", "metadata": map[string]any{"cwd": "D:/repo"}},
+				{"id": "sess_older", "workspace_id": "ws_repo", "metadata": map[string]any{"cwd": "D:/repo"}},
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+			created++
+			writeEnvelope(t, w, map[string]any{"id": fmt.Sprintf("sess_created_%d", created)})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/sess_exact":
+			writeEnvelope(t, w, map[string]any{"id": "sess_exact", "workspace_id": "ws_repo", "metadata": map[string]any{"cwd": "D:/repo"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/sessions/sess_missing":
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 40404, "msg": "session not found"})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	adapter := newTestServerAdapter(t, server.URL)
+	first, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{WorkspaceRoot: "D:/repo", CreateMode: SessionCreateAlways})
+	if err != nil {
+		t.Fatalf("first always create: %v", err)
+	}
+	second, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{WorkspaceRoot: "D:/repo", CreateMode: SessionCreateAlways})
+	if err != nil {
+		t.Fatalf("second always create: %v", err)
+	}
+	if first.KimiCodeSessionID == second.KimiCodeSessionID || first.WorkspaceID != "ws_repo" || first.WorkspaceRoot != "D:/repo" {
+		t.Fatalf("always mode did not create isolated sessions with workspace context: first=%+v second=%+v", first, second)
+	}
+	if listed != 0 {
+		t.Fatalf("always mode listed existing sessions %d times", listed)
+	}
+
+	reused, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{WorkspaceRoot: "D:/repo", CreateMode: SessionReuseLatest})
+	if err != nil || reused.KimiCodeSessionID != "sess_latest" || reused.SessionSource != "server_reused_latest" {
+		t.Fatalf("reuse_latest returned ref=%+v err=%v", reused, err)
+	}
+	compatible, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{WorkspaceRoot: "D:/repo"})
+	if err != nil || compatible.KimiCodeSessionID != "sess_latest" {
+		t.Fatalf("default if_missing compatibility returned ref=%+v err=%v", compatible, err)
+	}
+
+	exact, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{KimiCodeSessionID: "sess_exact", CreateMode: SessionResumeExact, SessionSource: "pinned"})
+	if err != nil || exact.KimiCodeSessionID != "sess_exact" || exact.WorkspaceID != "ws_repo" || exact.WorkspaceRoot != "D:/repo" || exact.SessionSource != "pinned" {
+		t.Fatalf("resume_exact returned ref=%+v err=%v", exact, err)
+	}
+	if _, err := adapter.EnsureSession(context.Background(), EnsureSessionRequest{KimiCodeSessionID: "sess_missing", CreateMode: SessionResumeExact}); err == nil {
+		t.Fatal("resume_exact unexpectedly replaced a missing session")
+	}
+	for _, request := range []EnsureSessionRequest{
+		{KimiCodeSessionID: "sess_exact", WorkspaceID: "ws_other", CreateMode: SessionResumeExact},
+		{KimiCodeSessionID: "sess_exact", WorkspaceRoot: "D:/other", CreateMode: SessionResumeExact},
+	} {
+		if _, err := adapter.EnsureSession(context.Background(), request); err == nil || !strings.Contains(err.Error(), "workspace_mismatch") {
+			t.Fatalf("resume_exact accepted mismatched workspace: request=%+v err=%v", request, err)
+		}
+	}
+	if created != 2 {
+		t.Fatalf("expected only the two explicit always creates, got %d", created)
+	}
+}
+
+func TestKimiCodeServerAdapterEnsureSessionRejectsInvalidModeInputsBeforeIO(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("invalid request reached runtime: %s %s", r.Method, r.URL.String())
+	}))
+	defer server.Close()
+	adapter := newTestServerAdapter(t, server.URL)
+
+	for _, request := range []EnsureSessionRequest{
+		{CreateMode: SessionCreateMode("unknown")},
+		{CreateMode: SessionResumeExact},
+		{CreateMode: SessionCreateAlways, KimiCodeSessionID: "sess_1"},
+		{CreateMode: SessionReuseLatest, KimiCodeSessionID: "sess_1"},
+	} {
+		if _, err := adapter.EnsureSession(context.Background(), request); err == nil {
+			t.Fatalf("expected request to fail: %+v", request)
+		}
+	}
+	encoded, err := json.Marshal(EnsureSessionRequest{CreateMode: SessionCreateAlways})
+	if err != nil || !strings.Contains(string(encoded), `"createMode":"always"`) {
+		t.Fatalf("unexpected createMode JSON contract: %s err=%v", encoded, err)
+	}
+}
+
 func TestKimiCodeServerAdapterPromptAndApprovalEndpoints(t *testing.T) {
 	var promptBody map[string]any
 	var approvalBody map[string]any
@@ -117,6 +266,8 @@ func TestKimiCodeServerAdapterPromptAndApprovalEndpoints(t *testing.T) {
 				"metadata":     map[string]any{"cwd": "D:/repo"},
 				"last_seq":     7,
 			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/config":
+			writeEnvelope(t, w, map[string]any{"default_model": "kimi-code/k3"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/sess_1/prompts":
 			decodeJSON(t, r, &promptBody)
 			writeEnvelope(t, w, map[string]any{
@@ -166,7 +317,7 @@ func TestKimiCodeServerAdapterPromptAndApprovalEndpoints(t *testing.T) {
 	if result.PromptID != "prompt_1" || result.Status != "running" {
 		t.Fatalf("unexpected prompt result: %+v", result)
 	}
-	if promptBody["permission_mode"] != "manual" || promptBody["thinking"] != "low" || promptBody["plan_mode"] != true {
+	if promptBody["model"] != "kimi-code/k3" || promptBody["permission_mode"] != "manual" || promptBody["thinking"] != "low" || promptBody["plan_mode"] != true {
 		t.Fatalf("expected prompt controls in snake_case body, got %#v", promptBody)
 	}
 
@@ -273,6 +424,7 @@ func TestKimiCodeServerAdapterSubmitPromptStreamsWebSocketEvents(t *testing.T) {
 	result, err := adapter.SubmitPrompt(context.Background(), AdapterPromptRequest{
 		SessionID: "sess_1",
 		Text:      "hello",
+		Controls:  RuntimeControls{Model: "kimi-code/k3"},
 	}, func(event AdapterEvent) error {
 		events = append(events, event)
 		return nil
@@ -294,6 +446,45 @@ func TestKimiCodeServerAdapterSubmitPromptStreamsWebSocketEvents(t *testing.T) {
 	}
 }
 
+func TestHandlePromptWSFrameReturnsStructuredFailure(t *testing.T) {
+	var events []AdapterEvent
+	status, terminal, err := handlePromptWSFrame(nil, wsFrame{
+		Type:    "turn.ended",
+		Payload: json.RawMessage(`{"reason":"failed","error":{"code":"model.not_configured","message":"Model not set"}}`),
+	}, "session-1", "prompt-1", func(event AdapterEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	failure, ok := err.(*PromptFailureError)
+	if status != "failed" || !terminal || !ok || failure.Code != "model.not_configured" {
+		t.Fatalf("unexpected terminal failure: status=%q terminal=%v err=%T %v", status, terminal, err, err)
+	}
+	if len(events) != 1 || events[0].Type != "turn_failed" || events[0].ErrorCode != "model.not_configured" {
+		t.Fatalf("unexpected failure event: %+v", events)
+	}
+}
+
+func TestKimiCodeServerAdapterInspectSessionReturnsFreshSafeState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requireBearer(t, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/sessions/session-1" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		writeEnvelope(t, w, map[string]any{
+			"id": "session-1", "workspace_id": "workspace-1", "status": "running", "last_seq": 42,
+			"metadata": map[string]any{"cwd": "D:/repo"},
+		})
+	}))
+	defer server.Close()
+	state, err := newTestServerAdapter(t, server.URL).InspectSession(context.Background(), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.SessionID != "session-1" || state.Status != "running" || state.LastSeq != 42 || state.WorkspaceRoot != "D:/repo" || state.Generation != 3 || state.ObservedAt == "" {
+		t.Fatalf("unexpected inspected state: %+v", state)
+	}
+}
+
 func newTestServerAdapter(t *testing.T, origin string) *KimiCodeServerAdapter {
 	t.Helper()
 	dir := t.TempDir()
@@ -303,9 +494,10 @@ func newTestServerAdapter(t *testing.T, origin string) *KimiCodeServerAdapter {
 	}
 	locatorPath := filepath.Join(dir, "locator.json")
 	raw, err := json.Marshal(map[string]any{
-		"origin":    origin,
-		"tokenPath": tokenPath,
-		"health":    "ready",
+		"origin":     origin,
+		"tokenPath":  tokenPath,
+		"health":     "ready",
+		"generation": 3,
 	})
 	if err != nil {
 		t.Fatalf("marshal locator: %v", err)

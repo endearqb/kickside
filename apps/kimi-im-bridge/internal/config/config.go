@@ -43,14 +43,16 @@ type BridgeSettings struct {
 }
 
 type ConnectorConfig struct {
-	ID                  string `json:"id"`
-	Platform            string `json:"platform"`
-	Label               string `json:"label"`
-	Enabled             bool   `json:"enabled"`
-	Mode                string `json:"mode"`
-	FeishuAutoApprove   bool   `json:"feishuAutoApprove,omitempty"`
-	FeishuReplyRenderer string `json:"feishuReplyRenderer,omitempty"`
-	WeixinReplyMode     string `json:"weixinReplyMode,omitempty"`
+	ID                         string `json:"id"`
+	Platform                   string `json:"platform"`
+	Label                      string `json:"label"`
+	Enabled                    bool   `json:"enabled"`
+	Mode                       string `json:"mode"`
+	DefaultWorkDir             string `json:"defaultWorkDir,omitempty"`
+	ResetBindingSessionOnStart *bool  `json:"resetBindingSessionOnStart,omitempty"`
+	FeishuAutoApprove          bool   `json:"feishuAutoApprove,omitempty"`
+	FeishuReplyRenderer        string `json:"feishuReplyRenderer,omitempty"`
+	WeixinReplyMode            string `json:"weixinReplyMode,omitempty"`
 }
 
 type ChannelConfig = ConnectorConfig
@@ -337,14 +339,16 @@ func normalizeConnectors(connectors []ConnectorConfig) []ConnectorConfig {
 		}
 
 		item := ConnectorConfig{
-			ID:                  connectorID,
-			Platform:            platform,
-			Label:               label,
-			Enabled:             connector.Enabled,
-			Mode:                normalizeConnectorMode(platform, connector.Mode),
-			FeishuAutoApprove:   connector.FeishuAutoApprove,
-			FeishuReplyRenderer: normalizeFeishuReplyRenderer(connector.FeishuReplyRenderer, nil),
-			WeixinReplyMode:     normalizeWeixinReplyMode(connector.WeixinReplyMode),
+			ID:                         connectorID,
+			Platform:                   platform,
+			Label:                      label,
+			Enabled:                    connector.Enabled,
+			Mode:                       normalizeConnectorMode(platform, connector.Mode),
+			DefaultWorkDir:             strings.TrimSpace(connector.DefaultWorkDir),
+			ResetBindingSessionOnStart: connector.ResetBindingSessionOnStart,
+			FeishuAutoApprove:          connector.FeishuAutoApprove,
+			FeishuReplyRenderer:        normalizeFeishuReplyRenderer(connector.FeishuReplyRenderer, nil),
+			WeixinReplyMode:            normalizeWeixinReplyMode(connector.WeixinReplyMode),
 		}
 		if platform == PlatformFeishu {
 			if connector.FeishuReplyRenderer == "" {

@@ -583,7 +583,17 @@ fn compute_next_run(
 }
 
 fn parse_hhmm(value: &str) -> anyhow::Result<NaiveTime> {
-    NaiveTime::parse_from_str(value.trim(), "%H:%M")
+    let value = value.trim();
+    if value.len() != 5
+        || value.as_bytes()[2] != b':'
+        || !value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| index == 2 || byte.is_ascii_digit())
+    {
+        anyhow::bail!("invalid time, expected HH:MM: {value}");
+    }
+    NaiveTime::parse_from_str(value, "%H:%M")
         .with_context(|| format!("invalid time, expected HH:MM: {value}"))
 }
 

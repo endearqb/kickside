@@ -10,14 +10,18 @@ import {
 } from "@/app/theme";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { materializeGridSlots } from "./gridPresets";
-import type { WorkspaceGridStateV1, WorkspacePane } from "./gridTypes";
+import type {
+  WorkspaceGridStateV1,
+  WorkspaceGridStateV2,
+  WorkspacePane,
+} from "./gridTypes";
 
 type ReadonlyStorage = Pick<Storage, "getItem">;
 
 export function migrateLegacyWorkspaceGridState(
   storage: ReadonlyStorage,
   now = Date.now(),
-): WorkspaceGridStateV1 {
+): WorkspaceGridStateV2 {
   const activeView =
     parseWorkspaceViewKind(storage.getItem(WORKSPACE_ACTIVE_VIEW_STORAGE_KEY)) ??
     "code";
@@ -40,7 +44,7 @@ export function migrateLegacyWorkspaceGridState(
         ? ["pane-code", "pane-chat"]
         : ["pane-chat", "pane-code"];
     return {
-      version: 1,
+      version: 2,
       preset: "1x2",
       panes,
       slots: materializeGridSlots("1x2", paneIds),
@@ -52,7 +56,7 @@ export function migrateLegacyWorkspaceGridState(
   }
 
   return {
-    version: 1,
+    version: 2,
     preset: "single",
     panes,
     slots: materializeGridSlots("single", [activePaneId]),
@@ -63,16 +67,26 @@ export function migrateLegacyWorkspaceGridState(
   };
 }
 
-export function createDefaultWorkspaceGridState(now = Date.now()): WorkspaceGridStateV1 {
+export function createDefaultWorkspaceGridState(now = Date.now()): WorkspaceGridStateV2 {
   const panes = createLegacyPanes(now);
   return {
-    version: 1,
+    version: 2,
     preset: "1x2",
     panes,
     slots: materializeGridSlots("1x2", ["pane-code", "pane-chat"]),
     activePaneId: "pane-code",
     maximizedPaneId: null,
     updatedAt: now,
+  };
+}
+
+export function migrateWorkspaceGridStateV1(
+  state: WorkspaceGridStateV1,
+): WorkspaceGridStateV2 {
+  return {
+    ...state,
+    version: 2,
+    panes: state.panes.map((pane) => ({ ...pane, carrier: "iframe" as const })),
   };
 }
 

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-07-18T22:00:00+08:00",
+  "runtime": {
+    "package": "@moonshot-ai/kimi-code",
+    "version": "0.27.0"
+  },
+  "dynamicReadOnly": {
+    "serverProvider": true,
+    "multiSessionSubscriptions": { "2": true, "6": true, "12": true },
+    "perSessionCursors": true,
+    "transcriptEndpoint": true,
+    "sessionStateAndLastSeq": true,
+    "mutatingProbePerformed": false
+  },
+  "installedContract": {
+    "dynamicSubscribeAndUnsubscribe": true,
+    "durablePerSessionReplay": true,
+    "userPromptEvent": true,
+    "nativePromptQueue": true,
+    "nativePromptSteer": true,
+    "promptContent": ["text", "image", "video", "file"],
+    "promptMetadataEcho": false,
+    "artifactEvent": false,
+    "abortEndpoint": true,
+    "abortCompletionTimingVerified": false,
+    "approvalSessionScopeWire": true,
+    "approvalSessionScopeRestartVerified": false,
+    "epoch": "journal epoch is stable across normal restart and changes only when the journal is recreated after missing or unreadable state"
+  },
+  "degradation": {
+    "abortAndReplace": "disabled until abort completion is confirmed; never submit a replacement after an unconfirmed abort",
+    "approvalScope": "use one-shot approval until session-scope restart behavior is verified",
+    "followUp": "use the Agent Room local FIFO even though Runtime exposes queue and steer",
+    "artifact": "derive references from reply text or Transcript; do not emit run.artifact_ready",
+    "promptMetadata": "attribute by prompt_id, turn_id, or the only running Run for the Session; never assume metadata echo",
+    "unknownPanePrompt": "use prompt.submitted or Transcript; otherwise display unknown rather than reconstructing text"
+  },
+  "evidence": [
+    "runtime-probe read-only hello/ack against 2, 6, and 12 existing Sessions",
+    "GET /api/v1/sessions/{session_id}/messages returned HTTP 200",
+    "@moonshot-ai/kimi-code@0.27.0 kap-server protocol, prompt routes, durable journal, and WS v1 implementation",
+    "apps/kimi-im-bridge internal/runtime Fake Runtime automated tests"
+  ]
+}

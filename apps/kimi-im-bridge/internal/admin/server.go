@@ -47,6 +47,10 @@ type AdminError struct {
 }
 
 func NewHandler(service Service, adminToken string) http.Handler {
+	return NewHandlerWithAgentRoom(service, adminToken, nil)
+}
+
+func NewHandlerWithAgentRoom(service Service, adminToken string, agentRoomRoutes *AgentRoomRoutes) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet {
@@ -228,6 +232,14 @@ func NewHandler(service Service, adminToken string) http.Handler {
 		}
 		writeAdminData(writer, request, http.StatusOK, response)
 	})
+	if agentRoomRoutes != nil {
+		mux.HandleFunc("/api/v1/agent-room/", func(writer http.ResponseWriter, request *http.Request) {
+			if !authorize(writer, request, adminToken) {
+				return
+			}
+			agentRoomRoutes.ServeHTTP(writer, request)
+		})
+	}
 	return mux
 }
 

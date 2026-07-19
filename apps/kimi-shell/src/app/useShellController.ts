@@ -327,9 +327,8 @@ export function useShellController() {
   const setWorkspaceGridActivePane = useWorkspaceGridStore(
     (state) => state.setActivePane,
   );
-  const addWorkspaceGridPane = useWorkspaceGridStore((state) => state.addPane);
-  const openWorkspaceGridPaneFromExplorer = useWorkspaceGridStore(
-    (state) => state.openPaneFromExplorer,
+  const openSessionInWorkspaceGrid = useWorkspaceGridStore(
+    (state) => state.openSessionInWorkspaceGrid,
   );
   const configureWorkspaceGridPane = useWorkspaceGridStore(
     (state) => state.configurePane,
@@ -670,68 +669,41 @@ export function useShellController() {
         (payload.source === "open_dir_request" || payload.source === "open_files_request"
           ? "new_pane"
           : "replace_active");
-      if (disposition === "new_pane") {
-        const placement = openWorkspaceGridPaneFromExplorer({
+      const placement = openSessionInWorkspaceGrid({
+        sessionId,
+        workDir: payload.workDir?.trim() || undefined,
+        disposition,
+        targetPaneId: workspaceGridActivePaneId ?? undefined,
+        title: getKimiAssistantDisplayName(),
+      });
+      rememberRequest();
+      if (placement.kind !== "limit_reached") {
+        return placement.paneId !== null;
+      }
+      const activePane = workspaceGridPanes.find(
+        (pane) => pane.id === workspaceGridActivePaneId,
+      );
+      if (
+        activePane &&
+        window.confirm(
+          "窗格库已达 12 个上限。是否用新工作区替换当前窗格？\n选择“取消”后可打开窗格库关闭或切换窗格。",
+        )
+      ) {
+        configureWorkspaceGridPane(activePane.id, {
           kind: "code",
           title: getKimiAssistantDisplayName(),
           sessionId,
           workDir: payload.workDir?.trim() || undefined,
         });
-        rememberRequest();
-        if (placement.kind === "limit_reached") {
-          const activePane = workspaceGridPanes.find(
-            (pane) => pane.id === workspaceGridActivePaneId,
-          );
-          if (
-            activePane &&
-            window.confirm(
-              "窗格库已达 12 个上限。是否用新工作区替换当前窗格？\n选择“取消”后可打开窗格库关闭或切换窗格。",
-            )
-          ) {
-            configureWorkspaceGridPane(activePane.id, {
-              kind: "code",
-              title: getKimiAssistantDisplayName(),
-              sessionId,
-              workDir: payload.workDir?.trim() || undefined,
-            });
-            setWorkspaceGridActivePane(activePane.id);
-          } else {
-            setActionError("未打开新工作区；请在窗格库中关闭一个窗格后重试。");
-          }
-          return true;
-        }
-        return placement.paneId !== null;
+        setWorkspaceGridActivePane(activePane.id);
+      } else {
+        setActionError("未打开新工作区；请在窗格库中关闭一个窗格后重试。");
       }
-
-      const targetPane =
-        workspaceGridPanes.find(
-          (pane) => pane.id === workspaceGridActivePaneId && pane.kind === "code",
-        ) ??
-        workspaceGridPanes.find((pane) => pane.id === "pane-code") ??
-        workspaceGridPanes.find((pane) => pane.kind === "code") ??
-        workspaceGridPanes[0];
-      const input = {
-        kind: "code" as const,
-        title: getKimiAssistantDisplayName(),
-        sessionId,
-        workDir: payload.workDir?.trim() || targetPane?.workDir,
-      };
-
-      if (targetPane) {
-        configureWorkspaceGridPane(targetPane.id, input);
-        setWorkspaceGridActivePane(targetPane.id);
-        rememberRequest();
-        return true;
-      }
-
-      const paneId = addWorkspaceGridPane(input);
-      if (paneId) rememberRequest();
-      return paneId !== null;
+      return true;
     },
     [
-      addWorkspaceGridPane,
       configureWorkspaceGridPane,
-      openWorkspaceGridPaneFromExplorer,
+      openSessionInWorkspaceGrid,
       setWorkspaceGridActivePane,
       workspaceGridActivePaneId,
       workspaceGridPanes,

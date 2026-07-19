@@ -49,6 +49,35 @@ const APP_COMMANDS: &[&str] = &[
     "start_weixin_connector_onboarding",
     "get_weixin_connector_onboarding_status",
     "cancel_weixin_connector_onboarding",
+    "agent_room_list_agents",
+    "agent_room_create_agent",
+    "agent_room_update_agent",
+    "agent_room_delete_agent",
+    "agent_room_list_rooms",
+    "agent_room_get_room",
+    "agent_room_create_room",
+    "agent_room_update_room",
+    "agent_room_delete_room",
+    "agent_room_list_members",
+    "agent_room_add_member",
+    "agent_room_update_member",
+    "agent_room_delete_member",
+    "agent_room_get_timeline",
+    "agent_room_get_run",
+    "agent_room_post_message",
+    "agent_room_resolve_workflow",
+    "agent_room_list_connector_bindings",
+    "agent_room_put_connector_binding",
+    "agent_room_delete_connector_binding",
+    "agent_room_abort_run",
+    "agent_room_retry_run",
+    "agent_room_resolve_approval",
+    "agent_room_sync_pane_sessions",
+    "agent_room_get_capabilities",
+    "agent_room_list_observations",
+    "agent_room_set_observation_pin",
+    "agent_room_poll_events",
+    "agent_room_open_session",
     "install_skill_from_git",
     "import_skill_from_path",
     "scan_discoverable_skills",
@@ -140,6 +169,11 @@ const APP_COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    #[cfg(windows)]
+    println!(
+        "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+    );
+
     tauri_build::try_build(
         tauri_build::Attributes::new()
             .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),

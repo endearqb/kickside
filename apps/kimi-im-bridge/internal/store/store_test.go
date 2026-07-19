@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
@@ -88,6 +90,64 @@ func TestChannelBindingUniqueIndexHandlesNullFields(t *testing.T) {
 	second.KimiSessionID = "session-2"
 	if err := store.CreateBinding(ctx, second); err == nil {
 		t.Fatalf("expected unique constraint error for duplicate nullable binding key")
+	}
+}
+
+func TestStoreKeepsOneRobotBindingPerSession(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "bridge.db"))
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	defer store.Close()
+
+	bindings := []domain.SessionBinding{
+		{BindingID: "binding-a", Key: domain.BindingKey{ConnectorID: "feishu-a", Platform: "feishu", ChatID: "chat-a"}, KimiSessionID: "shared-session", Source: "auto"},
+		{BindingID: "binding-b", Key: domain.BindingKey{ConnectorID: "feishu-b", Platform: "feishu", ChatID: "chat-b"}, KimiSessionID: "shared-session", Source: "auto"},
+	}
+	var wait sync.WaitGroup
+	errs := make(chan error, len(bindings))
+	for _, binding := range bindings {
+		wait.Add(1)
+		go func(binding domain.SessionBinding) {
+			defer wait.Done()
+			errs <- store.CreateBinding(ctx, binding)
+		}(binding)
+	}
+	wait.Wait()
+	close(errs)
+	succeeded := 0
+	for err := range errs {
+		if err == nil {
+			succeeded++
+		} else if !strings.Contains(err.Error(), "already bound") {
+			t.Fatalf("unexpected concurrent create error: %v", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("expected exactly one binding to claim the session, got %d", succeeded)
+	}
+
+	winner, err := store.ListBindings(ctx)
+	if err != nil || len(winner) != 1 {
+		t.Fatalf("unexpected bindings after concurrent claim: bindings=%+v err=%v", winner, err)
+	}
+	if err := store.CreateBinding(ctx, domain.SessionBinding{
+		BindingID:     "binding-c",
+		Key:           domain.BindingKey{ConnectorID: "weixin-c", Platform: "weixin", ChatID: "chat-c"},
+		KimiSessionID: "other-session",
+		Source:        "auto",
+	}); err != nil {
+		t.Fatalf("create independent binding: %v", err)
+	}
+	if err := store.Rebind(ctx, "binding-c", "shared-session", "", "manual_rebind"); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("expected store-level rebind conflict, got %v", err)
+	}
+	unchanged, err := store.GetBindingByID(ctx, "binding-c")
+	if err != nil || unchanged == nil || unchanged.KimiSessionID != "other-session" {
+		t.Fatalf("conflicting rebind changed binding: binding=%+v err=%v", unchanged, err)
 	}
 }
 

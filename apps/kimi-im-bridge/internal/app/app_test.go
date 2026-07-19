@@ -2,15 +2,19 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime/fakeruntime"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/store"
 )
 
@@ -25,6 +29,65 @@ func TestInspectRuntimeLocatorReadsHealth(t *testing.T) {
 	status := inspectRuntimeLocator(path)
 	if !status.Configured || !status.Readable || status.Health != "ready" {
 		t.Fatalf("unexpected locator status: %+v", status)
+	}
+}
+
+func TestAgentRoomObserverLifecycleAndCapabilitiesUseReadyServer(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "runtime.token")
+	if err := os.WriteFile(tokenPath, []byte("runtime-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake, err := fakeruntime.New(fakeruntime.Config{TokenPath: tokenPath, Transcript: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeServer := httptest.NewServer(fake)
+	defer runtimeServer.Close()
+	locatorPath := filepath.Join(dir, "locator.json")
+	locator, _ := json.Marshal(map[string]any{"origin": runtimeServer.URL, "tokenPath": tokenPath, "health": "ready", "generation": 7})
+	if err := os.WriteFile(locatorPath, locator, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	service, err := New(Options{
+		Version: "test", ConfigPath: filepath.Join(dir, "settings.json"), SecretsPath: filepath.Join(dir, "secrets.json"),
+		DBPath: filepath.Join(dir, "bridge.db"), LogFilePath: filepath.Join(dir, "bridge.log"), AdminPort: port,
+		AdminToken: "admin-secret", KimiRuntimeLocatorPath: locatorPath, AgentRoomEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	if err := service.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err := service.Status(context.Background())
+		if err == nil && status.AgentRoom.Observer == "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	status, err := service.Status(context.Background())
+	if err != nil || status.AgentRoom.Observer != "running" || containsString(status.AgentRoom.Degradations, "observer_not_running") {
+		t.Fatalf("unexpected Observer status: %+v err=%v", status.AgentRoom, err)
+	}
+	capabilities := service.agentRoomCapabilities(context.Background())
+	if !capabilities.Observer || !capabilities.MultiSessionObservation || !capabilities.UserPromptEvents || !capabilities.SessionTranscript {
+		t.Fatalf("unexpected ready Server capabilities: %+v", capabilities)
+	}
+	if err := service.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if service.agentRoomObserver != nil {
+		t.Fatal("Observer reference survived shutdown")
 	}
 }
 
@@ -46,6 +109,67 @@ func TestRuntimeAdapterStatusFollowsLocator(t *testing.T) {
 	})
 	if degraded.State != "degraded" || degraded.LastError == "" {
 		t.Fatalf("unexpected degraded adapter status: %+v", degraded)
+	}
+}
+
+func TestAgentRoomStatusReportsFlagAndActualProviderDegradation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	service, err := New(Options{
+		Version:          "test",
+		ConfigPath:       filepath.Join(dir, "bridge_settings.json"),
+		SecretsPath:      filepath.Join(dir, "bridge_secrets.json"),
+		DBPath:           filepath.Join(dir, "bridge.db"),
+		LogFilePath:      filepath.Join(dir, "bridge.log"),
+		AdminPort:        60110,
+		AdminToken:       "token-1",
+		AgentRoomEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	status, err := service.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.AgentRoom.Enabled || status.AgentRoom.Core != "running" || status.AgentRoom.Observer != "not_running" {
+		t.Fatalf("unexpected Agent Room status: %+v", status.AgentRoom)
+	}
+	if !containsString(status.AgentRoom.Degradations, "server_provider_required") || !containsString(status.AgentRoom.Degradations, "observer_not_running") {
+		t.Fatalf("expected truthful SDK/Observer degradation: %+v", status.AgentRoom.Degradations)
+	}
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
+func TestConnectorWorkDirUsesOverrideThenGlobalFallback(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name      string
+		connector config.ConnectorConfig
+		fallback  string
+		want      string
+	}{
+		{name: "telegram override", connector: config.ConnectorConfig{Platform: "telegram", DefaultWorkDir: " D:/telegram "}, fallback: "D:/global", want: "D:/telegram"},
+		{name: "feishu override", connector: config.ConnectorConfig{Platform: "feishu", DefaultWorkDir: "D:/feishu"}, fallback: "D:/global", want: "D:/feishu"},
+		{name: "weixin override", connector: config.ConnectorConfig{Platform: "weixin", DefaultWorkDir: "D:/weixin"}, fallback: "D:/global", want: "D:/weixin"},
+		{name: "global fallback", connector: config.ConnectorConfig{Platform: "feishu"}, fallback: " D:/global ", want: "D:/global"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := connectorWorkDir(test.connector, test.fallback); got != test.want {
+				t.Fatalf("connectorWorkDir returned %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/admin"
+	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/agentroom"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/binding"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/bridgecore"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/config"
@@ -41,32 +42,40 @@ type Options struct {
 	HostControlToken       string
 	KimiRuntimeLocatorPath string
 	SkillsDir              string
+	AgentRoomEnabled       bool
 }
 
 type Service struct {
-	options            Options
-	settings           config.BridgeSettings
-	secrets            config.BridgeSecrets
-	store              *store.Store
-	logger             *logging.Logger
-	bindings           *binding.Router
-	orchestrator       *bridgecore.Orchestrator
-	provider           bridgecore.RuntimeProvider
-	runtimeSvc         *runtime.Service
-	skillsAuthFilePath string
+	options             Options
+	settings            config.BridgeSettings
+	secrets             config.BridgeSecrets
+	store               *store.Store
+	logger              *logging.Logger
+	bindings            *binding.Router
+	orchestrator        *bridgecore.Orchestrator
+	provider            bridgecore.RuntimeProvider
+	serverAdapter       *runtime.KimiCodeServerAdapter
+	runtimeSvc          *runtime.Service
+	agentRoomCore       *agentroom.Service
+	agentRoomObserver   *agentroom.ObserverCoordinator
+	agentRoomDispatcher *agentroom.Dispatcher
+	providerName        string
+	skillsAuthFilePath  string
 
-	lifecycleMu   sync.Mutex
-	mu            sync.RWMutex
-	state         domain.BridgeRuntimeState
-	startedAt     string
-	lastErrorCode string
-	lastError     string
-	server        *http.Server
-	listener      net.Listener
-	stopCh        chan struct{}
-	stopOnce      sync.Once
-	adapterCancel context.CancelFunc
-	adapters      []managedAdapter
+	lifecycleMu    sync.Mutex
+	mu             sync.RWMutex
+	state          domain.BridgeRuntimeState
+	startedAt      string
+	lastErrorCode  string
+	lastError      string
+	server         *http.Server
+	listener       net.Listener
+	stopCh         chan struct{}
+	stopOnce       sync.Once
+	adapterCancel  context.CancelFunc
+	adapters       []managedAdapter
+	observerCancel context.CancelFunc
+	observerDone   chan struct{}
 }
 
 type managedAdapter interface {
@@ -118,14 +127,23 @@ func New(options Options) (*Service, error) {
 		}
 		service.skillsAuthFilePath = authFilePath
 	}
-	service.provider = newRuntimeProvider(options, service.skillsAuthFilePath, storeHandle, logger)
+	service.provider, service.providerName, service.serverAdapter = newRuntimeProvider(options, service.skillsAuthFilePath, storeHandle, logger)
+	service.agentRoomCore = agentroom.NewService(storeHandle)
 	service.orchestrator = bridgecore.NewOrchestrator(
 		service.bindings,
 		service.provider,
 		storeHandle,
 		storeHandle,
 		storeHandle,
+		bridgecore.OrchestratorOptions{AgentBindings: storeHandle, DefaultWorkDir: settings.DefaultWorkDir},
 	)
+	service.agentRoomDispatcher = agentroom.NewDispatcher(service.agentRoomCore, storeHandle, service.serverAdapter, service.provider)
+	if options.AgentRoomEnabled {
+		if err := service.agentRoomDispatcher.Recover(context.Background()); err != nil {
+			_ = service.Close()
+			return nil, fmt.Errorf("recover agent room queue: %w", err)
+		}
+	}
 	service.runtimeSvc = runtime.NewService(
 		runtime.NewSDKDriver(runtime.SDKDriverOptions{
 			SkillsDir:    strings.TrimSpace(options.SkillsDir),
@@ -154,7 +172,7 @@ func newRuntimeProvider(
 	authFilePath string,
 	storeHandle *store.Store,
 	logger *logging.Logger,
-) bridgecore.RuntimeProvider {
+) (bridgecore.RuntimeProvider, string, *runtime.KimiCodeServerAdapter) {
 	sdkProvider := kimiprovider.NewProvider(
 		kimiprovider.NewSDKDriver(kimiprovider.SDKDriverOptions{
 			SkillsDir:    strings.TrimSpace(options.SkillsDir),
@@ -166,17 +184,17 @@ func newRuntimeProvider(
 	locatorPath := strings.TrimSpace(options.KimiRuntimeLocatorPath)
 	if locatorPath == "" {
 		logger.Printf("bridge runtime provider selected: sdk")
-		return sdkProvider
+		return sdkProvider, "sdk", nil
 	}
 	adapter, err := runtime.NewKimiCodeServerAdapter(runtime.KimiCodeServerAdapterOptions{
 		RuntimeLocatorPath: locatorPath,
 	})
 	if err != nil {
 		logger.Printf("bridge runtime provider server unavailable; falling back to sdk: %v", err)
-		return sdkProvider
+		return sdkProvider, "sdk", nil
 	}
 	logger.Printf("bridge runtime provider selected: server")
-	return runtimeadapterprovider.NewProvider(adapter, storeHandle, storeHandle)
+	return runtimeadapterprovider.NewProvider(adapter, storeHandle, storeHandle), "server", adapter
 }
 
 func (s *Service) Start() error {
@@ -202,12 +220,16 @@ func (s *Service) Start() error {
 		return err
 	}
 
+	var roomRoutes *admin.AgentRoomRoutes
+	if s.options.AgentRoomEnabled {
+		roomRoutes = admin.NewAgentRoomRoutes(s.agentRoomCore, s.store, s.agentRoomCapabilities, s.agentRoomDispatcher)
+	}
 	server := &http.Server{
 		Addr:              address,
-		Handler:           admin.NewHandler(s, s.options.AdminToken),
+		Handler:           admin.NewHandlerWithAgentRoom(s, s.options.AdminToken, roomRoutes),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      35 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -231,6 +253,21 @@ func (s *Service) Start() error {
 	if err := s.startAdapters(); err != nil {
 		s.logger.Printf("bridge adapter startup degraded: %v", err)
 	}
+	if s.options.AgentRoomEnabled && s.serverAdapter != nil {
+		observerCtx, observerCancel := context.WithCancel(context.Background())
+		observer := agentroom.NewObserverCoordinator(s.store, s.serverAdapter, 300*time.Millisecond)
+		observer.SetRunTerminalHandler(s.agentRoomDispatcher.HandleTerminalRun)
+		done := make(chan struct{})
+		s.mu.Lock()
+		s.agentRoomObserver, s.observerCancel, s.observerDone = observer, observerCancel, done
+		s.mu.Unlock()
+		go func() {
+			defer close(done)
+			if err := observer.Run(observerCtx); err != nil && observerCtx.Err() == nil {
+				s.logger.Printf("agent room observer stopped: %v", err)
+			}
+		}()
+	}
 	return nil
 }
 
@@ -246,8 +283,21 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.state = domain.BridgeStateStopping
 	server := s.server
 	adapterCancel := s.adapterCancel
+	observerCancel := s.observerCancel
+	observerDone := s.observerDone
 	adapters := append([]managedAdapter(nil), s.adapters...)
 	s.mu.Unlock()
+	if observerCancel != nil {
+		observerCancel()
+	}
+	if observerDone != nil {
+		select {
+		case <-observerDone:
+		case <-ctx.Done():
+			s.setState(domain.BridgeStateDegraded, "transient_network", ctx.Err().Error())
+			return ctx.Err()
+		}
+	}
 
 	if adapterCancel != nil {
 		adapterCancel()
@@ -273,6 +323,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.listener = nil
 	s.adapterCancel = nil
 	s.adapters = nil
+	s.observerCancel = nil
+	s.observerDone = nil
+	s.agentRoomObserver = nil
 	s.state = domain.BridgeStateStopped
 	s.mu.Unlock()
 	s.logger.Printf("bridge stopped")
@@ -342,6 +395,52 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 			err,
 		)
 	}
+	agentRoomStatus := domain.AgentRoomStatus{Enabled: s.options.AgentRoomEnabled, Core: "disabled", Observer: "disabled"}
+	if s.options.AgentRoomEnabled {
+		agentRoomStatus.Core = "running"
+		agentRoomStatus.Observer = "not_running"
+		s.mu.RLock()
+		observer := s.agentRoomObserver
+		s.mu.RUnlock()
+		if observer != nil && observer.Available() {
+			agentRoomStatus.Observer = "running"
+		}
+		agentRoomStatus.ActiveRuns, agentRoomStatus.QueueDepth, agentRoomStatus.ObservedSessions, err = s.store.AgentRoomSummaryCounts(ctx)
+		if err != nil {
+			agentRoomStatus.Core = "degraded"
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "status_snapshot_failed")
+		}
+		if agentRoomStatus.DatabaseVersion, err = s.store.UserVersion(ctx); err != nil {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "database_status_unavailable")
+		}
+		if leases, leaseErr := s.store.ListActiveSessionLeases(ctx, time.Now()); leaseErr != nil {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "lease_status_unavailable")
+		} else {
+			agentRoomStatus.ActiveLeases = len(leases)
+		}
+		if approvals, approvalErr := s.store.ListApprovals(ctx, "pending"); approvalErr != nil {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "approval_status_unavailable")
+		} else {
+			for _, approval := range approvals {
+				if approval.OriginKind == "agent_room" || approval.Platform == "agent_room" {
+					agentRoomStatus.PendingApprovals++
+				}
+			}
+		}
+		if agentRoomStatus.PaneGeneration, err = s.store.GetPaneObservationGeneration(ctx); err != nil {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "pane_status_unavailable")
+		}
+		locator := inspectRuntimeLocator(s.options.KimiRuntimeLocatorPath)
+		if s.providerName != "server" {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "server_provider_required")
+		} else if !locator.Readable || locator.Health != "ready" {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "runtime_unavailable")
+		}
+		if agentRoomStatus.Observer != "running" {
+			agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "observer_not_running")
+		}
+		agentRoomStatus.Degradations = append(agentRoomStatus.Degradations, "abort_unconfirmed")
+	}
 
 	for _, channel := range channels {
 		if state == domain.BridgeStateRunning && (channel.State == domain.ChannelStateError || channel.State == domain.ChannelStateDegraded) {
@@ -362,12 +461,42 @@ func (s *Service) Status(ctx context.Context) (domain.BridgeStatus, error) {
 		Version:            s.options.Version,
 		KimiRuntimeLocator: locatorStatus,
 		RuntimeAdapter:     runtimeAdapterStatus(locatorStatus),
+		AgentRoom:          agentRoomStatus,
 		Channels:           channels,
 		PendingApprovals:   pendingApprovals,
 		Bindings:           bindings,
 		LastErrorCode:      lastErrorCode,
 		LastError:          lastError,
 	}, nil
+}
+
+func (s *Service) agentRoomCapabilities(context.Context) admin.AgentRoomCapabilitySnapshot {
+	locator := inspectRuntimeLocator(s.options.KimiRuntimeLocatorPath)
+	serverReady := s.options.AgentRoomEnabled && s.providerName == "server" && locator.Readable && locator.Health == "ready"
+	s.mu.RLock()
+	observerRunning := s.agentRoomObserver != nil && s.agentRoomObserver.Available()
+	s.mu.RUnlock()
+	result := admin.AgentRoomCapabilitySnapshot{
+		RuntimeProvider:         s.providerName,
+		Core:                    s.options.AgentRoomEnabled,
+		Observer:                observerRunning,
+		MultiSessionObservation: observerRunning,
+		UserPromptEvents:        observerRunning,
+		SessionTranscript:       serverReady,
+		Abort:                   false,
+		Approval:                serverReady,
+		NativeFollowUp:          false,
+	}
+	if s.providerName != "server" {
+		result.Degradations = append(result.Degradations, "server_provider_required")
+	} else if !serverReady {
+		result.Degradations = append(result.Degradations, "runtime_unavailable")
+	}
+	if !observerRunning {
+		result.Degradations = append(result.Degradations, "observer_not_running")
+	}
+	result.Degradations = append(result.Degradations, "abort_unconfirmed")
+	return result
 }
 
 func inspectRuntimeLocator(path string) domain.RuntimeLocatorStatus {
@@ -664,6 +793,7 @@ func (s *Service) startAdapters() error {
 }
 
 func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, error) {
+	defaultWorkDir := connectorWorkDir(channel, "")
 	switch strings.TrimSpace(strings.ToLower(channel.Platform)) {
 	case "telegram":
 		return telegramplatform.NewService(telegramplatform.Options{
@@ -671,7 +801,7 @@ func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, 
 				ConnectorID:    channel.ID,
 				ConnectorLabel: channel.Label,
 				BotToken:       secretTelegramBotToken(s.secrets, channel.ID),
-				DefaultWorkDir: s.settings.DefaultWorkDir,
+				DefaultWorkDir: defaultWorkDir,
 			},
 			BindingRouter: s.bindings,
 			Orchestrator:  s.orchestrator,
@@ -692,7 +822,7 @@ func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, 
 				VerificationToken:     secretFeishuVerificationToken(s.secrets, channel.ID),
 				EncryptKey:            secretFeishuEncryptKey(s.secrets, channel.ID),
 				AutoApprove:           channel.FeishuAutoApprove,
-				DefaultWorkDir:        s.settings.DefaultWorkDir,
+				DefaultWorkDir:        defaultWorkDir,
 				WorkDirPresets:        mapFeishuWorkDirPresets(s.settings.WorkDirPresets),
 				ReplyRenderer:         channel.FeishuReplyRenderer,
 				AttachmentsDir:        filepath.Join(filepath.Dir(s.options.DBPath), "attachments", channel.ID),
@@ -714,7 +844,7 @@ func (s *Service) buildAdapter(channel config.ConnectorConfig) (managedAdapter, 
 				BaseURL:        secretWeixinBaseURL(s.secrets, channel.ID),
 				AccountID:      secretWeixinAccountID(s.secrets, channel.ID),
 				OwnerUserID:    secretWeixinOwnerUserID(s.secrets, channel.ID),
-				DefaultWorkDir: s.settings.DefaultWorkDir,
+				DefaultWorkDir: defaultWorkDir,
 				ReplyMode:      channel.WeixinReplyMode,
 			},
 			BindingRouter: s.bindings,
@@ -929,6 +1059,10 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func connectorWorkDir(connector config.ConnectorConfig, fallback string) string {
+	return strings.TrimSpace(firstNonEmpty(connector.DefaultWorkDir, fallback))
 }
 
 func mapFeishuWorkDirPresets(presets []config.WorkDirPreset) []feishuplatform.WorkDirPreset {

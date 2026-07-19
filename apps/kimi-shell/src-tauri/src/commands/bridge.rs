@@ -1,6 +1,7 @@
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    agent_room_event_pump,
     app_state::AppState,
     bridge_manager, bridge_settings_store, feishu_onboarding,
     types::{
@@ -58,15 +59,21 @@ pub(crate) fn get_bridge_status(app: AppHandle) -> Result<BridgeStatus, String> 
 
 #[tauri::command]
 pub(crate) async fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let pump_app = app.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
         bridge_manager::start_bridge(&app).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| format!("failed to join start bridge task: {error}"))?
+    .map_err(|error| format!("failed to join start bridge task: {error}"))??;
+    if bridge_manager::agent_room_feature_enabled() {
+        agent_room_event_pump::ensure_started(&pump_app);
+    }
+    Ok(status)
 }
 
 #[tauri::command]
 pub(crate) async fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
+    agent_room_event_pump::stop(&app);
     tauri::async_runtime::spawn_blocking(move || {
         bridge_manager::stop_bridge(&app).map_err(|error| error.to_string())
     })
@@ -76,11 +83,17 @@ pub(crate) async fn stop_bridge(app: AppHandle) -> Result<BridgeStatus, String> 
 
 #[tauri::command]
 pub(crate) async fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    agent_room_event_pump::stop(&app);
+    let pump_app = app.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
         bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| format!("failed to join restart bridge task: {error}"))?
+    .map_err(|error| format!("failed to join restart bridge task: {error}"))??;
+    if bridge_manager::agent_room_feature_enabled() {
+        agent_room_event_pump::ensure_started(&pump_app);
+    }
+    Ok(status)
 }
 
 #[tauri::command]

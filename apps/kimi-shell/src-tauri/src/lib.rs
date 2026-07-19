@@ -1,4 +1,5 @@
 mod acp;
+mod agent_room_event_pump;
 #[allow(dead_code)]
 mod api_v1_client;
 mod app_state;
@@ -1010,6 +1011,7 @@ pub fn run() {
             let hotkey_owner = shared.hotkey_owner;
             let pid = shared.pid;
             app.manage(shared);
+            app.manage(agent_room_event_pump::AgentRoomEventPump::default());
             app.manage(install_manager::InstallManager::default());
 
             if let Err(error) = bridge_settings_store::ensure_bridge_files(app.handle()) {
@@ -1028,7 +1030,12 @@ pub fn run() {
 
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
-                shortcut_manager::register_default_hotkey(app.handle())?;
+                if let Err(error) = shortcut_manager::register_default_hotkey(app.handle()) {
+                    log_manager::append_line(
+                        app.handle(),
+                        format!("global hotkey unavailable; continuing without it: {error:#}"),
+                    );
+                }
             }
 
             if hotkey_owner {
@@ -1069,12 +1076,15 @@ pub fn run() {
                         }
                     };
 
-                    if settings.enabled && settings.auto_start {
+                    let agent_room_enabled = bridge_manager::agent_room_feature_enabled();
+                    if (settings.enabled && settings.auto_start) || agent_room_enabled {
                         if let Err(error) = bridge_manager::start_bridge(&app_handle) {
                             log_manager::append_line(
                                 &app_handle,
                                 format!("bridge auto start failed: {error:#}"),
                             );
+                        } else if agent_room_enabled {
+                            agent_room_event_pump::ensure_started(&app_handle);
                         }
                     }
                 });
@@ -1143,6 +1153,7 @@ pub fn run() {
                 );
                 return;
             }
+            agent_room_event_pump::stop(app_handle);
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
             }
@@ -1151,6 +1162,7 @@ pub fn run() {
             }
         }
         RunEvent::Exit => {
+            agent_room_event_pump::stop(app_handle);
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
             }

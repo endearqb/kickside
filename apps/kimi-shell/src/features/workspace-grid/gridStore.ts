@@ -8,6 +8,7 @@ import {
 import {
   createDefaultWorkspaceGridState,
   migrateLegacyWorkspaceGridState,
+  migrateWorkspaceGridStateV1,
 } from "./gridMigration";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { normalizeEmbeddableUrl } from "./urlSafety";
@@ -16,14 +17,18 @@ import type {
   WorkspaceGridPresetId,
   WorkspaceGridSavedLayout,
   WorkspaceGridStateV1,
+  WorkspaceGridStateV2,
   WorkspaceGridTrackSizes,
   WorkspacePane,
   WorkspacePaneKind,
   WorkspacePaneTheme,
 } from "./gridTypes";
 
-export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v1";
+export const WORKSPACE_GRID_STATE_STORAGE_KEY = "kimi-workspace-grid-state-v2";
+export const WORKSPACE_GRID_STATE_STORAGE_KEY_V1 = "kimi-workspace-grid-state-v1";
 export const WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY =
+  "kimi-workspace-grid-saved-layouts-v2";
+export const WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY_V1 =
   "kimi-workspace-grid-saved-layouts-v1";
 export const WORKSPACE_GRID_MAX_VISIBLE_PANES = 6;
 export const WORKSPACE_GRID_MAX_TOTAL_PANES = 12;
@@ -34,12 +39,28 @@ export type ExplorerPanePlacement = {
   paneId: string | null;
   displacedPaneId?: string;
 };
+export type WorkspacePanePlacement = ExplorerPanePlacement;
+export type WorkspaceSessionOpenDisposition =
+  | "focus_existing"
+  | "new_pane"
+  | "replace_active";
+
+export interface OpenWorkspaceSessionInput {
+  sessionId: string;
+  workDir?: string;
+  disposition: WorkspaceSessionOpenDisposition;
+  targetPaneId?: string;
+  title?: string;
+}
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
 
 export interface WorkspaceGridActions {
   setPreset: (preset: WorkspaceGridPresetId) => void;
   addPane: (pane: AddWorkspacePaneInput, targetSlotId?: string) => string | null;
+  openSessionInWorkspaceGrid: (
+    input: OpenWorkspaceSessionInput,
+  ) => WorkspacePanePlacement;
   openPaneFromExplorer: (pane: AddWorkspacePaneInput) => ExplorerPanePlacement;
   showPane: (paneId: string, targetSlotId?: string) => void;
   removePane: (paneId: string) => void;
@@ -65,12 +86,13 @@ export interface WorkspaceGridActions {
   restoreGridState: (state: WorkspaceGridPersistedState) => void;
 }
 
-export type WorkspaceGridStore = WorkspaceGridStateV1 & WorkspaceGridActions;
+export type WorkspaceGridStore = WorkspaceGridStateV2 & WorkspaceGridActions;
 
 export interface AddWorkspacePaneInput {
   kind: WorkspacePaneKind;
   title?: string;
   sessionId?: string;
+  roomId?: string;
   url?: string;
   workDir?: string;
   theme?: WorkspacePaneTheme;
@@ -80,7 +102,7 @@ export interface AddWorkspacePaneInput {
 export function loadWorkspaceGridState(
   storage = getBrowserStorage(),
   now = Date.now(),
-): WorkspaceGridStateV1 {
+): WorkspaceGridStateV2 {
   if (!storage) {
     return createDefaultWorkspaceGridState(now);
   }
@@ -93,14 +115,22 @@ export function loadWorkspaceGridState(
     }
   }
 
+  const storedV1 = storage.getItem(WORKSPACE_GRID_STATE_STORAGE_KEY_V1);
+  if (storedV1) {
+    const migrated = parseWorkspaceGridStateV1(storedV1);
+    if (migrated) {
+      return migrated;
+    }
+  }
+
   return migrateLegacyWorkspaceGridState(storage, now);
 }
 
 export function toPersistedWorkspaceGridState(
-  state: WorkspaceGridStateV1,
+  state: WorkspaceGridStateV2,
 ): WorkspaceGridPersistedState {
   return {
-    version: 1,
+    version: 2,
     preset: state.preset,
     panes: state.panes.map(sanitizePane),
     slots: state.slots,
@@ -113,7 +143,7 @@ export function toPersistedWorkspaceGridState(
 }
 
 export function saveWorkspaceGridState(
-  state: WorkspaceGridStateV1,
+  state: WorkspaceGridStateV2,
   storage = getBrowserStorage(),
 ): void {
   if (!storage) {
@@ -132,16 +162,29 @@ export function loadWorkspaceGridSavedLayouts(
     return [];
   }
 
+  const storedV2 = storage.getItem(WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY);
+  if (storedV2 !== null) {
+    try {
+      const parsed = JSON.parse(storedV2) as Partial<WorkspaceGridSavedLayout>[];
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map(sanitizeSavedLayout)
+          .filter((layout): layout is WorkspaceGridSavedLayout => Boolean(layout));
+      }
+    } catch {
+      // Fall through to the untouched V1 rollback key.
+    }
+  }
+
   try {
     const parsed = JSON.parse(
-      storage.getItem(WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY) ?? "[]",
+      storage.getItem(WORKSPACE_GRID_SAVED_LAYOUTS_STORAGE_KEY_V1) ?? "[]",
     ) as Partial<WorkspaceGridSavedLayout>[];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .map((layout) => sanitizeSavedLayout(layout))
-      .filter((layout): layout is WorkspaceGridSavedLayout => Boolean(layout));
+    return Array.isArray(parsed)
+      ? parsed
+          .map(migrateSavedLayoutV1)
+          .filter((layout): layout is WorkspaceGridSavedLayout => Boolean(layout))
+      : [];
   } catch {
     return [];
   }
@@ -160,7 +203,7 @@ export function saveWorkspaceGridSavedLayouts(
 export function upsertWorkspaceGridSavedLayout(
   layouts: readonly WorkspaceGridSavedLayout[],
   name: string,
-  state: WorkspaceGridStateV1,
+  state: WorkspaceGridStateV2,
   now = Date.now(),
 ): WorkspaceGridSavedLayout[] {
   const trimmedName = name.trim();
@@ -209,7 +252,7 @@ export const useWorkspaceGridStore = create<WorkspaceGridStore>()(
 );
 
 function createWorkspaceGridSlice(
-  initialState: WorkspaceGridStateV1,
+  initialState: WorkspaceGridStateV2,
   storage: BrowserStorage | null = getBrowserStorage(),
 ): StateCreator<WorkspaceGridStore> {
   return (set, get) => ({
@@ -247,6 +290,16 @@ function createWorkspaceGridSlice(
     },
     addPane(input, targetSlotId) {
       const state = get();
+      const roomId = sanitizeRoomId(input.roomId);
+      if (input.kind === "agent_room" && roomId) {
+        const existing = state.panes.find(
+          (pane) => pane.kind === "agent_room" && pane.roomId === roomId,
+        );
+        if (existing) {
+          get().showPane(existing.id, targetSlotId);
+          return existing.id;
+        }
+      }
       if (state.panes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) {
         return null;
       }
@@ -273,12 +326,60 @@ function createWorkspaceGridSlice(
 
       return paneId;
     },
+    openSessionInWorkspaceGrid(input) {
+      const sessionId = input.sessionId.trim();
+      if (!sessionId) {
+        return { kind: "limit_reached", paneId: null };
+      }
+      const existing = get().panes.find(
+        (pane) => effectiveSessionId(pane) === sessionId,
+      );
+      if (existing) {
+        const wasVisible = get().slots.some((slot) => slot.paneId === existing.id);
+        get().showPane(existing.id);
+        if (input.workDir?.trim()) {
+          get().setPaneWorkDir(existing.id, input.workDir);
+        }
+        return {
+          kind: wasVisible ? "reused_visible" : "reused_swapped",
+          paneId: existing.id,
+        };
+      }
+      if (input.disposition === "replace_active") {
+        const state = get();
+        const target =
+          state.panes.find((pane) => pane.id === input.targetPaneId) ??
+          state.panes.find(
+            (pane) => pane.id === state.activePaneId && pane.kind === "code",
+          ) ??
+          state.panes.find((pane) => pane.kind === "code") ??
+          state.panes[0];
+        if (target) {
+          get().configurePane(target.id, {
+            kind: "code",
+            title: input.title,
+            sessionId,
+            workDir: input.workDir,
+          });
+          get().showPane(target.id);
+          return { kind: "reused_visible", paneId: target.id };
+        }
+      }
+      return get().openPaneFromExplorer({
+        kind: "code",
+        title: input.title,
+        sessionId,
+        workDir: input.workDir,
+      });
+    },
     openPaneFromExplorer(input) {
       let result: ExplorerPanePlacement = { kind: "limit_reached", paneId: null };
       update(set, storage, (state) => {
         const now = Date.now();
         const existing = input.sessionId
-          ? state.panes.find((pane) => pane.sessionId === input.sessionId)
+          ? state.panes.find(
+              (pane) => effectiveSessionId(pane) === input.sessionId?.trim(),
+            )
           : undefined;
         if (existing) {
           const visibleSlot = state.slots.find((slot) => slot.paneId === existing.id);
@@ -590,14 +691,18 @@ function createWorkspaceGridSlice(
             ? {
                 ...pane,
                 kind,
+                carrier: kind === "agent_room" ? "local" : "iframe",
                 title: defaultPaneTitle(kind),
                 sessionId: undefined,
                 activeSessionId: undefined,
+                roomId: undefined,
                 url: undefined,
                 workDir: undefined,
                 storageNamespace:
-                  sanitizeStorageNamespace(pane.storageNamespace) ??
-                  createPaneStorageNamespace(pane.id),
+                  kind === "agent_room"
+                    ? undefined
+                    : (sanitizeStorageNamespace(pane.storageNamespace) ??
+                      createPaneStorageNamespace(pane.id)),
                 updatedAt: Date.now(),
               }
             : pane,
@@ -606,30 +711,66 @@ function createWorkspaceGridSlice(
       }));
     },
     configurePane(paneId, input) {
-      update(set, storage, (state) => ({
-        ...state,
-        panes: state.panes.map((pane) =>
-          pane.id === paneId
-            ? {
-                ...pane,
-                kind: input.kind,
-                title: input.title ?? defaultPaneTitle(input.kind),
-                sessionId: input.sessionId,
-                activeSessionId: undefined,
-                url: sanitizeUrl(input.url),
-                workDir: sanitizeWorkDir(input.workDir),
-                theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
-                storageNamespace:
-                  sanitizeStorageNamespace(input.storageNamespace) ??
-                  sanitizeStorageNamespace(pane.storageNamespace) ??
-                  createPaneStorageNamespace(pane.id),
-                updatedAt: Date.now(),
-              }
-            : pane,
-        ),
-        activePaneId: paneId,
-        updatedAt: Date.now(),
-      }));
+      update(set, storage, (state) => {
+        const roomId = sanitizeRoomId(input.roomId);
+        const existingRoomPane =
+          input.kind === "agent_room" && roomId
+            ? state.panes.find(
+                (pane) =>
+                  pane.id !== paneId &&
+                  pane.kind === "agent_room" &&
+                  pane.roomId === roomId,
+              )
+            : undefined;
+        if (existingRoomPane) {
+          const sourceSlot = state.slots.find((slot) => slot.paneId === paneId);
+          const existingSlot = state.slots.find(
+            (slot) => slot.paneId === existingRoomPane.id,
+          );
+          return {
+            ...state,
+            slots:
+              existingSlot || !sourceSlot
+                ? state.slots
+                : state.slots.map((slot) =>
+                    slot.id === sourceSlot.id
+                      ? { ...slot, paneId: existingRoomPane.id }
+                      : slot,
+                  ),
+            activePaneId: existingRoomPane.id,
+            maximizedPaneId: null,
+            updatedAt: Date.now(),
+          };
+        }
+        return {
+          ...state,
+          panes: state.panes.map((pane) =>
+            pane.id === paneId
+              ? sanitizePane({
+                  ...pane,
+                  kind: input.kind,
+                  carrier: input.kind === "agent_room" ? "local" : "iframe",
+                  title: input.title ?? defaultPaneTitle(input.kind),
+                  sessionId: input.sessionId,
+                  activeSessionId: undefined,
+                  roomId,
+                  url: sanitizeUrl(input.url),
+                  workDir: sanitizeWorkDir(input.workDir),
+                  theme: isPaneTheme(input.theme) ? input.theme : pane.theme,
+                  storageNamespace:
+                    input.kind === "agent_room"
+                      ? undefined
+                      : (sanitizeStorageNamespace(input.storageNamespace) ??
+                        sanitizeStorageNamespace(pane.storageNamespace) ??
+                        createPaneStorageNamespace(pane.id)),
+                  updatedAt: Date.now(),
+                })
+              : pane,
+          ),
+          activePaneId: paneId,
+          updatedAt: Date.now(),
+        };
+      });
     },
     setGridTrackSizes(trackSizes) {
       update(set, storage, (state) => ({
@@ -655,7 +796,7 @@ function createWorkspaceGridSlice(
 function update(
   set: StoreApi<WorkspaceGridStore>["setState"],
   storage: BrowserStorage | null,
-  reducer: (state: WorkspaceGridStore) => WorkspaceGridStateV1,
+  reducer: (state: WorkspaceGridStore) => WorkspaceGridStateV2,
 ): void {
   set((state) => {
     const next = reducer(state);
@@ -664,20 +805,38 @@ function update(
   });
 }
 
-function parseWorkspaceGridState(raw: string): WorkspaceGridStateV1 | null {
+function parseWorkspaceGridState(raw: string): WorkspaceGridStateV2 | null {
   try {
-    const parsed = JSON.parse(raw) as Partial<WorkspaceGridStateV1>;
+    const parsed = JSON.parse(raw) as Partial<WorkspaceGridStateV2>;
     return sanitizeGridState(parsed);
   } catch {
     return null;
   }
 }
 
+function parseWorkspaceGridStateV1(raw: string): WorkspaceGridStateV2 | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<WorkspaceGridStateV1>;
+    if (
+      parsed.version !== 1 ||
+      !Array.isArray(parsed.panes) ||
+      !Array.isArray(parsed.slots)
+    ) {
+      return null;
+    }
+    return sanitizeGridState(
+      migrateWorkspaceGridStateV1(parsed as WorkspaceGridStateV1),
+    );
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeGridState(
-  parsed: Partial<WorkspaceGridStateV1>,
-): WorkspaceGridStateV1 | null {
+  parsed: Partial<WorkspaceGridStateV2>,
+): WorkspaceGridStateV2 | null {
   if (
-    parsed.version !== 1 ||
+    parsed.version !== 2 ||
     !Array.isArray(parsed.panes) ||
     !Array.isArray(parsed.slots)
   ) {
@@ -707,7 +866,7 @@ function sanitizeGridState(
       : null;
 
   return {
-    version: 1,
+    version: 2,
     preset,
     panes,
     slots: materializeGridSlots(preset, slotPaneIds),
@@ -725,12 +884,19 @@ function isGridPresetId(value: unknown): value is WorkspaceGridPresetId {
 
 function sanitizePanes(panes: unknown[]): WorkspacePane[] {
   const seenPaneIds = new Set<string>();
+  const seenRoomIds = new Set<string>();
   const sanitizedPanes: WorkspacePane[] = [];
 
   for (const rawPane of panes) {
     const pane = sanitizePaneCandidate(rawPane);
     if (!pane || seenPaneIds.has(pane.id)) {
       continue;
+    }
+    if (pane.kind === "agent_room" && pane.roomId) {
+      if (seenRoomIds.has(pane.roomId)) {
+        continue;
+      }
+      seenRoomIds.add(pane.roomId);
     }
     seenPaneIds.add(pane.id);
     sanitizedPanes.push(pane);
@@ -757,12 +923,13 @@ function sanitizePaneCandidate(value: unknown): WorkspacePane | null {
   return sanitizePane({
     id: pane.id,
     kind,
-    carrier: "iframe",
+    carrier: kind === "agent_room" ? "local" : "iframe",
     title:
       typeof pane.title === "string" && pane.title.trim()
         ? pane.title
         : defaultPaneTitle(kind),
     sessionId: typeof pane.sessionId === "string" ? pane.sessionId : undefined,
+    roomId: typeof pane.roomId === "string" ? pane.roomId : undefined,
     url: typeof pane.url === "string" ? pane.url : undefined,
     workDir: typeof pane.workDir === "string" ? pane.workDir : undefined,
     theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
@@ -776,7 +943,12 @@ function sanitizePaneCandidate(value: unknown): WorkspacePane | null {
 }
 
 function isPaneKind(value: unknown): value is WorkspacePaneKind {
-  return value === "code" || value === "chat" || value === "external";
+  return (
+    value === "code" ||
+    value === "chat" ||
+    value === "external" ||
+    value === "agent_room"
+  );
 }
 
 function isPaneTheme(value: unknown): value is WorkspacePaneTheme {
@@ -804,8 +976,24 @@ function isLoadState(value: unknown): value is WorkspacePane["loadState"] {
 }
 
 function sanitizePane(pane: WorkspacePane): WorkspacePane {
+  if (pane.kind === "agent_room") {
+    return {
+      ...pane,
+      carrier: "local",
+      title: normalizePaneTitle(pane.kind, pane.title),
+      roomId: sanitizeRoomId(pane.roomId),
+      sessionId: undefined,
+      activeSessionId: undefined,
+      url: undefined,
+      workDir: undefined,
+      storageNamespace: undefined,
+      theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
+    };
+  }
   return {
     ...pane,
+    carrier: "iframe",
+    roomId: undefined,
     // 运行期观测值:不写入 localStorage,也不从持久化状态还原。
     activeSessionId: undefined,
     title: normalizePaneTitle(pane.kind, pane.title),
@@ -845,6 +1033,35 @@ function sanitizeSavedLayout(
   };
 }
 
+function migrateSavedLayoutV1(
+  layout: Partial<WorkspaceGridSavedLayout>,
+): WorkspaceGridSavedLayout | null {
+  if (!layout.id || !layout.name || !layout.state) {
+    return null;
+  }
+  const stateV1 = layout.state as unknown as Partial<WorkspaceGridStateV1>;
+  if (
+    stateV1.version !== 1 ||
+    !Array.isArray(stateV1.panes) ||
+    !Array.isArray(stateV1.slots)
+  ) {
+    return null;
+  }
+  const state = sanitizeGridState(
+    migrateWorkspaceGridStateV1(stateV1 as WorkspaceGridStateV1),
+  );
+  if (!state) {
+    return null;
+  }
+  return {
+    id: layout.id,
+    name: layout.name,
+    state,
+    createdAt: layout.createdAt ?? Date.now(),
+    updatedAt: layout.updatedAt ?? Date.now(),
+  };
+}
+
 function sanitizeUrl(url?: string): string | undefined {
   if (!url) {
     return undefined;
@@ -861,6 +1078,7 @@ function sanitizeWorkDir(workDir?: string): string | undefined {
 function defaultPaneTitle(kind: WorkspacePaneKind): string {
   if (kind === "code") return getKimiAssistantDisplayName();
   if (kind === "chat") return "Kimi Chat";
+  if (kind === "agent_room") return "Agent Room";
   return "外部网页";
 }
 
@@ -872,19 +1090,37 @@ function createWorkspacePane(
   return {
     id: paneId,
     kind: input.kind,
-    carrier: "iframe",
+    carrier: input.kind === "agent_room" ? "local" : "iframe",
     title: input.title ?? defaultPaneTitle(input.kind),
     sessionId: input.sessionId,
+    roomId: sanitizeRoomId(input.roomId),
     url: sanitizeUrl(input.url),
     workDir: sanitizeWorkDir(input.workDir),
     theme: isPaneTheme(input.theme) ? input.theme : undefined,
     storageNamespace:
-      sanitizeStorageNamespace(input.storageNamespace) ?? createPaneStorageNamespace(paneId),
+      input.kind === "agent_room"
+        ? undefined
+        : (sanitizeStorageNamespace(input.storageNamespace) ??
+          createPaneStorageNamespace(paneId)),
     mountPolicy: "eager",
     loadState: "idle",
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function sanitizeRoomId(roomId?: string): string | undefined {
+  const trimmed = roomId?.trim();
+  return trimmed && trimmed.length <= 256 && /^[a-zA-Z0-9._:-]+$/.test(trimmed)
+    ? trimmed
+    : undefined;
+}
+
+function effectiveSessionId(pane: WorkspacePane): string | undefined {
+  if (pane.kind !== "code") {
+    return undefined;
+  }
+  return pane.activeSessionId?.trim() || pane.sessionId?.trim() || undefined;
 }
 
 function presetForPaneCount(count: number): WorkspaceGridPresetId {

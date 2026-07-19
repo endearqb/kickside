@@ -32,6 +32,15 @@ pub enum BridgePlatform {
     Weixin,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeApprovalPlatform {
+    Telegram,
+    Feishu,
+    Weixin,
+    AgentRoom,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BridgeChannelMode {
@@ -356,6 +365,7 @@ pub struct WorkspaceSessionBridgePayload {
 pub enum WorkspaceSessionDisposition {
     ReplaceActive,
     NewPane,
+    FocusExisting,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -789,12 +799,566 @@ pub struct BridgeStatus {
     pub kimi_runtime_locator: BridgeRuntimeLocatorStatus,
     #[serde(default)]
     pub runtime_adapter: BridgeRuntimeAdapterStatus,
+    #[serde(default)]
+    pub agent_room: AgentRoomStatus,
     #[serde(default, alias = "channels")]
     pub connectors: Vec<BridgeConnectorStatus>,
     pub pending_approvals: usize,
     pub bindings: usize,
     pub last_error_code: Option<String>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomStatus {
+    pub enabled: bool,
+    pub core: String,
+    pub observer: String,
+    pub active_runs: usize,
+    pub queue_depth: usize,
+    pub observed_sessions: usize,
+    #[serde(default)]
+    pub database_version: usize,
+    #[serde(default)]
+    pub active_leases: usize,
+    #[serde(default)]
+    pub pending_approvals: usize,
+    #[serde(default)]
+    pub pane_generation: i64,
+    #[serde(default)]
+    pub degradations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomCommandError {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+}
+
+impl AgentRoomCommandError {
+    pub fn local(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            details: None,
+            request_id: None,
+            http_status: None,
+        }
+    }
+}
+
+impl std::fmt::Display for AgentRoomCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for AgentRoomCommandError {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub agent_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub avatar: String,
+    #[serde(default)]
+    pub description: String,
+    pub role_prompt: String,
+    pub default_work_dir: String,
+    pub session_policy: String,
+    #[serde(default)]
+    pub pinned_session_id: String,
+    pub auto_approve: bool,
+    #[serde(default)]
+    pub runtime_controls: Option<serde_json::Value>,
+    pub enabled: bool,
+    pub revision: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfileInput {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub role_prompt: String,
+    pub default_work_dir: String,
+    pub session_policy: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_session_id: Option<String>,
+    pub auto_approve: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_controls: Option<serde_json::Value>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfilePatchInput {
+    pub revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_work_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_controls: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoom {
+    pub room_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub shared_brief: String,
+    pub orchestration_mode: String,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomInput {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_brief: Option<String>,
+    pub orchestration_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomPatchInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_brief: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMember {
+    pub member_id: String,
+    pub room_id: String,
+    pub member_kind: String,
+    #[serde(default)]
+    pub agent_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub workspace_root: String,
+    pub session_policy: String,
+    pub follow_mode: String,
+    #[serde(default)]
+    pub followed_pane_id: String,
+    #[serde(default)]
+    pub pinned_session_id: String,
+    #[serde(default)]
+    pub effective_session_id: String,
+    #[serde(default)]
+    pub role_prompt_snapshot: String,
+    #[serde(default)]
+    pub runtime_controls: Option<serde_json::Value>,
+    pub auto_approve: bool,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMemberInput {
+    pub member_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followed_pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_controls: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMemberBindingInput {
+    pub follow_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followed_pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMemberPatchInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_approve: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_controls: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<AgentRoomMemberBindingInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMutationResult {
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomMessage {
+    pub message_id: String,
+    pub room_id: String,
+    pub sender_kind: String,
+    #[serde(default)]
+    pub sender_id: String,
+    pub content: String,
+    #[serde(default)]
+    pub reply_to_message_id: String,
+    #[serde(default)]
+    pub target_member_ids: Vec<String>,
+    #[serde(default)]
+    pub attachments: Option<serde_json::Value>,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRun {
+    pub run_id: String,
+    pub room_id: String,
+    pub source_message_id: String,
+    pub member_id: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub work_dir: String,
+    #[serde(default)]
+    pub turn_id: String,
+    #[serde(default)]
+    pub prompt_id: String,
+    pub origin_kind: String,
+    pub queue_policy: String,
+    pub queue_position: Option<i64>,
+    pub status: String,
+    #[serde(default)]
+    pub error_code: String,
+    #[serde(default)]
+    pub error_message: String,
+    #[serde(default)]
+    pub controls: Option<serde_json::Value>,
+    #[serde(default)]
+    pub prompt_assembly: Option<serde_json::Value>,
+    #[serde(default)]
+    pub workflow_stage_id: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub started_at: String,
+    #[serde(default)]
+    pub completed_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowStage {
+    pub stage_id: String,
+    pub target_member_ids: Vec<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    pub aggregation: String,
+    pub prompt_template: String,
+    pub failure_policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDefinition {
+    pub version: String,
+    pub stages: Vec<WorkflowStage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConnectorBinding {
+    pub connector_id: String,
+    pub agent_id: String,
+    pub session_mode: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConnectorBindingInput {
+    pub agent_id: String,
+    pub session_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomEvent {
+    pub seq: i64,
+    pub event_id: String,
+    #[serde(default)]
+    pub room_id: String,
+    #[serde(default)]
+    pub member_id: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub run_id: String,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub turn_id: String,
+    #[serde(default)]
+    pub prompt_id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub text_delta: String,
+    #[serde(default)]
+    pub display_text: String,
+    #[serde(default)]
+    pub artifact: Option<serde_json::Value>,
+    #[serde(default)]
+    pub approval_id: String,
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionObservation {
+    pub session_id: String,
+    pub generation: i64,
+    #[serde(default)]
+    pub work_dir: String,
+    pub last_seq: i64,
+    #[serde(default)]
+    pub epoch: String,
+    #[serde(default)]
+    pub last_event_at: String,
+    pub session_state: String,
+    pub control_origin: String,
+    #[serde(default)]
+    pub current_turn_id: String,
+    #[serde(default)]
+    pub current_prompt_id: String,
+    #[serde(default)]
+    pub last_reply: String,
+    pub pending_approvals: usize,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneSessionObservation {
+    pub pane_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persisted_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_dir: Option<String>,
+    pub visible: bool,
+    pub active: bool,
+    pub maximized: bool,
+    pub mount_policy: String,
+    pub load_state: String,
+    #[serde(default)]
+    pub generation: i64,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomCapability {
+    #[serde(default)]
+    pub runtime_provider: String,
+    pub core: bool,
+    pub observer: bool,
+    pub multi_session_observation: bool,
+    pub session_transcript: bool,
+    pub user_prompt_events: bool,
+    pub abort: bool,
+    pub approval: bool,
+    pub native_follow_up: bool,
+    #[serde(default)]
+    pub degradations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomPostMessageInput {
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_member_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to_message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_run_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_definition: Option<WorkflowDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomDispatchResult {
+    pub message: AgentRoomMessage,
+    pub runs: Vec<AgentRun>,
+    #[serde(default)]
+    pub failures: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomDetail {
+    pub room: AgentRoom,
+    pub members: Vec<AgentRoomMember>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomTimeline {
+    pub messages: Vec<AgentRoomMessage>,
+    pub runs: Vec<AgentRun>,
+    pub events: Vec<AgentRoomEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomList<T> {
+    pub items: Vec<T>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomPage<T> {
+    pub items: Vec<T>,
+    #[serde(default)]
+    pub cursor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomEventPage {
+    pub items: Vec<AgentRoomEvent>,
+    pub next_seq: i64,
+    pub has_more: bool,
+    pub server_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomObservationPage {
+    pub items: Vec<SessionObservation>,
+    pub pinned_session_ids: Vec<String>,
+    pub observer_running: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneSessionSyncInput {
+    pub generation: i64,
+    pub panes: Vec<PaneSessionObservation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneSessionSyncResult {
+    pub accepted_generation: i64,
+    pub observed_session_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomObservationPinResult {
+    pub session_id: String,
+    pub pinned: bool,
+    pub observer_running: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunRetryInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOpenDisposition {
+    FocusExisting,
+    NewPane,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -849,7 +1413,7 @@ pub struct BridgeApprovalRecord {
     pub step_id: Option<String>,
     pub request_kind: String,
     pub prompt: String,
-    pub platform: BridgePlatform,
+    pub platform: BridgeApprovalPlatform,
     pub chat_id: String,
     pub thread_id: Option<String>,
     pub status: String,

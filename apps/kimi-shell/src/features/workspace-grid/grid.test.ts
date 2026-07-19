@@ -377,7 +377,7 @@ describe("workspace grid store", () => {
     const state = loadWorkspaceGridState(
       writableStorage({
         [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
-          version: 1,
+          version: 2,
           preset: "single",
           panes: [
             {
@@ -554,7 +554,7 @@ describe("workspace grid store", () => {
     const state = loadWorkspaceGridState(
       writableStorage({
         [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
-          version: 1,
+          version: 2,
           preset: "missing",
           panes: persistedPanes,
           slots: [
@@ -596,6 +596,83 @@ describe("workspace grid store", () => {
 
     store.getState().setPreset("2x2");
     expect(store.getState().trackSizes).toBeUndefined();
+  });
+
+  it("creates one local pane per Agent Room and focuses an existing copy", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().setPreset("1x3");
+
+    const first = store.getState().addPane({
+      kind: "agent_room",
+      roomId: " room-1 ",
+      title: "Review Room",
+    });
+    const second = store.getState().addPane({
+      kind: "agent_room",
+      roomId: "room-1",
+      title: "Duplicate",
+    });
+
+    expect(second).toBe(first);
+    expect(
+      store.getState().panes.filter((pane) => pane.kind === "agent_room"),
+    ).toHaveLength(1);
+    expect(store.getState().panes.find((pane) => pane.id === first)).toMatchObject({
+      carrier: "local",
+      roomId: "room-1",
+      storageNamespace: undefined,
+    });
+    expect(store.getState().activePaneId).toBe(first);
+  });
+
+  it("opens sessions by effective runtime id and does not reuse stale persisted ids", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "session-a",
+      workDir: "D:/a",
+    });
+    store.getState().setPaneActiveSession("pane-code", "session-b");
+    const before = store.getState().panes.length;
+
+    const focused = store.getState().openSessionInWorkspaceGrid({
+      sessionId: "session-b",
+      disposition: "focus_existing",
+      workDir: "D:/b",
+    });
+    const opened = store.getState().openSessionInWorkspaceGrid({
+      sessionId: "session-a",
+      disposition: "new_pane",
+      workDir: "D:/a-next",
+    });
+
+    expect(focused.paneId).toBe("pane-code");
+    expect(store.getState().panes.length).toBe(before + 1);
+    expect(opened.paneId).not.toBe("pane-code");
+    expect(store.getState().panes.find((pane) => pane.id === "pane-code")?.workDir).toBe(
+      "D:/b",
+    );
+  });
+
+  it("replace-active clears the previous session workDir when none is provided", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().configurePane("pane-code", {
+      kind: "code",
+      sessionId: "old-session",
+      workDir: "D:/old",
+    });
+
+    const placement = store.getState().openSessionInWorkspaceGrid({
+      sessionId: "new-session",
+      disposition: "replace_active",
+      targetPaneId: "pane-code",
+    });
+
+    expect(placement.paneId).toBe("pane-code");
+    expect(store.getState().panes.find((pane) => pane.id === "pane-code")).toMatchObject({
+      sessionId: "new-session",
+      workDir: undefined,
+    });
   });
 });
 

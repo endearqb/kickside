@@ -2,9 +2,37 @@ package feishu
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestClientResolvesBotOpenIDWithoutPersistingToken(t *testing.T) {
+	t.Parallel()
+	var authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			_, _ = w.Write([]byte(`{"code":0,"tenant_access_token":"tenant-secret"}`))
+		case "/open-apis/bot/v3/info":
+			authorization = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"code":0,"bot":{"open_id":"ou_bot_exact"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClient("app", "secret", ClientOptions{Domain: server.URL, HTTPClient: server.Client()})
+	openID, err := client.BotOpenID(context.Background())
+	if err != nil || openID != "ou_bot_exact" {
+		t.Fatalf("bot identity failed: %q %v", openID, err)
+	}
+	if authorization != "Bearer tenant-secret" || strings.Contains(openID, "secret") {
+		t.Fatalf("unexpected bot identity request/result: auth=%q openID=%q", authorization, openID)
+	}
+}
 
 type captureLogger struct {
 	lines []string

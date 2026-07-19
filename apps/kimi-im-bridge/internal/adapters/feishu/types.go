@@ -96,6 +96,7 @@ type Options struct {
 }
 
 type Mention struct {
+	Key  string
 	ID   string
 	Name string
 }
@@ -112,6 +113,7 @@ type MessageEvent struct {
 	Content     string
 	Mentions    []Mention
 	SenderID    string
+	SenderType  string
 	SenderName  string
 	ReceivedAt  string
 	RawRef      string
@@ -174,4 +176,8 @@ type Gateway interface {
 	CreateMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
 	ReplyMessage(context.Context, SendMessageRequest) (*SendMessageResult, error)
 	PatchMessage(context.Context, string, string) error
+}
+
+type BotIdentityGateway interface {
+	BotOpenID(context.Context) (string, error)
 }

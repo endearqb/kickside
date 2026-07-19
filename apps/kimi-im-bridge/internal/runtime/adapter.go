@@ -27,11 +27,21 @@ type WorkspaceRef struct {
 	Root        string `json:"root"`
 }
 
+type SessionCreateMode string
+
+const (
+	SessionCreateIfMissing SessionCreateMode = "if_missing"
+	SessionCreateAlways    SessionCreateMode = "always"
+	SessionResumeExact     SessionCreateMode = "resume_exact"
+	SessionReuseLatest     SessionCreateMode = "reuse_latest"
+)
+
 type EnsureSessionRequest struct {
-	KimiCodeSessionID string `json:"kimiCodeSessionId,omitempty"`
-	WorkspaceRoot     string `json:"workspaceRoot,omitempty"`
-	WorkspaceID       string `json:"workspaceId,omitempty"`
-	SessionSource     string `json:"sessionSource,omitempty"`
+	KimiCodeSessionID string            `json:"kimiCodeSessionId,omitempty"`
+	WorkspaceRoot     string            `json:"workspaceRoot,omitempty"`
+	WorkspaceID       string            `json:"workspaceId,omitempty"`
+	SessionSource     string            `json:"sessionSource,omitempty"`
+	CreateMode        SessionCreateMode `json:"createMode,omitempty"`
 }
 
 type SessionRef struct {
@@ -40,6 +50,16 @@ type SessionRef struct {
 	WorkspaceID       string `json:"workspaceId,omitempty"`
 	SessionSource     string `json:"sessionSource,omitempty"`
 	RuntimeAdapter    string `json:"runtimeAdapter"`
+}
+
+type RuntimeSessionState struct {
+	SessionID     string `json:"sessionId"`
+	WorkspaceID   string `json:"workspaceId,omitempty"`
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+	Status        string `json:"status"`
+	LastSeq       int64  `json:"lastSeq"`
+	ObservedAt    string `json:"observedAt"`
+	Generation    int64  `json:"generation,omitempty"`
 }
 
 type AdapterPromptRequest struct {
@@ -67,15 +87,28 @@ type AdapterPromptResult struct {
 	Status        string `json:"status"`
 }
 
+type PromptFailureError struct {
+	Code    string
+	Message string
+}
+
+func (e *PromptFailureError) Error() string {
+	if e == nil {
+		return "runtime prompt failed"
+	}
+	return firstNonEmptyString(e.Code, "runtime_failed") + ": " + firstNonEmptyString(e.Message, "Runtime prompt failed")
+}
+
 type AdapterEventSink func(AdapterEvent) error
 
 type AdapterEvent struct {
-	Type     string           `json:"type"`
-	PromptID string           `json:"promptId,omitempty"`
-	Status   string           `json:"status,omitempty"`
-	Text     string           `json:"text,omitempty"`
-	Error    string           `json:"error,omitempty"`
-	Approval *RuntimeApproval `json:"approval,omitempty"`
+	Type      string           `json:"type"`
+	PromptID  string           `json:"promptId,omitempty"`
+	Status    string           `json:"status,omitempty"`
+	Text      string           `json:"text,omitempty"`
+	Error     string           `json:"error,omitempty"`
+	ErrorCode string           `json:"errorCode,omitempty"`
+	Approval  *RuntimeApproval `json:"approval,omitempty"`
 }
 
 type RuntimeApproval struct {

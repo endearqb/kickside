@@ -18,6 +18,7 @@ import {
   Minimize2,
   RefreshCcw,
   Trash2,
+  Users,
 } from "lucide-react";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
 import {
@@ -33,6 +34,7 @@ import {
   type EmbeddedExternalWebviewController,
 } from "@/services/externalWebviewService";
 import { buildCodePaneUrl } from "./paneUrl";
+import { AgentRoomPane } from "./AgentRoomPane";
 import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
 
 const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
@@ -70,7 +72,7 @@ interface PaneFrameProps {
   onChatFrameError: () => void;
   onActivate: () => void;
   onAddPane: (kind: WorkspacePaneKind) => void;
-  onConfigurePane: (kind: WorkspacePaneKind) => void;
+  onConfigurePane: (kind: WorkspacePaneKind, roomId?: string) => void;
   onRemovePane: () => void;
   onResumePane: () => void;
   onPaneDragStart: (event: ReactPointerEvent<HTMLElement>) => void;
@@ -174,12 +176,21 @@ export function PaneFrame({
             <MessageCircle size={14} aria-hidden />
             Chat
           </button>
+          <button
+            type="button"
+            className="workspace-grid-empty-btn"
+            onClick={() => onAddPane("agent_room")}
+            disabled={!canAddPane}
+          >
+            <Users size={14} aria-hidden />
+            Room
+          </button>
         </div>
       </div>
     );
   }
 
-  const source = resolvePaneSource({
+  const source = pane.carrier === "iframe" ? resolvePaneSource({
     pane,
     codeRemoteUrl,
     codeFrameKey,
@@ -193,7 +204,7 @@ export function PaneFrame({
     onCodeFrameError,
     onChatFrameLoad,
     onChatFrameError,
-  });
+  }) : null;
   const paneTheme = pane.theme ?? themeMode;
   const folderActionLabel = folderBusy
     ? "正在解析当前会话目录"
@@ -229,6 +240,8 @@ export function PaneFrame({
       className={`workspace-grid-pane${active ? " is-active" : ""}${
         dragging ? " is-dragging-source" : ""
       }`}
+      data-workspace-pane-id={pane.id}
+      tabIndex={-1}
       onFocus={onActivate}
       onPointerDown={onActivate}
     >
@@ -245,6 +258,7 @@ export function PaneFrame({
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
           {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
           {pane.kind === "external" ? <Globe2 size={14} aria-hidden /> : null}
+          {pane.kind === "agent_room" ? <Users size={14} aria-hidden /> : null}
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
@@ -269,13 +283,15 @@ export function PaneFrame({
               <FolderOpen size={14} aria-hidden />
             </IconButton>
           ) : null}
-          <IconButton
-            label={viewToggle.label}
-            onClick={() => onConfigurePane(viewToggle.target)}
-            active={viewToggle.active}
-          >
-            {viewToggle.icon}
-          </IconButton>
+          {pane.kind !== "agent_room" ? (
+            <IconButton
+              label={viewToggle.label}
+              onClick={() => onConfigurePane(viewToggle.target)}
+              active={viewToggle.active}
+            >
+              {viewToggle.icon}
+            </IconButton>
+          ) : null}
           <IconButton
             label={maximized ? "还原窗格" : "最大化窗格"}
             onClick={onToggleMaximize}
@@ -291,7 +307,17 @@ export function PaneFrame({
           </IconButton>
         </div>
       </header>
-      <PaneContent
+      {pane.kind === "agent_room" ? (
+        <AgentRoomPane
+          roomId={pane.roomId}
+          active={active}
+          mountPolicy={pane.mountPolicy}
+          onSelectRoom={(roomId) =>
+            onConfigurePane("agent_room", roomId)
+          }
+          onResume={onResumePane}
+        />
+      ) : source ? <PaneContent
         pane={pane}
         source={source}
         actionBusy={actionBusy}
@@ -323,7 +349,7 @@ export function PaneFrame({
               }
             });
         }}
-      />
+      /> : null}
     </article>
   );
 }

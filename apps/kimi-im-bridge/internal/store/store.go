@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -18,10 +19,12 @@ import (
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/migrations"
 )
 
-const userVersion = 13
+const userVersion = 19
 
 type Store struct {
-	db *sql.DB
+	db        *sql.DB
+	eventMu   sync.Mutex
+	eventWait chan struct{}
 }
 
 func Open(path string) (*Store, error) {
@@ -33,7 +36,9 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database %s: %w", path, err)
 	}
-	store := &Store{db: db}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	store := &Store{db: db, eventWait: make(chan struct{})}
 	if err := store.initialize(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -72,11 +77,34 @@ func (s *Store) initialize() error {
 		if migration.Version <= currentVersion {
 			continue
 		}
-		if _, err := s.db.Exec(migration.SQL); err != nil {
+		if err := applyMigration(s.db, migration); err != nil {
 			return fmt.Errorf("failed to apply migration %s: %w", migration.Name, err)
 		}
 	}
 	return nil
+}
+
+func applyMigration(db *sql.DB, migration migrations.Migration) (err error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err = tx.Exec(migration.SQL); err != nil {
+		return err
+	}
+	var appliedVersion int
+	if err = tx.QueryRow(`PRAGMA user_version`).Scan(&appliedVersion); err != nil {
+		return err
+	}
+	if appliedVersion != migration.Version {
+		return fmt.Errorf("migration set user_version %d, expected %d", appliedVersion, migration.Version)
+	}
+	return tx.Commit()
 }
 
 func (s *Store) UserVersion(ctx context.Context) (int, error) {
@@ -486,16 +514,16 @@ func (s *Store) UpsertSession(ctx context.Context, session domain.BridgeSession)
 			lease_expires_at, auto_approve, provider_name, runtime_metadata_json, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(kimi_session_id) DO UPDATE SET
-			work_dir=excluded.work_dir,
-			last_turn_id=excluded.last_turn_id,
-			last_message_at=excluded.last_message_at,
-			summary=excluded.summary,
-			session_state=excluded.session_state,
-			lease_owner=excluded.lease_owner,
-			lease_expires_at=excluded.lease_expires_at,
+			work_dir=coalesce(excluded.work_dir, bridge_sessions.work_dir),
+			last_turn_id=coalesce(excluded.last_turn_id, bridge_sessions.last_turn_id),
+			last_message_at=coalesce(excluded.last_message_at, bridge_sessions.last_message_at),
+			summary=coalesce(excluded.summary, bridge_sessions.summary),
+			session_state=coalesce(excluded.session_state, bridge_sessions.session_state),
+			lease_owner=coalesce(excluded.lease_owner, bridge_sessions.lease_owner),
+			lease_expires_at=coalesce(excluded.lease_expires_at, bridge_sessions.lease_expires_at),
 			auto_approve=excluded.auto_approve,
-			provider_name=excluded.provider_name,
-			runtime_metadata_json=excluded.runtime_metadata_json,
+			provider_name=coalesce(excluded.provider_name, bridge_sessions.provider_name),
+			runtime_metadata_json=coalesce(excluded.runtime_metadata_json, bridge_sessions.runtime_metadata_json),
 			updated_at=excluded.updated_at`,
 		session.KimiSessionID,
 		nullIfEmpty(session.WorkDir),
@@ -625,18 +653,26 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 	if binding.BindingID == "" {
 		return fmt.Errorf("binding id is required")
 	}
+	binding.KimiSessionID = strings.TrimSpace(binding.KimiSessionID)
+	if binding.KimiSessionID == "" {
+		return fmt.Errorf("kimi session id is required")
+	}
 	if binding.CreatedAt == "" {
 		binding.CreatedAt = now
 	}
 	if binding.UpdatedAt == "" {
 		binding.UpdatedAt = binding.CreatedAt
 	}
-	_, err := s.db.ExecContext(
+	result, err := s.db.ExecContext(
 		ctx,
 		`INSERT INTO channel_bindings (
 			binding_id, connector_id, platform, account_id, chat_id, thread_id, kimi_session_id, work_dir, source,
 			context_token, onboarded_at, onboarding_version, last_inbound_message_id, last_outbound_message_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM channel_bindings WHERE kimi_session_id = ?
+		)`,
 		binding.BindingID,
 		binding.Key.ConnectorID,
 		binding.Key.Platform,
@@ -653,9 +689,17 @@ func (s *Store) CreateBinding(ctx context.Context, binding domain.SessionBinding
 		nullIfEmpty(binding.LastOutboundMessageID),
 		binding.CreatedAt,
 		binding.UpdatedAt,
+		binding.KimiSessionID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create binding %s: %w", binding.BindingID, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to inspect binding create rows affected for %s: %w", binding.BindingID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("kimi session %s is already bound; each robot binding must keep an isolated session", binding.KimiSessionID)
 	}
 	return nil
 }
@@ -730,15 +774,25 @@ func (s *Store) ClearBinding(ctx context.Context, bindingID string) error {
 }
 
 func (s *Store) Rebind(ctx context.Context, bindingID string, kimiSessionID string, workDir string, source string) error {
+	kimiSessionID = strings.TrimSpace(kimiSessionID)
+	if kimiSessionID == "" {
+		return fmt.Errorf("kimi session id is required")
+	}
 	result, err := s.db.ExecContext(
 		ctx,
 		`UPDATE channel_bindings
 		 SET kimi_session_id = ?, work_dir = ?, source = ?, updated_at = ?
-		 WHERE binding_id = ?`,
+		 WHERE binding_id = ?
+		   AND NOT EXISTS (
+			 SELECT 1 FROM channel_bindings
+			 WHERE kimi_session_id = ? AND binding_id <> ?
+		   )`,
 		kimiSessionID,
 		nullIfEmpty(strings.TrimSpace(workDir)),
 		source,
 		nowRFC3339(),
+		bindingID,
+		kimiSessionID,
 		bindingID,
 	)
 	if err != nil {
@@ -749,7 +803,14 @@ func (s *Store) Rebind(ctx context.Context, bindingID string, kimiSessionID stri
 		return fmt.Errorf("failed to inspect rebind rows affected for %s: %w", bindingID, err)
 	}
 	if affected == 0 {
-		return fmt.Errorf("binding %s not found", bindingID)
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM channel_bindings WHERE binding_id = ?)`, bindingID).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to inspect rebind conflict for %s: %w", bindingID, err)
+		}
+		if exists == 0 {
+			return fmt.Errorf("binding %s not found", bindingID)
+		}
+		return fmt.Errorf("kimi session %s is already bound; each robot binding must keep an isolated session", kimiSessionID)
 	}
 	return nil
 }
@@ -905,7 +966,7 @@ func (s *Store) UpdateLastInboundMessageID(ctx context.Context, bindingID string
 	return nil
 }
 
-func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.ApprovalTicket) error {
+func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.ApprovalTicket) (err error) {
 	now := nowRFC3339()
 	if ticket.CreatedAt == "" {
 		ticket.CreatedAt = now
@@ -913,7 +974,16 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 	if ticket.UpdatedAt == "" {
 		ticket.UpdatedAt = ticket.CreatedAt
 	}
-	_, err := s.db.ExecContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin approval ticket transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO approval_requests (
 			approval_id, connector_id, kimi_session_id, turn_id, step_id, platform, chat_id, thread_id, request_kind, prompt, status,
@@ -946,22 +1016,71 @@ func (s *Store) CreateApprovalTicket(ctx context.Context, ticket domain.Approval
 	if err != nil {
 		return fmt.Errorf("failed to create approval ticket %s: %w", ticket.ApprovalID, err)
 	}
+	if hasAgentRoomApprovalLink(ticket) {
+		if err = upsertAgentRoomApprovalLink(ctx, tx, ticket); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) LinkApprovalToAgentRoom(ctx context.Context, ticket domain.ApprovalTicket) error {
+	if !hasAgentRoomApprovalLink(ticket) {
+		return errors.New("agent room approval association is required")
+	}
+	return upsertAgentRoomApprovalLink(ctx, s.db, ticket)
+}
+
+type sqlExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func upsertAgentRoomApprovalLink(ctx context.Context, exec sqlExecer, ticket domain.ApprovalTicket) error {
+	originKind := strings.TrimSpace(ticket.OriginKind)
+	if originKind == "" {
+		originKind = "unknown"
+	}
+	now := nowRFC3339()
+	_, err := exec.ExecContext(ctx, `INSERT INTO agent_room_approval_links (
+		approval_id, origin_kind, room_id, member_id, agent_id, run_id, session_id, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(approval_id) DO UPDATE SET
+		origin_kind = excluded.origin_kind,
+		room_id = excluded.room_id,
+		member_id = excluded.member_id,
+		agent_id = excluded.agent_id,
+		run_id = excluded.run_id,
+		session_id = excluded.session_id,
+		updated_at = excluded.updated_at`, ticket.ApprovalID, originKind, nullIfEmpty(ticket.RoomID),
+		nullIfEmpty(ticket.MemberID), nullIfEmpty(ticket.AgentID), nullIfEmpty(ticket.RunID),
+		ticket.KimiSessionID, now, now)
+	if err != nil {
+		return fmt.Errorf("failed to link approval %s to agent room: %w", ticket.ApprovalID, err)
+	}
 	return nil
 }
 
+func hasAgentRoomApprovalLink(ticket domain.ApprovalTicket) bool {
+	return strings.TrimSpace(ticket.OriginKind) != "" || strings.TrimSpace(ticket.RoomID) != "" ||
+		strings.TrimSpace(ticket.MemberID) != "" || strings.TrimSpace(ticket.AgentID) != "" ||
+		strings.TrimSpace(ticket.RunID) != ""
+}
+
 func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.ApprovalTicket, error) {
-	query := `SELECT approval_id, ifnull(connector_id, ''), kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+	query := `SELECT a.approval_id, ifnull(a.connector_id, ''), a.kimi_session_id, ifnull(a.turn_id, ''), ifnull(a.step_id, ''), a.request_kind,
 	          prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
 	          ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
 	          ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
-	          ifnull(request_hash, ''), created_at, updated_at, ifnull(resolved_at, '')
-	   FROM approval_requests`
+	          ifnull(request_hash, ''), a.created_at, a.updated_at, ifnull(resolved_at, ''),
+	          ifnull(l.origin_kind, ''), ifnull(l.room_id, ''), ifnull(l.member_id, ''),
+	          ifnull(l.agent_id, ''), ifnull(l.run_id, '')
+	   FROM approval_requests a LEFT JOIN agent_room_approval_links l ON l.approval_id = a.approval_id`
 	args := []any{}
 	if status != "" {
-		query += ` WHERE status = ?`
+		query += ` WHERE a.status = ?`
 		args = append(args, status)
 	}
-	query += ` ORDER BY created_at DESC, approval_id DESC`
+	query += ` ORDER BY a.created_at DESC, a.approval_id DESC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -995,6 +1114,11 @@ func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.Appr
 			&ticket.CreatedAt,
 			&ticket.UpdatedAt,
 			&ticket.ResolvedAt,
+			&ticket.OriginKind,
+			&ticket.RoomID,
+			&ticket.MemberID,
+			&ticket.AgentID,
+			&ticket.RunID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan approval ticket: %w", err)
 		}
@@ -1009,13 +1133,15 @@ func (s *Store) ListApprovals(ctx context.Context, status string) ([]domain.Appr
 func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain.ApprovalTicket, error) {
 	row := s.db.QueryRowContext(
 		ctx,
-		`SELECT approval_id, ifnull(connector_id, ''), kimi_session_id, ifnull(turn_id, ''), ifnull(step_id, ''), request_kind,
+		`SELECT a.approval_id, ifnull(a.connector_id, ''), a.kimi_session_id, ifnull(a.turn_id, ''), ifnull(a.step_id, ''), a.request_kind,
 		        prompt, platform, chat_id, ifnull(thread_id, ''), status, request_payload_json,
 		        ifnull(resolution_payload_json, ''), dedupe_key, ifnull(claimed_by_actor_id, ''),
 		        ifnull(claimed_at, ''), ifnull(platform_message_id, ''), ifnull(resolution_by, ''),
-		        ifnull(request_hash, ''), created_at, updated_at, ifnull(resolved_at, '')
-		 FROM approval_requests
-		 WHERE approval_id = ?`,
+		        ifnull(request_hash, ''), a.created_at, a.updated_at, ifnull(resolved_at, ''),
+		        ifnull(l.origin_kind, ''), ifnull(l.room_id, ''), ifnull(l.member_id, ''),
+		        ifnull(l.agent_id, ''), ifnull(l.run_id, '')
+		 FROM approval_requests a LEFT JOIN agent_room_approval_links l ON l.approval_id = a.approval_id
+		 WHERE a.approval_id = ?`,
 		approvalID,
 	)
 
@@ -1043,6 +1169,11 @@ func (s *Store) GetApprovalByID(ctx context.Context, approvalID string) (*domain
 		&ticket.CreatedAt,
 		&ticket.UpdatedAt,
 		&ticket.ResolvedAt,
+		&ticket.OriginKind,
+		&ticket.RoomID,
+		&ticket.MemberID,
+		&ticket.AgentID,
+		&ticket.RunID,
 	); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
@@ -1557,7 +1688,12 @@ func (s *Store) CountPendingApprovals(ctx context.Context) (int, error) {
 }
 
 func (s *Store) CreateTurn(ctx context.Context, turn domain.BridgeTurn) error {
-	_, err := s.db.ExecContext(
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO bridge_turns (
 			turn_id, connector_id, kimi_session_id, binding_id, platform, chat_id, thread_id, inbound_message_id,
@@ -1588,7 +1724,30 @@ func (s *Store) CreateTurn(ctx context.Context, turn domain.BridgeTurn) error {
 		}
 		return fmt.Errorf("failed to create turn %s: %w", turn.TurnID, err)
 	}
-	return nil
+	if strings.TrimSpace(turn.OriginKind) != "" || strings.TrimSpace(turn.AgentID) != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO bridge_turn_origins (turn_id, origin_kind, connector_id, agent_id, created_at) VALUES (?, ?, ?, ?, ?)`, turn.TurnID, firstNonEmptyStore(turn.OriginKind, "connector"), nullIfEmpty(turn.ConnectorID), nullIfEmpty(turn.AgentID), turn.CreatedAt); err != nil {
+			return fmt.Errorf("failed to persist turn origin %s: %w", turn.TurnID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetBridgeTurnOrigin(ctx context.Context, turnID string) (*domain.BridgeTurnOrigin, error) {
+	var item domain.BridgeTurnOrigin
+	err := s.db.QueryRowContext(ctx, `SELECT turn_id, origin_kind, ifnull(connector_id, ''), ifnull(agent_id, ''), created_at FROM bridge_turn_origins WHERE turn_id = ?`, strings.TrimSpace(turnID)).Scan(&item.TurnID, &item.OriginKind, &item.ConnectorID, &item.AgentID, &item.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &item, err
+}
+
+func firstNonEmptyStore(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (s *Store) UpdateTurn(ctx context.Context, turn domain.BridgeTurn) error {

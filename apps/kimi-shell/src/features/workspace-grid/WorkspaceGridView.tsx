@@ -29,6 +29,7 @@ import type {
 } from "./gridTypes";
 import { PaneFrame } from "./PaneFrame";
 import { normalizeEmbeddableUrl } from "./urlSafety";
+import { usePaneSessionRegistry } from "./usePaneSessionRegistry";
 
 type ResizeAxis = "columns" | "rows";
 
@@ -48,6 +49,7 @@ interface PaneDragDraft {
 }
 
 export function WorkspaceGridView(props: WorkspaceViewProps) {
+  usePaneSessionRegistry();
   const preset = useWorkspaceGridStore((state) => state.preset);
   const panes = useWorkspaceGridStore((state) => state.panes);
   const slots = useWorkspaceGridStore((state) => state.slots);
@@ -147,9 +149,17 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     }
   }
 
-  async function handleConfigurePane(paneId: string, kind: WorkspacePaneKind) {
+  async function handleConfigurePane(
+    paneId: string,
+    kind: WorkspacePaneKind,
+    roomId?: string,
+  ) {
     const existingPane = panes.find((pane) => pane.id === paneId);
-    if (existingPane?.kind === kind && kind !== "external") {
+    if (
+      existingPane?.kind === kind &&
+      kind !== "external" &&
+      !(kind === "agent_room" && roomId && existingPane.roomId !== roomId)
+    ) {
       return;
     }
 
@@ -161,6 +171,10 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     if (!input) {
       setGridMessage("已取消切换外部网页");
       return;
+    }
+
+    if (kind === "agent_room") {
+      input = { ...input, roomId };
     }
 
     configurePane(paneId, input);
@@ -398,9 +412,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onAddPane={(kind) => {
                   void handleAddPane(slot.id, kind);
                 }}
-                onConfigurePane={(kind) => {
+                onConfigurePane={(kind, roomId) => {
                   if (pane) {
-                    void handleConfigurePane(pane.id, kind);
+                    void handleConfigurePane(pane.id, kind, roomId);
                   }
                 }}
                 onRemovePane={() => {
@@ -521,6 +535,9 @@ function defaultPaneInput(
   }
   if (kind === "chat") {
     return { kind, title: "Kimi Chat" };
+  }
+  if (kind === "agent_room") {
+    return { kind, title: "Agent Room" };
   }
   return { kind, title: "外部网页", url: chatRemoteUrl };
 }

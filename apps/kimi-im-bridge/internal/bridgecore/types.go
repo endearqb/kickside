@@ -36,17 +36,19 @@ type RuntimeTarget struct {
 }
 
 type TurnRequest struct {
-	TurnID        string
-	Prompt        string
-	WorkDir       string
-	KimiSessionID string
-	AutoApprove   bool
-	MetadataJSON  string
-	Attachments   []domain.PromptAttachment
+	TurnID              string
+	Prompt              string
+	WorkDir             string
+	KimiSessionID       string
+	RequireExactSession bool
+	AutoApprove         bool
+	MetadataJSON        string
+	Attachments         []domain.PromptAttachment
 }
 
 type TurnResult struct {
 	KimiSessionID string
+	PromptID      string
 	Status        string
 	Error         string
 	ContextUsage  float64
@@ -64,6 +66,7 @@ type TurnEvent struct {
 	ThreadID           string
 	StepIndex          int
 	MessageID          string
+	PromptID           string
 	TextDelta          string
 	ThinkingDelta      string
 	Status             string
@@ -143,11 +146,20 @@ type TurnEventStore interface {
 }
 
 type Orchestrator struct {
-	bindings  BindingResolver
-	runtime   RuntimeProvider
-	approvals ApprovalStore
-	turns     TurnStore
-	events    TurnEventStore
+	bindings       BindingResolver
+	runtime        RuntimeProvider
+	execution      *ExecutionService
+	agentBindings  AgentBindingResolver
+	defaultWorkDir string
+}
+
+type AgentBindingResolver interface {
+	ResolveConnectorAgent(context.Context, string) (*domain.ConnectorAgentContext, error)
+}
+
+type OrchestratorOptions struct {
+	AgentBindings  AgentBindingResolver
+	DefaultWorkDir string
 }
 
 func NewOrchestrator(
@@ -156,14 +168,18 @@ func NewOrchestrator(
 	approvals ApprovalStore,
 	turns TurnStore,
 	events TurnEventStore,
+	options ...OrchestratorOptions,
 ) *Orchestrator {
-	return &Orchestrator{
+	orchestrator := &Orchestrator{
 		bindings:  bindings,
 		runtime:   runtime,
-		approvals: approvals,
-		turns:     turns,
-		events:    events,
+		execution: NewExecutionService(runtime, approvals, turns, events),
 	}
+	if len(options) > 0 {
+		orchestrator.agentBindings = options[0].AgentBindings
+		orchestrator.defaultWorkDir = options[0].DefaultWorkDir
+	}
+	return orchestrator
 }
 
 type InboundExecutor interface {

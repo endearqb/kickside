@@ -2,7 +2,7 @@
 
 ## Shell Runtime
 - `apps/kimi-shell` 是 Tauri v2 + React 桌面壳。
-- 后端主路径使用 `kimi server run --foreground --port <port>`；若同一 `KIMI_CODE_HOME` 已有通过本机地址、健康端点和 server token 验证的实例，Shell 复用其 lock 中的端口并标记为 `reused_external`，退出和普通停止只解除连接、不终止外部进程。
+- 后端主路径使用 `kimi web --no-open --port <port>`；若同一 `KIMI_CODE_HOME` 已有通过本机地址、健康端点和 server token 验证的实例，Shell 复用其 lock 中的端口并标记为 `reused_external`，退出和普通停止只解除连接、不终止外部进程。
 - Shell 从 `KIMI_CODE_HOME/server.token` 读取 server token；若未设置 `KIMI_CODE_HOME`，默认使用用户目录下 `.kimi-code/server.token`。
 - workspace URL 由 Shell 组装为 `http://127.0.0.1:<port>/#token=<token>`；对外状态只展示脱敏 token。
 - iframe/embed 导航通过专用 `get_workspace_embed_url` 获取 tokenized URL；`get_app_status` 与 `get_diagnostics` 只返回 redacted `workspaceUrl` 展示面。
@@ -19,11 +19,11 @@
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
 - 安装主链路已从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和首次安装走 npm 全局包 `@moonshot-ai/kimi-code`；升级会在修改 PATH 前捕获当前实际命中的 `kimi` shim，按 `npm prefix -g` 或 `pnpm bin --global` 选择同源包管理器并精确验证对应 `kimi.cmd`，其他或歧义来源明确拒绝；执行前要求 Node.js 22.19+ 和 Git for Windows/Git Bash 就绪。旧 `backend_manager/install_compat.rs` 路径已删除，uv/Python 任务仅在新 install catalog 中保留为 legacy repair。
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
-- Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi server run` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
+- Shell 会自动检测 Git Bash：优先复用有效的 `KIMI_SHELL_PATH`，再检查 PATH 中非 Windows 系统启动器的 `bash`、从 PATH `git.exe` 推导 Git 安装根目录，最后检查 Program Files 与 LocalAppData 常见 `bash.exe` 路径；启动 `kimi web --no-open` 时会向子进程注入 `KIMI_SHELL_PATH`，安装面板展示检测状态与路径。
 - Explorer 右键菜单 label 可通过控制中心编辑，启用意图持久化在 `AppSettings` schema 10；禁用后启动自愈不会重新启用。注册表只保留 `Directory\\Background`、`Directory` 和 `*` 入口，旧 `AllFilesystemObjects` 键会清理，写删后通知 Explorer 刷新。
 - Explorer 打开目录/文件使用有界、按 backend generation 归属的单消费者队列复用 `/api/v1` 创建独立 session；请求在确定完成前保留队首，运行中的后端不重启、不切全局 cwd。前端按 `new_pane` 路由，最多六个可见 pane、十二个总 pane，第七个换入 active slot，被替换 pane 进入 Pane Shelf。
 - 控制中心的“小助手设置”以互斥折叠 bar 承载 Kimi Doctor；Doctor 返回 exit code、Kimi 路径、Shell 路径与脱敏 stdout/stderr，旧 `runtime_center` 路由兼容映射到自动展开的 Doctor bar。
-- Kimi 后端 stdout/stderr 通过 Shell 管道在写入 `backend.log` 前脱敏，诊断读取再次脱敏；启动前会清理既有日志中的结构化 token 并写入带时间和 cycle 的启动边界。启动失败会验证 `server run --help` 命令契约并区分单实例复用失败与一般配置问题，不使用 `--version` 文本推断 CLI 身份。
+- Kimi 后端 stdout/stderr 通过 Shell 管道在写入 `backend.log` 前脱敏，诊断读取再次脱敏；启动前会清理既有日志中的结构化 token 并写入带时间和 cycle 的启动边界。启动失败会验证 `web --help` 命令契约并区分单实例复用失败与一般配置问题，不使用 `--version` 文本推断 CLI 身份。
 - Kimi API 配置 command 在异步阻塞任务中读写 `config.toml`；加载视图携带可选 opaque revision，保存会在写入前和原子替换前拒绝过期 revision，冲突时不覆盖外部文件。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。

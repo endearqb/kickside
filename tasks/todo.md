@@ -675,3 +675,17 @@
 - 自动发布在签名 Secrets 缺失或 tag 与 `apps/kimi-shell/package.json` 版本不一致时 fail-fast；workflow 不包含任何密钥值。
 - `0.1.13` 是首个支持本体更新的目标版本，`0.1.12` 及更早版本需手动安装一次。
 - 当前状态：代码、发布配置与签名 Secrets 已完成；真实 Release 资产、签名信任链及 NSIS/MSI 安装回归在完成 G3 前为 blocked。
+
+## Kimi Code 0.28.0 后端启动兼容修复
+
+### Checklist
+- [x] 核对脱敏 `backend.log`、本机 CLI 契约和 Kimi Code 官方 0.28.0 Release/源码
+- [x] 将 Shell 自有后端改为 `kimi web --no-open --port <port>`
+- [x] 将失败态契约探测改为 `kimi web --help`
+- [x] 更新回归测试、Shell README、安装文档和架构事实
+- [x] 运行 Rust 格式/编译/针对性测试和 Kimi Code 0.28.0 真实健康检查
+
+### Review
+- 根因是 Kimi Code 0.28.0 将 `kimi server` 整个命令树替换为弃用占位命令；它吞掉 `run --help` 后退出，导致启动失败和错误的“支持 server run”诊断。
+- 修复只替换共享启动参数与契约探测，不增加版本分支、回退层或新依赖。
+- 已验证：`cargo fmt -- --check`、`cargo check`、两条针对性 Rust 测试通过；本机 0.28.0 真实启动后 `/api/v1/healthz` 返回 HTTP 200。

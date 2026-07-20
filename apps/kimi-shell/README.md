@@ -7,13 +7,13 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 - 应用名称：`kimi小助手` / `kimi sidekick`
 - 当前版本：以 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 为准
 - 目标平台：Windows（当前发布产物为 MSI / NSIS）
-- 核心目标：把 `kimi server run` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
+- 核心目标：把 `kimi web --no-open` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
 
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
 - Workspace Grid V2 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，支持 1/2/3/4/5/6 个可见窗格、最多 12 个总窗格与 Pane Shelf 收纳；`Agent Room` 以无 iframe 的本地 Pane 承载。V2 使用独立 state/saved-layout keys，从 V1 只读迁移并保留旧键回滚。
-- 后端守护与健康探测：优先复用同一 `KIMI_CODE_HOME` 下健康的既有 Kimi Server，否则拉起 `kimi server run --foreground --port <port>`；读取 `server.token` 并用 `#token=` 接入 workspace
+- 后端守护与健康探测：优先复用同一 `KIMI_CODE_HOME` 下健康的既有 Kimi Server，否则拉起 `kimi web --no-open --port <port>`；读取 `server.token` 并用 `#token=` 接入 workspace
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
 - 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、API 配置、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；API 配置与微信/飞书扫码均在设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
 - Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的卡片目录；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制

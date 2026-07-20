@@ -86,7 +86,7 @@ Write-Host 'Git 安装程序执行完成。'
 
 ### 1.3 Git Bash / KIMI_SHELL_PATH
 
-Shell 会自动探测以下路径，并在启动 `kimi server run` 时写入 `KIMI_SHELL_PATH`：
+Shell 会自动探测以下路径，并在启动 `kimi web --no-open` 时写入 `KIMI_SHELL_PATH`：
 
 ```powershell
 $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'

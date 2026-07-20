@@ -329,7 +329,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         }
     };
     append_backend_start_boundary(&log_path, generation, u64::from(base_port));
-    let command_args = build_kimi_server_args(base_port);
+    let command_args = build_kimi_web_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
     let kimi_shell_path = kimi_locator::locate_shell_path();
     let agent_swarm_max_concurrency = settings.kimi_runtime_launch.agent_swarm_max_concurrency;
@@ -362,7 +362,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     ) {
         Ok(child) => child,
         Err(error) => {
-            let probe = probe_kimi_server_contract(&kimi_path, kimi_shell_path.as_ref());
+            let probe = probe_kimi_web_contract(&kimi_path, kimi_shell_path.as_ref());
             set_crashed(
                 app,
                 generation,
@@ -449,7 +449,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
                 }
                 ReuseAttempt::Stale => {}
             }
-            let probe = probe_kimi_server_contract(&kimi_path, kimi_shell_path.as_ref());
+            let probe = probe_kimi_web_contract(&kimi_path, kimi_shell_path.as_ref());
             set_crashed(
                 app,
                 generation,
@@ -940,14 +940,11 @@ enum ContractProbe {
     TimedOut,
 }
 
-fn probe_kimi_server_contract(
-    kimi_path: &Path,
-    kimi_shell_path: Option<&PathBuf>,
-) -> ContractProbe {
+fn probe_kimi_web_contract(kimi_path: &Path, kimi_shell_path: Option<&PathBuf>) -> ContractProbe {
     let mut command = Command::new(kimi_path);
     command_utils::configure_kimi_query_command(&mut command);
     command
-        .args(["server", "run", "--help"])
+        .args(["web", "--help"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -985,10 +982,10 @@ fn startup_failure_message(
     let reason = error.to_string().chars().take(240).collect::<String>();
     let guidance = match probe {
         ContractProbe::Supported => {
-            "已确认当前 Kimi 支持 `server run`；请查看脱敏后的 backend.log 获取具体原因。"
+            "已确认当前 Kimi 支持 `web`；请查看脱敏后的 backend.log 获取具体原因。"
         }
         ContractProbe::Incompatible => {
-            "当前可执行文件不支持 `server run`；请配置最新版 Kimi Code 的可执行文件。"
+            "当前可执行文件不支持 `web`；请配置最新版 Kimi Code 的可执行文件。"
         }
         ContractProbe::Unavailable => "无法检查当前可执行文件；请确认 Kimi Code 路径。",
         ContractProbe::TimedOut => "Kimi 命令检查超时；请查看脱敏后的 backend.log。",
@@ -1001,11 +998,10 @@ fn startup_failure_message(
     format!("后端启动失败：{reason}。{guidance}{shell_guidance}")
 }
 
-fn build_kimi_server_args(base_port: u16) -> Vec<String> {
+fn build_kimi_web_args(base_port: u16) -> Vec<String> {
     vec![
-        "server".to_string(),
-        "run".to_string(),
-        "--foreground".to_string(),
+        "web".to_string(),
+        "--no-open".to_string(),
         "--port".to_string(),
         base_port.to_string(),
     ]
@@ -1213,14 +1209,10 @@ mod tests {
 
     #[test]
     fn launch_args_enforce_local_only_mode() {
-        let args = build_kimi_server_args(57999);
-        let args_joined = args.join(" ");
-        assert!(args_joined.contains("server run"));
-        assert!(args_joined.contains("--foreground"));
-        assert!(args_joined.contains("--port 57999"));
-        assert!(!args_joined.contains("--open"));
-        assert!(!args_joined.contains("--network"));
-        assert!(!args_joined.contains("--public"));
+        assert_eq!(
+            build_kimi_web_args(57999),
+            vec!["web", "--no-open", "--port", "57999"]
+        );
     }
 
     #[test]
@@ -1231,8 +1223,8 @@ mod tests {
         let unavailable = startup_failure_message(&error, ContractProbe::Unavailable, false);
         let timed_out = startup_failure_message(&error, ContractProbe::TimedOut, false);
 
-        assert!(supported.contains("支持 `server run`"));
-        assert!(incompatible.contains("不支持 `server run`"));
+        assert!(supported.contains("支持 `web`"));
+        assert!(incompatible.contains("不支持 `web`"));
         assert!(unavailable.contains("无法检查"));
         assert!(timed_out.contains("检查超时"));
         assert!(supported.len() < 400);

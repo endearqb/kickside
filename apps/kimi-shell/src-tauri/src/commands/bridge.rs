@@ -3,7 +3,7 @@ use tauri::{AppHandle, Manager};
 use crate::{
     agent_room_event_pump,
     app_state::AppState,
-    bridge_manager, bridge_settings_store, feishu_onboarding,
+    bridge_manager, bridge_settings_store, feishu_onboarding, settings_store,
     types::{
         BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput, BridgeChannelState,
         BridgeChannelStatus, BridgeConnectorSecretsInput, BridgeOnboardingConfigInput,
@@ -12,7 +12,7 @@ use crate::{
         StartFeishuConnectorOnboardingInput, StartWeixinConnectorOnboardingInput,
         WeixinConnectorOnboardingSession,
     },
-    weixin_onboarding, workspace_session,
+    weixin_onboarding, window_manager, workspace_session,
 };
 
 #[tauri::command]
@@ -65,7 +65,7 @@ pub(crate) async fn start_bridge(app: AppHandle) -> Result<BridgeStatus, String>
     })
     .await
     .map_err(|error| format!("failed to join start bridge task: {error}"))??;
-    if bridge_manager::agent_room_feature_enabled() {
+    if bridge_manager::agent_room_feature_enabled(&pump_app) {
         agent_room_event_pump::ensure_started(&pump_app);
     }
     Ok(status)
@@ -90,10 +90,48 @@ pub(crate) async fn restart_bridge(app: AppHandle) -> Result<BridgeStatus, Strin
     })
     .await
     .map_err(|error| format!("failed to join restart bridge task: {error}"))??;
-    if bridge_manager::agent_room_feature_enabled() {
+    if bridge_manager::agent_room_feature_enabled(&pump_app) {
         agent_room_event_pump::ensure_started(&pump_app);
     }
     Ok(status)
+}
+
+#[tauri::command]
+pub(crate) async fn set_agent_room_enabled(
+    app: AppHandle,
+    enabled: bool,
+) -> Result<BridgeStatus, String> {
+    let current_status =
+        bridge_manager::get_bridge_status(&app).map_err(|error| error.to_string())?;
+    let mut settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    if settings.agent_room_enabled == enabled {
+        return Ok(current_status);
+    }
+
+    settings.agent_room_enabled = enabled;
+    settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
+    agent_room_event_pump::stop(&app);
+    if !enabled {
+        let _ = window_manager::hide_agent_room_window(&app);
+    }
+
+    if matches!(
+        current_status.state,
+        BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
+    ) {
+        let pump_app = app.clone();
+        let status = tauri::async_runtime::spawn_blocking(move || {
+            bridge_manager::restart_bridge(&app).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| format!("failed to join Agent Room bridge restart task: {error}"))??;
+        if enabled {
+            agent_room_event_pump::ensure_started(&pump_app);
+        }
+        Ok(status)
+    } else {
+        bridge_manager::get_bridge_status(&app).map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]

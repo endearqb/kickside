@@ -71,7 +71,13 @@ export function deleteAgentConnectorBinding(connectorId: string) {
 export interface AgentRoomDispatchResult {
   message: AgentRoomMessage;
   runs: AgentRun[];
-  failures: unknown[];
+  failures: AgentRoomTargetFailure[];
+}
+
+export interface AgentRoomTargetFailure {
+  memberId: string;
+  code: string;
+  message: string;
 }
 
 export interface AgentRoomDetail {
@@ -96,8 +102,13 @@ export interface AgentRoomListOptions {
 
 export interface AgentRoomObservationPage {
   items: SessionObservation[];
+  panes: PaneSessionObservation[];
   pinnedSessionIds: string[];
   observerRunning: boolean;
+}
+
+export interface AgentRoomWindowState {
+  visible: boolean;
 }
 
 export interface PaneSessionSyncInput {
@@ -233,6 +244,18 @@ export function openAgentRoomSession(
     workDir,
     disposition,
   });
+}
+
+export function showAgentRoomWindow() {
+  return invoke<AgentRoomWindowState>("agent_room_show_window");
+}
+
+export function hideAgentRoomWindow() {
+  return invoke<AgentRoomWindowState>("agent_room_hide_window");
+}
+
+export function toggleAgentRoomWindow() {
+  return invoke<AgentRoomWindowState>("agent_room_toggle_window");
 }
 
 export async function subscribeAgentRoomEvents(

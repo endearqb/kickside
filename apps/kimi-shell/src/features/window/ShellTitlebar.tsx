@@ -10,6 +10,7 @@ import {
   RefreshCcw,
   Settings,
   Square,
+  UsersRound,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -53,9 +54,11 @@ type ShellTitlebarProps = {
   tauriRuntime: boolean;
   isWindowMaximized: boolean;
   canOpenWorkspace: boolean;
+  agentRoomEnabled: boolean;
   onRetry: () => void;
   onBackToStatus: () => void;
   onOpenControlCenter: () => void;
+  onToggleAgentRoom: () => void;
   onOpenExternalUrl: (url: string) => void;
   onToggleTheme: () => void;
   onStartWindowDrag: () => void;
@@ -77,9 +80,11 @@ export function ShellTitlebar({
   tauriRuntime,
   isWindowMaximized,
   canOpenWorkspace,
+  agentRoomEnabled,
   onRetry,
   onBackToStatus,
   onOpenControlCenter,
+  onToggleAgentRoom,
   onOpenExternalUrl,
   onToggleTheme,
   onStartWindowDrag,
@@ -89,6 +94,9 @@ export function ShellTitlebar({
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
   const workspaceGridPreset = useWorkspaceGridStore((state) => state.preset);
+  const hasKimiCodePane = useWorkspaceGridStore((state) =>
+    state.panes.some((pane) => pane.kind === "code"),
+  );
   const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [browserMenuOpen, setBrowserMenuOpen] = useState(false);
@@ -195,6 +203,14 @@ export function ShellTitlebar({
           </div>
         ) : null}
         {screen === "workspace" ? <PaneShelf /> : null}
+        {screen === "workspace" && agentRoomEnabled && hasKimiCodePane ? (
+          <IconButton
+            icon={<UsersRound size={14} />}
+            label="打开 Agent Room"
+            onClick={onToggleAgentRoom}
+            className="ghost mini titlebar-agent-room-btn"
+          />
+        ) : null}
         {screen === "workspace" ? (
           <div ref={browserMenuRef} className="titlebar-layout-menu-wrap">
             <IconButton

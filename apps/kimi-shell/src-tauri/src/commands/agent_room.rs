@@ -16,6 +16,50 @@ use crate::{
     window_manager,
 };
 
+fn ensure_agent_room_enabled(app: &AppHandle) -> Result<(), AgentRoomCommandError> {
+    if bridge_manager::agent_room_feature_enabled(app) {
+        Ok(())
+    } else {
+        Err(AgentRoomCommandError::local(
+            "feature_disabled",
+            "Agent Room is disabled",
+        ))
+    }
+}
+
+fn window_error(error: String) -> AgentRoomCommandError {
+    AgentRoomCommandError::local("window_unavailable", error)
+}
+
+#[tauri::command]
+pub(crate) fn agent_room_show_window(
+    app: AppHandle,
+) -> Result<window_manager::AgentRoomWindowState, AgentRoomCommandError> {
+    ensure_agent_room_enabled(&app)?;
+    let state = window_manager::show_agent_room_window(&app).map_err(window_error)?;
+    agent_room_event_pump::ensure_started(&app);
+    Ok(state)
+}
+
+#[tauri::command]
+pub(crate) fn agent_room_hide_window(
+    app: AppHandle,
+) -> Result<window_manager::AgentRoomWindowState, AgentRoomCommandError> {
+    window_manager::hide_agent_room_window(&app).map_err(window_error)
+}
+
+#[tauri::command]
+pub(crate) fn agent_room_toggle_window(
+    app: AppHandle,
+) -> Result<window_manager::AgentRoomWindowState, AgentRoomCommandError> {
+    ensure_agent_room_enabled(&app)?;
+    let state = window_manager::toggle_agent_room_window(&app).map_err(window_error)?;
+    if state.visible {
+        agent_room_event_pump::ensure_started(&app);
+    }
+    Ok(state)
+}
+
 #[tauri::command]
 pub(crate) fn agent_room_list_agents(
     app: AppHandle,
@@ -345,11 +389,13 @@ pub(crate) fn agent_room_open_session(
         applied: None,
         reason: None,
     };
-    window_manager::publish_workspace_session_event(
+    if window_manager::publish_workspace_session_event(
         &app,
         "workspace-session-bridge",
         &payload,
         "agent_room",
-    );
+    ) {
+        window_manager::show_main_window(&app);
+    }
     Ok(payload)
 }

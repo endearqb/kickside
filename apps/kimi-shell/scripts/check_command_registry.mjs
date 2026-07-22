@@ -70,6 +70,7 @@ const commandRegistry = {
     "bridge::start_bridge",
     "bridge::stop_bridge",
     "bridge::restart_bridge",
+    "bridge::set_agent_room_enabled",
     "bridge::list_bridge_bindings",
     "bridge::list_bridge_sessions",
     "bridge::clear_bridge_binding",
@@ -89,6 +90,9 @@ const commandRegistry = {
     "bridge::cancel_weixin_connector_onboarding",
   ],
   agent_room: [
+    "agent_room::agent_room_show_window",
+    "agent_room::agent_room_hide_window",
+    "agent_room::agent_room_toggle_window",
     "agent_room::agent_room_list_agents",
     "agent_room::agent_room_create_agent",
     "agent_room::agent_room_update_agent",
@@ -247,7 +251,7 @@ const commandDomainMetadata = {
   },
   agent_room: {
     owner: "agent-room",
-    windowCapability: "main",
+    windowCapability: "main,agent-room(scoped)",
     purpose: "Agent Room local orchestration metadata, observations, events, and exact session routing",
   },
   skills: {
@@ -366,6 +370,32 @@ const expectedPermissions = new Map([
       "cancel_workspace_import_request",
     ],
   ],
+  [
+    "agent-room-command-access",
+    [
+      "agent_room_list_rooms",
+      "agent_room_get_room",
+      "agent_room_create_room",
+      "agent_room_update_room",
+      "agent_room_delete_room",
+      "agent_room_list_members",
+      "agent_room_add_member",
+      "agent_room_update_member",
+      "agent_room_delete_member",
+      "agent_room_get_timeline",
+      "agent_room_get_run",
+      "agent_room_post_message",
+      "agent_room_abort_run",
+      "agent_room_retry_run",
+      "agent_room_resolve_approval",
+      "agent_room_get_capabilities",
+      "agent_room_list_observations",
+      "agent_room_set_observation_pin",
+      "agent_room_open_session",
+      "agent_room_hide_window",
+      "list_bridge_approvals",
+    ],
+  ],
 ]);
 
 compareSets("build.rs APP_COMMANDS", buildCommands, registeredCommandNames);
@@ -380,6 +410,7 @@ requireCapabilityPermission(
   "workspace-import-command-access",
 );
 requireCapabilityPermission(capabilities, "workspace-import-picker", "dialog:allow-open");
+requireCapabilityPermission(capabilities, "agent-room", "agent-room-command-access");
 
 const architecture = fs.existsSync(architecturePath)
   ? fs.readFileSync(architecturePath, "utf8")

@@ -238,6 +238,7 @@ export function ControlCenterView({
   onRunBridgePrimaryAction,
   onStopBridge,
   onRestartBridge,
+  onSetAgentRoomEnabled,
   onImportBridgeSession,
   onClearBridgeBinding,
   onResetBridgeBindingSession,
@@ -1300,8 +1301,17 @@ export function ControlCenterView({
       primaryAction: workDirPrimaryAction,
     },
     {
-      id: "bridge",
+      id: "agent_room",
       index: "06",
+      title: "Agent Room",
+      actionLabel: bridgeStatus.agentRoom.enabled ? "运行中" : "已停止",
+      statusTone: bridgeStatus.agentRoom.enabled ? "success" : "neutral",
+      complete: true,
+      primaryAction: null,
+    },
+    {
+      id: "bridge",
+      index: "07",
       title: "外部 IM 通道",
       actionLabel:
         visibleBridgeConnectors.length === 0
@@ -1313,7 +1323,7 @@ export function ControlCenterView({
     },
     {
       id: "doctor",
-      index: "07",
+      index: "08",
       title: "Kimi Doctor",
       actionLabel: doctorSummary.label,
       statusTone: doctorSummary.tone,
@@ -1322,7 +1332,7 @@ export function ControlCenterView({
     },
     {
       id: "logs",
-      index: "08",
+      index: "09",
       title: "日志",
       actionLabel: "app.log · backend.log · bridge.log",
       statusTone: "neutral",
@@ -1450,6 +1460,21 @@ export function ControlCenterView({
               onOpenConfigDir={onOpenKimiConfigDir}
               onTestConnection={onTestKimiCodeAccessConfig}
             />
+          </div>
+        );
+      }
+      if (stepId === "agent_room") {
+        return (
+          <div className="cc-settings-detail-stack">
+            <ControlCenterToggleField
+              label="启用 Agent Room"
+              description="开启后，有 Kimi Code Pane 时会在标题栏显示 Agent Room 入口。"
+              checked={bridgeStatus.agentRoom.enabled}
+              onChange={(checked) => void onSetAgentRoomEnabled(checked)}
+              disabled={bridgeBusy}
+              busy={bridgeBusy}
+            />
+            <p className="hint">如果本地 Bridge 正在运行，切换时会自动重启。</p>
           </div>
         );
       }

@@ -20,12 +20,12 @@ use crate::{
     bridge_settings_store::{self, DEFAULT_BRIDGE_ADMIN_PORT},
     log_manager, settings_store,
     types::{
-        AgentRoomCommandError, BindingRecord, BridgeApprovalRecord, BridgeApprovalResolveInput,
-        BridgeChannelState, BridgeChannelStatus, BridgeConnectorSecretsMaskView,
-        BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue, BridgeRuntimeAdapterStatus,
-        BridgeRuntimeLocatorStatus, BridgeRuntimeState, BridgeSecretsMaskView,
-        BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings, BridgeStatus,
-        BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
+        AgentRoomCommandError, AgentRoomStatus, BindingRecord, BridgeApprovalRecord,
+        BridgeApprovalResolveInput, BridgeChannelState, BridgeChannelStatus,
+        BridgeConnectorSecretsMaskView, BridgeFeishuSecretsMaskView, BridgeMaskedSecretValue,
+        BridgeRuntimeAdapterStatus, BridgeRuntimeLocatorStatus, BridgeRuntimeState,
+        BridgeSecretsMaskView, BridgeSessionImportInput, BridgeSessionRecord, BridgeSettings,
+        BridgeStatus, BridgeTelegramSecretsMaskView, BridgeWeixinSecretsMaskView,
     },
 };
 
@@ -287,7 +287,7 @@ pub(crate) fn agent_room_client(
     if !matches!(
         snapshot.0,
         BridgeRuntimeState::Running | BridgeRuntimeState::Degraded
-    ) && agent_room_feature_enabled()
+    ) && agent_room_feature_enabled(app)
     {
         start_bridge(app).map_err(|_| {
             AgentRoomCommandError::local("bridge_unavailable", "IM Bridge failed to start")
@@ -316,8 +316,10 @@ pub(crate) fn agent_room_client(
     })
 }
 
-pub(crate) fn agent_room_feature_enabled() -> bool {
-    env_flag_enabled(env::var(KIMI_AGENT_ROOM_ENABLED_ENV).ok().as_deref())
+pub(crate) fn agent_room_feature_enabled(app: &AppHandle) -> bool {
+    settings_store::load_or_default(app)
+        .map(|settings| settings.agent_room_enabled)
+        .unwrap_or(false)
 }
 
 pub fn list_bridge_bindings(app: &AppHandle) -> anyhow::Result<Vec<BindingRecord>> {
@@ -859,6 +861,14 @@ fn build_bridge_command(
             KIMI_APP_RUNTIME_LOCATOR_FILE_ENV,
             &state.runtime_locator_path,
         )
+        .env(
+            KIMI_AGENT_ROOM_ENABLED_ENV,
+            if agent_room_feature_enabled(app) {
+                "1"
+            } else {
+                "0"
+            },
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1257,7 +1267,10 @@ fn build_local_status(app: &AppHandle, settings: &BridgeSettings) -> anyhow::Res
         version: runtime.version.clone(),
         kimi_runtime_locator: BridgeRuntimeLocatorStatus::default(),
         runtime_adapter: BridgeRuntimeAdapterStatus::default(),
-        agent_room: Default::default(),
+        agent_room: AgentRoomStatus {
+            enabled: agent_room_feature_enabled(app),
+            ..Default::default()
+        },
         connectors,
         pending_approvals: runtime.pending_approvals,
         bindings: runtime.bindings,

@@ -145,4 +145,23 @@ mod tests {
             "我的自定义菜单"
         );
     }
+
+    #[test]
+    fn agent_room_setting_defaults_off_and_round_trips_when_enabled() {
+        let legacy = serde_json::to_value(AppSettings::default()).expect("serialize settings");
+        let mut legacy = legacy.as_object().expect("settings object").clone();
+        legacy.remove("agentRoomEnabled");
+
+        let restored: AppSettings = serde_json::from_value(serde_json::Value::Object(legacy))
+            .expect("deserialize legacy settings");
+        assert!(!restored.agent_room_enabled);
+
+        let mut enabled = restored;
+        enabled.agent_room_enabled = true;
+        let round_trip: AppSettings = serde_json::from_str(
+            &serde_json::to_string(&enabled).expect("serialize enabled settings"),
+        )
+        .expect("deserialize enabled settings");
+        assert!(round_trip.agent_room_enabled);
+    }
 }

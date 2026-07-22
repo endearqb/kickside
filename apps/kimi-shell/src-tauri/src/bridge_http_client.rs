@@ -1299,7 +1299,7 @@ mod tests {
                         r#"{"runId":"run1","roomId":"r1","sourceMessageId":"msg1","memberId":"m1","originKind":"agent_room","queuePolicy":"enqueue","status":"queued","createdAt":"t1","updatedAt":"t1"}"#
                     }
                     "/api/v1/agent-room/observations" => {
-                        r#"{"items":[],"pinnedSessionIds":["s1"],"observerRunning":true}"#
+                        r#"{"items":[],"panes":[{"paneId":"pane-1","effectiveSessionId":"s1","visible":true,"active":true,"maximized":false,"mountPolicy":"eager","loadState":"ready"}],"pinnedSessionIds":["s1"],"observerRunning":true}"#
                     }
                     "/api/v1/agent-room/capabilities" => {
                         r#"{"runtimeProvider":"server","core":true,"observer":true,"multiSessionObservation":true,"sessionTranscript":true,"userPromptEvents":true,"abort":false,"approval":true,"nativeFollowUp":false}"#
@@ -1345,12 +1345,11 @@ mod tests {
             .events
             .is_empty());
         assert_eq!(client.agent_room_get_run("run1").unwrap().status, "queued");
+        let observations = client.agent_room_list_observations().unwrap();
+        assert_eq!(observations.pinned_session_ids, ["s1"]);
         assert_eq!(
-            client
-                .agent_room_list_observations()
-                .unwrap()
-                .pinned_session_ids,
-            ["s1"]
+            observations.panes[0].effective_session_id.as_deref(),
+            Some("s1")
         );
         assert!(client.agent_room_get_capabilities().unwrap().observer);
         assert_eq!(

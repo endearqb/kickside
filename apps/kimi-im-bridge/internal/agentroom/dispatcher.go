@@ -77,11 +77,12 @@ func (d *Dispatcher) HandleTerminalRun(runID string) {
 	d.activeMu.Lock()
 	_, executingHere := d.activeRuns[runID]
 	d.activeMu.Unlock()
-	if executingHere {
-		return
-	}
 	run, err := d.store.GetAgentRun(context.Background(), runID)
 	if err != nil || run == nil || !runTerminal(run.Status) {
+		return
+	}
+	if executingHere {
+		_ = d.advanceWorkflow(context.Background(), run.SourceMessageID)
 		return
 	}
 	if run.SessionID != "" {

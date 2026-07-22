@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PaneSessionObservation } from "@/app/types";
 import {
   getAgentRoomCapabilities,
@@ -18,12 +18,30 @@ export function usePaneSessionRegistry() {
   const slots = useWorkspaceGridStore((state) => state.slots);
   const activePaneId = useWorkspaceGridStore((state) => state.activePaneId);
   const maximizedPaneId = useWorkspaceGridStore((state) => state.maximizedPaneId);
+  const [featureAvailable, setFeatureAvailable] = useState(false);
   const hadDemand = useRef(false);
-  const hasDemand = panes.some((pane) => pane.kind === "agent_room");
+  const hasDemand = featureAvailable || panes.some((pane) => pane.kind === "agent_room");
   const snapshot = useMemo(
     () => buildPaneSessionSnapshot(panes, slots, activePaneId, maximizedPaneId),
     [activePaneId, maximizedPaneId, panes, slots],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    void getAgentRoomCapabilities()
+      .then((capabilities) => {
+        if (!disposed) {
+          setFeatureAvailable(capabilities.core);
+          useAgentRoomObservationStore.getState().setCapabilities(capabilities);
+        }
+      })
+      .catch(() => {
+        if (!disposed) setFeatureAvailable(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasDemand && !hadDemand.current) {
@@ -87,12 +105,7 @@ export function usePaneSessionRegistry() {
     let disposed = false;
     let refreshTimer: number | undefined;
     let unsubscribe: (() => void) | undefined;
-    void Promise.all([getAgentRoomCapabilities(), refreshObservations()])
-      .then(([capabilities]) => {
-        if (!disposed) {
-          useAgentRoomObservationStore.getState().setCapabilities(capabilities);
-        }
-      })
+    void refreshObservations()
       .catch((error) => {
         if (!disposed) {
           useAgentRoomObservationStore

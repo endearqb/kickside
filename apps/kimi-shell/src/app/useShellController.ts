@@ -2802,6 +2802,19 @@ export function useShellController() {
     }
   }
 
+  async function handleSetAgentRoomEnabled(enabled: boolean) {
+    setBridgeBusy(true);
+    setActionError(null);
+    try {
+      const data = await invoke<BridgeStatus>("set_agent_room_enabled", { enabled });
+      setBridgeStatus(data);
+    } catch (error) {
+      setActionError(String(error));
+    } finally {
+      setBridgeBusy(false);
+    }
+  }
+
   async function handleClearBridgeBinding(bindingId: string) {
     setBridgeBusy(true);
     setActionError(null);
@@ -3823,6 +3836,7 @@ export function useShellController() {
     handleStartBridge,
     handleStopBridge,
     handleRestartBridge,
+    handleSetAgentRoomEnabled,
     handleImportBridgeSession,
     handleClearBridgeBinding,
     handleResetBridgeBindingSession,

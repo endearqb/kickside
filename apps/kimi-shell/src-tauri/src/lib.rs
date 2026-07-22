@@ -1076,7 +1076,7 @@ pub fn run() {
                         }
                     };
 
-                    let agent_room_enabled = bridge_manager::agent_room_feature_enabled();
+                    let agent_room_enabled = bridge_manager::agent_room_feature_enabled(&app_handle);
                     if (settings.enabled && settings.auto_start) || agent_room_enabled {
                         if let Err(error) = bridge_manager::start_bridge(&app_handle) {
                             log_manager::append_line(
@@ -1141,6 +1141,16 @@ pub fn run() {
                         app_handle,
                         "workspace_import_picker_close_requested",
                     );
+                }
+            } else if label == window_manager::AGENT_ROOM_WINDOW_LABEL {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Err(error) = window_manager::hide_agent_room_window(app_handle) {
+                        log_manager::append_line(
+                            app_handle,
+                            format!("failed to hide Agent Room window on close: {error}"),
+                        );
+                    }
                 }
             }
         }

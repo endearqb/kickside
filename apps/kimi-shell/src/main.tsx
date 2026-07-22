@@ -3,9 +3,13 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
 import { RootErrorBoundary } from "@/app/RootErrorBoundary";
+import { AgentRoomWindowApp } from "@/features/agent-room/AgentRoomWindowApp";
 import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 
 const appDisplayName = getKimiAssistantDisplayName();
+const RootApp = window.location.hash.replace(/^#\/?/, "") === "agent-room"
+  ? AgentRoomWindowApp
+  : App;
 
 function markBootFallbackAsMounting() {
   const fallback = document.getElementById("boot-fallback");
@@ -70,7 +74,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <BootReadyMarker />
     <RootErrorBoundary>
-      <App />
+      <RootApp />
     </RootErrorBoundary>
   </React.StrictMode>,
 );

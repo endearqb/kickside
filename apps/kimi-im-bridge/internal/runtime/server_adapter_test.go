@@ -353,7 +353,7 @@ func TestKimiCodeServerAdapterSubmitPromptStreamsWebSocketEvents(t *testing.T) {
 				"id":       "sess_1",
 				"status":   "idle",
 				"metadata": map[string]any{"cwd": "D:/repo"},
-				"last_seq": 4,
+				"last_seq": 0,
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions/sess_1/prompts":
 			requireBearer(t, r)
@@ -403,11 +403,15 @@ func TestKimiCodeServerAdapterSubmitPromptStreamsWebSocketEvents(t *testing.T) {
 				t.Fatalf("write ack: %v", err)
 			}
 			for _, frame := range []map[string]any{
-				{"type": "turn.started", "seq": 5, "session_id": "sess_1", "payload": map[string]any{"turnId": 1}},
-				{"type": "turn.step.started", "seq": 6, "session_id": "sess_1", "payload": map[string]any{"turnId": 1, "step": 0}},
+				{"type": "turn.started", "seq": 1, "session_id": "sess_1", "payload": map[string]any{"turnId": 1}},
+				{"type": "turn.ended", "seq": 2, "session_id": "sess_1", "payload": map[string]any{"turnId": 1, "reason": "completed"}},
+				{"type": "prompt.completed", "seq": 3, "session_id": "sess_1", "payload": map[string]any{"promptId": "old_prompt", "reason": "completed"}},
+				{"type": "turn.started", "seq": 4, "session_id": "sess_1", "payload": map[string]any{"turnId": 2}},
+				{"type": "turn.step.started", "seq": 5, "session_id": "sess_1", "payload": map[string]any{"turnId": 2, "step": 0}},
 				{"type": "assistant.delta", "seq": 6, "session_id": "sess_1", "payload": map[string]any{"delta": "hello "}},
-				{"type": "assistant.delta", "seq": 6, "session_id": "sess_1", "payload": map[string]any{"delta": "world"}},
-				{"type": "turn.ended", "seq": 7, "session_id": "sess_1", "payload": map[string]any{"reason": "completed"}},
+				{"type": "assistant.delta", "seq": 7, "session_id": "sess_1", "payload": map[string]any{"delta": "world"}},
+				{"type": "turn.ended", "seq": 8, "session_id": "sess_1", "payload": map[string]any{"turnId": 2, "reason": "completed"}},
+				{"type": "prompt.completed", "seq": 9, "session_id": "sess_1", "payload": map[string]any{"promptId": "prompt_1", "reason": "completed"}},
 			} {
 				if err := conn.WriteJSON(frame); err != nil {
 					t.Fatalf("write event frame: %v", err)
@@ -450,7 +454,7 @@ func TestHandlePromptWSFrameReturnsStructuredFailure(t *testing.T) {
 	var events []AdapterEvent
 	status, terminal, err := handlePromptWSFrame(nil, wsFrame{
 		Type:    "turn.ended",
-		Payload: json.RawMessage(`{"reason":"failed","error":{"code":"model.not_configured","message":"Model not set"}}`),
+		Payload: json.RawMessage(`{"promptId":"prompt-1","reason":"failed","error":{"code":"model.not_configured","message":"Model not set"}}`),
 	}, "session-1", "prompt-1", func(event AdapterEvent) error {
 		events = append(events, event)
 		return nil

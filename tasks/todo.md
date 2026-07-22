@@ -689,3 +689,36 @@
 - 根因是 Kimi Code 0.28.0 将 `kimi server` 整个命令树替换为弃用占位命令；它吞掉 `run --help` 后退出，导致启动失败和错误的“支持 server run”诊断。
 - 修复只替换共享启动参数与契约探测，不增加版本分支、回退层或新依赖。
 - 已验证：`cargo fmt -- --check`、`cargo check`、两条针对性 Rust 测试通过；本机 0.28.0 真实启动后 `/api/v1/healthz` 返回 HTTP 200。
+
+## Agent Room Redesign Phase 0–2
+
+### Checklist
+- [x] 核对 `main@f7a89d8`、PRD/SPEC、静态预览、DESIGN 与现有 V1 实现
+- [x] 接受独立窗口 / targeted event / dedicated capability ADR
+- [x] 预写 Grid V3 Draft ADR 与 7 天 Dogfood 记录模板，不提前执行迁移
+- [x] 完成单例 `agent-room` 窗口、关闭隐藏、临时置顶与标题栏入口
+- [x] 完成 capability allow-list、双窗口 Event Pump 与 capability-driven Pane Session Publisher
+- [x] 完成房间切换/创建、执行成员、任务动态、Compact Composer、内嵌审批和精确 Session 打开（含 `focus_existing` / `new_pane`）
+- [x] 完成归档只读、事件 generation 恢复、逐目标失败反馈、键盘目标选择与 Session 错误映射审计
+- [x] 修复 Workflow 终态 Reply 投影与本地执行清理并发时的 lost wake-up
+- [x] 完成 TypeScript、前端/Rust/Go 全量测试、生产构建、安全门禁与最小视觉静态验证
+- [x] 写入 `.ai/changes/2026-07-22.md`、README 与 architecture 当前事实
+- [ ] 完成连续 7 天真实 Dogfood Product Gate
+- [ ] Product Gate 通过后再决定 Phase 3–5、Grid V3 与旧 Pane 退场
+
+### Review
+- 当前交付范围严格停在 Redesign Phase 0–2。Phase 3–5 不是遗漏：PRD 明确要求先通过 7 天真实 Dogfood Product Gate，Gate 前禁止删除旧 Pane、实施 Grid V3 或宣称完整 Redesign DoD。
+- 已验证前端 35 个文件 / 186 项测试、TypeScript、Vite build、安全门禁、Rust 237 项 lib 测试与 Go `go test ./...` 全量测试。Workflow 竞态回归目标测试连续 10 次通过。
+- G3 仍需真实 Tauri 双窗口、2–6 个 Runtime Session、实际审批、主窗口隐藏后的精确跳转、Sidecar 重启、暗色和 820×560 视觉矩阵。
+
+## 飞书同 Session 后续回复丢失
+
+### Checklist
+- [x] 核对 `session_4850bb78-ac22-4125-9771-180287aa0ba8` 的 Bridge DB、Runtime journal 与只读 WS 回放
+- [x] 在共享 Server Runtime Adapter 修复无 Prompt ID 的历史 `turn.ended` 提前终止当前流
+- [x] 增加历史 Prompt 回放回归并运行 `go test ./...`
+- [ ] 重建 bundled Bridge sidecar，重启应用后用真实飞书连续发送两条同 Session 消息完成 G3
+
+### Review
+- 三条消息均成功入站；后两条 Runtime 实际完成，但 Bridge 分别提前约 44 秒和 80 秒结束事件流，因此没有内容增量或飞书 outbound。
+- 修复只收紧终止事件关联，不改变内容增量、飞书发送、数据库或 UI；历史漏发回复不自动补发。

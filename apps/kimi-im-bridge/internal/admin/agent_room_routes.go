@@ -463,8 +463,13 @@ func (r *AgentRoomRoutes) serveObservations(w http.ResponseWriter, req *http.Req
 			r.writeResult(w, req, nil, err, http.StatusOK)
 			return
 		}
+		panes, err := r.store.ListPaneSessionObservations(req.Context())
+		if err != nil {
+			r.writeResult(w, req, nil, err, http.StatusOK)
+			return
+		}
 		pins, err := r.store.ListPinnedSessionObservations(req.Context())
-		r.writeResult(w, req, map[string]any{"items": items, "pinnedSessionIds": pins, "observerRunning": r.observerRunning(req.Context())}, err, http.StatusOK)
+		r.writeResult(w, req, map[string]any{"items": items, "panes": panes, "pinnedSessionIds": pins, "observerRunning": r.observerRunning(req.Context())}, err, http.StatusOK)
 		return
 	}
 	if len(parts) == 2 && parts[1] == "pin" && (req.Method == http.MethodPost || req.Method == http.MethodDelete) {

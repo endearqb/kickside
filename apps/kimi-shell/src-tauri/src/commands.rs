@@ -47,6 +47,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         bridge::start_bridge,
         bridge::stop_bridge,
         bridge::restart_bridge,
+        bridge::set_agent_room_enabled,
         bridge::list_bridge_bindings,
         bridge::list_bridge_sessions,
         bridge::clear_bridge_binding,
@@ -65,6 +66,9 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         bridge::get_weixin_connector_onboarding_status,
         bridge::cancel_weixin_connector_onboarding,
         // agent room
+        agent_room::agent_room_show_window,
+        agent_room::agent_room_hide_window,
+        agent_room::agent_room_toggle_window,
         agent_room::agent_room_list_agents,
         agent_room::agent_room_create_agent,
         agent_room::agent_room_update_agent,

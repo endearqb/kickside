@@ -129,10 +129,16 @@ func TestWorkflowParallelReviewAdvancesWithExplicitResultRefs(t *testing.T) {
 		if run.WorkflowStageID != "review" {
 			continue
 		}
+		dispatcher.activeMu.Lock()
+		dispatcher.activeRuns[run.RunID] = struct{}{}
+		dispatcher.activeMu.Unlock()
 		if _, err := dataStore.AppendAgentRoomEvent(ctx, domain.AgentRoomEvent{EventID: "reply:" + run.RunID, RoomID: room.RoomID, RunID: run.RunID, SessionID: run.SessionID, Kind: "run.reply_delta", TextDelta: "reviewed " + run.RunID}); err != nil {
 			t.Fatal(err)
 		}
 		dispatcher.HandleTerminalRun(run.RunID)
+		dispatcher.activeMu.Lock()
+		delete(dispatcher.activeRuns, run.RunID)
+		dispatcher.activeMu.Unlock()
 	}
 	waitWorkflowRuns(t, ctx, dataStore, result.Message.MessageID, func(runs []domain.AgentRun) bool {
 		return len(runs) == 3 && allRunStatus(runs, "completed")
@@ -143,17 +149,7 @@ func TestWorkflowParallelReviewAdvancesWithExplicitResultRefs(t *testing.T) {
 	if len(prompts) != 3 || !strings.Contains(prompts[2], "Workflow stage instruction:\nSynthesize findings") || !strings.Contains(prompts[2], "Shared result") {
 		t.Fatalf("downstream prompt did not receive explicit summaries: %+v", prompts)
 	}
-	events, err := dataStore.ListAgentRoomEvents(ctx, store.AgentRoomEventQuery{RoomID: room.RoomID, Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	foundCompleted := false
-	for _, event := range events {
-		foundCompleted = foundCompleted || event.Kind == "workflow.completed"
-	}
-	if !foundCompleted {
-		t.Fatalf("workflow completion event was not persisted: %+v", events)
-	}
+	waitWorkflowEvent(t, ctx, dataStore, room.RoomID, "workflow.completed")
 }
 
 func TestWorkflowFailurePoliciesAndResolveAreBounded(t *testing.T) {
@@ -275,6 +271,26 @@ func waitWorkflowRuns(t *testing.T, ctx context.Context, dataStore interface {
 	runs, _ := dataStore.ListAgentRunsByMessage(ctx, messageID)
 	t.Fatalf("workflow did not reach expected state: %+v", runs)
 	return nil
+}
+
+func waitWorkflowEvent(t *testing.T, ctx context.Context, dataStore interface {
+	ListAgentRoomEvents(context.Context, store.AgentRoomEventQuery) ([]domain.AgentRoomEvent, error)
+}, roomID, kind string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := dataStore.ListAgentRoomEvents(ctx, store.AgentRoomEventQuery{RoomID: roomID, Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.Kind == kind {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("workflow event %q was not persisted", kind)
 }
 
 func allRunStatus(runs []domain.AgentRun, status string) bool {

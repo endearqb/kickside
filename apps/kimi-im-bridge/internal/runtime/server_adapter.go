@@ -535,6 +535,9 @@ func handlePromptWSFrame(
 		approval := runtimeApprovalFromPayload(frame.Payload, sessionID)
 		return "", false, sinkAdapterEvent(sink, AdapterEvent{Type: "approval_resolved", PromptID: promptID, Approval: &approval})
 	case "turn.ended":
+		if strings.TrimSpace(promptID) != "" && payloadString(frame.Payload, "promptId") != promptID && payloadString(frame.Payload, "prompt_id") != promptID {
+			return "", false, nil
+		}
 		reason := strings.TrimSpace(payloadString(frame.Payload, "reason"))
 		status := statusFromTurnEndReason(reason)
 		eventType := "turn_completed"

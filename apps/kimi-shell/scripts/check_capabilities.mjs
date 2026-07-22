@@ -4,6 +4,9 @@ import process from "node:process";
 
 const root = path.resolve(process.cwd(), "src-tauri", "capabilities", "default.json");
 const raw = JSON.parse(fs.readFileSync(root, "utf8"));
+const tauriConfig = JSON.parse(
+  fs.readFileSync(path.resolve(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),
+);
 
 const capabilityList = Array.isArray(raw)
   ? raw
@@ -12,6 +15,7 @@ const capabilityList = Array.isArray(raw)
     : [raw];
 
 const capability = capabilityList.find((item) => item.identifier === "default");
+const agentRoomCapability = capabilityList.find((item) => item.identifier === "agent-room");
 const errors = [];
 const dangerousMainOnlyPermissions = new Set([
   "core:webview:allow-create-webview",
@@ -50,6 +54,57 @@ if (!capability) {
       errors.push(`forbidden permission found: ${permission}`);
     }
   }
+}
+
+const expectedAgentRoomPermissions = [
+  "core:default",
+  "core:window:allow-is-always-on-top",
+  "core:window:allow-set-always-on-top",
+  "agent-room-command-access",
+];
+if (!agentRoomCapability) {
+  errors.push("missing agent-room capability");
+} else {
+  if (JSON.stringify(agentRoomCapability.windows ?? []) !== JSON.stringify(["agent-room"])) {
+    errors.push("agent-room capability must only target the agent-room window");
+  }
+  if (
+    JSON.stringify([...(agentRoomCapability.permissions ?? [])].sort()) !==
+    JSON.stringify([...expectedAgentRoomPermissions].sort())
+  ) {
+    errors.push("agent-room capability permissions do not match the exact allow-list");
+  }
+  if (agentRoomCapability.permissions?.includes("main-command-access")) {
+    errors.push("agent-room capability must not include main-command-access");
+  }
+}
+
+const framelessCapability = capabilityList.find(
+  (item) => item.identifier === "frameless-window-controls",
+);
+if (!framelessCapability?.windows?.includes("agent-room")) {
+  errors.push("frameless window controls must include agent-room");
+}
+
+for (const identifier of ["prefill", "workspace-import-picker"]) {
+  const item = capabilityList.find((candidate) => candidate.identifier === identifier);
+  if (item?.permissions?.includes("agent-room-command-access")) {
+    errors.push(`${identifier} must not include agent-room-command-access`);
+  }
+}
+
+const agentRoomWindow = tauriConfig.app?.windows?.find((item) => item.label === "agent-room");
+if (
+  !agentRoomWindow ||
+  agentRoomWindow.url !== "index.html#/agent-room" ||
+  agentRoomWindow.create !== false ||
+  agentRoomWindow.visible !== false ||
+  agentRoomWindow.width !== 960 ||
+  agentRoomWindow.height !== 680 ||
+  agentRoomWindow.minWidth !== 820 ||
+  agentRoomWindow.minHeight !== 560
+) {
+  errors.push("agent-room window config does not match the stable lazy-window contract");
 }
 
 for (const item of capabilityList) {

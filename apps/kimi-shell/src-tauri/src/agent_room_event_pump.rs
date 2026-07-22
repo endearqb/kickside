@@ -8,13 +8,17 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
-    bridge_manager,
+    bridge_manager, log_manager,
     types::{AgentRoomCommandError, AgentRoomEvent, AgentRoomEventPage},
     window_manager,
 };
 
 const EVENT_NAME: &str = "agent-room-events";
 const STATUS_EVENT_NAME: &str = "agent-room-pump-status";
+const EVENT_TARGETS: [&str; 2] = [
+    window_manager::MAIN_WINDOW_LABEL,
+    window_manager::AGENT_ROOM_WINDOW_LABEL,
+];
 const IDLE_GRACE: Duration = Duration::from_secs(30);
 const BACKOFFS: [Duration; 5] = [
     Duration::from_millis(250),
@@ -58,6 +62,19 @@ struct PumpStatus {
     error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DeliverySummary {
+    existing: usize,
+    delivered: usize,
+    failed: usize,
+}
+
+impl DeliverySummary {
+    fn delivered_any(self) -> bool {
+        self.delivered > 0
+    }
 }
 
 pub fn ensure_started(app: &AppHandle) {
@@ -140,6 +157,7 @@ fn run_worker(app: AppHandle, generation: u64, mut cursor: i64) {
                     continue;
                 }
                 let has_demand = current_pane_refs(&app) > 0
+                    || window_manager::is_agent_room_window_visible(&app)
                     || client
                         .get_status()
                         .map(|status| status.agent_room.active_runs > 0)
@@ -170,10 +188,10 @@ fn run_worker(app: AppHandle, generation: u64, mut cursor: i64) {
 }
 
 fn emit_page(app: &AppHandle, generation: u64, page: &AgentRoomEventPage) -> bool {
-    app.emit_to(
-        window_manager::MAIN_WINDOW_LABEL,
+    emit_agent_room_targets(
+        app,
         EVENT_NAME,
-        EventBatch {
+        &EventBatch {
             generation,
             items: page.items.clone(),
             next_seq: page.next_seq,
@@ -181,7 +199,7 @@ fn emit_page(app: &AppHandle, generation: u64, page: &AgentRoomEventPage) -> boo
             server_time: page.server_time.clone(),
         },
     )
-    .is_ok()
+    .delivered_any()
 }
 
 fn handle_error(
@@ -218,10 +236,10 @@ fn emit_status(
     retry_count: usize,
     error: Option<(&str, &str)>,
 ) {
-    let _ = app.emit_to(
-        window_manager::MAIN_WINDOW_LABEL,
+    emit_agent_room_targets(
+        app,
         STATUS_EVENT_NAME,
-        PumpStatus {
+        &PumpStatus {
             state,
             generation,
             cursor,
@@ -230,6 +248,31 @@ fn emit_status(
             error_message: error.map(|(_, message)| message.to_string()),
         },
     );
+}
+
+fn emit_agent_room_targets<T: Clone + Serialize>(
+    app: &AppHandle,
+    event: &str,
+    payload: &T,
+) -> DeliverySummary {
+    let mut summary = DeliverySummary::default();
+    for label in EVENT_TARGETS {
+        if app.get_webview_window(label).is_none() {
+            continue;
+        }
+        summary.existing += 1;
+        match app.emit_to(label, event, payload.clone()) {
+            Ok(()) => summary.delivered += 1,
+            Err(error) => {
+                summary.failed += 1;
+                log_manager::append_line(
+                    app,
+                    format!("failed to emit {event} to {label}: {error}"),
+                );
+            }
+        }
+    }
+    summary
 }
 
 fn wait_backoff(app: &AppHandle, generation: u64, retry_count: usize) {
@@ -309,6 +352,7 @@ mod tests {
     fn event_and_status_names_are_stable() {
         assert_eq!(EVENT_NAME, "agent-room-events");
         assert_eq!(STATUS_EVENT_NAME, "agent-room-pump-status");
+        assert_eq!(EVENT_TARGETS, ["main", "agent-room"]);
     }
 
     #[test]
@@ -316,5 +360,22 @@ mod tests {
         assert_eq!(cursor_after_emit(7, 9, true), 9);
         assert_eq!(cursor_after_emit(9, 7, true), 9);
         assert_eq!(cursor_after_emit(7, 9, false), 7);
+    }
+
+    #[test]
+    fn partial_delivery_advances_but_missing_or_failed_targets_do_not() {
+        assert!(DeliverySummary {
+            existing: 2,
+            delivered: 1,
+            failed: 1,
+        }
+        .delivered_any());
+        assert!(!DeliverySummary::default().delivered_any());
+        assert!(!DeliverySummary {
+            existing: 2,
+            delivered: 0,
+            failed: 2,
+        }
+        .delivered_any());
     }
 }

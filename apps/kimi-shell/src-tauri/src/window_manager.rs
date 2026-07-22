@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use serde::Serialize;
 use tauri::{
     webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindow,
     WebviewWindowBuilder,
@@ -34,6 +35,13 @@ use crate::{
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const PREFILL_WINDOW_LABEL: &str = "prefill";
 pub const WORKSPACE_IMPORT_PICKER_WINDOW_LABEL: &str = "workspace-import-picker";
+pub const AGENT_ROOM_WINDOW_LABEL: &str = "agent-room";
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoomWindowState {
+    pub visible: bool,
+}
 
 const SHELL_ROUTE_EVENT: &str = "shell-route";
 const PREFILL_CHAT_EVENT: &str = "prefill-chat";
@@ -869,7 +877,7 @@ pub fn publish_workspace_session_event(
     event_name: &str,
     payload: &WorkspaceSessionBridgePayload,
     source: &str,
-) {
+) -> bool {
     let should_queue = {
         let lock = shared_navigation_state().lock();
         let Ok(mut state) = lock else {
@@ -879,7 +887,7 @@ pub fn publish_workspace_session_event(
                     "navigation state mutex poisoned while publishing workspace event (source={source})"
                 ),
             );
-            return;
+            return false;
         };
 
         if state.frontend_ready && app.get_webview_window(MAIN_WINDOW_LABEL).is_some() {
@@ -903,7 +911,7 @@ pub fn publish_workspace_session_event(
                 payload.action
             ),
         );
-        return;
+        return false;
     }
 
     if !emit_workspace_session_event(app, event_name, payload, source) {
@@ -916,7 +924,9 @@ pub fn publish_workspace_session_event(
             source,
             "emit_failed",
         );
+        return false;
     }
+    true
 }
 
 pub fn publish_open_request_error(
@@ -1124,6 +1134,68 @@ pub fn hide_workspace_import_picker_window(app: &AppHandle, source: &str) {
             format!("workspace import picker window hidden (source={source})"),
         );
     }
+}
+
+pub fn show_agent_room_window(app: &AppHandle) -> Result<AgentRoomWindowState, String> {
+    let window = if let Some(existing) = app.get_webview_window(AGENT_ROOM_WINDOW_LABEL) {
+        existing
+    } else {
+        let config = window_config(app, AGENT_ROOM_WINDOW_LABEL)?;
+        WebviewWindowBuilder::from_config(app, &config)
+            .map_err(|error| format!("failed to construct Agent Room window: {error}"))?
+            .build()
+            .map_err(|error| format!("failed to build Agent Room window: {error}"))?
+    };
+    window
+        .show()
+        .map_err(|error| format!("failed to show Agent Room window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus Agent Room window: {error}"))?;
+    Ok(AgentRoomWindowState { visible: true })
+}
+
+pub fn hide_agent_room_window(app: &AppHandle) -> Result<AgentRoomWindowState, String> {
+    if let Some(window) = app.get_webview_window(AGENT_ROOM_WINDOW_LABEL) {
+        window
+            .hide()
+            .map_err(|error| format!("failed to hide Agent Room window: {error}"))?;
+        window
+            .set_always_on_top(false)
+            .map_err(|error| format!("failed to clear Agent Room always-on-top state: {error}"))?;
+    }
+    Ok(AgentRoomWindowState { visible: false })
+}
+
+pub fn toggle_agent_room_window(app: &AppHandle) -> Result<AgentRoomWindowState, String> {
+    let visible = app
+        .get_webview_window(AGENT_ROOM_WINDOW_LABEL)
+        .map(|window| window.is_visible())
+        .transpose()
+        .map_err(|error| format!("failed to read Agent Room window state: {error}"))?
+        .unwrap_or(false);
+    if next_agent_room_visibility(visible) {
+        show_agent_room_window(app)
+    } else {
+        hide_agent_room_window(app)
+    }
+}
+
+pub fn is_agent_room_window_visible(app: &AppHandle) -> bool {
+    app.get_webview_window(AGENT_ROOM_WINDOW_LABEL)
+        .and_then(|window| window.is_visible().ok())
+        .unwrap_or(false)
+}
+
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn next_agent_room_visibility(visible: bool) -> bool {
+    !visible
 }
 
 pub fn handle_workspace_import_picker_close_requested(app: &AppHandle, source: &str) {
@@ -2494,6 +2566,13 @@ fn record_startup_trace(app: &AppHandle, event: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_room_window_contract_is_stable() {
+        assert_eq!(AGENT_ROOM_WINDOW_LABEL, "agent-room");
+        assert!(next_agent_room_visibility(false));
+        assert!(!next_agent_room_visibility(true));
+    }
 
     fn sample_payload() -> PrefillChatPayload {
         PrefillChatPayload {

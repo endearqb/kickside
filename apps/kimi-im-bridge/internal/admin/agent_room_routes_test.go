@@ -209,6 +209,11 @@ func TestAgentRoomAdminFlagOffStrictBodyPaneGenerationAndSafeErrors(t *testing.T
 	if status != http.StatusOK || dataMap(t, envelope)["observedSessionIds"].([]any)[0] != "session-active" {
 		t.Fatalf("pane sync failed: status=%d envelope=%+v", status, envelope)
 	}
+	status, envelope = agentRoomRequest(t, server.URL, "token-1", http.MethodGet, "/api/v1/agent-room/observations", nil)
+	panes := dataMap(t, envelope)["panes"].([]any)
+	if status != http.StatusOK || len(panes) != 1 || panes[0].(map[string]any)["effectiveSessionId"] != "session-active" {
+		t.Fatalf("observation pane projection failed: status=%d envelope=%+v", status, envelope)
+	}
 	status, envelope = agentRoomRequest(t, server.URL, "token-1", http.MethodPost, "/api/v1/agent-room/pane-sessions/sync", map[string]any{"generation": 1, "panes": []any{pane}})
 	details := map[string]any{}
 	if envelope.Error != nil {

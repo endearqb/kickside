@@ -51,6 +51,7 @@ describe("Pane Session Registry", () => {
     }));
     mocks.observations.mockResolvedValue({
       items: [],
+      panes: [],
       pinnedSessionIds: [],
       observerRunning: true,
     });
@@ -142,11 +143,10 @@ describe("Pane Session Registry", () => {
     });
   });
 
-  it("trailing-debounces sync and sends an empty snapshot when Room demand closes", async () => {
+  it("trailing-debounces sync when the Agent Room capability is available without a Room pane", async () => {
     const store = useWorkspaceGridStore.getState();
     store.setPreset("1x3");
     store.configurePane("pane-code", { kind: "code", sessionId: "session-1" });
-    expect(store.addPane({ kind: "agent_room", roomId: "room-1" })).not.toBeNull();
     const { unmount } = renderHook(() => usePaneSessionRegistry());
     await act(async () => Promise.resolve());
 
@@ -155,13 +155,6 @@ describe("Pane Session Registry", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(mocks.sync).toHaveBeenCalledTimes(1);
     expect(mocks.sync.mock.calls[0][0].panes[0].effectiveSessionId).toBe("session-1");
-
-    act(() => useWorkspaceGridStore.getState().changePaneKind(
-      useWorkspaceGridStore.getState().panes.find((item) => item.kind === "agent_room")!.id,
-      "external",
-    ));
-    await act(async () => vi.advanceTimersByTimeAsync(250));
-    expect(mocks.sync.mock.calls[mocks.sync.mock.calls.length - 1]?.[0].panes).toEqual([]);
     unmount();
   });
 

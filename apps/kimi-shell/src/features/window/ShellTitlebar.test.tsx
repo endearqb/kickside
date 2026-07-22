@@ -17,9 +17,11 @@ const titlebarProps = {
   tauriRuntime: false,
   isWindowMaximized: false,
   canOpenWorkspace: true,
+  agentRoomEnabled: false,
   onRetry: vi.fn(),
   onBackToStatus: vi.fn(),
   onOpenControlCenter: vi.fn(),
+  onToggleAgentRoom: vi.fn(),
   onOpenExternalUrl: vi.fn(),
   onToggleTheme: vi.fn(),
   onStartWindowDrag: vi.fn(),
@@ -124,5 +126,29 @@ describe("ShellTitlebar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "打开控制中心" }));
     expect(onOpenControlCenter).toHaveBeenCalled();
+  });
+
+  it("shows the Agent Room entry only when enabled and a Kimi Code pane exists", () => {
+    const onToggleAgentRoom = vi.fn();
+    const { rerender } = render(
+      <ShellTitlebar
+        {...titlebarProps}
+        agentRoomEnabled
+        onToggleAgentRoom={onToggleAgentRoom}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开 Agent Room" }));
+    expect(onToggleAgentRoom).toHaveBeenCalledTimes(1);
+
+    rerender(<ShellTitlebar {...titlebarProps} agentRoomEnabled={false} />);
+    expect(screen.queryByRole("button", { name: "打开 Agent Room" })).toBeNull();
+
+    const state = useWorkspaceGridStore.getState();
+    useWorkspaceGridStore.setState({
+      panes: state.panes.filter((pane) => pane.kind !== "code"),
+    });
+    rerender(<ShellTitlebar {...titlebarProps} agentRoomEnabled />);
+    expect(screen.queryByRole("button", { name: "打开 Agent Room" })).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ import {
   getAgentRoomCapabilities,
   getAgentRoomDiagnostics,
   getAgentRoomTimeline,
+  hideAgentRoomWindow,
   listAgentRoomAgents,
   listAgentRoomApprovals,
   listAgentRoomMembers,
@@ -34,8 +35,10 @@ import {
   resolveAgentRoomApproval,
   retryAgentRoomRun,
   setAgentRoomObservationPin,
+  showAgentRoomWindow,
   subscribeAgentRoomEvents,
   syncAgentRoomPaneSessions,
+  toggleAgentRoomWindow,
   updateAgentRoom,
   updateAgentRoomAgent,
   updateAgentRoomMember,
@@ -43,6 +46,20 @@ import {
 
 describe("agentRoomService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("keeps Agent Room window lifecycle behind thin Tauri commands", async () => {
+    mocks.invoke.mockResolvedValue({ visible: true });
+
+    await showAgentRoomWindow();
+    await hideAgentRoomWindow();
+    await toggleAgentRoomWindow();
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["agent_room_show_window"],
+      ["agent_room_hide_window"],
+      ["agent_room_toggle_window"],
+    ]);
+  });
 
   it("filters the shared approval command to Agent Room and reuses Bridge status diagnostics", async () => {
     mocks.invoke.mockResolvedValueOnce([

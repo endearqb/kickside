@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -436,6 +436,7 @@ pub struct AppSettings {
     pub bridge_auto_start: bool,
     #[serde(rename = "bridge_admin_port_override")]
     pub bridge_admin_port_override: Option<u16>,
+    pub agent_room_enabled: bool,
     pub onboarding_completed_version: u32,
     pub onboarding_step_acks: OnboardingStepAcks,
     pub preferred_install_source: InstallSource,
@@ -464,6 +465,7 @@ impl Default for AppSettings {
             bridge_enabled: false,
             bridge_auto_start: false,
             bridge_admin_port_override: None,
+            agent_room_enabled: false,
             onboarding_completed_version: 0,
             onboarding_step_acks: OnboardingStepAcks::default(),
             preferred_install_source: InstallSource::Official,
@@ -1321,6 +1323,8 @@ pub struct AgentRoomEventPage {
 #[serde(rename_all = "camelCase")]
 pub struct AgentRoomObservationPage {
     pub items: Vec<SessionObservation>,
+    #[serde(default)]
+    pub panes: Vec<PaneSessionObservation>,
     pub pinned_session_ids: Vec<String>,
     pub observer_running: bool,
 }

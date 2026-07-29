@@ -6,15 +6,17 @@ use std::{
 
 const ENV_VALUE_VISIBLE_EDGE: usize = 2;
 
-pub(crate) const KIMI_CODING_PLAN_PROVIDER_ID: &str = "kimi-app-api-key";
-pub(crate) const KIMI_CODING_PLAN_MODEL_ID: &str = "kimi-app/kimi-for-coding";
+pub(crate) const KIMI_CODING_PLAN_PROVIDER_ID: &str = "managed:kimi-code";
+pub(crate) const KIMI_CODING_PLAN_MODEL_ID: &str = "kimi-code/k3";
 pub(super) const KIMI_CODING_PLAN_MODEL_NAME: &str = "kimi-for-coding";
+const KIMI_CODING_PLAN_MODEL_PREFIX: &str = "kimi-code/";
+const LEGACY_KIMI_APP_PROVIDER_ID: &str = "kimi-app-api-key";
+const LEGACY_KIMI_APP_MODEL_ID: &str = "kimi-app/kimi-for-coding";
 pub(super) const LEGACY_KIMI_CODING_PLAN_PROVIDER_ID: &str = "kimi-for-coding";
 pub(super) const LEGACY_KIMI_CODING_PLAN_MODEL_ID: &str = "kimi-for-coding";
 pub(super) const KIMI_CODING_PLAN_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 pub(super) const KIMI_CODING_PLAN_SEARCH_URL: &str = "https://api.kimi.com/coding/v1/search";
 pub(super) const KIMI_CODING_PLAN_FETCH_URL: &str = "https://api.kimi.com/coding/v1/fetch";
-pub(super) const KIMI_CODING_PLAN_MAX_CONTEXT_SIZE: i64 = 262144;
 pub(super) const KIMI_CODING_PLAN_SEARCH_SERVICE_KEY: &str = "moonshot_search";
 pub(super) const KIMI_CODING_PLAN_FETCH_SERVICE_KEY: &str = "moonshot_fetch";
 const KIMI_CONFIG_BACKUP_KEEP: usize = 5;
@@ -71,7 +73,8 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
     let config_exists = snapshot.raw.is_some();
     let mut provider_base_url = None;
     let mut provider_api_key = None;
-    let mut model_exists = false;
+    let mut models = Vec::new();
+    let mut default_model = None;
     let mut search_base_url = None;
     let mut search_api_key = None;
     let mut fetch_base_url = None;
@@ -91,34 +94,30 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
 
         if let Some(doc) = doc {
             let root = doc.as_table();
-            let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID);
+            let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID)
+                .or_else(|| provider_table(root, LEGACY_KIMI_APP_PROVIDER_ID))
+                .or_else(|| provider_table(root, LEGACY_KIMI_CODING_PLAN_PROVIDER_ID));
             provider_base_url = provider.and_then(|table| table_string(table, "base_url"));
             provider_api_key = provider.and_then(|table| table_string(table, "api_key"));
+            default_model = table_string(root, "default_model");
+            models = managed_model_views(root);
 
-            model_exists = root
-                .get("models")
-                .and_then(Item::as_table)
-                .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
-                .and_then(Item::as_table)
-                .is_some_and(|table| {
-                    table_string(table, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
-                        && table_string(table, "model").as_deref()
-                            == Some(KIMI_CODING_PLAN_MODEL_NAME)
-                        && table_i64(table, "max_context_size")
-                            == Some(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE)
-                });
-
-            if provider_table(root, LEGACY_KIMI_CODING_PLAN_PROVIDER_ID).is_some()
+            if provider_table(root, LEGACY_KIMI_APP_PROVIDER_ID).is_some()
+                || provider_table(root, LEGACY_KIMI_CODING_PLAN_PROVIDER_ID).is_some()
                 || root
                     .get("models")
                     .and_then(Item::as_table)
-                    .and_then(|models| models.get(LEGACY_KIMI_CODING_PLAN_MODEL_ID))
-                    .and_then(Item::as_table)
-                    .is_some()
+                    .is_some_and(|models| {
+                        models.get(LEGACY_KIMI_APP_MODEL_ID).is_some()
+                            || models.get(LEGACY_KIMI_CODING_PLAN_MODEL_ID).is_some()
+                    })
             {
+                warnings
+                    .push("发现旧版 Kimi 小助手 API 配置；下次成功保存时会自动迁移。".to_string());
+            }
+            if provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).is_some_and(provider_has_oauth) {
                 warnings.push(
-                    "发现旧版 Kimi 小助手 API 配置。建议迁移到新的 kimi-app-api-key provider。"
-                        .to_string(),
+                    "当前 managed:kimi-code 使用 OAuth 登录；API Key 保存将被阻止。".to_string(),
                 );
             }
 
@@ -151,13 +150,9 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
             api_key_configured: provider_key_configured,
             api_key_masked: provider_api_key.as_deref().map(mask_env_value),
         },
-        model: KimiCodeAccessConfigModelView {
-            id: KIMI_CODING_PLAN_MODEL_ID.to_string(),
-            provider: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
-            model: KIMI_CODING_PLAN_MODEL_NAME.to_string(),
-            max_context_size: KIMI_CODING_PLAN_MAX_CONTEXT_SIZE,
-            exists: model_exists,
-        },
+        model: selected_model_view(default_model.as_deref(), &models),
+        default_model,
+        models,
         services: KimiCodeAccessConfigServicesView {
             search: KimiCodeAccessConfigServiceView {
                 key: KIMI_CODING_PLAN_SEARCH_SERVICE_KEY.to_string(),
@@ -184,6 +179,7 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
 pub fn save_kimi_code_access_config(
     app: &AppHandle,
     input: KimiCodeAccessConfigInput,
+    kimi_path: &Path,
 ) -> Result<KimiCodeAccessConfigView, String> {
     validate_kimi_code_access_input(&input)?;
 
@@ -208,8 +204,30 @@ pub fn save_kimi_code_access_config(
         Some(raw) => parse_kimi_config_document(raw, &config_path)?,
         None => DocumentMut::new(),
     };
-    apply_kimi_code_access_input(&mut doc, &input)?;
-    write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)?;
+    let clear_provider_api_key = input.clear_provider_api_key.unwrap_or(false);
+    if !clear_provider_api_key
+        && provider_table(doc.as_table(), KIMI_CODING_PLAN_PROVIDER_ID)
+            .is_some_and(provider_has_oauth)
+    {
+        return Err(
+            "managed:kimi-code 当前由 OAuth 登录管理；请先退出登录，再保存 API Key 配置。"
+                .to_string(),
+        );
+    }
+    if clear_provider_api_key {
+        clear_managed_access_keys(&mut doc, &input);
+    } else {
+        let existing_provider_api_key = managed_provider_api_key(doc.as_table());
+        let next_provider_api_key = normalize_optional_string(&input.provider_api_key)
+            .or(existing_provider_api_key)
+            .ok_or_else(|| "Kimi API Key 不能为空；请输入 API Key 后再保存。".to_string())?;
+        let synced_models = fetch_models_blocking(
+            input.provider_base_url.as_str(),
+            next_provider_api_key.as_str(),
+        )?;
+        apply_kimi_code_access_input(&mut doc, &input, &synced_models, &next_provider_api_key)?;
+    }
+    write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot, Some(kimi_path))?;
 
     let mut settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
     settings.onboarding_step_acks.api_config_ack = true;
@@ -223,14 +241,18 @@ pub fn save_kimi_code_access_config(
 }
 
 pub async fn test_kimi_code_access_config(
+    _app: &AppHandle,
     input: KimiCodeAccessConfigTestInput,
 ) -> Result<KimiCodeAccessConfigTestResult, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|error| format!("failed to build HTTP client: {error}"))?;
+    let existing_api_key = load_managed_provider_api_key()?;
+    let effective_provider_api_key =
+        normalize_optional_string(&input.provider_api_key).or(existing_api_key);
     let secrets = [
-        input.provider_api_key.as_deref(),
+        effective_provider_api_key.as_deref(),
         input.search_api_key.as_deref(),
         input.fetch_api_key.as_deref(),
     ]
@@ -240,35 +262,31 @@ pub async fn test_kimi_code_access_config(
     .filter(|value| !value.is_empty())
     .map(str::to_string)
     .collect::<Vec<_>>();
-    let api_key_configured = !secrets.is_empty();
+    let api_key_configured = effective_provider_api_key.is_some();
 
+    let (provider, models) = probe_models_endpoint(
+        &client,
+        &input.provider_base_url,
+        effective_provider_api_key.as_deref(),
+        &secrets,
+    )
+    .await;
     Ok(KimiCodeAccessConfigTestResult {
-        provider: probe_access_endpoint(
-            &client,
-            &input.provider_base_url,
-            input.provider_api_key.as_deref(),
-            &secrets,
-        )
-        .await,
-        search: probe_access_endpoint(
-            &client,
+        provider,
+        search: skipped_endpoint_result(
             &input.search_base_url,
-            input.search_api_key.as_deref(),
-            &secrets,
-        )
-        .await,
-        fetch: probe_access_endpoint(
-            &client,
+            "未发起实际搜索请求，避免产生请求或额度消耗。",
+        ),
+        fetch: skipped_endpoint_result(
             &input.fetch_base_url,
-            input.fetch_api_key.as_deref(),
-            &secrets,
-        )
-        .await,
+            "未发起实际抓取请求，避免产生外部访问。",
+        ),
         api_key_configured,
+        models,
         warnings: if api_key_configured {
-            Vec::new()
+            vec!["Search/Fetch 仅检查配置，不执行有副作用的业务请求。".to_string()]
         } else {
-            vec!["未提供 API Key，连接测试只检查 URL 可达性。".to_string()]
+            vec!["未找到 API Key，无法验证 Kimi API。".to_string()]
         },
     })
 }
@@ -327,22 +345,12 @@ fn validate_http_url_value(label: &str, raw: &str) -> Result<(), String> {
 fn apply_kimi_code_access_input(
     doc: &mut DocumentMut,
     input: &KimiCodeAccessConfigInput,
+    models: &[KimiCodeAccessConfigModelView],
+    provider_api_key: &str,
 ) -> Result<(), String> {
-    let existing_provider_api_key = provider_table(doc.as_table(), KIMI_CODING_PLAN_PROVIDER_ID)
-        .and_then(|table| table_string(table, "api_key"));
-    let requested_provider_api_key = normalize_optional_string(&input.provider_api_key);
-    let next_provider_api_key = if input.clear_provider_api_key.unwrap_or(false) {
-        None
-    } else {
-        requested_provider_api_key.or(existing_provider_api_key)
-    };
-
-    patch_kimi_access_provider(
-        doc,
-        input.provider_base_url.trim(),
-        next_provider_api_key.as_deref(),
-    )?;
-    patch_kimi_access_model(doc)?;
+    patch_kimi_access_provider(doc, input.provider_base_url.trim(), Some(provider_api_key))?;
+    let default_model = patch_kimi_access_models(doc, models, input.default_model.as_deref())?;
+    doc["default_model"] = value(default_model);
     patch_kimi_access_service(
         doc,
         KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
@@ -351,7 +359,7 @@ fn apply_kimi_code_access_input(
             .search_api_key_mode
             .unwrap_or(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
         input.search_api_key.as_deref(),
-        next_provider_api_key.as_deref(),
+        Some(provider_api_key),
     )?;
     patch_kimi_access_service(
         doc,
@@ -361,9 +369,50 @@ fn apply_kimi_code_access_input(
             .fetch_api_key_mode
             .unwrap_or(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
         input.fetch_api_key.as_deref(),
-        next_provider_api_key.as_deref(),
+        Some(provider_api_key),
     )?;
+    remove_legacy_assistant_entries(doc);
     Ok(())
+}
+
+fn clear_managed_access_keys(doc: &mut DocumentMut, input: &KimiCodeAccessConfigInput) {
+    if let Some(providers) = doc.get_mut("providers").and_then(Item::as_table_mut) {
+        for provider_id in [
+            KIMI_CODING_PLAN_PROVIDER_ID,
+            LEGACY_KIMI_APP_PROVIDER_ID,
+            LEGACY_KIMI_CODING_PLAN_PROVIDER_ID,
+        ] {
+            if let Some(provider) = providers.get_mut(provider_id).and_then(Item::as_table_mut) {
+                let _ = provider.remove("api_key");
+            }
+        }
+    }
+    if let Some(services) = doc.get_mut("services").and_then(Item::as_table_mut) {
+        for (service_key, mode) in [
+            (
+                KIMI_CODING_PLAN_SEARCH_SERVICE_KEY,
+                input
+                    .search_api_key_mode
+                    .unwrap_or(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
+            ),
+            (
+                KIMI_CODING_PLAN_FETCH_SERVICE_KEY,
+                input
+                    .fetch_api_key_mode
+                    .unwrap_or(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
+            ),
+        ] {
+            if matches!(
+                mode,
+                KimiCodeAccessServiceApiKeyMode::ReuseProvider
+                    | KimiCodeAccessServiceApiKeyMode::Clear
+            ) {
+                if let Some(service) = services.get_mut(service_key).and_then(Item::as_table_mut) {
+                    let _ = service.remove("api_key");
+                }
+            }
+        }
+    }
 }
 
 fn patch_kimi_access_provider(
@@ -382,7 +431,7 @@ fn patch_kimi_access_provider(
     let provider = providers
         .get_mut(KIMI_CODING_PLAN_PROVIDER_ID)
         .and_then(Item::as_table_mut)
-        .ok_or_else(|| "providers.kimi-app-api-key must be a table".to_string())?;
+        .ok_or_else(|| "providers.managed:kimi-code must be a table".to_string())?;
 
     provider["type"] = value("kimi");
     provider["base_url"] = value(base_url);
@@ -394,24 +443,51 @@ fn patch_kimi_access_provider(
     Ok(())
 }
 
-fn patch_kimi_access_model(doc: &mut DocumentMut) -> Result<(), String> {
-    let models = ensure_root_table_mut(doc, "models")?;
-    if models
-        .get(KIMI_CODING_PLAN_MODEL_ID)
-        .and_then(Item::as_table)
-        .is_none()
-    {
-        models.insert(KIMI_CODING_PLAN_MODEL_ID, Item::Table(Table::new()));
+fn patch_kimi_access_models(
+    doc: &mut DocumentMut,
+    synced_models: &[KimiCodeAccessConfigModelView],
+    requested_default: Option<&str>,
+) -> Result<String, String> {
+    if synced_models.is_empty() {
+        return Err("Kimi API 未返回可用模型。".to_string());
     }
-    let model = models
-        .get_mut(KIMI_CODING_PLAN_MODEL_ID)
-        .and_then(Item::as_table_mut)
-        .ok_or_else(|| "models.kimi-app/kimi-for-coding must be a table".to_string())?;
+    let models = ensure_root_table_mut(doc, "models")?;
+    let synced_ids = synced_models
+        .iter()
+        .map(|model| model.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let stale_ids = models
+        .iter()
+        .filter_map(|(id, item)| {
+            let model = item.as_table()?;
+            (id.starts_with(KIMI_CODING_PLAN_MODEL_PREFIX)
+                && table_string(model, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID)
+                && !synced_ids.contains(id))
+            .then(|| id.to_string())
+        })
+        .collect::<Vec<_>>();
+    for id in stale_ids {
+        let _ = models.remove(&id);
+    }
 
-    model["provider"] = value(KIMI_CODING_PLAN_PROVIDER_ID);
-    model["model"] = value(KIMI_CODING_PLAN_MODEL_NAME);
-    model["max_context_size"] = value(KIMI_CODING_PLAN_MAX_CONTEXT_SIZE);
-    Ok(())
+    for synced in synced_models {
+        if models.get(&synced.id).and_then(Item::as_table).is_none() {
+            models.insert(&synced.id, Item::Table(Table::new()));
+        }
+        let model = models
+            .get_mut(&synced.id)
+            .and_then(Item::as_table_mut)
+            .ok_or_else(|| format!("models.{} must be a table", synced.id))?;
+        model["provider"] = value(KIMI_CODING_PLAN_PROVIDER_ID);
+        model["model"] = value(&synced.model);
+        model["max_context_size"] = value(synced.max_context_size);
+        set_string_array(model, "capabilities", &synced.capabilities);
+        set_optional_string(model, "display_name", synced.display_name.as_deref());
+        set_string_array(model, "support_efforts", &synced.support_efforts);
+        set_optional_string(model, "default_effort", synced.default_effort.as_deref());
+    }
+
+    Ok(select_default_model(requested_default, synced_models))
 }
 
 fn patch_kimi_access_service(
@@ -463,6 +539,7 @@ fn write_kimi_config_atomically_with_backup(
     config_path: &Path,
     doc: &DocumentMut,
     source: &KimiConfigSnapshot,
+    kimi_path: Option<&Path>,
 ) -> Result<(), String> {
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
@@ -517,6 +594,9 @@ fn write_kimi_config_atomically_with_backup(
         })?;
         drop(file);
 
+        if let Some(kimi_path) = kimi_path {
+            validate_kimi_config_candidate(kimi_path, &temp_path, doc)?;
+        }
         ensure_config_fingerprint(config_path, &source.fingerprint)?;
         if let Some(raw) = source.raw.as_deref() {
             backup_kimi_config(config_path, raw)?;
@@ -544,6 +624,61 @@ fn write_kimi_config_atomically_with_backup(
         let _ = fs::remove_file(&temp_path);
     }
     write_result
+}
+
+fn validate_kimi_config_candidate(
+    kimi_path: &Path,
+    candidate_path: &Path,
+    doc: &DocumentMut,
+) -> Result<(), String> {
+    let mut process = Command::new(kimi_path);
+    command_utils::configure_kimi_query_command(&mut process);
+    process
+        .arg("doctor")
+        .arg("config")
+        .arg(candidate_path)
+        .stdin(Stdio::null())
+        .env("NO_COLOR", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1");
+    if let Some(shell_path) = kimi_locator::locate_shell_path() {
+        process.env("KIMI_SHELL_PATH", shell_path);
+    }
+    let output = process.output().map_err(|error| {
+        format!(
+            "failed to run `{} doctor config`: {error}",
+            kimi_path.display()
+        )
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let secrets = collect_kimi_code_access_secret_values_from_root(doc.as_table());
+    let detail = [
+        String::from_utf8_lossy(&output.stdout).as_ref(),
+        String::from_utf8_lossy(&output.stderr).as_ref(),
+    ]
+    .into_iter()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .collect::<Vec<_>>()
+    .join("\n");
+    let redacted = redact_secrets(&detail, &secrets);
+    let limited = redacted.chars().take(2_000).collect::<String>();
+    Err(format!(
+        "Kimi doctor 拒绝候选配置（exit {}）：{}",
+        output
+            .status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        if limited.is_empty() {
+            "未返回诊断详情".to_string()
+        } else {
+            limited
+        }
+    ))
 }
 
 fn should_retry_config_replace(error: &std::io::Error, attempt: usize) -> bool {
@@ -620,51 +755,276 @@ fn prune_kimi_config_backups(parent: &Path, file_name: &str) -> Result<(), Strin
     Ok(())
 }
 
-async fn probe_access_endpoint(
+async fn probe_models_endpoint(
     client: &reqwest::Client,
     raw_url: &str,
     api_key: Option<&str>,
     secrets: &[String],
-) -> KimiCodeAccessEndpointTestResult {
-    let trimmed = raw_url.trim();
-    let parsed = match Url::parse(trimmed) {
+) -> (
+    KimiCodeAccessEndpointTestResult,
+    Vec<KimiCodeAccessConfigModelView>,
+) {
+    let models_url = models_endpoint_url(raw_url);
+    let parsed = match Url::parse(&models_url) {
         Ok(url) if matches!(url.scheme(), "http" | "https") => url,
         Ok(url) => {
-            return KimiCodeAccessEndpointTestResult {
-                url: trimmed.to_string(),
-                reachable: false,
-                status_code: None,
-                error: Some(format!("unsupported URL scheme: {}", url.scheme())),
-            }
+            return (
+                failed_endpoint_result(
+                    models_url,
+                    None,
+                    format!("unsupported URL scheme: {}", url.scheme()),
+                ),
+                Vec::new(),
+            );
         }
         Err(error) => {
-            return KimiCodeAccessEndpointTestResult {
-                url: trimmed.to_string(),
-                reachable: false,
-                status_code: None,
-                error: Some(format!("invalid URL: {error}")),
-            }
+            return (
+                failed_endpoint_result(models_url, None, format!("invalid URL: {error}")),
+                Vec::new(),
+            );
         }
     };
 
+    let Some(api_key) = api_key.map(str::trim).filter(|value| !value.is_empty()) else {
+        return (
+            failed_endpoint_result(
+                parsed.to_string(),
+                None,
+                "未找到 API Key，无法进行认证验证。".to_string(),
+            ),
+            Vec::new(),
+        );
+    };
     let mut request = client.get(parsed.as_str());
-    if let Some(api_key) = api_key.map(str::trim).filter(|value| !value.is_empty()) {
-        request = request.bearer_auth(api_key);
-    }
+    request = request
+        .bearer_auth(api_key)
+        .header("Accept", "application/json");
 
     match request.send().await {
-        Ok(response) => KimiCodeAccessEndpointTestResult {
-            url: parsed.to_string(),
-            reachable: true,
-            status_code: Some(response.status().as_u16()),
-            error: None,
-        },
-        Err(error) => KimiCodeAccessEndpointTestResult {
-            url: parsed.to_string(),
-            reachable: false,
-            status_code: None,
-            error: Some(redact_secrets(&error.to_string(), secrets)),
-        },
+        Ok(response) => {
+            let status = response.status();
+            if !status.is_success() {
+                return (
+                    failed_endpoint_result(
+                        parsed.to_string(),
+                        Some(status.as_u16()),
+                        format!("模型接口返回 HTTP {}", status.as_u16()),
+                    ),
+                    Vec::new(),
+                );
+            }
+            match response.json::<serde_json::Value>().await {
+                Ok(payload) => match parse_models_payload(&payload) {
+                    Ok(models) => (
+                        verified_endpoint_result(parsed.to_string(), status.as_u16()),
+                        models,
+                    ),
+                    Err(error) => (
+                        failed_endpoint_result(parsed.to_string(), Some(status.as_u16()), error),
+                        Vec::new(),
+                    ),
+                },
+                Err(error) => (
+                    failed_endpoint_result(
+                        parsed.to_string(),
+                        Some(status.as_u16()),
+                        format!(
+                            "模型接口返回了无效 JSON：{}",
+                            redact_secrets(&error.to_string(), secrets)
+                        ),
+                    ),
+                    Vec::new(),
+                ),
+            }
+        }
+        Err(error) => (
+            failed_endpoint_result(
+                parsed.to_string(),
+                None,
+                redact_secrets(&error.to_string(), secrets),
+            ),
+            Vec::new(),
+        ),
+    }
+}
+
+fn fetch_models_blocking(
+    base_url: &str,
+    api_key: &str,
+) -> Result<Vec<KimiCodeAccessConfigModelView>, String> {
+    let url = models_endpoint_url(base_url);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("failed to build HTTP client: {error}"))?;
+    let response = client
+        .get(&url)
+        .bearer_auth(api_key)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|error| {
+            format!(
+                "Kimi 模型接口连接失败：{}",
+                redact_secrets(&error.to_string(), &[api_key.to_string()])
+            )
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Kimi 模型接口验证失败：HTTP {}", status.as_u16()));
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .map_err(|error| format!("Kimi 模型接口返回了无效 JSON：{error}"))?;
+    parse_models_payload(&payload)
+}
+
+fn models_endpoint_url(base_url: &str) -> String {
+    format!("{}/models", base_url.trim().trim_end_matches('/'))
+}
+
+fn parse_models_payload(
+    payload: &serde_json::Value,
+) -> Result<Vec<KimiCodeAccessConfigModelView>, String> {
+    let items = payload
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "模型接口响应缺少 data 数组。".to_string())?;
+    let mut models = Vec::new();
+    for item in items {
+        let Some(id) = item
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let context_length = item
+            .get("context_length")
+            .and_then(serde_json::Value::as_i64)
+            .filter(|value| *value > 0)
+            .ok_or_else(|| {
+                format!("Kimi Code model \"{id}\" must include a positive context_length.")
+            })?;
+        let supports_thinking_type = item
+            .get("supports_thinking_type")
+            .and_then(serde_json::Value::as_str);
+        let mut capabilities = Vec::new();
+        match supports_thinking_type {
+            Some("only") => {
+                capabilities.push("thinking".to_string());
+                capabilities.push("always_thinking".to_string());
+            }
+            Some("both") => capabilities.push("thinking".to_string()),
+            Some("no") => {}
+            _ if item
+                .get("supports_reasoning")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false) =>
+            {
+                capabilities.push("thinking".to_string())
+            }
+            _ => {}
+        }
+        for (field, capability) in [
+            ("supports_image_in", "image_in"),
+            ("supports_video_in", "video_in"),
+        ] {
+            if item
+                .get(field)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                capabilities.push(capability.to_string());
+            }
+        }
+        if item
+            .get("supports_tool_use")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true)
+        {
+            capabilities.push("tool_use".to_string());
+        }
+        let think_efforts = item.get("think_efforts");
+        let supports_efforts = think_efforts
+            .and_then(|value| value.get("support"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let support_efforts = if supports_efforts {
+            json_string_array(think_efforts.and_then(|value| value.get("valid_efforts")))
+        } else {
+            Vec::new()
+        };
+        let default_effort = supports_efforts
+            .then(|| {
+                think_efforts
+                    .and_then(|value| value.get("default_effort"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .flatten();
+        models.push(KimiCodeAccessConfigModelView {
+            id: format!("{KIMI_CODING_PLAN_MODEL_PREFIX}{id}"),
+            provider: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+            model: id.to_string(),
+            max_context_size: context_length,
+            exists: true,
+            capabilities,
+            display_name: item
+                .get("display_name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            support_efforts,
+            default_effort,
+        });
+    }
+    if models.is_empty() {
+        return Err("Kimi API 未返回可用模型。".to_string());
+    }
+    Ok(models)
+}
+
+fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn verified_endpoint_result(url: String, status_code: u16) -> KimiCodeAccessEndpointTestResult {
+    KimiCodeAccessEndpointTestResult {
+        url,
+        reachable: true,
+        status_code: Some(status_code),
+        error: None,
+        state: KimiCodeAccessTestState::Verified,
+    }
+}
+
+fn failed_endpoint_result(
+    url: String,
+    status_code: Option<u16>,
+    error: String,
+) -> KimiCodeAccessEndpointTestResult {
+    KimiCodeAccessEndpointTestResult {
+        url,
+        reachable: false,
+        status_code,
+        error: Some(error),
+        state: KimiCodeAccessTestState::Failed,
+    }
+}
+
+fn skipped_endpoint_result(url: &str, message: &str) -> KimiCodeAccessEndpointTestResult {
+    KimiCodeAccessEndpointTestResult {
+        url: url.trim().to_string(),
+        reachable: false,
+        status_code: None,
+        error: Some(message.to_string()),
+        state: KimiCodeAccessTestState::Skipped,
     }
 }
 
@@ -721,6 +1081,7 @@ fn collect_kimi_code_access_secret_values_from_root(root: &Table) -> Vec<String>
     let mut values = Vec::new();
     for provider_id in [
         KIMI_CODING_PLAN_PROVIDER_ID,
+        LEGACY_KIMI_APP_PROVIDER_ID,
         LEGACY_KIMI_CODING_PLAN_PROVIDER_ID,
     ] {
         if let Some(provider) = provider_table(root, provider_id) {
@@ -898,6 +1259,181 @@ pub(super) fn provider_table<'a>(root: &'a Table, provider: &str) -> Option<&'a 
         .and_then(Item::as_table)
 }
 
+fn provider_has_oauth(provider: &Table) -> bool {
+    provider.get("oauth").is_some()
+}
+
+fn managed_provider_api_key(root: &Table) -> Option<String> {
+    [
+        KIMI_CODING_PLAN_PROVIDER_ID,
+        LEGACY_KIMI_APP_PROVIDER_ID,
+        LEGACY_KIMI_CODING_PLAN_PROVIDER_ID,
+    ]
+    .into_iter()
+    .find_map(|id| provider_table(root, id).and_then(|table| table_string(table, "api_key")))
+}
+
+fn load_managed_provider_api_key() -> Result<Option<String>, String> {
+    let path = resolve_kimi_config_path()?;
+    let snapshot = read_kimi_config_snapshot(&path)?;
+    let Some(raw) = snapshot.raw.as_deref() else {
+        return Ok(None);
+    };
+    let doc = parse_kimi_config_document(raw, &path)?;
+    Ok(managed_provider_api_key(doc.as_table()))
+}
+
+fn managed_model_views(root: &Table) -> Vec<KimiCodeAccessConfigModelView> {
+    root.get("models")
+        .and_then(Item::as_table)
+        .into_iter()
+        .flat_map(Table::iter)
+        .filter_map(|(id, item)| {
+            let model = item.as_table()?;
+            (id.starts_with(KIMI_CODING_PLAN_MODEL_PREFIX)
+                && table_string(model, "provider").as_deref() == Some(KIMI_CODING_PLAN_PROVIDER_ID))
+            .then(|| KimiCodeAccessConfigModelView {
+                id: id.to_string(),
+                provider: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+                model: table_string(model, "model").unwrap_or_default(),
+                max_context_size: table_i64(model, "max_context_size").unwrap_or_default(),
+                exists: true,
+                capabilities: table_string_array(model, "capabilities"),
+                display_name: table_string(model, "display_name"),
+                support_efforts: table_string_array(model, "support_efforts"),
+                default_effort: table_string(model, "default_effort"),
+            })
+        })
+        .collect()
+}
+
+fn selected_model_view(
+    default_model: Option<&str>,
+    models: &[KimiCodeAccessConfigModelView],
+) -> KimiCodeAccessConfigModelView {
+    models
+        .iter()
+        .find(|model| Some(model.id.as_str()) == default_model)
+        .or_else(|| models.first())
+        .cloned()
+        .unwrap_or_else(|| KimiCodeAccessConfigModelView {
+            id: KIMI_CODING_PLAN_MODEL_ID.to_string(),
+            provider: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+            model: "k3".to_string(),
+            max_context_size: 0,
+            exists: false,
+            capabilities: Vec::new(),
+            display_name: None,
+            support_efforts: Vec::new(),
+            default_effort: None,
+        })
+}
+
+fn select_default_model(
+    requested_default: Option<&str>,
+    models: &[KimiCodeAccessConfigModelView],
+) -> String {
+    requested_default
+        .and_then(|requested| models.iter().find(|model| model.id == requested))
+        .or_else(|| {
+            models
+                .iter()
+                .find(|model| model.id == KIMI_CODING_PLAN_MODEL_ID)
+        })
+        .or_else(|| models.first())
+        .map(|model| model.id.clone())
+        .unwrap_or_else(|| KIMI_CODING_PLAN_MODEL_ID.to_string())
+}
+
+fn table_string_array(table: &Table, key: &str) -> Vec<String> {
+    table
+        .get(key)
+        .and_then(Item::as_value)
+        .and_then(toml_edit::Value::as_array)
+        .into_iter()
+        .flat_map(Array::iter)
+        .filter_map(toml_edit::Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn set_string_array(table: &mut Table, key: &str, values: &[String]) {
+    if values.is_empty() {
+        let _ = table.remove(key);
+        return;
+    }
+    let mut array = Array::new();
+    for item in values {
+        array.push(item.as_str());
+    }
+    table[key] = value(array);
+}
+
+fn set_optional_string(table: &mut Table, key: &str, value_to_set: Option<&str>) {
+    if let Some(value_to_set) = value_to_set.filter(|value| !value.is_empty()) {
+        table[key] = value(value_to_set);
+    } else {
+        let _ = table.remove(key);
+    }
+}
+
+fn remove_legacy_assistant_entries(doc: &mut DocumentMut) {
+    if let Some(models) = doc.get_mut("models").and_then(Item::as_table_mut) {
+        for (id, provider_id) in [
+            (LEGACY_KIMI_APP_MODEL_ID, LEGACY_KIMI_APP_PROVIDER_ID),
+            (
+                LEGACY_KIMI_CODING_PLAN_MODEL_ID,
+                LEGACY_KIMI_CODING_PLAN_PROVIDER_ID,
+            ),
+        ] {
+            let removable = models
+                .get(id)
+                .and_then(Item::as_table)
+                .is_some_and(|model| {
+                    table_string(model, "provider").as_deref() == Some(provider_id)
+                        && table_string(model, "model").as_deref()
+                            == Some(KIMI_CODING_PLAN_MODEL_NAME)
+                        && model.iter().all(|(key, _)| {
+                            matches!(key, "provider" | "model" | "max_context_size")
+                        })
+                });
+            if removable {
+                let _ = models.remove(id);
+            }
+        }
+    }
+
+    for provider_id in [
+        LEGACY_KIMI_APP_PROVIDER_ID,
+        LEGACY_KIMI_CODING_PLAN_PROVIDER_ID,
+    ] {
+        let referenced = doc
+            .get("models")
+            .and_then(Item::as_table)
+            .into_iter()
+            .flat_map(Table::iter)
+            .filter_map(|(_, item)| item.as_table())
+            .any(|model| table_string(model, "provider").as_deref() == Some(provider_id));
+        if referenced {
+            continue;
+        }
+        let removable = provider_table(doc.as_table(), provider_id).is_some_and(|provider| {
+            table_string(provider, "type").as_deref() == Some("kimi")
+                && (provider_id == LEGACY_KIMI_APP_PROVIDER_ID
+                    || table_string(provider, "base_url").as_deref()
+                        == Some(KIMI_CODING_PLAN_BASE_URL))
+                && provider
+                    .iter()
+                    .all(|(key, _)| matches!(key, "type" | "base_url" | "api_key"))
+        });
+        if removable {
+            if let Some(providers) = doc.get_mut("providers").and_then(Item::as_table_mut) {
+                let _ = providers.remove(provider_id);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -918,6 +1454,20 @@ mod tests {
         parse_kimi_config_document(&raw, path).expect("test config should parse")
     }
 
+    fn synced_model(id: &str, context: i64) -> KimiCodeAccessConfigModelView {
+        KimiCodeAccessConfigModelView {
+            id: format!("{KIMI_CODING_PLAN_MODEL_PREFIX}{id}"),
+            provider: KIMI_CODING_PLAN_PROVIDER_ID.to_string(),
+            model: id.to_string(),
+            max_context_size: context,
+            exists: true,
+            capabilities: vec!["thinking".to_string(), "tool_use".to_string()],
+            display_name: Some(id.to_uppercase()),
+            support_efforts: vec!["max".to_string()],
+            default_effort: Some("max".to_string()),
+        }
+    }
+
     #[test]
     fn access_config_patch_preserves_unrelated_tables_and_existing_keys() {
         let mut doc = r#"
@@ -927,7 +1477,7 @@ default_model = "gpt-4.1"
 type = "openai"
 api_key = "sk-openai"
 
-[providers."kimi-app-api-key"]
+[providers."managed:kimi-code"]
 type = "kimi"
 base_url = "https://old.example.com"
 api_key = "sk-existing"
@@ -952,6 +1502,7 @@ api_key = "other-key"
                 provider_base_url: KIMI_CODING_PLAN_BASE_URL.to_string(),
                 provider_api_key: None,
                 clear_provider_api_key: Some(false),
+                default_model: Some("kimi-code/k3".to_string()),
                 search_base_url: KIMI_CODING_PLAN_SEARCH_URL.to_string(),
                 search_api_key_mode: Some(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
                 search_api_key: None,
@@ -961,13 +1512,15 @@ api_key = "other-key"
                 agent_swarm_max_concurrency: None,
                 clear_agent_swarm_max_concurrency: Some(false),
             },
+            &[synced_model("k3", 1_048_576)],
+            "sk-existing",
         )
         .expect("apply access input");
 
         let root = doc.as_table();
         assert_eq!(
             table_string(root, "default_model").as_deref(),
-            Some("gpt-4.1")
+            Some("kimi-code/k3")
         );
         assert!(provider_table(root, "openai").is_some());
         let provider = provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).expect("provider");
@@ -982,10 +1535,7 @@ api_key = "other-key"
             .and_then(|models| models.get(KIMI_CODING_PLAN_MODEL_ID))
             .and_then(Item::as_table)
             .expect("model");
-        assert_eq!(
-            table_string(model, "model").as_deref(),
-            Some(KIMI_CODING_PLAN_MODEL_NAME)
-        );
+        assert_eq!(table_string(model, "model").as_deref(), Some("k3"));
         let search = service_table(root, KIMI_CODING_PLAN_SEARCH_SERVICE_KEY).expect("search");
         assert_eq!(
             search
@@ -1019,7 +1569,7 @@ api_key = "other-key"
             .expect("new config");
         let snapshot = read_kimi_config_snapshot(&config_path).expect("read source config");
 
-        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot, None)
             .expect("write config");
 
         let raw = fs::read_to_string(&config_path).expect("read config");
@@ -1068,7 +1618,7 @@ api_key = "other-key"
             .parse::<DocumentMut>()
             .expect("new config");
 
-        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+        write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot, None)
             .expect("create config");
         assert_eq!(
             fs::read_to_string(&config_path).expect("read created config"),
@@ -1086,7 +1636,7 @@ api_key = "other-key"
         fs::write(&config_path, "external = true\n").expect("simulate external writer");
         let doc = "shell = true\n".parse::<DocumentMut>().expect("new config");
 
-        let error = write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot)
+        let error = write_kimi_config_atomically_with_backup(&config_path, &doc, &snapshot, None)
             .expect_err("stale write must fail");
         assert!(error.starts_with("config_conflict:"));
         assert_eq!(
@@ -1157,5 +1707,245 @@ api_key = 'sk-search'
             values,
             vec!["sk-provider".to_string(), "sk-search".to_string()]
         );
+    }
+
+    #[test]
+    fn models_payload_maps_current_kimi_metadata() {
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "k3",
+                "context_length": 1048576,
+                "display_name": "K3",
+                "supports_thinking_type": "only",
+                "supports_image_in": true,
+                "supports_video_in": true,
+                "supports_tool_use": true,
+                "think_efforts": {
+                    "support": true,
+                    "valid_efforts": ["max"],
+                    "default_effort": "max"
+                }
+            }]
+        });
+
+        let models = parse_models_payload(&payload).expect("models should parse");
+        assert_eq!(models[0].id, "kimi-code/k3");
+        assert_eq!(models[0].max_context_size, 1_048_576);
+        assert_eq!(
+            models[0].capabilities,
+            vec![
+                "thinking",
+                "always_thinking",
+                "image_in",
+                "video_in",
+                "tool_use"
+            ]
+        );
+        assert_eq!(models[0].support_efforts, vec!["max"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("max"));
+    }
+
+    #[test]
+    fn models_payload_rejects_empty_and_invalid_context() {
+        assert!(parse_models_payload(&serde_json::json!({"data": []})).is_err());
+        assert!(parse_models_payload(&serde_json::json!({
+            "data": [{"id": "k3", "context_length": 0}]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn canonical_patch_migrates_owned_legacy_entries_idempotently() {
+        let mut doc = format!(
+            r#"
+default_model = "{LEGACY_KIMI_APP_MODEL_ID}"
+
+[providers."{LEGACY_KIMI_APP_PROVIDER_ID}"]
+type = "kimi"
+base_url = "{KIMI_CODING_PLAN_BASE_URL}"
+api_key = "sk-old"
+
+[models."{LEGACY_KIMI_APP_MODEL_ID}"]
+provider = "{LEGACY_KIMI_APP_PROVIDER_ID}"
+model = "kimi-for-coding"
+max_context_size = 262144
+
+[unrelated]
+keep = true
+"#
+        )
+        .parse::<DocumentMut>()
+        .expect("valid toml");
+        let input = KimiCodeAccessConfigInput {
+            provider_base_url: KIMI_CODING_PLAN_BASE_URL.to_string(),
+            default_model: Some("kimi-code/k3".to_string()),
+            search_base_url: KIMI_CODING_PLAN_SEARCH_URL.to_string(),
+            search_api_key_mode: Some(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
+            fetch_base_url: KIMI_CODING_PLAN_FETCH_URL.to_string(),
+            fetch_api_key_mode: Some(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
+            ..Default::default()
+        };
+        let models = vec![
+            synced_model("k3", 1_048_576),
+            synced_model("kimi-for-coding", 262_144),
+        ];
+
+        apply_kimi_code_access_input(&mut doc, &input, &models, "sk-new").expect("first patch");
+        let first = doc.to_string();
+        apply_kimi_code_access_input(&mut doc, &input, &models, "sk-new").expect("second patch");
+
+        assert_eq!(doc.to_string(), first);
+        assert!(provider_table(doc.as_table(), LEGACY_KIMI_APP_PROVIDER_ID).is_none());
+        assert!(doc
+            .get("models")
+            .and_then(Item::as_table)
+            .is_some_and(|models| models.get(LEGACY_KIMI_APP_MODEL_ID).is_none()));
+        assert!(provider_table(doc.as_table(), KIMI_CODING_PLAN_PROVIDER_ID).is_some());
+        assert_eq!(
+            table_string(doc.as_table(), "default_model").as_deref(),
+            Some("kimi-code/k3")
+        );
+        assert!(doc
+            .get("unrelated")
+            .and_then(Item::as_table)
+            .is_some_and(|table| table.get("keep").is_some()));
+    }
+
+    #[test]
+    fn migration_preserves_legacy_provider_with_remaining_reference() {
+        let mut doc = format!(
+            r#"
+[providers."{LEGACY_KIMI_APP_PROVIDER_ID}"]
+type = "kimi"
+base_url = "{KIMI_CODING_PLAN_BASE_URL}"
+api_key = "sk-old"
+
+[models.custom]
+provider = "{LEGACY_KIMI_APP_PROVIDER_ID}"
+model = "custom"
+max_context_size = 1
+"#
+        )
+        .parse::<DocumentMut>()
+        .expect("valid toml");
+
+        remove_legacy_assistant_entries(&mut doc);
+
+        assert!(provider_table(doc.as_table(), LEGACY_KIMI_APP_PROVIDER_ID).is_some());
+    }
+
+    #[test]
+    fn clearing_provider_key_keeps_custom_service_key() {
+        let mut doc = r#"
+[providers."managed:kimi-code"]
+type = "kimi"
+api_key = "sk-provider"
+
+[services.moonshot_search]
+api_key = "sk-provider"
+
+[services.moonshot_fetch]
+api_key = "sk-custom"
+"#
+        .parse::<DocumentMut>()
+        .expect("valid toml");
+        let input = KimiCodeAccessConfigInput {
+            clear_provider_api_key: Some(true),
+            search_api_key_mode: Some(KimiCodeAccessServiceApiKeyMode::ReuseProvider),
+            fetch_api_key_mode: Some(KimiCodeAccessServiceApiKeyMode::KeepExisting),
+            ..Default::default()
+        };
+
+        clear_managed_access_keys(&mut doc, &input);
+
+        assert!(provider_table(doc.as_table(), KIMI_CODING_PLAN_PROVIDER_ID)
+            .and_then(|provider| table_string(provider, "api_key"))
+            .is_none());
+        assert!(
+            service_table(doc.as_table(), KIMI_CODING_PLAN_SEARCH_SERVICE_KEY)
+                .and_then(|service| table_string(service, "api_key"))
+                .is_none()
+        );
+        assert_eq!(
+            service_table(doc.as_table(), KIMI_CODING_PLAN_FETCH_SERVICE_KEY)
+                .and_then(|service| table_string(service, "api_key"))
+                .as_deref(),
+            Some("sk-custom")
+        );
+    }
+
+    #[test]
+    fn oauth_provider_is_detected_before_api_key_save() {
+        let doc = r#"
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+oauth = { key = "oauth/kimi-code" }
+"#
+        .parse::<DocumentMut>()
+        .expect("valid toml");
+
+        assert!(provider_table(doc.as_table(), KIMI_CODING_PLAN_PROVIDER_ID)
+            .is_some_and(provider_has_oauth));
+    }
+
+    #[test]
+    fn default_model_prefers_requested_then_k3_then_first() {
+        let models = vec![
+            synced_model("kimi-for-coding", 262_144),
+            synced_model("k3", 1_048_576),
+        ];
+        assert_eq!(
+            select_default_model(Some("kimi-code/kimi-for-coding"), &models),
+            "kimi-code/kimi-for-coding"
+        );
+        assert_eq!(
+            select_default_model(Some("kimi-code/missing"), &models),
+            "kimi-code/k3"
+        );
+        assert_eq!(
+            select_default_model(None, &models[..1]),
+            "kimi-code/kimi-for-coding"
+        );
+    }
+
+    #[test]
+    fn blocking_model_probe_rejects_http_errors() {
+        for status in [401, 404, 500] {
+            let server = Server::http("127.0.0.1:0").expect("server should bind");
+            let base_url = format!("http://{}", server.server_addr());
+            let responder = thread::spawn(move || {
+                let request = server.recv().expect("request should arrive");
+                assert_eq!(request.url(), "/models");
+                request
+                    .respond(Response::empty(StatusCode(status)))
+                    .expect("response should send");
+            });
+
+            let error = fetch_models_blocking(&base_url, "sk-test")
+                .expect_err("HTTP error must not pass validation");
+
+            responder.join().expect("responder should finish");
+            assert!(error.contains(&format!("HTTP {status}")));
+            assert!(!error.contains("sk-test"));
+        }
+    }
+
+    #[test]
+    fn blocking_model_probe_rejects_invalid_json() {
+        let server = Server::http("127.0.0.1:0").expect("server should bind");
+        let base_url = format!("http://{}", server.server_addr());
+        let responder = thread::spawn(move || {
+            let request = server.recv().expect("request should arrive");
+            request
+                .respond(Response::from_string("not-json").with_status_code(StatusCode(200)))
+                .expect("response should send");
+        });
+
+        let error =
+            fetch_models_blocking(&base_url, "sk-test").expect_err("invalid JSON must fail");
+
+        responder.join().expect("responder should finish");
+        assert!(error.contains("无效 JSON"));
     }
 }

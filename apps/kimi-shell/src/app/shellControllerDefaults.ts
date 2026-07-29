@@ -56,6 +56,7 @@ export function createEmptyKimiCodeAccessInput(): KimiCodeAccessConfigInput {
     providerBaseUrl: KIMI_CODING_PLAN_BASE_URL,
     providerApiKey: undefined,
     clearProviderApiKey: false,
+    defaultModel: "kimi-code/k3",
     searchBaseUrl: KIMI_CODING_PLAN_SEARCH_URL,
     searchApiKeyMode: "reuse_provider",
     searchApiKey: undefined,
@@ -82,6 +83,11 @@ export function toKimiCodeAccessInput(view: KimiCodeAccessConfigView): KimiCodeA
     providerBaseUrl: view.provider.baseUrl ?? KIMI_CODING_PLAN_BASE_URL,
     providerApiKey: undefined,
     clearProviderApiKey: false,
+    defaultModel:
+      view.defaultModel ??
+      view.models.find((model) => model.id === "kimi-code/k3")?.id ??
+      view.models[0]?.id ??
+      "kimi-code/k3",
     searchBaseUrl: view.services.search.baseUrl ?? KIMI_CODING_PLAN_SEARCH_URL,
     searchApiKeyMode: serviceModeFromView(
       view.services.search.apiKeyConfigured,

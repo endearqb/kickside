@@ -2074,6 +2074,10 @@ pub struct KimiCodeAccessConfigModelView {
     pub model: String,
     pub max_context_size: i64,
     pub exists: bool,
+    pub capabilities: Vec<String>,
+    pub display_name: Option<String>,
+    pub support_efforts: Vec<String>,
+    pub default_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2109,6 +2113,8 @@ pub struct KimiCodeAccessConfigView {
     pub config_error: Option<String>,
     pub provider: KimiCodeAccessConfigProviderView,
     pub model: KimiCodeAccessConfigModelView,
+    pub default_model: Option<String>,
+    pub models: Vec<KimiCodeAccessConfigModelView>,
     pub services: KimiCodeAccessConfigServicesView,
     pub runtime_limits: KimiCodeRuntimeLimitsView,
     pub warnings: Vec<String>,
@@ -2130,6 +2136,7 @@ pub struct KimiCodeAccessConfigInput {
     pub provider_base_url: String,
     pub provider_api_key: Option<String>,
     pub clear_provider_api_key: Option<bool>,
+    pub default_model: Option<String>,
     pub search_base_url: String,
     pub search_api_key_mode: Option<KimiCodeAccessServiceApiKeyMode>,
     pub search_api_key: Option<String>,
@@ -2158,6 +2165,16 @@ pub struct KimiCodeAccessEndpointTestResult {
     pub reachable: bool,
     pub status_code: Option<u16>,
     pub error: Option<String>,
+    pub state: KimiCodeAccessTestState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KimiCodeAccessTestState {
+    Verified,
+    Failed,
+    #[default]
+    Skipped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2167,6 +2184,7 @@ pub struct KimiCodeAccessConfigTestResult {
     pub search: KimiCodeAccessEndpointTestResult,
     pub fetch: KimiCodeAccessEndpointTestResult,
     pub api_key_configured: bool,
+    pub models: Vec<KimiCodeAccessConfigModelView>,
     pub warnings: Vec<String>,
 }
 

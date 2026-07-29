@@ -1282,6 +1282,10 @@ export interface KimiCodeAccessConfigModelView {
   model: string;
   maxContextSize: number;
   exists: boolean;
+  capabilities: string[];
+  displayName?: string;
+  supportEfforts: string[];
+  defaultEffort?: string;
 }
 
 export interface KimiCodeAccessConfigServiceView {
@@ -1300,6 +1304,8 @@ export interface KimiCodeAccessConfigView {
   configError?: string;
   provider: KimiCodeAccessConfigProviderView;
   model: KimiCodeAccessConfigModelView;
+  defaultModel?: string;
+  models: KimiCodeAccessConfigModelView[];
   services: {
     search: KimiCodeAccessConfigServiceView;
     fetch: KimiCodeAccessConfigServiceView;
@@ -1321,6 +1327,7 @@ export interface KimiCodeAccessConfigInput {
   providerBaseUrl: string;
   providerApiKey?: string;
   clearProviderApiKey?: boolean;
+  defaultModel?: string;
   searchBaseUrl: string;
   searchApiKeyMode?: KimiCodeAccessServiceApiKeyMode;
   searchApiKey?: string;
@@ -1336,6 +1343,7 @@ export interface KimiCodeAccessEndpointTestResult {
   reachable: boolean;
   statusCode?: number;
   error?: string;
+  state: "verified" | "failed" | "skipped";
 }
 
 export interface KimiCodeAccessConfigTestResult {
@@ -1343,6 +1351,7 @@ export interface KimiCodeAccessConfigTestResult {
   search: KimiCodeAccessEndpointTestResult;
   fetch: KimiCodeAccessEndpointTestResult;
   apiKeyConfigured: boolean;
+  models: KimiCodeAccessConfigModelView[];
   warnings: string[];
 }
 

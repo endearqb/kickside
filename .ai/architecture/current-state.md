@@ -24,7 +24,7 @@
 - Explorer 打开目录/文件使用有界、按 backend generation 归属的单消费者队列复用 `/api/v1` 创建独立 session；请求在确定完成前保留队首，运行中的后端不重启、不切全局 cwd。前端按 `new_pane` 路由，最多六个可见 pane、十二个总 pane，第七个换入 active slot，被替换 pane 进入 Pane Shelf。
 - 控制中心的“小助手设置”以互斥折叠 bar 承载 Kimi Doctor；Doctor 返回 exit code、Kimi 路径、Shell 路径与脱敏 stdout/stderr，旧 `runtime_center` 路由兼容映射到自动展开的 Doctor bar。
 - Kimi 后端 stdout/stderr 通过 Shell 管道在写入 `backend.log` 前脱敏，诊断读取再次脱敏；启动前会清理既有日志中的结构化 token 并写入带时间和 cycle 的启动边界。启动失败会验证 `web --help` 命令契约并区分单实例复用失败与一般配置问题，不使用 `--version` 文本推断 CLI 身份。
-- Kimi API 配置 command 在异步阻塞任务中读写 `config.toml`；加载视图携带可选 opaque revision，保存会在写入前和原子替换前拒绝过期 revision，冲突时不覆盖外部文件。
+- Kimi API 配置 command 在异步阻塞任务中读写 `config.toml`；API Key 主路径管理 canonical `managed:kimi-code` / `kimi-code/*`，通过认证后的 `/models` 同步模型并以 `kimi doctor config` 验证候选文件。加载视图携带可选 opaque revision，保存会在写入前和原子替换前拒绝过期 revision；旧 `kimi-app-api-key` / `kimi-app/*` 仅在形状匹配且无剩余引用时自动清理，OAuth managed provider 不会被 API Key 保存静默替换。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 已按当前 Go 源码重建到 `apps/kimi-shell/src-tauri/binaries/kimi-im-bridge.exe`；本机 smoke 覆盖 token-file 启动、health/status envelope、runtime stop 和 stdout/stderr/log token redaction。
 - Shell 已接入 Tauri v2 Updater：每个应用进程启动后后台检测一次，设置页支持手动重检和用户确认后的签名下载/安装；安装开始前走退出协调并停止 Kimi 后端与 IM Bridge，检查或下载失败不停止现有服务。

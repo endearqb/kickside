@@ -20,7 +20,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 - Chat 集成收口：跨站链接跳系统浏览器，Windows 安装版下载使用原生“另存为”
 - 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“Kimi 小助手”中文名称并可编辑；打开请求创建独立 session，不重启运行中的后端
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
-- API 配置：异步保存 `config.toml`，通过可选 opaque revision 拒绝覆盖 Kimi Code 或编辑器产生的外部更新
+- API 配置：使用 `managed:kimi-code` 与认证后的 `/models` 同步 `kimi-code/*` 模型；候选 `config.toml` 通过 Kimi Doctor 后原子保存，并通过可选 opaque revision 拒绝覆盖外部更新
 - 安全退出流程：退出读秒窗 + 状态反馈
 - 本体更新：安装版启动后后台检测一次，设置页可手动重检并在用户确认后下载签名更新；安装前停止 Kimi 后端与 IM Bridge
 

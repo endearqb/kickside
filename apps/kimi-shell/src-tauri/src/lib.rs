@@ -542,8 +542,10 @@ async fn save_kimi_code_access_config(
     app: AppHandle,
     input: KimiCodeAccessConfigInput,
 ) -> Result<KimiCodeAccessConfigView, String> {
+    let settings = settings_store::load_or_default(&app).map_err(|error| error.to_string())?;
+    let kimi_path = resolve_kimi_path_for_login(&app, &settings)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let view = backend_manager::save_kimi_code_access_config(&app, input)?;
+        let view = backend_manager::save_kimi_code_access_config(&app, input, &kimi_path)?;
         sync_provider_api_snapshot_after_config_change(&app)?;
         Ok(view)
     })
@@ -553,10 +555,10 @@ async fn save_kimi_code_access_config(
 
 #[tauri::command]
 async fn test_kimi_code_access_config(
-    _app: AppHandle,
+    app: AppHandle,
     input: KimiCodeAccessConfigTestInput,
 ) -> Result<KimiCodeAccessConfigTestResult, String> {
-    backend_manager::test_kimi_code_access_config(input).await
+    backend_manager::test_kimi_code_access_config(&app, input).await
 }
 
 #[tauri::command]

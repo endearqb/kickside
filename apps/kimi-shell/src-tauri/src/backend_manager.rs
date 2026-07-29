@@ -12,7 +12,7 @@ use std::{
 use anyhow::Context;
 use tauri::{AppHandle, Manager};
 use tiny_http::{Header, Response, Server, StatusCode};
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table};
 use url::Url;
 
 use crate::{
@@ -24,8 +24,8 @@ use crate::{
         KimiCodeAccessConfigProviderView, KimiCodeAccessConfigServiceView,
         KimiCodeAccessConfigServicesView, KimiCodeAccessConfigTestInput,
         KimiCodeAccessConfigTestResult, KimiCodeAccessConfigView, KimiCodeAccessEndpointTestResult,
-        KimiCodeAccessServiceApiKeyMode, KimiCodeRuntimeLimitsView, RuntimeOwnership,
-        WorkspaceWebMode,
+        KimiCodeAccessServiceApiKeyMode, KimiCodeAccessTestState, KimiCodeRuntimeLimitsView,
+        RuntimeOwnership, WorkspaceWebMode,
     },
     window_manager, workspace_session,
 };

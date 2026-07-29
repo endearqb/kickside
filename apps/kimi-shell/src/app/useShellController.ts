@@ -3447,6 +3447,18 @@ export function useShellController() {
         },
       );
       setKimiCodeAccessTestResult(result);
+      if (
+        result.provider.state === "verified" &&
+        result.models.length > 0 &&
+        !result.models.some((model) => model.id === kimiCodeAccessDraft.defaultModel)
+      ) {
+        setKimiCodeAccessDraft((current) => ({
+          ...current,
+          defaultModel:
+            result.models.find((model) => model.id === "kimi-code/k3")?.id ??
+            result.models[0]?.id,
+        }));
+      }
     } catch (error) {
       setActionError(String(error));
     } finally {

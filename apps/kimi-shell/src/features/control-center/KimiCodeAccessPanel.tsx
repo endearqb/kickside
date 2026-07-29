@@ -123,6 +123,10 @@ export function KimiCodeAccessTaskContent({
   >({});
   const blockingErrors = buildBlockingErrors(draft);
   const warnings = buildWarnings(draft, view?.warnings);
+  const availableModels =
+    testResult?.provider.state === "verified" && testResult.models.length > 0
+      ? testResult.models
+      : (view?.models ?? []);
 
   function updateDraft(patch: Partial<KimiCodeAccessConfigInput>) {
     onDraftChange({ ...draft, ...patch });
@@ -268,6 +272,25 @@ export function KimiCodeAccessTaskContent({
               </div>
             </label>
           </div>
+          <label className="field-stack">
+            <span>默认模型</span>
+            <select
+              className="ui-input cc-config-select"
+              aria-label="默认模型"
+              value={draft.defaultModel ?? ""}
+              onChange={(event) => updateDraft({ defaultModel: event.currentTarget.value })}
+              disabled={availableModels.length === 0}
+            >
+              {availableModels.length === 0 ? (
+                <option value="">验证 API 后同步模型</option>
+              ) : null}
+              {availableModels.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.displayName ?? model.model} · {model.id}
+                </option>
+              ))}
+            </select>
+          </label>
           {draft.clearProviderApiKey ? <p className="hint danger">保存后会清除现有 API Key。</p> : null}
         </section>
 
@@ -307,9 +330,9 @@ export function KimiCodeAccessTaskContent({
               className="cc-action-btn"
               icon={<Wifi size={14} />}
               onClick={() => void onTestConnection()}
-              disabled={testing}
+              disabled={testing || blockingErrors.length > 0}
             >
-              {testing ? "测试中" : "测试连接"}
+              {testing ? "验证中" : "验证 API 并同步模型"}
             </Button>
             <Button
               type="button"
@@ -346,11 +369,21 @@ export function KimiCodeAccessTaskContent({
                 ["Fetch", testResult.fetch],
               ].map(([label, result]) => {
                 const item = result as KimiCodeAccessConfigTestResult["provider"];
+                const statusLabel =
+                  item.state === "verified"
+                    ? "已验证"
+                    : item.state === "skipped"
+                      ? "未测试"
+                      : "失败";
                 return (
                   <article key={label as string} className="cc-config-summary-card">
                     <span>{label as string}</span>
-                    <strong>{item.reachable ? "可达" : "不可达"}</strong>
-                    <small>{item.statusCode ? `HTTP ${item.statusCode}` : item.error ?? item.url}</small>
+                    <strong>{statusLabel}</strong>
+                    <small>
+                      {item.state === "verified" && item.statusCode
+                        ? `HTTP ${item.statusCode}`
+                        : item.error ?? item.url}
+                    </small>
                   </article>
                 );
               })}

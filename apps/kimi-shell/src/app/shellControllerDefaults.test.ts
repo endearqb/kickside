@@ -18,7 +18,17 @@ describe("shell controller defaults", () => {
       configExists: true,
       configFingerprint: "content:1234",
       provider: { id: "kimi", type: "kimi", apiKeyConfigured: false },
-      model: { id: "model", provider: "kimi", model: "model", maxContextSize: 1, exists: true },
+      model: {
+        id: "model",
+        provider: "kimi",
+        model: "model",
+        maxContextSize: 1,
+        exists: true,
+        capabilities: [],
+        supportEfforts: [],
+      },
+      defaultModel: "model",
+      models: [],
       services: {
         search: { key: "search", apiKeyConfigured: false, usesProviderApiKey: false },
         fetch: { key: "fetch", apiKeyConfigured: false, usesProviderApiKey: false },

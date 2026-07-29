@@ -781,3 +781,17 @@
 ### Review
 - 重复 cycle 来自健康后端上的“重新连接”操作，不是 Server 启动失败；首次引导重构遗漏了已有完成回调的 UI 入口。
 - npm/pnpm 升级保持原逻辑，未知安装来源继续拒绝；普通 `reused_external` 停止语义不变。
+
+## 控制中心 API 配置 canonical 化
+
+### Checklist
+- [x] 统一 `managed:kimi-code` / `kimi-code/*` 配置
+- [x] 使用认证后的 `/models` 验证并同步模型
+- [x] 修复 404 误报和已保存 Key 无法测试
+- [x] 增加旧配置幂等迁移、OAuth 阻断与 Doctor 保存门禁
+- [x] 增加默认模型选择和验证三态 UI
+- [ ] 使用真实 API Key 在 Windows 安装版完成保存、重载和新会话 G3
+
+### Review
+- Search/Fetch 不再用无意义 GET 冒充成功，也不在验证时消耗真实搜索或抓取请求。
+- 非 API 配置、用户自定义 Provider/Model 和仍被引用的旧 Provider 保持不变。

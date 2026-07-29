@@ -106,6 +106,25 @@
   border-color: var(--border);
 }
 
+button,
+summary,
+label,
+[role="button"],
+[role="tab"],
+[role="option"],
+[role="menuitem"] {
+  cursor: default !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 html,
 body {
   margin: 0;

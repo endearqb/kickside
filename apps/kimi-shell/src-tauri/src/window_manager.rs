@@ -1146,23 +1146,42 @@ pub fn show_agent_room_window(app: &AppHandle) -> Result<AgentRoomWindowState, S
             .build()
             .map_err(|error| format!("failed to build Agent Room window: {error}"))?
     };
+    if window.is_minimized().unwrap_or(false) {
+        if let Err(error) = window.unminimize() {
+            log_manager::append_line(
+                app,
+                format!("failed to restore minimized Agent Room window: {error}"),
+            );
+        }
+    }
     window
         .show()
         .map_err(|error| format!("failed to show Agent Room window: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("failed to focus Agent Room window: {error}"))?;
-    Ok(AgentRoomWindowState { visible: true })
+    if let Err(error) = window.set_focus() {
+        log_manager::append_line(
+            app,
+            format!("Agent Room window shown but focus failed: {error}"),
+        );
+    }
+    Ok(AgentRoomWindowState {
+        visible: window.is_visible().unwrap_or(true),
+    })
 }
 
 pub fn hide_agent_room_window(app: &AppHandle) -> Result<AgentRoomWindowState, String> {
     if let Some(window) = app.get_webview_window(AGENT_ROOM_WINDOW_LABEL) {
+        if let Err(error) = window.set_always_on_top(false) {
+            log_manager::append_line(
+                app,
+                format!("failed to clear Agent Room always-on-top state: {error}"),
+            );
+        }
         window
             .hide()
             .map_err(|error| format!("failed to hide Agent Room window: {error}"))?;
-        window
-            .set_always_on_top(false)
-            .map_err(|error| format!("failed to clear Agent Room always-on-top state: {error}"))?;
+        return Ok(AgentRoomWindowState {
+            visible: window.is_visible().unwrap_or(false),
+        });
     }
     Ok(AgentRoomWindowState { visible: false })
 }

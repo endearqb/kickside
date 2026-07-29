@@ -12,7 +12,6 @@ import {
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
-import { toggleAgentRoomWindow } from "@/services/agentRoomService";
 import "./App.css";
 import "./components/control-center/control-center.css";
 import "./features/directory/directory.css";
@@ -226,7 +225,6 @@ function App() {
     onRunBridgePrimaryAction: shell.handleRunBridgePrimaryAction,
     onStopBridge: shell.handleStopBridge,
     onRestartBridge: shell.handleRestartBridge,
-    onSetAgentRoomEnabled: shell.handleSetAgentRoomEnabled,
     onImportBridgeSession: shell.handleImportBridgeSession,
     onClearBridgeBinding: shell.handleClearBridgeBinding,
     onResetBridgeBindingSession: shell.handleResetBridgeBindingSession,
@@ -294,13 +292,9 @@ function App() {
         tauriRuntime={shell.tauriRuntime}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
-        agentRoomEnabled={shell.bridgeStatus?.agentRoom.enabled ?? false}
         onRetry={shell.handleRuntimeOnlyRetry}
         onBackToStatus={shell.backToStatus}
         onOpenControlCenter={shell.openControlCenter}
-        onToggleAgentRoom={() => {
-          void toggleAgentRoomWindow().catch(() => undefined);
-        }}
         onOpenExternalUrl={shell.handleOpenExternalUrl}
         onToggleTheme={shell.handleToggleThemeMode}
         onStartWindowDrag={shell.handleStartWindowDrag}

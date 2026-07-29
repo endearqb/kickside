@@ -884,19 +884,12 @@ function isGridPresetId(value: unknown): value is WorkspaceGridPresetId {
 
 function sanitizePanes(panes: unknown[]): WorkspacePane[] {
   const seenPaneIds = new Set<string>();
-  const seenRoomIds = new Set<string>();
   const sanitizedPanes: WorkspacePane[] = [];
 
   for (const rawPane of panes) {
     const pane = sanitizePaneCandidate(rawPane);
-    if (!pane || seenPaneIds.has(pane.id)) {
+    if (!pane || pane.kind === "agent_room" || seenPaneIds.has(pane.id)) {
       continue;
-    }
-    if (pane.kind === "agent_room" && pane.roomId) {
-      if (seenRoomIds.has(pane.roomId)) {
-        continue;
-      }
-      seenRoomIds.add(pane.roomId);
     }
     seenPaneIds.add(pane.id);
     sanitizedPanes.push(pane);

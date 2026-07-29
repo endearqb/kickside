@@ -1841,3 +1841,4 @@ go test ./...
 ```
 
 这样即使 Product Gate 未通过，项目也能以“有证据的实验结论”收口，而不是继续被沉没成本拖入一个大而全、难以解释的 Agent 平台。
+> 归档：Agent Room 实验已由 `.ai/decisions/2026-07-23-agent-room-decommission.md` 终止；以下内容只保留为历史设计记录。

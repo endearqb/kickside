@@ -17,12 +17,14 @@ import {
   X,
 } from "lucide-react";
 import type {
+  AppStatus,
   BridgeConnectorConfig,
   BridgePlatform,
   BridgeSettings,
   ControlSectionId,
   ContextMenuLabelsInput,
   InstallTaskId,
+  OnboardingStatus,
   RuntimePanelId,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
@@ -238,7 +240,6 @@ export function ControlCenterView({
   onRunBridgePrimaryAction,
   onStopBridge,
   onRestartBridge,
-  onSetAgentRoomEnabled,
   onImportBridgeSession,
   onClearBridgeBinding,
   onResetBridgeBindingSession,
@@ -282,6 +283,7 @@ export function ControlCenterView({
   onCancelInstallTask,
   onCheckAppUpdate,
   onInstallAppUpdate,
+  onCompleteOnboarding,
   onOpenExternalUrl,
   installMessage,
 }: ControlCenterViewProps) {
@@ -1301,17 +1303,8 @@ export function ControlCenterView({
       primaryAction: workDirPrimaryAction,
     },
     {
-      id: "agent_room",
-      index: "06",
-      title: "Agent Room",
-      actionLabel: bridgeStatus.agentRoom.enabled ? "运行中" : "已停止",
-      statusTone: bridgeStatus.agentRoom.enabled ? "success" : "neutral",
-      complete: true,
-      primaryAction: null,
-    },
-    {
       id: "bridge",
-      index: "07",
+      index: "06",
       title: "外部 IM 通道",
       actionLabel:
         visibleBridgeConnectors.length === 0
@@ -1323,7 +1316,7 @@ export function ControlCenterView({
     },
     {
       id: "doctor",
-      index: "08",
+      index: "07",
       title: "Kimi Doctor",
       actionLabel: doctorSummary.label,
       statusTone: doctorSummary.tone,
@@ -1332,7 +1325,7 @@ export function ControlCenterView({
     },
     {
       id: "logs",
-      index: "09",
+      index: "08",
       title: "日志",
       actionLabel: "app.log · backend.log · bridge.log",
       statusTone: "neutral",
@@ -1460,21 +1453,6 @@ export function ControlCenterView({
               onOpenConfigDir={onOpenKimiConfigDir}
               onTestConnection={onTestKimiCodeAccessConfig}
             />
-          </div>
-        );
-      }
-      if (stepId === "agent_room") {
-        return (
-          <div className="cc-settings-detail-stack">
-            <ControlCenterToggleField
-              label="启用 Agent Room"
-              description="开启后，有 Kimi Code Pane 时会在标题栏显示 Agent Room 入口。"
-              checked={bridgeStatus.agentRoom.enabled}
-              onChange={(checked) => void onSetAgentRoomEnabled(checked)}
-              disabled={bridgeBusy}
-              busy={bridgeBusy}
-            />
-            <p className="hint">如果本地 Bridge 正在运行，切换时会自动重启。</p>
           </div>
         );
       }
@@ -3082,8 +3060,15 @@ export function ControlCenterView({
             <pre>{installConsoleText}</pre>
           </div>
         ) : null}
+        <WorkspaceEntryButton
+          status={status}
+          onboarding={onboarding}
+          actionBusy={actionBusy}
+          onEnter={onCompleteOnboarding}
+        />
         <Button
           type="button"
+          variant="outline"
           className="cc-rail-restart-btn"
           icon={<RefreshCcw size={15} />}
           onClick={() => void onRetry()}
@@ -3186,5 +3171,32 @@ export function ControlCenterView({
         </div>
       ) : null}
     </section>
+  );
+}
+
+export function WorkspaceEntryButton({
+  status,
+  onboarding,
+  actionBusy,
+  onEnter,
+}: {
+  status: Pick<AppStatus, "state"> | null;
+  onboarding: Pick<OnboardingStatus, "shouldShowOnboarding"> | null;
+  actionBusy: boolean;
+  onEnter: () => Promise<void>;
+}) {
+  if (status?.state !== "running" || !onboarding?.shouldShowOnboarding) {
+    return null;
+  }
+
+  return (
+    <Button
+      type="button"
+      icon={<Check size={15} />}
+      onClick={() => void onEnter()}
+      disabled={actionBusy}
+    >
+      进入工作区
+    </Button>
   );
 }

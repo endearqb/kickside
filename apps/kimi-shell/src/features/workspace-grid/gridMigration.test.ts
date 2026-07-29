@@ -159,16 +159,8 @@ describe("workspace grid v1 to v2 migration", () => {
 
     const loaded = loadWorkspaceGridState(storage);
 
-    expect(loaded.panes).toHaveLength(1);
-    expect(loaded.panes[0]).toMatchObject({
-      id: "pane-room-1",
-      kind: "agent_room",
-      carrier: "local",
-      roomId: "room-1",
-    });
-    expect(loaded.panes[0]?.sessionId).toBeUndefined();
-    expect(loaded.panes[0]?.url).toBeUndefined();
-    expect(loaded.panes[0]?.workDir).toBeUndefined();
-    expect(loaded.panes[0]?.storageNamespace).toBeUndefined();
+    expect(loaded.panes).toEqual([]);
+    expect(loaded.slots.every((slot) => slot.paneId == null)).toBe(true);
+    expect(loaded.activePaneId).toBeNull();
   });
 });

@@ -37,23 +37,11 @@
       ]
     },
     {
-      "identifier": "agent-room",
-      "description": "Capability for the Agent Room window",
-      "local": true,
-      "windows": ["agent-room"],
-      "permissions": [
-        "core:default",
-        "core:window:allow-is-always-on-top",
-        "core:window:allow-set-always-on-top",
-        "agent-room-command-access"
-      ]
-    },
-    {
       "identifier": "frameless-window-controls",
       "description": "Windows-only permissions required by the custom titlebar controls.",
       "local": true,
       "platforms": ["windows"],
-      "windows": ["main", "prefill", "workspace-import-picker", "agent-room"],
+      "windows": ["main", "prefill", "workspace-import-picker"],
       "permissions": [
         "core:window:allow-start-dragging",
         "core:window:allow-minimize",

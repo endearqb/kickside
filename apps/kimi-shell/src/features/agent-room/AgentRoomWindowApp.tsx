@@ -17,7 +17,6 @@ import {
   getAgentRoom,
   getAgentRoomCapabilities,
   getAgentRoomTimeline,
-  hideAgentRoomWindow,
   listAgentRoomApprovals,
   listAgentRoomObservations,
   listAgentRooms,
@@ -203,7 +202,7 @@ export function AgentRoomWindowApp() {
 
   return (
     <main className={`agent-room-window theme-${theme}`}>
-      <AgentRoomWindowTitlebar rooms={rooms} selectedRoomId={selectedRoomId} health={health} alwaysOnTop={alwaysOnTop} busy={busy} onSelectRoom={(id) => void selectRoom(id)} onCreateRoom={createRoom} onRetry={() => void refreshSnapshots()} onToggleAlwaysOnTop={() => void toggleAlwaysOnTop()} onHide={() => void hideAgentRoomWindow()} />
+      <AgentRoomWindowTitlebar rooms={rooms} selectedRoomId={selectedRoomId} health={health} alwaysOnTop={alwaysOnTop} busy={busy} onSelectRoom={(id) => void selectRoom(id)} onCreateRoom={createRoom} onRetry={() => void refreshSnapshots()} onToggleAlwaysOnTop={() => void toggleAlwaysOnTop()} onWindowError={setError} />
       <div className="ar-window-body">
         {room ? <AgentRoomExecutionMemberRail members={memberViews} selectedMemberIds={selectedMemberIds} archived={room.archived} onToggleTarget={(id) => setSelectedMemberIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id])} onOpenSession={(view) => void openMemberSession(view)} onAdd={() => setAddMemberOpen(true)} /> : <aside className="ar-member-rail" aria-hidden />}
         <div className="ar-main">

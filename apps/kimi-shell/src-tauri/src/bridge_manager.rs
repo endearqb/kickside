@@ -316,10 +316,8 @@ pub(crate) fn agent_room_client(
     })
 }
 
-pub(crate) fn agent_room_feature_enabled(app: &AppHandle) -> bool {
-    settings_store::load_or_default(app)
-        .map(|settings| settings.agent_room_enabled)
-        .unwrap_or(false)
+pub(crate) fn agent_room_feature_enabled(_app: &AppHandle) -> bool {
+    false
 }
 
 pub fn list_bridge_bindings(app: &AppHandle) -> anyhow::Result<Vec<BindingRecord>> {

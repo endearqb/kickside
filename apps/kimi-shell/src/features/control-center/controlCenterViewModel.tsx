@@ -280,7 +280,6 @@ export type ControlCenterViewProps = {
   onRunBridgePrimaryAction: (mode: BridgePrimaryActionMode) => Promise<void>;
   onStopBridge: () => Promise<void>;
   onRestartBridge: () => Promise<void>;
-  onSetAgentRoomEnabled: (enabled: boolean) => Promise<void>;
   onImportBridgeSession: (input: BridgeSessionImportInput) => Promise<void>;
   onClearBridgeBinding: (bindingId: string) => Promise<void>;
   onResetBridgeBindingSession: (bindingId: string) => Promise<void>;

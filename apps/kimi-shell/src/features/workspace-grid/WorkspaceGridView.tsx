@@ -29,7 +29,6 @@ import type {
 } from "./gridTypes";
 import { PaneFrame } from "./PaneFrame";
 import { normalizeEmbeddableUrl } from "./urlSafety";
-import { usePaneSessionRegistry } from "./usePaneSessionRegistry";
 
 type ResizeAxis = "columns" | "rows";
 
@@ -49,7 +48,6 @@ interface PaneDragDraft {
 }
 
 export function WorkspaceGridView(props: WorkspaceViewProps) {
-  usePaneSessionRegistry();
   const preset = useWorkspaceGridStore((state) => state.preset);
   const panes = useWorkspaceGridStore((state) => state.panes);
   const slots = useWorkspaceGridStore((state) => state.slots);

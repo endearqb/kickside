@@ -333,42 +333,56 @@ $currentKimiCommand = Get-Command kimi -ErrorAction SilentlyContinue
 if (-not $currentKimiCommand -or -not $currentKimiCommand.Source) {
   throw 'The active Kimi command could not be resolved from PATH.'
 }
-$currentKimi = $currentKimiCommand.Source
-$currentPnpmCommand = Get-Command pnpm -ErrorAction SilentlyContinue
+$currentKimi = [IO.Path]::GetFullPath($currentKimiCommand.Source)
+$nativeKimi = [IO.Path]::GetFullPath((Join-Path $HOME '.kimi-code\bin\kimi.exe'))
 Ensure-KimiShellPath
-Invoke-KimiShellNodePrerequisites
 Write-Host "Current Kimi command: $currentKimi"
 & $currentKimi --version
 if ($LASTEXITCODE -ne 0) { throw "kimi version check failed with exit code $LASTEXITCODE." }
 
-$currentKimiDir = [IO.Path]::GetFullPath((Split-Path -Parent $currentKimi)).TrimEnd('\')
-$npmPrefix = (& $script:KimiShellNpm prefix -g).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $npmPrefix) { throw "npm global prefix lookup failed." }
-$npmBin = [IO.Path]::GetFullPath($npmPrefix).TrimEnd('\')
-$pnpm = if ($currentPnpmCommand -and $currentPnpmCommand.Source) { $currentPnpmCommand.Source } else { $null }
-$pnpmBin = $null
-if ($pnpm) {
-  $pnpmBin = (& $pnpm bin --global).Trim()
-  if ($LASTEXITCODE -ne 0 -or -not $pnpmBin) { throw "pnpm global bin lookup failed." }
-  $pnpmBin = [IO.Path]::GetFullPath($pnpmBin).TrimEnd('\')
-}
-$isNpmInstall = $currentKimiDir -eq $npmBin
-$isPnpmInstall = $pnpmBin -and $currentKimiDir -eq $pnpmBin
-
-if ($isNpmInstall -and $isPnpmInstall) {
-  throw "The active Kimi command matches both npm and pnpm global bins: $currentKimi"
-} elseif ($isPnpmInstall) {
-  Write-Host "Upgrading the active pnpm installation: $currentKimi"
-  & $pnpm add --global __KIMI_CODE_NPM_PACKAGE__@latest
-  if ($LASTEXITCODE -ne 0) { throw "pnpm upgrade failed with exit code $LASTEXITCODE." }
-  $verifiedKimi = Join-Path $pnpmBin 'kimi.cmd'
-} elseif ($isNpmInstall) {
-  Write-Host "Upgrading the active npm installation: $currentKimi"
-  & $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__@latest
-  if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed with exit code $LASTEXITCODE." }
-  $verifiedKimi = Join-Path $npmPrefix 'kimi.cmd'
+if ($currentKimi -ieq $nativeKimi) {
+  $legacyServerLock = Join-Path $HOME '.kimi-code\server\lock'
+  Write-Host "Stopping a legacy Kimi Server before upgrading the Windows native installation."
+  & $currentKimi server kill
+  $serverKillExitCode = $LASTEXITCODE
+  if ($serverKillExitCode -ne 0 -and (Test-Path $legacyServerLock)) {
+    throw "The legacy Kimi Server could not be stopped (exit code $serverKillExitCode). Close Kimi Code and retry."
+  }
+  Write-Host "Upgrading the Windows native installation: $currentKimi"
+  Invoke-RestMethod -Uri 'https://code.kimi.com/kimi-code/install.ps1' | Invoke-Expression
+  $verifiedKimi = $nativeKimi
 } else {
-  throw "The active Kimi command is not managed by npm or pnpm: $currentKimi"
+  Invoke-KimiShellNodePrerequisites
+  $currentPnpmCommand = Get-Command pnpm -ErrorAction SilentlyContinue
+  $currentKimiDir = [IO.Path]::GetFullPath((Split-Path -Parent $currentKimi)).TrimEnd('\')
+  $npmPrefix = (& $script:KimiShellNpm prefix -g).Trim()
+  if ($LASTEXITCODE -ne 0 -or -not $npmPrefix) { throw "npm global prefix lookup failed." }
+  $npmBin = [IO.Path]::GetFullPath($npmPrefix).TrimEnd('\')
+  $pnpm = if ($currentPnpmCommand -and $currentPnpmCommand.Source) { $currentPnpmCommand.Source } else { $null }
+  $pnpmBin = $null
+  if ($pnpm) {
+    $pnpmBin = (& $pnpm bin --global).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $pnpmBin) { throw "pnpm global bin lookup failed." }
+    $pnpmBin = [IO.Path]::GetFullPath($pnpmBin).TrimEnd('\')
+  }
+  $isNpmInstall = $currentKimiDir -eq $npmBin
+  $isPnpmInstall = $pnpmBin -and $currentKimiDir -eq $pnpmBin
+
+  if ($isNpmInstall -and $isPnpmInstall) {
+    throw "The active Kimi command matches both npm and pnpm global bins: $currentKimi"
+  } elseif ($isPnpmInstall) {
+    Write-Host "Upgrading the active pnpm installation: $currentKimi"
+    & $pnpm add --global __KIMI_CODE_NPM_PACKAGE__@latest
+    if ($LASTEXITCODE -ne 0) { throw "pnpm upgrade failed with exit code $LASTEXITCODE." }
+    $verifiedKimi = Join-Path $pnpmBin 'kimi.cmd'
+  } elseif ($isNpmInstall) {
+    Write-Host "Upgrading the active npm installation: $currentKimi"
+    & $script:KimiShellNpm install -g __KIMI_CODE_NPM_PACKAGE__@latest
+    if ($LASTEXITCODE -ne 0) { throw "npm upgrade failed with exit code $LASTEXITCODE." }
+    $verifiedKimi = Join-Path $npmPrefix 'kimi.cmd'
+  } else {
+    throw "The active Kimi command is not managed by the Windows installer, npm, or pnpm: $currentKimi"
+  }
 }
 
 if (-not (Test-Path $verifiedKimi)) { throw "Kimi command was not created after upgrade: $verifiedKimi" }
@@ -390,6 +404,12 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
 }
 $binary = Join-Path $HOME '.kimi-code\bin\kimi.exe'
 if (Test-Path $binary) {
+  $legacyServerLock = Join-Path $HOME '.kimi-code\server\lock'
+  & $binary server kill
+  $serverKillExitCode = $LASTEXITCODE
+  if ($serverKillExitCode -ne 0 -and (Test-Path $legacyServerLock)) {
+    throw "The legacy Kimi Server could not be stopped (exit code $serverKillExitCode). Close Kimi Code and retry."
+  }
   Remove-Item $binary -Force
   $removed = $true
 }

@@ -18,7 +18,6 @@ import {
   Minimize2,
   RefreshCcw,
   Trash2,
-  Users,
 } from "lucide-react";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
 import {
@@ -34,7 +33,6 @@ import {
   type EmbeddedExternalWebviewController,
 } from "@/services/externalWebviewService";
 import { buildCodePaneUrl } from "./paneUrl";
-import { AgentRoomPane } from "./AgentRoomPane";
 import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
 
 const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
@@ -176,15 +174,6 @@ export function PaneFrame({
             <MessageCircle size={14} aria-hidden />
             Chat
           </button>
-          <button
-            type="button"
-            className="workspace-grid-empty-btn"
-            onClick={() => onAddPane("agent_room")}
-            disabled={!canAddPane}
-          >
-            <Users size={14} aria-hidden />
-            Room
-          </button>
         </div>
       </div>
     );
@@ -258,7 +247,6 @@ export function PaneFrame({
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
           {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
           {pane.kind === "external" ? <Globe2 size={14} aria-hidden /> : null}
-          {pane.kind === "agent_room" ? <Users size={14} aria-hidden /> : null}
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
@@ -307,17 +295,7 @@ export function PaneFrame({
           </IconButton>
         </div>
       </header>
-      {pane.kind === "agent_room" ? (
-        <AgentRoomPane
-          roomId={pane.roomId}
-          active={active}
-          mountPolicy={pane.mountPolicy}
-          onSelectRoom={(roomId) =>
-            onConfigurePane("agent_room", roomId)
-          }
-          onResume={onResumePane}
-        />
-      ) : source ? <PaneContent
+      {source ? <PaneContent
         pane={pane}
         source={source}
         actionBusy={actionBusy}

@@ -9,12 +9,7 @@ import {
   openExternalWebviewWindow,
 } from "@/services/externalWebviewService";
 import { createGridSession } from "@/services/workspaceGridService";
-import {
-  getAgentRoom,
-  getAgentRoomCapabilities,
-  listAgentRooms,
-  openAgentRoomSession,
-} from "@/services/agentRoomService";
+import { getAgentRoomCapabilities } from "@/services/agentRoomService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
 import { postThemeToFrame } from "./PaneFrame";
@@ -150,70 +145,24 @@ describe("WorkspaceGridView", () => {
     expect(screen.queryByRole("button", { name: "切换为 Kimi.com" })).toBeNull();
     expect(screen.getByRole("button", { name: "Code" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Chat" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Room" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Room" })).toBeNull();
   });
 
-  it("renders Agent Room locally without an iframe or Code session observation", async () => {
+  it("does not render the retired Agent Room surface", () => {
     useWorkspaceGridStore.getState().setPreset("single");
     useWorkspaceGridStore.getState().configurePane("pane-code", {
       kind: "agent_room",
       roomId: "room-1",
       title: "Review Room",
     });
-    vi.mocked(listAgentRooms).mockResolvedValueOnce({
-      items: [
-        {
-          roomId: "room-1",
-          title: "Review Room",
-          orchestrationMode: "parallel",
-          archived: false,
-          createdAt: "2026-07-18T00:00:00Z",
-          updatedAt: "2026-07-18T00:00:00Z",
-        },
-      ],
-      cursor: "",
-    });
-    vi.mocked(getAgentRoom).mockResolvedValueOnce({
-      room: {
-        roomId: "room-1",
-        title: "Review Room",
-        orchestrationMode: "parallel",
-        archived: false,
-        createdAt: "2026-07-18T00:00:00Z",
-        updatedAt: "2026-07-18T00:00:00Z",
-      },
-      members: [
-        {
-          memberId: "member-1",
-          roomId: "room-1",
-          memberKind: "agent",
-          displayName: "Reviewer",
-          workspaceRoot: "D:/review",
-          sessionPolicy: "resume_selected",
-          followMode: "pin_session",
-          effectiveSessionId: "session-review",
-          autoApprove: false,
-          status: "idle",
-          createdAt: "2026-07-18T00:00:00Z",
-          updatedAt: "2026-07-18T00:00:00Z",
-        },
-      ],
-    });
 
     render(<WorkspaceGridView {...props} />);
 
-    expect(await screen.findByRole("region", { name: "Agent Room" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "选择 Agent Room" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Agent Room" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "选择 Agent Room" })).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
     expect(props.onPaneSessionObserved).not.toHaveBeenCalled();
-    expect(getAgentRoomCapabilities).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "打开 Session" }));
-    expect(openAgentRoomSession).toHaveBeenCalledWith(
-      "session-review",
-      "D:/review",
-      "focus_existing",
-    );
+    expect(getAgentRoomCapabilities).not.toHaveBeenCalled();
   });
 
   it("switches an existing pane to Code without creating a server session", async () => {

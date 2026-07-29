@@ -1,4 +1,24 @@
-# Agent Room V1（v1.1）
+# Agent Room 下线与冻结
+
+## 任务契约
+
+- 用户目标：完整下线并冻结 Agent Room，任何旧设置、环境变量或历史 Pane 都不能恢复产品能力。
+- 直接交付物：删除产品入口与独立窗口配置；Shell/Bridge 双端 fail closed；旧 Pane 归一；Accepted retirement ADR；README、架构事实和变更记录同步。
+- 影响范围：`apps/kimi-shell`、`apps/kimi-im-bridge`、`.ai/architecture`、`.ai/decisions`、`.ai/changes` 与本任务记录。
+- 非目标：不 DROP migration 0014–0019，不删除用户 Room 数据，不移除普通 IM 共享的 ExecutionService、lease、approval link、turn origin 或 connector binding。
+- 验收：设置/标题栏/独立窗口/空 Pane 无入口；`KIMI_AGENT_ROOM_ENABLED=true` 与 `Options.AgentRoomEnabled=true` 仍 disabled；旧 Pane 被移除并修复布局引用；最小 G0/G1 gate 通过。
+- 保守假设：“冻结”表示历史 schema/data 与短期兼容墓碑惰性保留，禁止写入和新增功能；破坏性清库需用户另行授权。
+
+## Checklist
+
+- [x] 建立下线 ADR，并撤销 Grid V3 Draft。
+- [x] 移除设置、标题栏、hash 路由、空 Pane 入口、独立窗口 config/capability。
+- [x] Shell 与 Bridge 生产启用门恒为 false。
+- [x] V2 state/saved layout 加载时剔除 Agent Room Pane。
+- [x] 更新长期 README、架构事实和当日变更记录。
+- [x] 完成 Shell/Go/Rust 最小验证。
+
+# Agent Room V1（v1.1，已由下线决策终止）
 
 ## 任务契约
 
@@ -29,7 +49,7 @@
 - [x] Phase 4：AR-400～405 Multi Session Observer（Fake 1/6 全矩阵；真实 0.27.0 只读 1/6 transport）。
 - [x] Phase 5～7：Rust Pump、Grid V2、Native Pane、Reverse Mirror；Observer MVP Gate 已通过后才开放 Forward。
 - [x] Phase 8～10：Forward Dispatch、Approval/Recovery、Workflow/Connector（真实 Connector matrix 单独 blocked）。
-- [ ] Release：本地 Product/Architecture/Security/Reliability、NSIS/MSI 构建与静态升级兼容已验证；签名 updater、隔离安装升级与真实 Connector G3 blocked。
+- [x] Release：cancelled/superseded by `.ai/decisions/2026-07-23-agent-room-decommission.md`；不再执行 Agent Room 发布 Gate。
 
 ## Phase 0 基线
 
@@ -722,3 +742,42 @@
 ### Review
 - 三条消息均成功入站；后两条 Runtime 实际完成，但 Bridge 分别提前约 44 秒和 80 秒结束事件流，因此没有内容增量或飞书 outbound。
 - 修复只收紧终止事件关联，不改变内容增量、飞书发送、数据库或 UI；历史漏发回复不自动补发。
+
+## Agent Room 独立窗口交互修复
+
+### Checklist
+- [x] 核对窗口配置、command、capability、launcher、标题栏与 `CloseRequested` 完整调用链
+- [x] launcher 改为幂等 show，并把失败接入主窗口可见错误栏
+- [x] 标题栏改用原生手动拖动，交互控件保持不可拖动
+- [x] X 统一走原生 close 与 Rust close-to-hide 生命周期
+- [x] 收敛 Rust show/focus 与 hide/topmost 的部分成功语义
+- [x] 完成前端全量测试、TypeScript、Rust 格式/编译/测试 gate
+- [ ] 在真实 Windows 安装版完成焦点、最小化、Alt+F4 与双显示器 G3
+
+### Review
+- 审查结论的方向成立，但不存在由静态代码证明的单一根因：首次点击时 toggle 仍会走 show；实际是 launcher 吞错、窗口焦点部分成功、拖动命中区过小和关闭双链叠加。
+- 已验证：前端 36 files / 188 tests、TypeScript、`cargo check`、Rust 238 项 lib tests；真实操作系统窗口层级仍属于 G3。
+
+## Windows native-feel 基线审查
+
+### Checklist
+- [x] 运行 native-feel 架构 decision tree 与代码态 ship-readiness 审查
+- [x] 统一桌面 Chrome 的原生箭头与不可选中文案语义
+- [ ] 在真实 Windows 环境检查启动闪烁、IME、Narrator、窗口恢复与后台 CPU
+
+### Review
+- 当前应用只发布 Windows；保留既有 Tauri + WebView2 架构，未引入未被产品目标证明的 macOS shell、Node sidecar 或 Rust core 分层。
+- 本次只修复重复出现的 Web hand cursor 根因；真实链接、输入与拖拽/缩放语义保持不变。
+
+## 首次引导与 Windows 原生 Kimi 升级修复
+
+### Checklist
+- [x] 根据日志确认后端健康、token 验证与 session bootstrap 成功
+- [x] 恢复首次引导完成后进入工作区的可见入口
+- [x] 为 Kimi 升级增加中断现有连接确认
+- [x] 支持 `%USERPROFILE%\.kimi-code\bin\kimi.exe` 官方脚本升级
+- [ ] 在 Kimi 0.26.0 Windows 原生安装包环境完成停止、升级、重启和 Workspace G3
+
+### Review
+- 重复 cycle 来自健康后端上的“重新连接”操作，不是 Server 启动失败；首次引导重构遗漏了已有完成回调的 UI 入口。
+- npm/pnpm 升级保持原逻辑，未知安装来源继续拒绝；普通 `reused_external` 停止语义不变。

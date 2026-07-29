@@ -88,30 +88,21 @@ func TestParseFlagsReadsRuntimeLocatorFromEnv(t *testing.T) {
 	}
 }
 
-func TestParseFlagsAgentRoomFeatureFlagDefaultsOffAndValidates(t *testing.T) {
+func TestParseFlagsAgentRoomEnvironmentCannotEnableRetiredFeature(t *testing.T) {
 	t.Parallel()
 
-	getenv := func(value string) func(string) string {
-		return func(name string) string {
-			if name == adminTokenEnv {
-				return "admin-token"
-			}
-			if name == agentRoomEnabledEnv {
-				return value
-			}
-			return ""
+	getenv := func(name string) string {
+		if name == adminTokenEnv {
+			return "admin-token"
 		}
+		if name == "KIMI_AGENT_ROOM_ENABLED" {
+			return "true"
+		}
+		return ""
 	}
-	options, err := parseFlagsFrom(requiredArgs(), getenv(""), os.ReadFile)
+	options, err := parseFlagsFrom(requiredArgs(), getenv, os.ReadFile)
 	if err != nil || options.AgentRoomEnabled {
-		t.Fatalf("feature flag must default off: options=%+v err=%v", options, err)
-	}
-	options, err = parseFlagsFrom(requiredArgs(), getenv("true"), os.ReadFile)
-	if err != nil || !options.AgentRoomEnabled {
-		t.Fatalf("true must enable Agent Room: options=%+v err=%v", options, err)
-	}
-	if _, err := parseFlagsFrom(requiredArgs(), getenv("sometimes"), os.ReadFile); err == nil || !strings.Contains(err.Error(), agentRoomEnabledEnv) {
-		t.Fatalf("invalid feature flag must be rejected, got %v", err)
+		t.Fatalf("retired feature must remain off: options=%+v err=%v", options, err)
 	}
 }
 

@@ -16,3 +16,4 @@
 - [ ] 无 token、凭据或未脱敏响应进入 React 持久化状态或日志
 
 结论只能填写：`通过`、`未通过` 或 `blocked`。Gate 通过前不得接受 Workspace Grid V3 ADR。
+> 归档：Agent Room 实验已由 `.ai/decisions/2026-07-23-agent-room-decommission.md` 终止，本 Gate 未执行且不再追加。

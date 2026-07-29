@@ -95,12 +95,13 @@ $env:KIMI_SHELL_PATH = $gitBash
 & $env:KIMI_SHELL_PATH --version
 ```
 
-## 2. Kimi 官方源完整流程
+## 2. Kimi 官方 Windows 安装
 
 说明：
 
-- Windows 主路径使用 Kimi Code 官方安装脚本。
+- Kimi 官方安装脚本是受支持的 Windows 原生安装方式。
 - 官方脚本默认安装到 `%USERPROFILE%\.kimi-code\bin\kimi.exe`，并更新用户 PATH。
+- 小助手会识别该路径；应用内升级会在用户确认后停止旧 Server、重新运行官方脚本并验证版本。
 - 旧版 `uv` / Python `kimi-cli` 只作为历史兼容，不再是主安装依赖。
 
 ### 2.1 安装 Kimi Code
@@ -119,8 +120,9 @@ if (Test-Path $kimiBin) {
 ### 2.2 升级 Kimi Code
 
 ```powershell
-kimi upgrade
-kimi --version
+kimi server kill
+Invoke-RestMethod -Uri 'https://code.kimi.com/kimi-code/install.ps1' | Invoke-Expression
+& (Join-Path $HOME '.kimi-code\bin\kimi.exe') --version
 ```
 
 ### 2.3 验证与登录
@@ -130,9 +132,9 @@ kimi --version
 kimi login
 ```
 
-## 3. Kimi 镜像源与 npm 备选
+## 3. 小助手应用内安装与 npm
 
-官方 Windows 安装脚本是主路径。若需要通过 npm 包管理器安装或企业网络只允许 npm registry，可使用 npm 备选：
+小助手的 quick/core 与首次安装使用 npm 全局包；已有官方 Windows 原生安装继续使用第 2 节的原生升级路径：
 
 ```powershell
 npm install -g @moonshot-ai/kimi-code@latest
@@ -152,7 +154,10 @@ npm install -g @moonshot-ai/kimi-code@latest --registry https://registry.npmmirr
 ```powershell
 npm uninstall -g @moonshot-ai/kimi-code
 $kimiBin = Join-Path $HOME '.kimi-code\bin\kimi.exe'
-if (Test-Path $kimiBin) { Remove-Item $kimiBin -Force }
+if (Test-Path $kimiBin) {
+  & $kimiBin server kill
+  Remove-Item $kimiBin -Force
+}
 ```
 
 ## 5. 最终验证清单
@@ -164,7 +169,7 @@ $env:KIMI_SHELL_PATH
 kimi --version
 ```
 
-npm 仅用于 npm 备选安装或卸载：
+npm 路径需要：
 
 ```powershell
 node -v

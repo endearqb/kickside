@@ -233,6 +233,12 @@ export function useInstallController({
     try {
       const catalog = installFlowCatalog ?? (await refreshInstallFlowCatalog());
       const task = catalog.tasks.find((item) => item.id === taskId);
+      if (
+        taskId === "upgrade_kimi" &&
+        !window.confirm("升级将停止当前 Kimi Server 和正在使用它的连接。继续升级吗？")
+      ) {
+        return;
+      }
       if (task?.requiresElevation) {
         const accepted = window.confirm(
           `${task.title} will open an elevated external PowerShell window. Continue?`,

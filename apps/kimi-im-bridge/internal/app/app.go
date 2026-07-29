@@ -89,6 +89,7 @@ type recoveredApprovalRedeliverer interface {
 }
 
 func New(options Options) (*Service, error) {
+	options.AgentRoomEnabled = false
 	settings, err := config.LoadOrCreateSettings(options.ConfigPath)
 	if err != nil {
 		return nil, err

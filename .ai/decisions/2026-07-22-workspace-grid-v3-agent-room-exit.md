@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — blocked by the 7-day Agent Room Redesign Product Gate.
+Rejected — superseded by `2026-07-23-agent-room-decommission.md`; the experiment ended without a Grid V3 rollout.
 
 ## Proposed Decision
 

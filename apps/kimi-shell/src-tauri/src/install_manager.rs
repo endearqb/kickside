@@ -2058,7 +2058,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrade_command_follows_the_active_npm_or_pnpm_shim() {
+    fn upgrade_command_follows_the_active_install_source() {
         let command = catalog::kimi_upgrade_command(None);
         let capture_index = command
             .find("Get-Command kimi")
@@ -2067,6 +2067,11 @@ mod tests {
             .find("Ensure-KimiShellPath")
             .expect("path setup exists");
         assert!(capture_index < path_mutation_index);
+        assert!(command.contains("Join-Path $HOME '.kimi-code\\bin\\kimi.exe'"));
+        assert!(command.contains("& $currentKimi server kill"));
+        assert!(command.contains("Test-Path $legacyServerLock"));
+        assert!(command.contains("https://code.kimi.com/kimi-code/install.ps1"));
+        assert!(command.contains("$verifiedKimi = $nativeKimi"));
         assert!(command.contains("$pnpm add --global"));
         assert!(command.contains("$script:KimiShellNpm install -g"));
         assert!(command.contains("@moonshot-ai/kimi-code@latest"));
@@ -2074,10 +2079,17 @@ mod tests {
         assert!(command.contains("$pnpm bin --global"));
         assert!(command.contains("Join-Path $pnpmBin 'kimi.cmd'"));
         assert!(command.contains("Join-Path $npmPrefix 'kimi.cmd'"));
-        assert!(command.contains("not managed by npm or pnpm"));
+        assert!(command.contains("not managed by the Windows installer, npm, or pnpm"));
         assert!(command.contains("matches both npm and pnpm global bins"));
         assert!(command.contains("& $verifiedKimi --version"));
         assert!(command.contains("Invoke-KimiShellNodePrerequisites"));
+        let native_branch_index = command
+            .find("if ($currentKimi -ieq $nativeKimi)")
+            .expect("native branch exists");
+        let node_prerequisite_index = command
+            .find("Invoke-KimiShellNodePrerequisites")
+            .expect("npm prerequisites exist");
+        assert!(native_branch_index < node_prerequisite_index);
         assert!(!command.contains("& $kimi upgrade"));
         assert!(!command.contains("uv tool upgrade kimi-cli"));
         assert!(!command.contains("uv python install 3.13"));
@@ -2123,6 +2135,27 @@ mod tests {
         assert!(!managed_task_requires_backend_stop(
             InstallTaskId::QuickInstallCore
         ));
+    }
+
+    #[test]
+    fn native_uninstall_stops_the_legacy_server_before_removing_the_binary() {
+        let catalog = catalog::build_install_flow_catalog_with_mirror_config(
+            &resolved_mirror_config_from_settings(&AppSettings::default()),
+        );
+        let uninstall = catalog
+            .tasks
+            .iter()
+            .find(|task| task.id == InstallTaskId::UninstallKimi)
+            .expect("uninstall task exists");
+        let command = &uninstall.official_steps[0].command;
+        let stop_index = command
+            .find("& $binary server kill")
+            .expect("native server stop exists");
+        let remove_index = command
+            .find("Remove-Item $binary -Force")
+            .expect("native binary removal exists");
+        assert!(stop_index < remove_index);
+        assert!(command.contains("Test-Path $legacyServerLock"));
     }
 
     #[test]

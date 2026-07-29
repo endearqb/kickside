@@ -410,7 +410,6 @@ requireCapabilityPermission(
   "workspace-import-command-access",
 );
 requireCapabilityPermission(capabilities, "workspace-import-picker", "dialog:allow-open");
-requireCapabilityPermission(capabilities, "agent-room", "agent-room-command-access");
 
 const architecture = fs.existsSync(architecturePath)
   ? fs.readFileSync(architecturePath, "utf8")

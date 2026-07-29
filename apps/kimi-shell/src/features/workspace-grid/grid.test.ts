@@ -598,31 +598,37 @@ describe("workspace grid store", () => {
     expect(store.getState().trackSizes).toBeUndefined();
   });
 
-  it("creates one local pane per Agent Room and focuses an existing copy", () => {
-    const store = createWorkspaceGridStore(undefined, null);
-    store.getState().setPreset("1x3");
+  it("drops retired Agent Room panes and repairs their slot references", () => {
+    const state = loadWorkspaceGridState(
+      writableStorage({
+        [WORKSPACE_GRID_STATE_STORAGE_KEY]: JSON.stringify({
+          version: 2,
+          preset: "1x2",
+          panes: [
+            persistedPane("pane-code"),
+            {
+              ...persistedPane("pane-room"),
+              kind: "agent_room",
+              carrier: "local",
+              roomId: "room-1",
+            },
+          ],
+          slots: [
+            { id: "left", area: "left", paneId: "pane-code" },
+            { id: "right", area: "right", paneId: "pane-room" },
+          ],
+          activePaneId: "pane-room",
+          maximizedPaneId: "pane-room",
+          updatedAt: 100,
+        }),
+      }),
+      100,
+    );
 
-    const first = store.getState().addPane({
-      kind: "agent_room",
-      roomId: " room-1 ",
-      title: "Review Room",
-    });
-    const second = store.getState().addPane({
-      kind: "agent_room",
-      roomId: "room-1",
-      title: "Duplicate",
-    });
-
-    expect(second).toBe(first);
-    expect(
-      store.getState().panes.filter((pane) => pane.kind === "agent_room"),
-    ).toHaveLength(1);
-    expect(store.getState().panes.find((pane) => pane.id === first)).toMatchObject({
-      carrier: "local",
-      roomId: "room-1",
-      storageNamespace: undefined,
-    });
-    expect(store.getState().activePaneId).toBe(first);
+    expect(state.panes.map((pane) => pane.id)).toEqual(["pane-code"]);
+    expect(state.slots.map((slot) => slot.paneId)).toEqual(["pane-code", undefined]);
+    expect(state.activePaneId).toBe("pane-code");
+    expect(state.maximizedPaneId).toBeNull();
   });
 
   it("opens sessions by effective runtime id and does not reuse stale persisted ids", () => {

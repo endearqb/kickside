@@ -680,6 +680,7 @@ function PaneContent({
             title={source.title}
             name={source.frameName}
             className="workspace-iframe"
+            allow={pane.kind === "external" ? undefined : "clipboard-write"}
             sandbox={
               pane.kind === "external"
                 ? "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"

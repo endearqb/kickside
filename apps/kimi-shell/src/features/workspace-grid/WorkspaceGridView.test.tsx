@@ -200,11 +200,11 @@ describe("WorkspaceGridView", () => {
       sessionId: undefined,
       workDir: "D:/work",
     });
-    expect(
-      document.querySelector(
-        'iframe[src="http://127.0.0.1:1234/#token=secret"]',
-      ),
-    ).toBeTruthy();
+    const frame = document.querySelector<HTMLIFrameElement>(
+      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
+    );
+    expect(frame).toBeTruthy();
+    expect(frame?.getAttribute("allow")).toBe("clipboard-write");
   });
 
   it("adds panes to the clicked empty fourth slot", async () => {

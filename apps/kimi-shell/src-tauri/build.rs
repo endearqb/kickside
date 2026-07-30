@@ -146,6 +146,7 @@ const APP_COMMANDS: &[&str] = &[
     "start_install_task",
     "cancel_install_task",
     "get_install_probe_status",
+    "check_kimi_code_update",
     "get_install_settings",
     "save_install_settings",
     "get_install_mirror_health_report",

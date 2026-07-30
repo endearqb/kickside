@@ -6,6 +6,7 @@ import {
   getKimiDoctorSummary,
   getLegacySettingsCard,
   getKimiInstallPrerequisiteIssues,
+  getKimiCodeUpdatePresentation,
   isAssistantSettingsSection,
   shouldShowStartupFailureDiagnostics,
 } from "./controlCenterViewModel";
@@ -36,6 +37,39 @@ describe("getKimiInstallPrerequisiteIssues", () => {
 
   it("returns no issues when npm install prerequisites are ready", () => {
     expect(getKimiInstallPrerequisiteIssues(readyProbe)).toEqual([]);
+  });
+});
+
+describe("getKimiCodeUpdatePresentation", () => {
+  const info = {
+    currentVersion: "0.29.2",
+    latestVersion: "0.30.0",
+    available: true,
+  };
+
+  it("matches the app updater status language without blocking manual fallback", () => {
+    expect(getKimiCodeUpdatePresentation("available", info)).toMatchObject({
+      barLabel: "v0.30.0 可更新",
+      primaryLabel: "升级到 v0.30.0",
+      tone: "warning",
+      disabled: false,
+    });
+    expect(
+      getKimiCodeUpdatePresentation("up_to_date", {
+        ...info,
+        currentVersion: "0.30.0",
+        available: false,
+      }),
+    ).toMatchObject({
+      barLabel: "v0.30.0 · 已是最新版本",
+      tone: "success",
+      disabled: true,
+    });
+    expect(getKimiCodeUpdatePresentation("error", null)).toMatchObject({
+      barLabel: "更新检测失败",
+      tone: "danger",
+      disabled: false,
+    });
   });
 });
 

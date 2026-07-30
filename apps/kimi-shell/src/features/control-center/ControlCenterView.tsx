@@ -66,6 +66,7 @@ import {
   formatWeixinOnboardingTone,
   generateUniqueBridgeConnectorId,
   getKimiDoctorSummary,
+  getKimiCodeUpdatePresentation,
   getLegacySettingsCard,
   getStartupFailureMessage,
   getKimiInstallPrerequisiteIssues,
@@ -184,6 +185,9 @@ export function ControlCenterView({
   kimiCodeAccessTestResult,
   installProbe,
   installProbeBusy,
+  kimiCodeUpdateStatus,
+  kimiCodeUpdateInfo,
+  kimiCodeUpdateError,
   installSource,
   installSettings,
   installSettingsBusy,
@@ -451,11 +455,15 @@ export function ControlCenterView({
     () => sortedBridgeConnectors.filter((connector) => connector.platform !== "telegram"),
     [sortedBridgeConnectors],
   );
-  const installStatusTone = !onboarding?.kimiInstalled
+  const kimiCodeUpdatePresentation = getKimiCodeUpdatePresentation(
+    kimiCodeUpdateStatus,
+    kimiCodeUpdateInfo,
+  );
+  const installStatusTone = kimiCodeUpdatePresentation.tone ?? (!onboarding?.kimiInstalled
     ? "warning"
     : status?.state === "running"
       ? "success"
-      : "neutral";
+      : "neutral");
   const contextMenuStatusTone = !runtimeContextMenuSupported
     ? "neutral"
     : runtimeContextMenuEnabled
@@ -635,7 +643,12 @@ export function ControlCenterView({
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
-  const installPrimaryActionLabel = installReady ? "升级 Kimi" : "一键安装 Kimi Code";
+  const installPrimaryActionLabel = !installReady
+    ? "一键安装 Kimi Code"
+    : kimiCodeUpdatePresentation.primaryLabel;
+  const installBarActionLabel = !installReady
+    ? installPrimaryActionLabel
+    : kimiCodeUpdatePresentation.barLabel;
   async function handleStartOnboardingInstallTask(taskId: InstallTaskId) {
     setExpandedOnboardingCard("install");
     if (!installPrerequisitesReady && (taskId === "quick_install_core" || taskId === "upgrade_kimi")) {
@@ -649,7 +662,12 @@ export function ControlCenterView({
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
       onClick={() => void handleStartOnboardingInstallTask(installPrimaryTaskId)}
-      disabled={installBusy || installProbeBusy || !installPrerequisitesReady}
+      disabled={
+        installBusy ||
+        installProbeBusy ||
+        (installReady && kimiCodeUpdatePresentation.disabled) ||
+        !installPrerequisitesReady
+      }
       title={installPrerequisiteIssues.join("；") || undefined}
     >
       {installPrimaryActionLabel}
@@ -1270,7 +1288,7 @@ export function ControlCenterView({
       id: "install",
       index: "02",
       title: "安装 / 升级 Kimi Code",
-      actionLabel: installPrimaryActionLabel,
+      actionLabel: installBarActionLabel,
       statusTone: installStatusTone,
       complete: installReady,
       primaryAction: installPrimaryAction,
@@ -1404,6 +1422,21 @@ export function ControlCenterView({
       if (stepId === "install") {
         return (
           <div className="cc-onboarding-install-stack">
+            {kimiCodeUpdateInfo ? (
+              <dl className="cc-app-update-meta">
+                <div>
+                  <dt>当前版本</dt>
+                  <dd>v{kimiCodeUpdateInfo.currentVersion}</dd>
+                </div>
+                <div>
+                  <dt>最新版本</dt>
+                  <dd>v{kimiCodeUpdateInfo.latestVersion}</dd>
+                </div>
+              </dl>
+            ) : null}
+            {kimiCodeUpdateError ? (
+              <p className="cc-config-error">{kimiCodeUpdateError}</p>
+            ) : null}
             <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
             <InstallFlowTaskContent
               session={installSessionSnapshot}

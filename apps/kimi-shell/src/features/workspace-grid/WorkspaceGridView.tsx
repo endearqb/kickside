@@ -17,7 +17,6 @@ import {
   resizeGridTrackSizes,
 } from "./gridPresets";
 import {
-  WORKSPACE_GRID_MAX_TOTAL_PANES,
   type AddWorkspacePaneInput,
   useWorkspaceGridStore,
 } from "./gridStore";
@@ -54,7 +53,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const activePaneId = useWorkspaceGridStore((state) => state.activePaneId);
   const maximizedPaneId = useWorkspaceGridStore((state) => state.maximizedPaneId);
   const trackSizes = useWorkspaceGridStore((state) => state.trackSizes);
-  const addPane = useWorkspaceGridStore((state) => state.addPane);
   const removePane = useWorkspaceGridStore((state) => state.removePane);
   const swapSlots = useWorkspaceGridStore((state) => state.swapSlots);
   const maximizePane = useWorkspaceGridStore((state) => state.maximizePane);
@@ -67,7 +65,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     (state) => state.setGridTrackSizes,
   );
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [gridMessage, setGridMessage] = useState("");
   const [resizeDraft, setResizeDraft] = useState<ResizeDraft | null>(null);
   const [resizePreviewTrackSizes, setResizePreviewTrackSizes] =
     useState<WorkspaceGridTrackSizes | null>(null);
@@ -83,7 +80,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     customTrackSizes?.columns ?? createEqualTrackSizes(trackCounts.columns);
   const effectiveRows =
     customTrackSizes?.rows ?? createEqualTrackSizes(trackCounts.rows);
-  const canAddPane = panes.length < WORKSPACE_GRID_MAX_TOTAL_PANES;
   const renderedSlots = maximizedPaneId
     ? [
         {
@@ -121,32 +117,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
     return panes.find((pane) => pane.id === slot.paneId) ?? null;
   }
 
-  async function handleAddPane(slotId: string, kind: WorkspacePaneKind) {
-    setGridMessage("");
-    let input = defaultPaneInput(
-      kind,
-      props.chatRemoteUrl,
-      props.effectiveWorkDir,
-    );
-
-    if (kind === "external") {
-      const externalInput = readExternalPaneInput(props.chatRemoteUrl);
-      if (!externalInput) {
-        setGridMessage("已取消添加外部网页");
-        return;
-      }
-      input = externalInput;
-    }
-
-    const paneId = addPane(input, slotId);
-    if (!paneId) {
-      if (!gridMessage) {
-        setGridMessage("没有可用空窗格，或已达到 6 窗格上限");
-      }
-      return;
-    }
-  }
-
   async function handleConfigurePane(
     paneId: string,
     kind: WorkspacePaneKind,
@@ -161,13 +131,11 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       return;
     }
 
-    setGridMessage("");
     let input =
       kind === "external"
         ? readExternalPaneInput(props.chatRemoteUrl)
         : defaultPaneInput(kind, props.chatRemoteUrl, props.effectiveWorkDir);
     if (!input) {
-      setGridMessage("已取消切换外部网页");
       return;
     }
 
@@ -266,10 +234,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   ) {
     try {
       await openExternalWebviewWindow({ url, title, storageNamespace });
-      setGridMessage("已在独立应用窗口打开");
-    } catch (error) {
-      setGridMessage(`应用窗口打开失败：${String(error)}`);
-    }
+    } catch {}
   }
 
   function handleResizeStart(
@@ -379,11 +344,9 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
             >
               <PaneFrame
                 pane={pane}
-                slotLabel={slot.id}
                 active={Boolean(pane && pane.id === activePaneId)}
                 maximized={Boolean(pane && pane.id === maximizedPaneId)}
                 dragging={isDragSource}
-                canAddPane={canAddPane}
                 themeMode={props.themeMode}
                 codeRemoteUrl={props.codeRemoteUrl}
                 codeFrameKey={props.codeFrameKey}
@@ -407,9 +370,6 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 onChatFrameLoad={props.onChatFrameLoad}
                 onChatFrameError={props.onChatFrameError}
                 onActivate={() => setActivePane(pane?.id ?? null)}
-                onAddPane={(kind) => {
-                  void handleAddPane(slot.id, kind);
-                }}
                 onConfigurePane={(kind, roomId) => {
                   if (pane) {
                     void handleConfigurePane(pane.id, kind, roomId);

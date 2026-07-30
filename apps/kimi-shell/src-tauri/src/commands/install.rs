@@ -5,7 +5,7 @@ use crate::{
     types::{
         InstallFlowCatalog, InstallMirrorHealthReport, InstallProbeStatus, InstallSessionEvent,
         InstallSessionSnapshot, InstallSettingsView, InstallSource, InstallTaskId,
-        PowerShellPreflightSummary,
+        KimiCodeUpdateInfo, PowerShellPreflightSummary,
     },
 };
 
@@ -98,6 +98,13 @@ pub(crate) fn install_nodejs(
 #[tauri::command]
 pub(crate) fn get_install_probe_status(app: AppHandle) -> InstallProbeStatus {
     install_manager::get_install_probe_status(&app)
+}
+
+#[tauri::command]
+pub(crate) async fn check_kimi_code_update(app: AppHandle) -> Result<KimiCodeUpdateInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || install_manager::check_kimi_code_update(&app))
+        .await
+        .map_err(|error| format!("failed to join Kimi Code update check task: {error}"))?
 }
 
 #[tauri::command]

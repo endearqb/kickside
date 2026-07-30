@@ -45,7 +45,7 @@ commands.allow = [
   "load_kimi_code_access_config", "save_kimi_code_access_config", "test_kimi_code_access_config",
   "run_kimi_doctor", "register_install_session_channel", "get_install_flow_catalog",
   "get_install_session_snapshot", "start_install_task", "cancel_install_task",
-  "get_install_probe_status", "get_install_settings", "save_install_settings",
+  "get_install_probe_status", "check_kimi_code_update", "get_install_settings", "save_install_settings",
   "get_install_mirror_health_report", "get_powershell_preflight", "install_kimi_dependencies",
   "install_kimi_code", "upgrade_kimi_code", "uninstall_kimi_code", "install_nodejs",
   "get_context_menu_status", "enable_context_menu", "disable_context_menu", "save_context_menu_labels",

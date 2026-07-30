@@ -28,6 +28,8 @@ import type {
   ControlSectionId,
   DiagnosticsInfo,
   KimiDoctorResult,
+  KimiCodeUpdateInfo,
+  KimiCodeUpdateStatus,
   InstallMirrorHealthReport,
   InstallSettingsView,
   InstallProbeStatus,
@@ -208,6 +210,9 @@ export type ControlCenterViewProps = {
   kimiCodeAccessTestResult: KimiCodeAccessConfigTestResult | null;
   installProbe: InstallProbeStatus | null;
   installProbeBusy: boolean;
+  kimiCodeUpdateStatus: KimiCodeUpdateStatus;
+  kimiCodeUpdateInfo: KimiCodeUpdateInfo | null;
+  kimiCodeUpdateError: string | null;
   installSource: "official" | "mirror";
   installSettings: InstallSettingsView;
   installSettingsBusy: boolean;
@@ -394,6 +399,50 @@ export function getKimiInstallPrerequisiteIssues(
     probe.nodeReady ? null : "需要 Node.js 22.19+",
     probe.gitBashReady ? null : "需要 Git for Windows / Git Bash",
   ].filter((item): item is string => Boolean(item));
+}
+
+export function getKimiCodeUpdatePresentation(
+  status: KimiCodeUpdateStatus,
+  info: KimiCodeUpdateInfo | null,
+) {
+  if (status === "checking") {
+    return {
+      barLabel: "正在检测更新",
+      primaryLabel: "升级 Kimi",
+      tone: null,
+      disabled: true,
+    } as const;
+  }
+  if (status === "available" && info) {
+    return {
+      barLabel: `v${info.latestVersion} 可更新`,
+      primaryLabel: `升级到 v${info.latestVersion}`,
+      tone: "warning",
+      disabled: false,
+    } as const;
+  }
+  if (status === "up_to_date" && info) {
+    return {
+      barLabel: `v${info.currentVersion} · 已是最新版本`,
+      primaryLabel: "已是最新",
+      tone: "success",
+      disabled: true,
+    } as const;
+  }
+  if (status === "error") {
+    return {
+      barLabel: "更新检测失败",
+      primaryLabel: "升级 Kimi",
+      tone: "danger",
+      disabled: false,
+    } as const;
+  }
+  return {
+    barLabel: "升级 Kimi",
+    primaryLabel: "升级 Kimi",
+    tone: null,
+    disabled: false,
+  } as const;
 }
 
 export function bridgePlatformLabel(platform: BridgePlatform): string {

@@ -2387,6 +2387,14 @@ pub struct InstallProbeStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct KimiCodeUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallLogChunk {
     pub task_id: InstallTaskId,
     pub step_id: Option<String>,

@@ -137,15 +137,15 @@ describe("WorkspaceGridView", () => {
     );
   });
 
-  it("does not offer Kimi.com as an empty-pane or header action", () => {
+  it("renders a passive empty state without pane creation actions", () => {
     useWorkspaceGridStore.getState().setPreset("1x3");
     render(<WorkspaceGridView {...props} />);
 
-    expect(screen.queryByRole("button", { name: "Kimi.com" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "切换为 Kimi.com" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Code" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Chat" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Room" })).toBeNull();
+    expect(
+      screen.getByText("暂无窗格，请使用左上角 + 新建窗格"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Code" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Chat" })).toBeNull();
   });
 
   it("does not render the retired Agent Room surface", () => {
@@ -180,53 +180,6 @@ describe("WorkspaceGridView", () => {
       kind: "code",
       sessionId: undefined,
       title: getKimiAssistantDisplayName(),
-      workDir: "D:/work",
-    });
-  });
-
-  it("adds empty Code panes as root Kimi Code Web iframes without sessions", async () => {
-    useWorkspaceGridStore.getState().setPreset("1x3");
-    render(<WorkspaceGridView {...props} />);
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Code" }));
-    });
-
-    const pane = useWorkspaceGridStore
-      .getState()
-      .panes.find((item) => item.id !== "pane-code" && item.kind === "code");
-    expect(createGridSession).not.toHaveBeenCalled();
-    expect(pane).toMatchObject({
-      sessionId: undefined,
-      workDir: "D:/work",
-    });
-    const frame = document.querySelector<HTMLIFrameElement>(
-      'iframe[src="http://127.0.0.1:1234/#token=secret"]',
-    );
-    expect(frame).toBeTruthy();
-    expect(frame?.getAttribute("allow")).toBe("clipboard-write");
-  });
-
-  it("adds panes to the clicked empty fourth slot", async () => {
-    useWorkspaceGridStore.getState().setPreset("2x2");
-    render(<WorkspaceGridView {...props} />);
-
-    const emptyCodeButtons = screen.getAllByRole("button", { name: "Code" });
-    await act(async () => {
-      fireEvent.click(emptyCodeButtons[1]);
-    });
-
-    const state = useWorkspaceGridStore.getState();
-    const bottomLeft = state.slots.find((slot) => slot.id === "bottom-left");
-    const bottomRight = state.slots.find((slot) => slot.id === "bottom-right");
-    const bottomRightPane = state.panes.find(
-      (pane) => pane.id === bottomRight?.paneId,
-    );
-
-    expect(bottomLeft?.paneId).toBeUndefined();
-    expect(bottomRightPane).toMatchObject({
-      kind: "code",
-      sessionId: undefined,
       workDir: "D:/work",
     });
   });
@@ -455,8 +408,9 @@ describe("WorkspaceGridView", () => {
     const externalPane = addExternalPaneToGrid();
     render(<WorkspaceGridView {...props} />);
 
-    const embedHosts = document.querySelectorAll(".workspace-embed");
-    const embedHost = embedHosts[embedHosts.length - 1] as HTMLDivElement;
+    const embedHost = document.querySelector(
+      `[data-workspace-pane-id="${externalPane.id}"] .workspace-embed`,
+    ) as HTMLDivElement;
     Object.defineProperty(embedHost, "getBoundingClientRect", {
       configurable: true,
       value: () => ({

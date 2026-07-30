@@ -159,6 +159,9 @@ function App() {
     kimiCodeAccessTestResult: shell.kimiCodeAccessTestResult,
     installProbe: shell.installProbe,
     installProbeBusy: shell.installProbeBusy,
+    kimiCodeUpdateStatus: shell.kimiCodeUpdateStatus,
+    kimiCodeUpdateInfo: shell.kimiCodeUpdateInfo,
+    kimiCodeUpdateError: shell.kimiCodeUpdateError,
     installSource: shell.installSource,
     installSettings: shell.installSettings,
     installSettingsBusy: shell.installSettingsBusy,
@@ -286,6 +289,7 @@ function App() {
         themeMode={shell.themeMode}
         codeRemoteUrl={shell.remoteUrl}
         chatRemoteUrl={shell.chatRemoteUrl}
+        effectiveWorkDir={shell.status?.effectiveWorkDir}
         statusText={shell.statusText}
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}

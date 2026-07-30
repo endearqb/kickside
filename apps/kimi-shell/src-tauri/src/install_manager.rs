@@ -21,7 +21,7 @@ use crate::{
         InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
         InstallMirrorHealthReport, InstallMirrorPreset, InstallProbeStatus, InstallSessionEvent,
         InstallSessionSnapshot, InstallSessionStage, InstallSessionStatus, InstallSettingsView,
-        InstallSource, InstallTaskDefinition, InstallTaskId, InstallTaskStep,
+        InstallSource, InstallTaskDefinition, InstallTaskId, InstallTaskStep, KimiCodeUpdateInfo,
         PowerShellDiagnosticKind, PowerShellExecutionPolicyItem, PowerShellPreflightSummary,
     },
 };
@@ -34,6 +34,7 @@ const FALLBACK_REPROBE_TIMEOUT_MS: u64 = 120_000;
 const EXECUTION_POLICY_SUGGESTION: &str =
     "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned";
 const KIMI_CODE_NPM_PACKAGE: &str = "@moonshot-ai/kimi-code";
+const KIMI_CODE_LATEST_URL: &str = "https://code.kimi.com/kimi-code/latest";
 const MIN_NODE_VERSION: (u32, u32, u32) = (22, 19, 0);
 const DEFAULT_GIT_MIRROR_RELEASE_PAGES: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/",
@@ -391,6 +392,73 @@ pub fn get_install_probe_status(app: &AppHandle) -> InstallProbeStatus {
         node_ready,
         core_ready: kimi_ready,
     }
+}
+
+pub fn check_kimi_code_update(app: &AppHandle) -> Result<KimiCodeUpdateInfo, String> {
+    let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
+    let kimi_path = kimi_locator::locate(&settings)?;
+    let current_version = query_kimi_version(&kimi_path)?;
+    let latest_version = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("创建 Kimi Code 更新检测客户端失败：{error}"))?
+        .get(KIMI_CODE_LATEST_URL)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|error| format!("获取 Kimi Code 最新版本失败：{error}"))?
+        .text()
+        .map_err(|error| format!("读取 Kimi Code 最新版本失败：{error}"))?;
+    let current = parse_kimi_version(&current_version)
+        .ok_or_else(|| format!("无法识别当前 Kimi Code 版本：{current_version}"))?;
+    let latest = parse_kimi_version(&latest_version)
+        .ok_or_else(|| format!("无法识别 Kimi Code 最新版本：{}", latest_version.trim()))?;
+
+    Ok(KimiCodeUpdateInfo {
+        current_version: format_version(current),
+        latest_version: format_version(latest),
+        available: latest > current,
+    })
+}
+
+fn query_kimi_version(kimi_path: &Path) -> Result<String, String> {
+    let mut command = Command::new(kimi_path);
+    command_utils::configure_kimi_query_command(&mut command);
+    let output = command
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("执行 `{} --version` 失败：{error}", kimi_path.display()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        return Ok(if stdout.is_empty() { stderr } else { stdout });
+    }
+    Err(format!(
+        "`{} --version` 执行失败：{}",
+        kimi_path.display(),
+        if stderr.is_empty() { stdout } else { stderr }
+    ))
+}
+
+fn parse_kimi_version(value: &str) -> Option<(u64, u64, u64)> {
+    value.split_whitespace().find_map(|part| {
+        let candidate = part
+            .rsplit_once('@')
+            .map_or(part, |(_, version)| version)
+            .trim_start_matches(['v', 'V'])
+            .split(['-', '+'])
+            .next()?;
+        let mut numbers = candidate.split('.');
+        let version = (
+            numbers.next()?.parse().ok()?,
+            numbers.next()?.parse().ok()?,
+            numbers.next()?.parse().ok()?,
+        );
+        numbers.next().is_none().then_some(version)
+    })
+}
+
+fn format_version(version: (u64, u64, u64)) -> String {
+    format!("{}.{}.{}", version.0, version.1, version.2)
 }
 
 fn build_install_settings_view(settings: &AppSettings) -> InstallSettingsView {
@@ -1991,6 +2059,18 @@ fn format_failure_summary(step_title: &str, exit_code: Option<i32>, detail: &str
 mod tests {
     use super::*;
     use crate::types::InstallTaskGroup;
+
+    #[test]
+    fn kimi_version_parser_accepts_cli_and_release_formats() {
+        assert_eq!(parse_kimi_version("0.30.0"), Some((0, 30, 0)));
+        assert_eq!(parse_kimi_version("kimi-code v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(
+            parse_kimi_version("@moonshot-ai/kimi-code@2.10.4"),
+            Some((2, 10, 4))
+        );
+        assert_eq!(parse_kimi_version("not-a-version"), None);
+        assert!((0, 30, 1) > parse_kimi_version("0.30.0").unwrap());
+    }
 
     #[test]
     fn quick_core_uses_single_npm_kimi_step() {

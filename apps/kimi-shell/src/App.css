@@ -77,7 +77,7 @@
 
 .icon-btn.titlebar-nav-btn,
 .titlebar .icon-btn.mini,
-.icon-btn.titlebar-layout-btn,
+.icon-btn.titlebar-pane-create-btn,
 .icon-btn.titlebar-browser-btn,
 .icon-btn.titlebar-settings-btn {
   width: 24px;
@@ -85,7 +85,7 @@
   height: 24px;
 }
 
-.icon-btn.titlebar-layout-btn.is-active,
+.icon-btn.titlebar-pane-create-btn.is-active,
 .icon-btn.titlebar-browser-btn.is-active,
 .icon-btn.titlebar-settings-btn:hover {
   color: var(--text-primary);
@@ -114,6 +114,7 @@
   box-shadow: 0 12px 28px color-mix(in srgb, #000 16%, transparent);
 }
 
+.titlebar-pane-popover,
 .titlebar-browser-popover {
   position: absolute;
   z-index: 30;
@@ -128,6 +129,7 @@
   box-shadow: 0 12px 28px color-mix(in srgb, #000 16%, transparent);
 }
 
+.titlebar-pane-option,
 .titlebar-browser-option {
   appearance: none;
   min-width: 58px;
@@ -146,51 +148,17 @@
   cursor: pointer;
 }
 
+.titlebar-pane-option:hover:not(:disabled),
 .titlebar-browser-option:hover:not(:disabled) {
   color: var(--text-primary);
   border-color: var(--chrome-border);
   background: color-mix(in srgb, var(--text-primary) 7%, var(--surface));
 }
 
+.titlebar-pane-option:disabled,
 .titlebar-browser-option:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-}
-
-.titlebar-layout-option {
-  appearance: none;
-  min-width: 0;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  gap: 2px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  cursor: pointer;
-}
-
-.titlebar-layout-option:hover,
-.titlebar-layout-option.is-active {
-  color: var(--text-primary);
-  border-color: var(--chrome-border);
-  background: color-mix(in srgb, var(--text-primary) 7%, var(--surface));
-}
-
-.titlebar-layout-option-count {
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.titlebar-layout-option-label {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
 }
 
 .pane-shelf-root { position: relative; }
@@ -2699,8 +2667,7 @@ input:focus {
 
 .workspace-grid-pane-empty {
   place-items: center;
-  grid-template-rows: auto auto;
-  gap: 12px;
+  grid-template-rows: auto;
   padding: 16px;
   border-style: dashed;
   background: color-mix(in srgb, var(--surface-muted) 58%, var(--surface));
@@ -2712,47 +2679,9 @@ input:focus {
   text-align: center;
 }
 
-.workspace-grid-empty-copy span {
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
 .workspace-grid-empty-copy strong {
   color: var(--text-secondary);
   font-size: 13px;
-}
-
-.workspace-grid-empty-actions {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.workspace-grid-empty-btn {
-  appearance: none;
-  min-height: 28px;
-  border: 1px solid var(--chrome-border);
-  border-radius: 6px;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-primary);
-  background: var(--surface);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.workspace-grid-empty-btn:disabled {
-  opacity: 0.46;
-  cursor: not-allowed;
-}
-
-.workspace-grid-empty-btn:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--chrome-border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 
 .agent-room-pane {

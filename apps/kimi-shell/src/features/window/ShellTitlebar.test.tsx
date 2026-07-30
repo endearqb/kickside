@@ -11,6 +11,7 @@ const titlebarProps = {
   themeMode: "light" as const,
   codeRemoteUrl: "http://127.0.0.1:1234/#token=secret",
   chatRemoteUrl: "https://www.kimi.com/",
+  effectiveWorkDir: "D:/work",
   statusText: "运行中",
   shellScreenLabel: "工作区",
   actionBusy: false,
@@ -40,18 +41,31 @@ describe("ShellTitlebar", () => {
     cleanup();
   });
 
-  it("selects workspace grid layouts from a titlebar popover", () => {
+  it("creates Code and Chat panes from the titlebar menu", () => {
     render(<ShellTitlebar {...titlebarProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /选择工作区布局/ }));
+    expect(screen.queryByRole("button", { name: /选择工作区布局/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
 
-    expect(screen.getByRole("menu", { name: "选择工作区布局" })).toBeTruthy();
-    expect(screen.getAllByRole("menuitemradio")).toHaveLength(6);
+    expect(screen.getByRole("menu", { name: "新建窗格" })).toBeTruthy();
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /三窗布局/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Code" }));
 
-    expect(useWorkspaceGridStore.getState().preset).toBe("1x3");
-    expect(screen.queryByRole("menu", { name: "选择工作区布局" })).toBeNull();
+    const state = useWorkspaceGridStore.getState();
+    const firstPane = state.panes.find(
+      (pane) => pane.id === state.slots[0]?.paneId,
+    );
+    expect(state.preset).toBe("1x3");
+    expect(firstPane).toMatchObject({ kind: "code", workDir: "D:/work" });
+    expect(screen.queryByRole("menu", { name: "新建窗格" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Chat" }));
+    const nextState = useWorkspaceGridStore.getState();
+    expect(
+      nextState.panes.find((pane) => pane.id === nextState.slots[0]?.paneId)?.kind,
+    ).toBe("chat");
   });
 
   it("opens Code and Chat from the titlebar browser menu", () => {
@@ -77,9 +91,13 @@ describe("ShellTitlebar", () => {
   it("closes each titlebar menu when clicking elsewhere in the app", () => {
     render(<ShellTitlebar {...titlebarProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /选择工作区布局/ }));
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
     fireEvent.pointerDown(document.body);
-    expect(screen.queryByRole("menu", { name: "选择工作区布局" })).toBeNull();
+    expect(screen.queryByRole("menu", { name: "新建窗格" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "新建窗格" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /打开窗格库/ }));
     fireEvent.pointerDown(document.body);
@@ -88,6 +106,19 @@ describe("ShellTitlebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "在浏览器打开" }));
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("menu", { name: "在浏览器打开" })).toBeNull();
+  });
+
+  it("disables pane creation at the twelve-pane total limit", () => {
+    while (useWorkspaceGridStore.getState().panes.length < 12) {
+      useWorkspaceGridStore.getState().addPane({ kind: "chat" });
+    }
+
+    render(<ShellTitlebar {...titlebarProps} />);
+
+    const button = screen.getByRole("button", {
+      name: "已达到 12 个窗格上限",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
   });
 
   it("shows only the current session directory name in the pane shelf", () => {

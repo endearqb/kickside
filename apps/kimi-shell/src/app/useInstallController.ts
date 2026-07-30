@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import { createDefaultInstallSettingsView } from "@/app/shellControllerDefaults";
@@ -8,6 +8,8 @@ import type {
   InstallLogChunk,
   InstallMirrorHealthReport,
   InstallProbeStatus,
+  KimiCodeUpdateInfo,
+  KimiCodeUpdateStatus,
   InstallSessionEvent,
   InstallSessionSnapshot,
   InstallSettingsView,
@@ -55,6 +57,11 @@ export function useInstallController({
   const [installMessage, setInstallMessage] = useState("");
   const [installProbeBusy, setInstallProbeBusy] = useState(false);
   const [installProbe, setInstallProbe] = useState<InstallProbeStatus | null>(null);
+  const [kimiCodeUpdateStatus, setKimiCodeUpdateStatus] =
+    useState<KimiCodeUpdateStatus>("idle");
+  const [kimiCodeUpdateInfo, setKimiCodeUpdateInfo] =
+    useState<KimiCodeUpdateInfo | null>(null);
+  const [kimiCodeUpdateError, setKimiCodeUpdateError] = useState<string | null>(null);
   const [installFlowCatalog, setInstallFlowCatalog] =
     useState<InstallFlowCatalog | null>(null);
   const [installSessionSnapshot, setInstallSessionSnapshot] =
@@ -66,12 +73,30 @@ export function useInstallController({
   const [installCommandsBusy, setInstallCommandsBusy] = useState(false);
   const [installCommandCatalog, setInstallCommandCatalog] =
     useState<InstallCommandCatalog | null>(null);
+  const startupProbeStartedRef = useRef(false);
+  const refreshedUpgradeRef = useRef<string | null>(null);
 
   async function refreshInstallProbe() {
     const data = await invoke<InstallProbeStatus>("get_install_probe_status");
     setInstallProbe(data);
     return data;
   }
+
+  const checkKimiCodeUpdate = useCallback(async () => {
+    setKimiCodeUpdateStatus("checking");
+    setKimiCodeUpdateError(null);
+    try {
+      const info = await invoke<KimiCodeUpdateInfo>("check_kimi_code_update");
+      setKimiCodeUpdateInfo(info);
+      setKimiCodeUpdateStatus(info.available ? "available" : "up_to_date");
+      return info;
+    } catch (error) {
+      setKimiCodeUpdateStatus("error");
+      setKimiCodeUpdateInfo(null);
+      setKimiCodeUpdateError(String(error));
+      return null;
+    }
+  }, []);
 
   async function handleRefreshInstallProbe() {
     setInstallProbeBusy(true);
@@ -80,6 +105,13 @@ export function useInstallController({
     try {
       const data = await refreshInstallProbe();
       setInstallMessage("");
+      if (data.kimiReady) {
+        await checkKimiCodeUpdate();
+      } else {
+        setKimiCodeUpdateStatus("idle");
+        setKimiCodeUpdateInfo(null);
+        setKimiCodeUpdateError(null);
+      }
       return data;
     } catch (error) {
       const detail = String(error);
@@ -90,6 +122,26 @@ export function useInstallController({
       setInstallProbeBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!tauriRuntime || !enabled || startupProbeStartedRef.current) {
+      return;
+    }
+    startupProbeStartedRef.current = true;
+    setInstallProbeBusy(true);
+    void refreshInstallProbe()
+      .then(async (probe) => {
+        if (probe.kimiReady) {
+          await checkKimiCodeUpdate();
+        }
+      })
+      .catch((error) => {
+        setInstallMessage(String(error));
+      })
+      .finally(() => {
+        setInstallProbeBusy(false);
+      });
+  }, [checkKimiCodeUpdate, enabled, tauriRuntime]);
 
   async function refreshInstallSettings() {
     const data = await invoke<InstallSettingsView>("get_install_settings");
@@ -281,6 +333,24 @@ export function useInstallController({
     }
   }
 
+  useEffect(() => {
+    const finishedAt = installSessionSnapshot.finishedAt;
+    if (
+      installSessionSnapshot.taskId !== "upgrade_kimi" ||
+      installSessionSnapshot.status !== "succeeded" ||
+      !finishedAt ||
+      refreshedUpgradeRef.current === finishedAt
+    ) {
+      return;
+    }
+    refreshedUpgradeRef.current = finishedAt;
+    void handleRefreshInstallProbe();
+  }, [
+    installSessionSnapshot.finishedAt,
+    installSessionSnapshot.status,
+    installSessionSnapshot.taskId,
+  ]);
+
   async function handleQuickInstallCore() {
     await handleStartInstallTask("quick_install_core");
   }
@@ -318,6 +388,9 @@ export function useInstallController({
   return {
     installProbe,
     installProbeBusy,
+    kimiCodeUpdateStatus,
+    kimiCodeUpdateInfo,
+    kimiCodeUpdateError,
     installSource,
     installSettings,
     installSettingsBusy,

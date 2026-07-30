@@ -39,11 +39,9 @@ const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
 
 interface PaneFrameProps {
   pane: WorkspacePane | null;
-  slotLabel: string;
   active: boolean;
   maximized: boolean;
   dragging: boolean;
-  canAddPane: boolean;
   themeMode: Theme;
   codeRemoteUrl: string | null;
   codeFrameKey: string;
@@ -69,7 +67,6 @@ interface PaneFrameProps {
   onChatFrameLoad: () => void;
   onChatFrameError: () => void;
   onActivate: () => void;
-  onAddPane: (kind: WorkspacePaneKind) => void;
   onConfigurePane: (kind: WorkspacePaneKind, roomId?: string) => void;
   onRemovePane: () => void;
   onResumePane: () => void;
@@ -79,11 +76,9 @@ interface PaneFrameProps {
 
 export function PaneFrame({
   pane,
-  slotLabel,
   active,
   maximized,
   dragging,
-  canAddPane,
   themeMode,
   codeRemoteUrl,
   codeFrameKey,
@@ -105,7 +100,6 @@ export function PaneFrame({
   onChatFrameLoad,
   onChatFrameError,
   onActivate,
-  onAddPane,
   onConfigurePane,
   onRemovePane,
   onResumePane,
@@ -152,28 +146,7 @@ export function PaneFrame({
     return (
       <div className="workspace-grid-pane workspace-grid-pane-empty">
         <div className="workspace-grid-empty-copy">
-          <span>{slotLabel}</span>
-          <strong>空窗格</strong>
-        </div>
-        <div className="workspace-grid-empty-actions">
-          <button
-            type="button"
-            className="workspace-grid-empty-btn"
-            onClick={() => onAddPane("code")}
-            disabled={!canAddPane}
-          >
-            <Code2 size={14} aria-hidden />
-            Code
-          </button>
-          <button
-            type="button"
-            className="workspace-grid-empty-btn"
-            onClick={() => onAddPane("chat")}
-            disabled={!canAddPane}
-          >
-            <MessageCircle size={14} aria-hidden />
-            Chat
-          </button>
+          <strong>暂无窗格，请使用左上角 + 新建窗格</strong>
         </div>
       </div>
     );

@@ -116,20 +116,76 @@ describe("workspace grid store", () => {
     expect(store.getState().activePaneId).toBe("pane-code");
   });
 
-  it("adds a pane directly to the requested empty slot", () => {
+  it("prepends a new pane and grows a single-pane layout", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
-    store.getState().setPreset("2x2");
-    const paneId = store.getState().addPane({ kind: "chat" }, "bottom-right");
+    store.getState().setActivePane("pane-code");
+    store.getState().setPreset("single");
+    const paneId = store.getState().addPane({ kind: "chat" });
     const state = store.getState();
 
     expect(paneId).toEqual(expect.stringContaining("pane-chat-"));
-    expect(state.slots.map((slot) => [slot.id, slot.paneId])).toEqual([
-      ["top-left", "pane-code"],
-      ["top-right", "pane-chat"],
-      ["bottom-left", undefined],
-      ["bottom-right", paneId],
+    expect(state.preset).toBe("1x2");
+    expect(state.slots.map((slot) => slot.paneId)).toEqual([
+      paneId,
+      "pane-code",
     ]);
+    expect(state.activePaneId).toBe(paneId);
+  });
+
+  it("keeps six visible panes and shelves the previous last pane", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    while (store.getState().slots.filter((slot) => slot.paneId).length < 6) {
+      store.getState().addPane({ kind: "code" });
+    }
+    const previousVisibleIds = store
+      .getState()
+      .slots.map((slot) => slot.paneId)
+      .filter((id): id is string => Boolean(id));
+
+    const paneId = store.getState().addPane({ kind: "chat" });
+    const state = store.getState();
+    const visibleIds = state.slots
+      .map((slot) => slot.paneId)
+      .filter((id): id is string => Boolean(id));
+
+    expect(state.preset).toBe("2x3");
+    expect(visibleIds).toEqual([paneId, ...previousVisibleIds.slice(0, 5)]);
+    expect(state.panes.some((pane) => pane.id === previousVisibleIds[5])).toBe(true);
+    expect(visibleIds).not.toContain(previousVisibleIds[5]);
+  });
+
+  it("compacts panes and shrinks the layout after removing a visible pane", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().addPane({ kind: "code" });
+    store.getState().addPane({ kind: "chat" });
+    const visibleIds = store
+      .getState()
+      .slots.map((slot) => slot.paneId)
+      .filter((id): id is string => Boolean(id));
+
+    store.getState().removePane(visibleIds[1]!);
+
+    expect(store.getState().preset).toBe("1x3");
+    expect(store.getState().slots.map((slot) => slot.paneId)).toEqual([
+      visibleIds[0],
+      visibleIds[2],
+      visibleIds[3],
+    ]);
+  });
+
+  it("keeps an empty single layout after removing the last visible pane", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    store.getState().setActivePane("pane-code");
+    store.getState().setPreset("single");
+
+    store.getState().removePane("pane-code");
+
+    expect(store.getState().preset).toBe("single");
+    expect(store.getState().slots).toEqual([
+      { id: "main", area: "main", paneId: undefined },
+    ]);
+    expect(store.getState().activePaneId).toBeNull();
   });
 
   it("restores hidden panes when expanding the grid preset", () => {
@@ -355,20 +411,12 @@ describe("workspace grid store", () => {
       kind: "external",
       url: "https://kimi.com/chat#token=secret",
     });
-
-    expect(paneId).toBeNull();
-
-    store.getState().setPreset("1x3");
-    const createdPaneId = store.getState().addPane({
-      kind: "external",
-      url: "https://kimi.com/chat#token=secret",
-    });
     const persisted = toPersistedWorkspaceGridState(store.getState());
-    const lastPane = persisted.panes[persisted.panes.length - 1];
+    const createdPane = persisted.panes.find((pane) => pane.id === paneId);
 
-    expect(createdPaneId).toEqual(expect.stringContaining("pane-external-"));
-    expect(lastPane?.url).toBe("https://kimi.com/chat");
-    expect(lastPane?.storageNamespace).toEqual(
+    expect(paneId).toEqual(expect.stringContaining("pane-external-"));
+    expect(createdPane?.url).toBe("https://kimi.com/chat");
+    expect(createdPane?.storageNamespace).toEqual(
       expect.stringContaining("workspace-grid-pane-external-"),
     );
   });
@@ -409,18 +457,19 @@ describe("workspace grid store", () => {
     expect(persisted.panes[0]?.theme).toBe("dark");
   });
 
-  it("caps panes at the v1 resource limit", () => {
+  it("caps newly created panes at the total resource limit", () => {
     const store = createWorkspaceGridStore(undefined, null);
 
-    store.getState().setPreset("2x3");
-    for (let index = 0; index < WORKSPACE_GRID_MAX_PANES; index += 1) {
+    while (store.getState().panes.length < WORKSPACE_GRID_MAX_TOTAL_PANES) {
       store.getState().addPane({ kind: "external", url: "https://kimi.com/" });
     }
 
-    expect(store.getState().panes).toHaveLength(WORKSPACE_GRID_MAX_PANES);
+    const slots = store.getState().slots;
+    expect(store.getState().panes).toHaveLength(WORKSPACE_GRID_MAX_TOTAL_PANES);
     expect(
       store.getState().addPane({ kind: "external", url: "https://kimi.com/" }),
     ).toBeNull();
+    expect(store.getState().slots).toBe(slots);
   });
 
   it("mounts newly added panes eagerly", () => {

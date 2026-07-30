@@ -57,7 +57,7 @@ type BrowserStorage = Pick<Storage, "getItem" | "setItem">;
 
 export interface WorkspaceGridActions {
   setPreset: (preset: WorkspaceGridPresetId) => void;
-  addPane: (pane: AddWorkspacePaneInput, targetSlotId?: string) => string | null;
+  addPane: (pane: AddWorkspacePaneInput) => string | null;
   openSessionInWorkspaceGrid: (
     input: OpenWorkspaceSessionInput,
   ) => WorkspacePanePlacement;
@@ -288,7 +288,7 @@ function createWorkspaceGridSlice(
         };
       });
     },
-    addPane(input, targetSlotId) {
+    addPane(input) {
       const state = get();
       const roomId = sanitizeRoomId(input.roomId);
       if (input.kind === "agent_room" && roomId) {
@@ -296,31 +296,35 @@ function createWorkspaceGridSlice(
           (pane) => pane.kind === "agent_room" && pane.roomId === roomId,
         );
         if (existing) {
-          get().showPane(existing.id, targetSlotId);
+          get().showPane(existing.id);
           return existing.id;
         }
       }
       if (state.panes.length >= WORKSPACE_GRID_MAX_TOTAL_PANES) {
         return null;
       }
-      const targetSlot = targetSlotId
-        ? state.slots.find((slot) => slot.id === targetSlotId && !slot.paneId)
-        : state.slots.find((slot) => !slot.paneId);
-      if (!targetSlot) {
-        return null;
-      }
 
       const now = Date.now();
       const paneId = createPaneId(input.kind);
       const pane = createWorkspacePane(input, paneId, now);
+      const visiblePaneIds = state.slots
+        .map((slot) => slot.paneId)
+        .filter((id): id is string => Boolean(id));
+      const nextVisiblePaneIds = [paneId, ...visiblePaneIds].slice(
+        0,
+        WORKSPACE_GRID_MAX_VISIBLE_PANES,
+      );
+      const preset = presetForPaneCount(nextVisiblePaneIds.length);
 
       update(set, storage, (current) => ({
         ...current,
         panes: [...current.panes, pane],
-        slots: current.slots.map((slot) =>
-          slot.id === targetSlot.id ? { ...slot, paneId } : slot,
-        ),
+        preset,
+        slots: materializeGridSlots(preset, nextVisiblePaneIds),
         activePaneId: paneId,
+        maximizedPaneId: null,
+        trackSizes:
+          preset === current.preset ? current.trackSizes : undefined,
         updatedAt: now,
       }));
 
@@ -499,12 +503,13 @@ function createWorkspaceGridSlice(
     removePane(paneId) {
       update(set, storage, (state) => {
         const panes = state.panes.filter((pane) => pane.id !== paneId);
-        const slots = state.slots.map((slot) =>
-          slot.paneId === paneId ? { ...slot, paneId: undefined } : slot,
-        );
-        const visiblePaneIds = slots
+        const wasVisible = state.slots.some((slot) => slot.paneId === paneId);
+        const visiblePaneIds = state.slots
           .map((slot) => slot.paneId)
-          .filter((id): id is string => Boolean(id));
+          .filter((id): id is string => Boolean(id) && id !== paneId);
+        const preset = wasVisible
+          ? presetForPaneCount(Math.max(visiblePaneIds.length, 1))
+          : state.preset;
         const activePaneId =
           state.activePaneId === paneId
             ? (visiblePaneIds[0] ?? null)
@@ -512,10 +517,17 @@ function createWorkspaceGridSlice(
         return {
           ...state,
           panes,
-          slots,
+          preset,
+          slots: wasVisible
+            ? materializeGridSlots(preset, visiblePaneIds)
+            : state.slots,
           activePaneId,
           maximizedPaneId:
             state.maximizedPaneId === paneId ? null : state.maximizedPaneId,
+          trackSizes:
+            wasVisible && preset !== state.preset
+              ? undefined
+              : state.trackSizes,
           updatedAt: Date.now(),
         };
       });

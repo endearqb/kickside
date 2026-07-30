@@ -168,6 +168,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         install::start_install_task,
         install::cancel_install_task,
         install::get_install_probe_status,
+        install::check_kimi_code_update,
         install::get_install_settings,
         install::save_install_settings,
         install::get_install_mirror_health_report,

@@ -1367,6 +1367,19 @@ export interface InstallProbeStatus {
   coreReady: boolean;
 }
 
+export type KimiCodeUpdateStatus =
+  | "idle"
+  | "checking"
+  | "up_to_date"
+  | "available"
+  | "error";
+
+export interface KimiCodeUpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+}
+
 export type AppUpdateStatus =
   | "idle"
   | "checking"

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Code2,
-  Columns2,
   Copy,
   ExternalLink,
   MessageCircle,
   Minus,
   Monitor,
+  Plus,
   RefreshCcw,
   Settings,
   Square,
@@ -16,27 +16,19 @@ import { Button } from "@/components/ui/button";
 import { KimiAssistantBrand } from "@/components/kimi-code-brand";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { GRID_PRESETS } from "@/features/workspace-grid/gridPresets";
 import { PaneShelf } from "@/features/workspace-grid/PaneShelf";
-import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+import {
+  WORKSPACE_GRID_MAX_TOTAL_PANES,
+  useWorkspaceGridStore,
+} from "@/features/workspace-grid/gridStore";
 import type {
   BackendState,
   Screen,
   Theme,
 } from "@/app/types";
-import type { WorkspaceGridPresetId } from "@/features/workspace-grid/gridTypes";
 
 const DRAG_BLOCK_SELECTOR =
   ".titlebar-actions, .titlebar-window-controls, button, a, input, textarea, select, [role='button'], [data-no-drag='true']";
-const WORKSPACE_GRID_PRESET_ORDER: WorkspaceGridPresetId[] = [
-  "single",
-  "1x2",
-  "1x3",
-  "2x2",
-  "2x3-5",
-  "2x3",
-];
-
 function isTitlebarDragTarget(target: EventTarget | null): boolean {
   return !(target instanceof Element && target.closest(DRAG_BLOCK_SELECTOR));
 }
@@ -47,6 +39,7 @@ type ShellTitlebarProps = {
   themeMode: Theme;
   codeRemoteUrl: string | null;
   chatRemoteUrl: string;
+  effectiveWorkDir?: string;
   statusText: string;
   shellScreenLabel: string;
   actionBusy: boolean;
@@ -71,6 +64,7 @@ export function ShellTitlebar({
   themeMode,
   codeRemoteUrl,
   chatRemoteUrl,
+  effectiveWorkDir,
   statusText,
   shellScreenLabel,
   actionBusy,
@@ -88,24 +82,24 @@ export function ShellTitlebar({
   onCloseWindow,
   onTitlebarDoubleClick,
 }: ShellTitlebarProps) {
-  const workspaceGridPreset = useWorkspaceGridStore((state) => state.preset);
-  const setWorkspaceGridPreset = useWorkspaceGridStore((state) => state.setPreset);
-  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const panes = useWorkspaceGridStore((state) => state.panes);
+  const addPane = useWorkspaceGridStore((state) => state.addPane);
+  const [paneMenuOpen, setPaneMenuOpen] = useState(false);
   const [browserMenuOpen, setBrowserMenuOpen] = useState(false);
-  const layoutMenuRef = useRef<HTMLDivElement>(null);
+  const paneMenuRef = useRef<HTMLDivElement>(null);
   const browserMenuRef = useRef<HTMLDivElement>(null);
-  const layoutToggleLabel = `选择工作区布局，当前 ${GRID_PRESETS[workspaceGridPreset].label}`;
+  const canCreatePane = panes.length < WORKSPACE_GRID_MAX_TOTAL_PANES;
 
   useEffect(() => {
-    if (!layoutMenuOpen && !browserMenuOpen) return;
+    if (!paneMenuOpen && !browserMenuOpen) return;
     const closeOutside = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!layoutMenuRef.current?.contains(target)) setLayoutMenuOpen(false);
+      if (!paneMenuRef.current?.contains(target)) setPaneMenuOpen(false);
       if (!browserMenuRef.current?.contains(target)) setBrowserMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setLayoutMenuOpen(false);
+        setPaneMenuOpen(false);
         setBrowserMenuOpen(false);
       }
     };
@@ -115,7 +109,12 @@ export function ShellTitlebar({
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [browserMenuOpen, layoutMenuOpen]);
+  }, [browserMenuOpen, paneMenuOpen]);
+
+  const createPane = (kind: "code" | "chat") => {
+    addPane(kind === "code" ? { kind, workDir: effectiveWorkDir } : { kind });
+    setPaneMenuOpen(false);
+  };
 
   const handleDragZoneMouseDown = (event: MouseEvent<HTMLElement>) => {
     if (!tauriRuntime) return;
@@ -156,40 +155,37 @@ export function ShellTitlebar({
           />
         ) : null}
         {screen === "workspace" ? (
-          <div ref={layoutMenuRef} className="titlebar-layout-menu-wrap">
+          <div ref={paneMenuRef} className="titlebar-layout-menu-wrap">
             <IconButton
-              icon={<Columns2 size={14} />}
-              label={layoutToggleLabel}
+              icon={<Plus size={14} />}
+              label={canCreatePane ? "新建窗格" : "已达到 12 个窗格上限"}
               onClick={() => {
                 setBrowserMenuOpen(false);
-                setLayoutMenuOpen((current) => !current);
+                setPaneMenuOpen((current) => !current);
               }}
-              className={`ghost mini titlebar-layout-btn ${layoutMenuOpen ? "is-active" : ""}`}
+              disabled={!canCreatePane}
+              className={`ghost mini titlebar-pane-create-btn ${paneMenuOpen ? "is-active" : ""}`}
             />
-            {layoutMenuOpen ? (
-              <div className="titlebar-layout-popover" role="menu" aria-label="选择工作区布局">
-                {WORKSPACE_GRID_PRESET_ORDER.map((presetId) => {
-                  const preset = GRID_PRESETS[presetId];
-                  const active = presetId === workspaceGridPreset;
-                  return (
-                    <button
-                      type="button"
-                      key={presetId}
-                      className={`titlebar-layout-option${active ? " is-active" : ""}`}
-                      role="menuitemradio"
-                      aria-checked={active}
-                      onClick={() => {
-                        setWorkspaceGridPreset(presetId);
-                        setLayoutMenuOpen(false);
-                      }}
-                    >
-                      <span className="titlebar-layout-option-count">
-                        {preset.slots.length}
-                      </span>
-                      <span className="titlebar-layout-option-label">{preset.label}</span>
-                    </button>
-                  );
-                })}
+            {paneMenuOpen ? (
+              <div className="titlebar-pane-popover" role="menu" aria-label="新建窗格">
+                <button
+                  type="button"
+                  className="titlebar-pane-option"
+                  role="menuitem"
+                  onClick={() => createPane("code")}
+                >
+                  <Code2 size={14} aria-hidden />
+                  <span>Code</span>
+                </button>
+                <button
+                  type="button"
+                  className="titlebar-pane-option"
+                  role="menuitem"
+                  onClick={() => createPane("chat")}
+                >
+                  <MessageCircle size={14} aria-hidden />
+                  <span>Chat</span>
+                </button>
               </div>
             ) : null}
           </div>
@@ -201,7 +197,7 @@ export function ShellTitlebar({
               icon={<ExternalLink size={14} />}
               label="在浏览器打开"
               onClick={() => {
-                setLayoutMenuOpen(false);
+                setPaneMenuOpen(false);
                 setBrowserMenuOpen((current) => !current);
               }}
               className={`ghost mini titlebar-browser-btn ${browserMenuOpen ? "is-active" : ""}`}

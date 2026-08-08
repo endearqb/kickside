@@ -15,12 +15,12 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows 桌面壳程序，用于�
 - Workspace Grid V2 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，标题栏通过 `+` 直接新建 Code/Chat 窗格；新窗格排在第一格，布局按可见窗格数量自动扩展或在删除后缩减，支持 1/2/3/4/5/6 个可见窗格、最多 12 个总窗格与 Pane Shelf 收纳。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用；V2 兼容输入保留一个发布周期后退出。
 - 后端守护与健康探测：优先复用同一 `KIMI_CODE_HOME` 下健康的既有 Kimi Server，否则拉起 `kimi web --no-open --port <port>`；读取 `server.token` 并用 `#token=` 接入 workspace
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
-- 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、API 配置、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；启动后会静默探测 Kimi Code 安装环境与官方最新版本，并在安装/升级设置 bar 提示可用更新；API 配置与微信/飞书扫码均在设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
+- 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；启动后会静默探测 Kimi Code 安装环境与官方最新版本，并在安装/升级设置 bar 提示可用更新；API、模型与服务编辑统一引导到 Kimi Code Web 内置设置，微信/飞书扫码仍在对应设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
 - Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的卡片目录；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
-- Chat 集成收口：跨站链接跳系统浏览器，Windows 安装版下载使用原生“另存为”
+- Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器，Windows 安装版下载使用原生“另存为”
 - 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“Kimi 小助手”中文名称并可编辑；打开请求创建独立 session，不重启运行中的后端
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
-- API 配置：使用 `managed:kimi-code` 与认证后的 `/models` 同步 `kimi-code/*` 模型；候选 `config.toml` 通过 Kimi Doctor 后原子保存，并通过可选 opaque revision 拒绝覆盖外部更新
+- 认证与 API 诊断：控制中心只读展示当前认证模式、Kimi 登录和 Provider API 健康状态；API、模型与 Search / Fetch 服务编辑由 Kimi Code Web 内置设置负责
 - 安全退出流程：退出读秒窗 + 状态反馈
 - 本体更新：安装版启动后后台检测一次，设置页可手动重检并在用户确认后下载签名更新；安装前停止 Kimi 后端与 IM Bridge
 

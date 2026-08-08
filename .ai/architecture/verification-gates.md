@@ -29,6 +29,7 @@ go test ./...
 
 P5 发布前仍需要人工或专用环境验证：
 
+- Windows 未登录状态启动或在 Kimi Code Web 触发 OAuth，系统默认浏览器必须打开验证页；完成验证并刷新后，控制中心仍能展示 `authMode`、Kimi 登录健康、Provider API 健康及诊断摘要。
 - Telegram 私聊/群聊 prompt、stream、approval 与 Bridge 重启后的 pending approval 恢复。
 - Feishu DM/group/thread prompt、streaming card、approval card 与 Bridge 重启后的 pending approval 恢复。
 - Weixin 若继续保留在发布范围内，至少验证最小 inbound/outbound 链路；当前不提供 in-chat approval callback。

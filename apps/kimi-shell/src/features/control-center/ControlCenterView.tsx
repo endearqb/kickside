@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Shield,
   ShieldOff,
-  SlidersHorizontal,
   Sparkles,
   X,
 } from "lucide-react";
@@ -178,11 +177,6 @@ export function ControlCenterView({
   kimiPathInput,
   workDirInput,
   kimiCodeAccessView,
-  kimiCodeAccessDraft,
-  kimiCodeAccessBusy,
-  kimiCodeAccessDirty,
-  kimiCodeAccessTesting,
-  kimiCodeAccessTestResult,
   installProbe,
   installProbeBusy,
   kimiCodeUpdateStatus,
@@ -227,7 +221,6 @@ export function ControlCenterView({
   onRetry,
   onOpenLogs,
   onOpenFolder,
-  onOpenKimiConfigDir,
   onPickKimiPath,
   onSavePathAndRetry,
   onEnableContextMenu,
@@ -272,10 +265,6 @@ export function ControlCenterView({
   onUpdateSkill,
   onUninstallSkill,
   onRecoverWorkspaceSkill,
-  onRefreshKimiCodeAccessConfig,
-  onKimiCodeAccessDraftChange,
-  onSaveKimiCodeAccessConfig,
-  onTestKimiCodeAccessConfig,
   onInstallSourceChange,
   onSaveInstallSettings,
   onRefreshPowerShellPreflight,
@@ -470,6 +459,10 @@ export function ControlCenterView({
       ? "success"
       : "warning";
   const providerApiHealth = onboarding?.providerApiHealth ?? status?.providerApiHealth;
+  const kimiLoginHealth = onboarding?.kimiLoginHealth ?? status?.kimiLoginHealth;
+  const authMode = onboarding?.authMode ?? status?.authMode;
+  const activeProvider =
+    onboarding?.providerApiActiveProvider ?? status?.providerApiActiveProvider;
   const providerApiConfigured =
     onboarding?.providerApiConfigured ??
     status?.providerApiConfigured ??
@@ -685,21 +678,6 @@ export function ControlCenterView({
       disabled={contextMenuBusy || !runtimeContextMenuSupported}
     >
       {runtimeContextMenuEnabled ? "禁用菜单" : "启用菜单"}
-    </Button>
-  );
-
-  const optionalApiPrimaryAction = (
-    <Button
-      type="button"
-      icon={<SlidersHorizontal size={15} />}
-      className="cc-action-btn"
-      onClick={() => {
-        setExpandedOnboardingCard("auth");
-        void onRefreshKimiCodeAccessConfig();
-      }}
-      disabled={kimiCodeAccessBusy}
-    >
-      打开 API 设置
     </Button>
   );
 
@@ -1305,11 +1283,11 @@ export function ControlCenterView({
     {
       id: "auth",
       index: "04",
-      title: "API 配置",
-      actionLabel: providerApiConfigured ? "查看配置" : "按需配置",
+      title: "认证与 API 设置",
+      actionLabel: providerApiStatusLabel,
       statusTone: optionalApiStatusTone,
       complete: true,
-      primaryAction: optionalApiPrimaryAction,
+      primaryAction: null,
     },
     {
       id: "work_dir",
@@ -1470,23 +1448,14 @@ export function ControlCenterView({
       }
       if (stepId === "auth") {
         return (
-          <div className="cc-settings-detail-stack">
-            <div className="cc-settings-live-row" aria-live="polite">
-              {kimiCodeAccessBusy ? "正在读取 API 配置" : providerApiStatusLabel}
-            </div>
-            <KimiCodeAccessTaskContent
-              dirty={kimiCodeAccessDirty}
-              view={kimiCodeAccessView}
-              draft={kimiCodeAccessDraft}
-              testResult={kimiCodeAccessTestResult}
-              testing={kimiCodeAccessTesting}
-              saving={kimiCodeAccessBusy}
-              onDraftChange={onKimiCodeAccessDraftChange}
-              onSave={onSaveKimiCodeAccessConfig}
-              onOpenConfigDir={onOpenKimiConfigDir}
-              onTestConnection={onTestKimiCodeAccessConfig}
-            />
-          </div>
+          <KimiCodeAccessTaskContent
+            authMode={authMode}
+            activeProvider={activeProvider}
+            providerApiConfigured={providerApiConfigured}
+            kimiLoginHealth={kimiLoginHealth}
+            providerApiHealth={providerApiHealth}
+            onOpenKimiCodeSettings={onClose}
+          />
         );
       }
       if (stepId === "bridge") {
@@ -1581,7 +1550,7 @@ export function ControlCenterView({
                       onClick={() => {
                         const next = expanded ? null : step.id;
                         setExpandedOnboardingCard(next);
-                        if (next === "auth") void onRefreshKimiCodeAccessConfig();
+                        if (next === "auth") void onRefreshOnboarding();
                         if (next === "doctor") void onRefreshDiagnostics();
                         if (next === "logs") {
                           void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()]);

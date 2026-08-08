@@ -55,6 +55,86 @@ describe("link bridge iframe source checks", () => {
     expect(normalizeExternalOpenUrl("://bad")).toBeNull();
   });
 
+  it("forwards Kimi login links with the iframe bridge nonce", () => {
+    const postMessage = vi.fn();
+    let clickHandler: ((event: Record<string, unknown>) => void) | undefined;
+    const frameWindow = {
+      name: "workspace-bridge-nonce",
+      parent: { postMessage },
+      top: {},
+      location: new URL("http://127.0.0.1:1234/"),
+      history: {},
+      addEventListener: vi.fn(),
+      open: vi.fn(),
+    };
+    const frameDocument = {
+      head: null,
+      body: null,
+      documentElement: { dataset: {} },
+      addEventListener: vi.fn(
+        (type: string, handler: (event: Record<string, unknown>) => void) => {
+          if (type === "click") clickHandler = handler;
+        },
+      ),
+      getElementById: vi.fn(),
+    };
+    class FrameElement {
+      closest() {
+        return this;
+      }
+    }
+    class FrameAnchorElement extends FrameElement {
+      getAttribute(name: string) {
+        return name === "href" ? "https://kimi.example/login?code=ABCD" : null;
+      }
+    }
+
+    new Function(
+      "window",
+      "document",
+      "Element",
+      "HTMLAnchorElement",
+      "URL",
+      "URLSearchParams",
+      "setTimeout",
+      frameWorkspaceBridgeScript,
+    )(
+      frameWindow,
+      frameDocument,
+      FrameElement,
+      FrameAnchorElement,
+      URL,
+      URLSearchParams,
+      (callback: () => void) => callback(),
+    );
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    clickHandler?.({
+      defaultPrevented: false,
+      button: 0,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+      target: new FrameAnchorElement(),
+      preventDefault,
+      stopPropagation,
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(stopPropagation).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        source: "kimi-shell-external-link-bridge",
+        url: "https://kimi.example/login?code=ABCD",
+        reason: "anchor_click",
+        bridgeNonce: "workspace-bridge-nonce",
+      },
+      "*",
+    );
+  });
+
   it("requires the exact workspace bridge nonce", () => {
     const nonce = createWorkspaceBridgeNonce();
 

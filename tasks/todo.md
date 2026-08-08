@@ -1,3 +1,30 @@
+# 控制中心 API 编辑退场与 Kimi 登录浏览器放行
+
+## 任务契约
+
+- 用户目标：控制中心不再编辑 API 配置，清晰引导到 Kimi Code Web 内置设置；认证模式展示与诊断不回退；启动登录验证可打开系统浏览器。
+- 直接交付物：只读认证/API 状态面板、Kimi Code Web 设置引导、iframe 登录外链桥修复、回归测试与文档记录。
+- 影响范围：Shell 控制中心、workspace iframe 外链桥、前端测试、Shell/根 README、架构事实和验证门。
+- 非目标：不删除已发布配置 commands，不修改 `kimi web --no-open`，不改认证状态计算、Doctor 或系统浏览器 URL 安全校验。
+- 验收：无 API/模型/服务编辑控件；认证模式和双路健康诊断可见；默认 Code pane 登录链接携带 nonce 并转交系统浏览器；自动测试与 G0/G1 最小 gate 通过。
+- 保守假设：仓库没有稳定的 Kimi Code Web 设置深链，因此按钮返回工作区，由明确文案引导用户打开内置设置，不猜测路由。
+
+## Checklist
+
+- [x] 将 API 编辑面改为只读认证与健康诊断。
+- [x] 引导用户到 Kimi Code Web 内置设置。
+- [x] 补齐默认 Code iframe 登录外链的 bridge nonce。
+- [x] 增加 UI 与外链桥回归测试。
+- [x] 完成前端、Rust、安全与文档 gate。
+- [ ] 在真实 Windows 环境完成 OAuth 默认浏览器 G3。
+
+## Review
+
+- 根因：直接 iframe 的外链脚本先拦截登录链接，但消息遗漏 `window.name` nonce，父窗口安全校验将其丢弃；`--no-open`、stdout 日志和系统浏览器 opener 均不是问题。
+- 兼容边界：配置读写 commands 保留；当前产品 UI 不再调用写入与测试入口，认证快照继续复用配置读取。
+- 文档冲突：历史 release note 描述过认证模式与双路健康展示，当前 HEAD 已缺失；本次在只读面板恢复并用测试锁定，不修改历史 release note。
+- 已验证：Vitest 38 files / 197 tests、TypeScript、Vite build、安全 command/capability gate、tracked Markdown 路径 gate、`cargo check` 与 `cargo test --no-run` 通过；真实 Windows OAuth 默认浏览器链路仍属于 G3。
+
 # Agent Room 下线与冻结
 
 ## 任务契约

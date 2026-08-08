@@ -195,6 +195,14 @@
       : EXTERNAL_BRIDGE_SOURCE;
   }
 
+  function getBridgeNonce() {
+    try {
+      return String(window.name || "");
+    } catch (_) {
+      return "";
+    }
+  }
+
   function postExternalUrl(url, reason) {
     try {
       if (!window.parent || window.parent === window) {
@@ -205,6 +213,7 @@
           source: bridgeSource(),
           url: url,
           reason: reason || "unknown",
+          bridgeNonce: getBridgeNonce(),
         },
         "*",
       );

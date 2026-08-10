@@ -1,4 +1,5 @@
 const APP_COMMANDS: &[&str] = &[
+    "get_platform_capabilities",
     "get_app_status",
     "get_workspace_embed_url",
     "retry_start_backend",
@@ -174,6 +175,8 @@ const APP_COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=KIMI_RELEASE_CHANNEL");
+
     #[cfg(windows)]
     println!(
         "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"

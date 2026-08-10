@@ -9,8 +9,9 @@ const VERB_KEY_NAME: &str = "KimiWebShell";
 const MOVE_TO_WORKSPACE_VERB_KEY_NAME: &str = "MoveToWorkspace";
 const IMPORT_DEFAULT_VERB_KEY_NAME: &str = "ImportToDefaultWorkspace";
 const IMPORT_PICKER_VERB_KEY_NAME: &str = "ImportWithWorkspacePicker";
-
+#[cfg(target_os = "windows")]
 const MULTI_SELECT_MODEL_PLAYER: &str = "Player";
+#[cfg(target_os = "windows")]
 const EMPTY_SUBCOMMANDS_VALUE: &str = "";
 
 #[cfg(target_os = "windows")]
@@ -68,6 +69,7 @@ const FILE_IMPORT_PICKER_COMMAND_KEY: &str =
 #[cfg(target_os = "windows")]
 const ALL_FILESYSTEM_OBJECTS_MOVE_TO_WORKSPACE_KEY: &str =
     "Software\\Classes\\AllFilesystemObjects\\shell\\MoveToWorkspace";
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone)]
 struct ExpectedContextMenuCommands {
     icon_value: String,
@@ -109,10 +111,12 @@ const CASCADING_MENU_KEYSETS: [CascadingMenuKeySet; 2] = [
     },
 ];
 
+#[cfg(target_os = "windows")]
 fn quote_executable_path(executable: &str) -> String {
     format!("\"{}\"", executable.replace('"', "\\\""))
 }
 
+#[cfg(target_os = "windows")]
 fn build_expected_commands(executable: &str) -> ExpectedContextMenuCommands {
     let quoted_exe = quote_executable_path(executable);
     ExpectedContextMenuCommands {
@@ -351,10 +355,12 @@ fn validate_context_menu_labels(
     })
 }
 
+#[cfg(target_os = "windows")]
 fn command_matches_expected(actual: &str, expected: &str) -> bool {
     actual.trim() == expected.trim()
 }
 
+#[cfg(target_os = "windows")]
 fn truncate_for_status_message(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
@@ -390,7 +396,7 @@ pub fn status(_app: &AppHandle) -> ContextMenuStatus {
     }
 }
 
-pub fn enable(app: &AppHandle) -> Result<(), String> {
+pub fn enable(_app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::env;
@@ -400,7 +406,7 @@ pub fn enable(app: &AppHandle) -> Result<(), String> {
             .map_err(|error| format!("failed to resolve executable path: {error}"))?;
         let executable = executable.to_string_lossy();
         let expected = build_expected_commands(executable.as_ref());
-        let labels = load_context_menu_labels(app);
+        let labels = load_context_menu_labels(_app);
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
         let result = (|| {
@@ -829,6 +835,7 @@ pub fn import_picker_verb_key_name() -> &'static str {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn build_expected_commands_handles_space_path() {
         let commands = build_expected_commands(r"C:\Program Files\Kimi Shell\kimi-shell.exe");
@@ -846,6 +853,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn build_expected_commands_escapes_quotes() {
         let commands = build_expected_commands(r#"C:\Kimi"Quoted"\kimi-shell.exe"#);
@@ -855,6 +863,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
     fn command_matches_expected_trims_outer_whitespace() {
         assert!(command_matches_expected(

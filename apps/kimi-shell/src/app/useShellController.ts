@@ -114,6 +114,7 @@ import { useShellPollingController } from "@/app/useShellPollingController";
 import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
 import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+import { usePlatformCapabilities } from "@/platform/usePlatformCapabilities";
 import {
   getGridSession,
   resolveCurrentPaneWorkDir,
@@ -157,6 +158,7 @@ type BootHint = Pick<
 >;
 
 export function useShellController() {
+  const platform = usePlatformCapabilities();
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
@@ -3643,6 +3645,9 @@ export function useShellController() {
   }
 
   return {
+    platformCapabilities: platform.capabilities,
+    platformCapabilitiesStatus: platform.status,
+    platformCapabilitiesError: platform.error,
     status,
     diagnostics,
     kimiDoctorResult,

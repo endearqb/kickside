@@ -22,12 +22,16 @@ const hostControlTokenFileEnv = "KIMI_IM_BRIDGE_HOST_CONTROL_TOKEN_FILE"
 const kimiRuntimeLocatorFileEnv = "KIMI_APP_RUNTIME_LOCATOR_FILE"
 
 func main() {
-	options, err := parseFlags()
+	command, err := parseCommand()
 	if err != nil {
 		fatalStartup("parse_flags", err, 2)
 	}
+	if command.printVersion {
+		fmt.Fprintln(os.Stdout, versionOutput())
+		return
+	}
 
-	service, err := app.New(options)
+	service, err := app.New(command.options)
 	if err != nil {
 		fatalStartup("initialize", err, 1)
 	}
@@ -51,22 +55,34 @@ func main() {
 	}
 }
 
+type parsedCommand struct {
+	options      app.Options
+	printVersion bool
+}
+
 func fatalStartup(phase string, err error, code int) {
 	fmt.Fprintf(os.Stderr, "bridge startup phase=%s error=%v\n", phase, err)
 	os.Exit(code)
 }
 
-func parseFlags() (app.Options, error) {
-	return parseFlagsFrom(os.Args[1:], os.Getenv, os.ReadFile)
+func parseCommand() (parsedCommand, error) {
+	return parseCommandFrom(os.Args[1:], os.Getenv, os.ReadFile)
 }
 
 func parseFlagsFrom(args []string, getenv func(string) string, readFile func(string) ([]byte, error)) (app.Options, error) {
+	command, err := parseCommandFrom(args, getenv, readFile)
+	return command.options, err
+}
+
+func parseCommandFrom(args []string, getenv func(string) string, readFile func(string) ([]byte, error)) (parsedCommand, error) {
 	var options app.Options
 	var adminTokenFile string
 	var hostControlTokenFile string
+	var printVersion bool
 
 	flags := flag.NewFlagSet("kimi-im-bridge", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	flags.BoolVar(&printVersion, "version", false, "print version and exit")
 	flags.StringVar(&options.ConfigPath, "config", "", "absolute path to bridge_settings.json")
 	flags.StringVar(&options.SecretsPath, "secrets", "", "absolute path to bridge_secrets.json")
 	flags.StringVar(&options.DBPath, "db", "", "absolute path to bridge.db")
@@ -80,41 +96,50 @@ func parseFlagsFrom(args []string, getenv func(string) string, readFile func(str
 	flags.StringVar(&options.KimiRuntimeLocatorPath, "kimi-runtime-locator", "", "optional shell-provided kimi-code runtime locator JSON file")
 	flags.StringVar(&options.SkillsDir, "skills-dir", "", "optional skills directory mounted into Kimi CLI sessions")
 	if err := flags.Parse(args); err != nil {
-		return options, err
+		return parsedCommand{options: options}, err
 	}
 
 	options.Version = version
+	command := parsedCommand{options: options, printVersion: printVersion}
+	if printVersion {
+		return command, nil
+	}
 	if options.ConfigPath == "" {
-		return options, fmt.Errorf("--config is required")
+		return command, fmt.Errorf("--config is required")
 	}
 	if options.SecretsPath == "" {
-		return options, fmt.Errorf("--secrets is required")
+		return command, fmt.Errorf("--secrets is required")
 	}
 	if options.DBPath == "" {
-		return options, fmt.Errorf("--db is required")
+		return command, fmt.Errorf("--db is required")
 	}
 	if options.LogFilePath == "" {
-		return options, fmt.Errorf("--log-file is required")
+		return command, fmt.Errorf("--log-file is required")
 	}
 	var err error
 	options.AdminToken, err = resolveSecret("admin token", options.AdminToken, adminTokenFile, adminTokenEnv, adminTokenFileEnv, getenv, readFile)
 	if err != nil {
-		return options, err
+		return command, err
 	}
 	options.HostControlToken, err = resolveSecret("host-control token", options.HostControlToken, hostControlTokenFile, hostControlTokenEnv, hostControlTokenFileEnv, getenv, readFile)
 	if err != nil {
-		return options, err
+		return command, err
 	}
 	if options.AdminToken == "" {
-		return options, fmt.Errorf("%s or %s is required", adminTokenEnv, adminTokenFileEnv)
+		return command, fmt.Errorf("%s or %s is required", adminTokenEnv, adminTokenFileEnv)
 	}
 	if options.AdminPort <= 0 || options.AdminPort > 65535 {
-		return options, fmt.Errorf("--admin-port must be between 1 and 65535")
+		return command, fmt.Errorf("--admin-port must be between 1 and 65535")
 	}
 	if options.KimiRuntimeLocatorPath == "" {
 		options.KimiRuntimeLocatorPath = strings.TrimSpace(getenv(kimiRuntimeLocatorFileEnv))
 	}
-	return options, nil
+	command.options = options
+	return command, nil
+}
+
+func versionOutput() string {
+	return fmt.Sprintf("kimi-im-bridge %s", version)
 }
 
 func resolveSecret(label string, flagValue string, flagFile string, envName string, envFileName string, getenv func(string) string, readFile func(string) ([]byte, error)) (string, error) {

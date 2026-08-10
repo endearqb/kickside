@@ -53,6 +53,7 @@ import {
   controlSections,
   createEmptyBridgeConnectorSecretDraft,
   defaultBridgeConnectorLabel,
+  createExplorerContextMenuSteps,
   findBridgeConnectorRecentError,
   focusDomId,
   formatBridgeConnectorStateLabel,
@@ -117,6 +118,8 @@ const CONTEXT_MENU_LABEL_FIELDS: Array<{
 
 export function ControlCenterView({
   surface,
+  supportsExplorerContextMenu,
+  kimiInstallMode,
   status,
   diagnostics,
   kimiDoctorResult,
@@ -319,6 +322,7 @@ export function ControlCenterView({
     appUpdateStatus === "downloading" ||
     appUpdateStatus === "installing";
   const appUpdateAvailable = appUpdateStatus === "available" && Boolean(appUpdateInfo?.version);
+  const externalGuidedInstall = kimiInstallMode === "externalGuided";
   const appUpdateActionLabel = !appUpdateSupported
     ? "仅安装版支持"
     : appUpdateStatus === "checking"
@@ -636,9 +640,13 @@ export function ControlCenterView({
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
-  const installPrimaryActionLabel = !installReady
-    ? "一键安装 Kimi Code"
-    : kimiCodeUpdatePresentation.primaryLabel;
+  const installPrimaryActionLabel = externalGuidedInstall
+    ? installReady
+      ? "查看升级说明"
+      : "查看安装说明"
+    : !installReady
+      ? "一键安装 Kimi Code"
+      : kimiCodeUpdatePresentation.primaryLabel;
   const installBarActionLabel = !installReady
     ? installPrimaryActionLabel
     : kimiCodeUpdatePresentation.barLabel;
@@ -654,14 +662,20 @@ export function ControlCenterView({
       type="button"
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
-      onClick={() => void handleStartOnboardingInstallTask(installPrimaryTaskId)}
+      onClick={() =>
+        void (externalGuidedInstall
+          ? onOpenExternalUrl(
+              "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
+            )
+          : handleStartOnboardingInstallTask(installPrimaryTaskId))
+      }
       disabled={
         installBusy ||
         installProbeBusy ||
-        (installReady && kimiCodeUpdatePresentation.disabled) ||
-        !installPrerequisitesReady
+        (!externalGuidedInstall &&
+          ((installReady && kimiCodeUpdatePresentation.disabled) || !installPrerequisitesReady))
       }
-      title={installPrerequisiteIssues.join("；") || undefined}
+      title={externalGuidedInstall ? undefined : installPrerequisiteIssues.join("；") || undefined}
     >
       {installPrimaryActionLabel}
     </Button>
@@ -1244,7 +1258,7 @@ export function ControlCenterView({
   const showStartupFailureDiagnostics = shouldShowStartupFailureDiagnostics(status, diagnostics);
   const startupFailureMessage = getStartupFailureMessage(status, diagnostics);
   const doctorSummary = getKimiDoctorSummary(kimiDoctorResult, showStartupFailureDiagnostics);
-  const onboardingSteps: Array<{
+  type OnboardingStepView = {
     id: OnboardingCardId;
     index: string;
     title: string;
@@ -1252,7 +1266,8 @@ export function ControlCenterView({
     statusTone: "neutral" | "success" | "warning" | "danger";
     complete: boolean;
     primaryAction: ReactNode;
-  }> = [
+  };
+  const onboardingSteps: OnboardingStepView[] = [
     {
       id: "app_update",
       index: "01",
@@ -1271,15 +1286,18 @@ export function ControlCenterView({
       complete: installReady,
       primaryAction: installPrimaryAction,
     },
-    {
-      id: "context_menu",
-      index: "03",
-      title: "资源管理器右键菜单",
-      actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
-      statusTone: contextMenuStatusTone,
-      complete: contextMenuReady,
-      primaryAction: contextMenuPrimaryAction,
-    },
+    ...createExplorerContextMenuSteps<OnboardingStepView>(
+      supportsExplorerContextMenu,
+      () => ({
+        id: "context_menu" as const,
+        index: "03",
+        title: "资源管理器右键菜单",
+        actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
+        statusTone: contextMenuStatusTone,
+        complete: contextMenuReady,
+        primaryAction: contextMenuPrimaryAction,
+      }),
+    ),
     {
       id: "auth",
       index: "04",
@@ -1416,30 +1434,94 @@ export function ControlCenterView({
               <p className="cc-config-error">{kimiCodeUpdateError}</p>
             ) : null}
             <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-            <InstallFlowTaskContent
-              session={installSessionSnapshot}
-              probe={installProbe}
-              probeBusy={installProbeBusy}
-              probeMessage={installMessage}
-              backendState={status?.state ?? null}
-              installSource={installSource}
-              installSettings={installSettings}
-              installSettingsBusy={installSettingsBusy}
-              installMirrorHealthReport={installMirrorHealthReport}
-              installMirrorHealthBusy={installMirrorHealthBusy}
-              powershellPreflight={powershellPreflight}
-              kimiPathInput={kimiPathInput}
-              detectedKimiPath={installPathDisplay}
-              onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
-              onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
-              onSourceChange={onInstallSourceChange}
-              onSaveInstallSettings={onSaveInstallSettings}
-              onStartTask={handleStartOnboardingInstallTask}
-              onRestartBackend={onRetry}
-              onPickKimiPath={onPickKimiPath}
-              onSavePathAndRetry={onSavePathAndRetry}
-              restartBusy={actionBusy}
-            />
+            {externalGuidedInstall ? (
+              <div className="cc-config-grid">
+                <p className="hint">
+                  macOS 版不会在后台执行远程安装脚本。请复制官方命令到 Terminal，完成后回到这里重新检测。
+                </p>
+                <pre className="cc-install-command-code">
+                  curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+                </pre>
+                <div className="cc-step-secondary-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cc-action-btn"
+                    onClick={() =>
+                      copyText("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash")
+                    }
+                  >
+                    复制安装命令
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cc-action-btn"
+                    onClick={() => copyText("kimi upgrade")}
+                  >
+                    复制升级命令
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cc-action-btn"
+                    onClick={() =>
+                      void onOpenExternalUrl(
+                        "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
+                      )
+                    }
+                  >
+                    打开官方文档
+                  </Button>
+                </div>
+                <p className="hint">
+                  默认原生安装位置为 ~/.kimi-code/bin/kimi；也可以通过“选择 Kimi 路径”使用其他受信任的安装。
+                </p>
+                <div className="cc-step-secondary-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cc-action-btn"
+                    onClick={() => void onPickKimiPath()}
+                  >
+                    选择 Kimi 路径
+                  </Button>
+                  <Button
+                    type="button"
+                    className="cc-action-btn"
+                    onClick={() => void onSavePathAndRetry()}
+                    disabled={!kimiPathInput.trim() || actionBusy}
+                  >
+                    保存并重试
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <InstallFlowTaskContent
+                session={installSessionSnapshot}
+                probe={installProbe}
+                probeBusy={installProbeBusy}
+                probeMessage={installMessage}
+                backendState={status?.state ?? null}
+                installSource={installSource}
+                installSettings={installSettings}
+                installSettingsBusy={installSettingsBusy}
+                installMirrorHealthReport={installMirrorHealthReport}
+                installMirrorHealthBusy={installMirrorHealthBusy}
+                powershellPreflight={powershellPreflight}
+                kimiPathInput={kimiPathInput}
+                detectedKimiPath={installPathDisplay}
+                onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+                onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
+                onSourceChange={onInstallSourceChange}
+                onSaveInstallSettings={onSaveInstallSettings}
+                onStartTask={handleStartOnboardingInstallTask}
+                onRestartBackend={onRetry}
+                onPickKimiPath={onPickKimiPath}
+                onSavePathAndRetry={onSavePathAndRetry}
+                restartBusy={actionBusy}
+              />
+            )}
           </div>
         );
       }

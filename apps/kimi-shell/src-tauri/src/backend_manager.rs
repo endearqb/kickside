@@ -32,6 +32,7 @@ use crate::{
 
 #[allow(dead_code)]
 mod config;
+mod instance_registry;
 mod lifecycle;
 mod redaction;
 mod system_open;

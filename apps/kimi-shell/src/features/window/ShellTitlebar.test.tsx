@@ -16,6 +16,7 @@ const titlebarProps = {
   shellScreenLabel: "工作区",
   actionBusy: false,
   tauriRuntime: false,
+  nativeWindowControls: false,
   isWindowMaximized: false,
   canOpenWorkspace: true,
   agentRoomEnabled: false,
@@ -162,5 +163,26 @@ describe("ShellTitlebar", () => {
   it("does not expose the retired Agent Room entry", () => {
     render(<ShellTitlebar {...titlebarProps} />);
     expect(screen.queryByRole("button", { name: "打开 Agent Room" })).toBeNull();
+  });
+
+  it("uses native macOS controls instead of rendering Windows window buttons", () => {
+    const { container } = render(
+      <ShellTitlebar
+        {...titlebarProps}
+        tauriRuntime
+        nativeWindowControls
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "最小化窗口" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "最大化窗口" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭窗口" })).toBeNull();
+    expect(screen.getByRole("button", { name: "打开控制中心" })).toBeTruthy();
+
+    const header = container.querySelector(".titlebar.is-workspace");
+    const appActions = header?.querySelector(".titlebar-actions.is-workspace");
+    expect(appActions?.querySelectorAll("button")).toHaveLength(5);
+    expect(appActions?.contains(screen.getByRole("button", { name: "打开控制中心" }))).toBe(true);
+    expect(header?.querySelector(".titlebar-right")).toBeNull();
   });
 });

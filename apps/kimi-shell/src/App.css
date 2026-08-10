@@ -59,6 +59,36 @@
   min-width: 0;
 }
 
+.platform-macos .titlebar-actions:not(.is-workspace) {
+  padding-left: 78px;
+}
+
+.platform-macos .titlebar.is-workspace {
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+}
+
+.platform-macos .titlebar.is-workspace .titlebar-actions {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  padding: 0 8px;
+}
+
+.platform-macos .titlebar.is-workspace .titlebar-identity {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: stretch;
+  width: 100%;
+  max-width: none;
+}
+
+.platform-macos .titlebar.is-workspace .titlebar-layout-popover,
+.platform-macos .titlebar.is-workspace .titlebar-pane-popover,
+.platform-macos .titlebar.is-workspace .titlebar-browser-popover {
+  right: 0;
+  left: auto;
+}
+
 .titlebar-actions,
 .titlebar-right,
 .titlebar-window-controls {
@@ -2634,6 +2664,31 @@ input:focus {
   touch-action: none;
 }
 
+/* On macOS, permanent panes read as a native split view instead of nested windows. */
+.platform-macos .workspace-grid-canvas {
+  gap: 1px;
+  background: var(--chrome-border);
+}
+
+.platform-macos .workspace-stage-grid-shell.is-edge-to-edge .workspace-grid-canvas {
+  gap: 0;
+  background: var(--surface);
+}
+
+.platform-macos .workspace-grid-pane,
+.platform-macos .workspace-stage-grid-shell.is-edge-to-edge .workspace-grid-pane {
+  border: 0;
+  border-radius: 0;
+}
+
+.platform-macos .workspace-grid-pane-header {
+  border-bottom: 1px solid var(--chrome-border);
+}
+
+.platform-macos .workspace-grid-pane.is-active .workspace-grid-pane-header {
+  background: color-mix(in srgb, var(--text-primary) 4%, var(--surface));
+}
+
 .workspace-grid-pane-header:active {
   cursor: grabbing;
 }
@@ -2671,6 +2726,11 @@ input:focus {
   padding: 16px;
   border-style: dashed;
   background: color-mix(in srgb, var(--surface-muted) 58%, var(--surface));
+}
+
+.platform-macos .workspace-grid-pane-empty {
+  outline: 1px dashed var(--chrome-border);
+  outline-offset: -1px;
 }
 
 .workspace-grid-empty-copy {
@@ -4943,6 +5003,29 @@ input:focus {
     overflow: auto;
     gap: 4px;
     padding: 0 6px;
+  }
+
+  .platform-macos .titlebar.is-workspace {
+    grid-template-columns: 78px minmax(0, 1fr) auto;
+    grid-template-rows: 26px;
+    height: 26px;
+  }
+
+  .platform-macos .titlebar.is-workspace .titlebar-actions {
+    grid-column: 3;
+    grid-row: 1;
+    height: 26px;
+    overflow: visible;
+    gap: 4px;
+    padding: 0 6px;
+    border-top: 0;
+  }
+
+  .platform-macos .titlebar.is-workspace .titlebar-identity {
+    grid-column: 2;
+    grid-row: 1;
+    align-items: center;
+    padding-left: 0;
   }
 
   .shell-login-banner {

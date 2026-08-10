@@ -2,9 +2,9 @@
 
 [English README](README.md)
 
-Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Web 的 Windows 桌面壳。
+Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Code Web 的 Windows / Apple Silicon macOS 桌面壳。
 当前主应用位于 `apps/kimi-shell`，技术栈为 `Tauri v2 + React`，把启动接管、安装与升级、
-多标签控制中心、IM Bridge 运维、诊断日志和 Windows 安装包输出整合进同一个面向工作区的桌面应用。
+多标签控制中心、IM Bridge 运维、诊断日志和跨平台安装包输出整合进同一个面向工作区的桌面应用。
 
 ## 仓库结构
 
@@ -14,12 +14,12 @@ Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 
 ## 核心亮点
 
 - 为 `Kimi Code Web` 与 `Kimi Chat` 提供常驻桌面壳，支持分栏与视图切换
-- 支持资源管理器右键打开目录、单文件和多文件，并分别完成目录接管或文件导入工作区
+- Windows 支持资源管理器右键打开目录、单文件和多文件；macOS 不展示该平台专属入口
 - 提供面向首次使用与日常恢复场景的 Quick Setup 引导流程
-- 内置安装与升级中心，统一展示 PowerShell 预检与依赖状态
+- Windows 提供受管安装任务；macOS 仅引导使用官方 native installer 与 `kimi upgrade`
 - 控制中心整合概览、快速设置、运行诊断和 IM Bridge 操作入口
 - IM Bridge 页面聚焦飞书等通道控制、会话切换、审批与工作目录映射
-- 提供符合 Windows 使用习惯的系统托盘、最小化到托盘和安装包输出能力
+- macOS 提供原生 traffic lights、App Menu、关闭隐藏、Dock reopen 与 Cmd+Q；Windows 保持 close-to-tray
 
 ## 项目能力
 
@@ -30,7 +30,7 @@ Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 
 - 对目录直接接管为当前工作目录；对单文件和多文件则复制到新建工作区后再启动桌面壳
 - 通过统一控制中心提供安装引导、升级操作、诊断信息、日志与运行控制
 - 提供 IM Bridge 能力，用于飞书通道管理、会话轮换、审批处理与工作目录映射
-- 生成 Windows 的 NSIS / MSI 安装包
+- 生成 Windows NSIS/MSI 与 macOS arm64 app/DMG 产物
 
 ## 界面预览
 
@@ -58,10 +58,12 @@ IM Bridge：集中处理通道状态、当前绑定/会话切换，以及默认�
 
 环境要求：
 
-- Node.js 18+
-- pnpm 8+
+- Node.js 22+
+- pnpm 10.34.4
 - Rust stable
+- Go（版本以 `apps/kimi-im-bridge/go.mod` 为准）
 - Windows WebView2 Runtime
+- Apple Silicon macOS 13+；签名/公证 release 需要完整 Xcode 与 Apple Developer 凭据
 
 常用命令：
 
@@ -69,6 +71,7 @@ IM Bridge：集中处理通道状态、当前绑定/会话切换，以及默认�
 pnpm -C apps/kimi-shell install
 pnpm -C apps/kimi-shell tauri dev
 pnpm -C apps/kimi-shell build
+pnpm -C apps/kimi-shell tauri:build:macos:local
 pnpm -C apps/kimi-shell tauri build
 ```
 
@@ -78,6 +81,7 @@ pnpm -C apps/kimi-shell tauri build
 
 - `apps/kimi-shell/src-tauri/target/release/bundle/nsis`
 - `apps/kimi-shell/src-tauri/target/release/bundle/msi`
+- `apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle/macos`
 
 发布说明位于：
 

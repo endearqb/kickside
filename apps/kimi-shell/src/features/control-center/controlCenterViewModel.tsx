@@ -138,8 +138,17 @@ export type BridgeDeleteConfirmState = {
   connectorLabel: string;
 };
 
+export function createExplorerContextMenuSteps<T>(
+  supported: boolean,
+  createStep: () => T,
+): T[] {
+  return supported ? [createStep()] : [];
+}
+
 export type ControlCenterViewProps = {
   surface: ControlCenterSurface;
+  supportsExplorerContextMenu: boolean;
+  kimiInstallMode: import("@/app/types").KimiInstallMode;
   status: AppStatus | null;
   diagnostics: DiagnosticsInfo | null;
   kimiDoctorResult: KimiDoctorResult | null;

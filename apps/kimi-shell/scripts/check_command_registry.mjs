@@ -31,6 +31,7 @@ const registeredCommands = match
 
 const commandRegistry = {
   runtime: [
+    "platform::get_platform_capabilities",
     "get_app_status",
     "get_workspace_embed_url",
     "retry_start_backend",
@@ -365,6 +366,7 @@ const expectedPermissions = new Map([
   [
     "workspace-import-command-access",
     [
+      "get_platform_capabilities",
       "list_workspace_import_targets",
       "get_active_workspace_import_request",
       "complete_workspace_import_request",

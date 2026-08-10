@@ -18,8 +18,10 @@ mod harness;
 mod install_manager;
 mod kimi_locator;
 mod log_manager;
+mod menu_manager;
 mod onboarding_http;
 mod open_request;
+mod platform;
 mod port_manager;
 mod runtime_locator;
 mod scheduler;
@@ -1008,6 +1010,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_menu_event(|app, event| menu_manager::handle_menu_event(app, &event))
         .setup(|app| {
             let shared = AppState::new(app.handle())?;
             let hotkey_owner = shared.hotkey_owner;
@@ -1030,6 +1033,7 @@ pub fn run() {
             }
             scheduler::start(app.handle().clone());
 
+            menu_manager::setup_app_menu(app.handle())?;
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
                 if let Err(error) = shortcut_manager::register_default_hotkey(app.handle()) {
@@ -1104,11 +1108,16 @@ pub fn run() {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
-                        if !window_manager::handle_main_close_requested(
-                            app_handle,
-                            "main_close_requested",
-                        ) {
-                            start_graceful_exit(app_handle.clone(), "main_close_requested");
+                        #[cfg(target_os = "macos")]
+                        window_manager::hide_main_window(app_handle, "macos_main_close_requested");
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            if !window_manager::handle_main_close_requested(
+                                app_handle,
+                                "main_close_requested",
+                            ) {
+                                start_graceful_exit(app_handle.clone(), "main_close_requested");
+                            }
                         }
                     }
                     tauri::WindowEvent::Destroyed => {
@@ -1181,6 +1190,10 @@ pub fn run() {
             if should_attempt_stop_bridge(app_handle) {
                 let _ = bridge_manager::stop_bridge(app_handle);
             }
+        }
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            window_manager::show_and_focus(app_handle);
         }
         _ => {}
     });
@@ -1732,7 +1745,7 @@ fn duration_to_u64_ms(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn start_graceful_exit(app: AppHandle, source: &str) {
+pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
     if is_graceful_exit_in_progress(&app) {
         return;
     }
@@ -1903,8 +1916,10 @@ mod tests {
 
     #[test]
     fn onboarding_is_shown_for_missing_kimi_even_if_completed() {
-        let mut settings = AppSettings::default();
-        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        let settings = AppSettings {
+            onboarding_completed_version: CURRENT_ONBOARDING_VERSION,
+            ..AppSettings::default()
+        };
         assert!(should_show_onboarding(
             &settings,
             false,
@@ -1914,8 +1929,10 @@ mod tests {
 
     #[test]
     fn onboarding_is_hidden_after_completion_for_normal_startup() {
-        let mut settings = AppSettings::default();
-        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        let settings = AppSettings {
+            onboarding_completed_version: CURRENT_ONBOARDING_VERSION,
+            ..AppSettings::default()
+        };
         assert!(!should_show_onboarding(
             &settings,
             false,

@@ -477,12 +477,23 @@ func scanAgentRoomMember(row rowScanner) (domain.AgentRoomMember, error) {
 }
 
 func sameStoredWorkspace(left, right string) bool {
-	left = filepath.Clean(strings.TrimSpace(left))
-	right = filepath.Clean(strings.TrimSpace(right))
+	left = canonicalStoredWorkspace(left)
+	right = canonicalStoredWorkspace(right)
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(left, right)
 	}
 	return left == right
+}
+
+func canonicalStoredWorkspace(value string) string {
+	value = filepath.Clean(strings.TrimSpace(value))
+	if absolute, err := filepath.Abs(value); err == nil {
+		value = absolute
+	}
+	if resolved, err := filepath.EvalSymlinks(value); err == nil {
+		value = resolved
+	}
+	return filepath.Clean(value)
 }
 
 func (s *Store) CreateAgentRoomMessage(ctx context.Context, message domain.AgentRoomMessage) (domain.AgentRoomMessage, error) {

@@ -1,11 +1,17 @@
 use super::config::resolve_working_directory;
+use super::instance_registry::{self, ServerInstance};
 use super::*;
 use serde::Deserialize;
-use std::io::BufRead;
+use std::{collections::HashSet, io::BufRead};
 
 const EXTERNAL_HEALTH_TIMEOUT: Duration = Duration::from_millis(800);
 const EXTERNAL_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 const EXTERNAL_MONITOR_FAILURE_LIMIT: u8 = 3;
+const OWNED_REGISTRY_TIMEOUT: Duration = Duration::from_secs(15);
+const OWNED_FAST_POLL_WINDOW: Duration = Duration::from_secs(2);
+const OWNED_FAST_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const OWNED_SLOW_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const OWNED_PORT_FALLBACK_COUNT: u16 = 10;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ExistingServerLock {
@@ -16,9 +22,31 @@ struct ExistingServerLock {
     host_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DiscoverySource {
+    InstanceRegistry,
+    LegacyLock,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredServer {
+    server_id: Option<String>,
+    pid: u32,
+    port: u16,
+    host_version: Option<String>,
+    source: DiscoverySource,
+}
+
+struct OwnedRuntimeReady {
+    port: u16,
+    origin: String,
+    token: token_resolver::ServerToken,
+    instance: Option<ServerInstance>,
+}
+
 enum ReuseAttempt {
     Ready {
-        lock: ExistingServerLock,
+        server: DiscoveredServer,
         origin: String,
         token: token_resolver::ServerToken,
     },
@@ -241,18 +269,20 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
 
     match try_reuse_existing_server(app) {
         ReuseAttempt::Ready {
-            lock,
+            server,
             origin,
             token,
         } => {
-            append_backend_start_boundary(&log_path, generation, lock.port);
+            append_backend_start_boundary(&log_path, generation, u64::from(server.port));
             log_manager::append_line(
                 app,
                 format!(
-                    "reusing existing kimi-code server (pid={}, port={}, version={})",
-                    lock.pid,
-                    lock.port,
-                    lock.host_version.as_deref().unwrap_or("unknown")
+                    "reusing existing kimi-code server (source={:?}, server_id={}, pid={}, port={}, version={})",
+                    server.source,
+                    server.server_id.as_deref().unwrap_or("legacy-lock"),
+                    server.pid,
+                    server.port,
+                    server.host_version.as_deref().unwrap_or("unknown")
                 ),
             );
             {
@@ -271,7 +301,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             finish_ready(
                 app,
                 generation,
-                lock.port as u16,
+                server.port,
                 origin,
                 token,
                 RuntimeOwnership::ReusedExternal,
@@ -328,6 +358,21 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             return Ok(());
         }
     };
+    let kimi_home = match token_resolver::resolve_kimi_code_home() {
+        Ok(home) => home,
+        Err(error) => {
+            set_crashed(
+                app,
+                generation,
+                format!("Could not resolve Kimi Code home before launch: {error:#}"),
+            );
+            return Ok(());
+        }
+    };
+    let registry_before_spawn = instance_registry::read_live_instances(&kimi_home);
+    log_registry_warnings(app, &registry_before_spawn.warnings);
+    let previous_server_ids = instance_registry::server_ids(&registry_before_spawn.instances);
+    let launch_time_ms = unix_time_millis();
     append_backend_start_boundary(&log_path, generation, u64::from(base_port));
     let command_args = build_kimi_web_args(base_port);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
@@ -405,8 +450,15 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
     let _ = skill_center::track_workspace_root(app, &work_dir);
 
     let health_started = Instant::now();
-    let active_port = match port_manager::wait_for_ready_port(base_port, &mut child) {
-        Ok(port) => port,
+    let ready = match wait_for_owned_runtime(
+        app,
+        &kimi_home,
+        base_port,
+        &mut child,
+        &previous_server_ids,
+        launch_time_ms,
+    ) {
+        Ok(ready) => ready,
         Err(error) => {
             log_manager::append_line(
                 app,
@@ -419,7 +471,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             terminate_child_if_running(&mut child);
             match try_reuse_existing_server(app) {
                 ReuseAttempt::Ready {
-                    lock,
+                    server,
                     origin,
                     token,
                 } => {
@@ -427,13 +479,13 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
                         app,
                         format!(
                             "reusing kimi-code server after startup race (pid={}, port={})",
-                            lock.pid, lock.port
+                            server.pid, server.port
                         ),
                     );
                     finish_ready(
                         app,
                         generation,
-                        lock.port as u16,
+                        server.port,
                         origin,
                         token,
                         RuntimeOwnership::ReusedExternal,
@@ -463,6 +515,27 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         app,
         format!("startup_timing health_wait_ms={health_wait_ms}"),
     );
+    if let Some(instance) = ready.instance.as_ref() {
+        log_manager::append_line(
+            app,
+            format!(
+                "matched owned kimi-code registry instance (server_id={}, pid={}, child_pid={}, port={}, version={})",
+                instance.server_id,
+                instance.pid,
+                child.id(),
+                instance.port,
+                instance.host_version.as_deref().unwrap_or("unknown")
+            ),
+        );
+    } else {
+        log_manager::append_line(
+            app,
+            format!(
+                "owned kimi-code registry was delayed; using bounded authenticated port fallback (child_pid={}, port={})",
+                child.id(), ready.port
+            ),
+        );
+    }
     {
         let state = app.state::<AppState>();
         let mut runtime = state
@@ -476,36 +549,14 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         runtime.child = Some(child);
     }
 
-    let token_started = Instant::now();
-    let token = match token_resolver::resolve_server_token_with_retry() {
-        Ok(token) => token,
-        Err(error) => {
-            log_manager::append_line(
-                app,
-                format!(
-                    "startup_timing token_wait_ms={} total_ms={}",
-                    token_started.elapsed().as_millis(),
-                    startup_started.elapsed().as_millis()
-                ),
-            );
-            stop_child_for_generation(app, generation);
-            set_crashed(
-                app,
-                generation,
-                format!("kimi-code server token unavailable after startup: {error:#}"),
-            );
-            return Ok(());
-        }
-    };
-    let token_wait_ms = token_started.elapsed().as_millis();
+    let token_wait_ms = 0;
     log_manager::append_line(app, format!("startup_timing token_wait_ms={token_wait_ms}"));
-    let origin = format!("http://127.0.0.1:{active_port}");
     finish_ready(
         app,
         generation,
-        active_port,
-        origin,
-        token,
+        ready.port,
+        ready.origin,
+        ready.token,
         RuntimeOwnership::OwnedByShell,
         startup_started,
         health_wait_ms,
@@ -520,6 +571,62 @@ fn try_reuse_existing_server(app: &AppHandle) -> ReuseAttempt {
         Ok(home) => home,
         Err(_) => return ReuseAttempt::Stale,
     };
+    let token_path = home.join("server.token");
+    let registry = instance_registry::read_live_instances(&home);
+    log_registry_warnings(app, &registry.warnings);
+    for instance in registry.instances {
+        let Some(origin) = instance.origin() else {
+            continue;
+        };
+        let token = match token_resolver::read_server_token_at(&token_path) {
+            Ok(token) => token,
+            Err(error) => {
+                log_manager::append_line(
+                    app,
+                    format!(
+                        "could not authenticate registry instance server_id={} pid={} port={}: {}",
+                        instance.server_id,
+                        instance.pid,
+                        instance.port,
+                        super::redaction::redact_backend_text(&error.to_string())
+                    ),
+                );
+                continue;
+            }
+        };
+        match probe_liveness(&origin).and_then(|_| probe_bearer_auth(&origin, &token.value)) {
+            Ok(()) => {
+                return ReuseAttempt::Ready {
+                    server: DiscoveredServer {
+                        server_id: Some(instance.server_id),
+                        pid: instance.pid,
+                        port: instance.port,
+                        host_version: instance.host_version,
+                        source: DiscoverySource::InstanceRegistry,
+                    },
+                    origin,
+                    token,
+                };
+            }
+            Err(error) => {
+                log_manager::append_line(
+                    app,
+                    format!(
+                        "registry instance failed health/auth validation (server_id={}, pid={}, port={}): {}",
+                        instance.server_id,
+                        instance.pid,
+                        instance.port,
+                        super::redaction::redact_backend_text(&error.to_string())
+                    ),
+                );
+            }
+        }
+    }
+
+    try_reuse_legacy_lock(app, &home)
+}
+
+fn try_reuse_legacy_lock(app: &AppHandle, home: &Path) -> ReuseAttempt {
     let lock_path = home.join("server").join("lock");
     let raw = match fs::read_to_string(&lock_path) {
         Ok(raw) => raw,
@@ -536,6 +643,13 @@ fn try_reuse_existing_server(app: &AppHandle) -> ReuseAttempt {
             return ReuseAttempt::Stale;
         }
     };
+    if !instance_registry::pid_alive(lock.pid) {
+        log_manager::append_line(
+            app,
+            format!("ignored legacy kimi server lock with dead pid={}", lock.pid),
+        );
+        return ReuseAttempt::Stale;
+    }
     let origin = match local_server_origin(&lock.host, lock.port) {
         Ok(origin) => origin,
         Err(error) => {
@@ -589,7 +703,13 @@ fn try_reuse_existing_server(app: &AppHandle) -> ReuseAttempt {
 
     match probe_bearer_auth(&origin, &token.value) {
         Ok(()) => ReuseAttempt::Ready {
-            lock,
+            server: DiscoveredServer {
+                server_id: None,
+                pid: lock.pid,
+                port: lock.port as u16,
+                host_version: lock.host_version,
+                source: DiscoverySource::LegacyLock,
+            },
             origin,
             token,
         },
@@ -602,6 +722,12 @@ fn try_reuse_existing_server(app: &AppHandle) -> ReuseAttempt {
             ),
             target_port: lock.port,
         },
+    }
+}
+
+fn log_registry_warnings(app: &AppHandle, warnings: &[String]) {
+    for warning in warnings {
+        log_manager::append_line(app, super::redaction::redact_backend_text(warning));
     }
 }
 
@@ -659,6 +785,96 @@ fn probe_bearer_auth(origin: &str, token: &str) -> Result<(), reqwest::Error> {
         .send()?
         .error_for_status()?;
     Ok(())
+}
+
+fn wait_for_owned_runtime(
+    app: &AppHandle,
+    kimi_home: &Path,
+    base_port: u16,
+    child: &mut Child,
+    previous_server_ids: &HashSet<String>,
+    launch_time_ms: u64,
+) -> anyhow::Result<OwnedRuntimeReady> {
+    let started = Instant::now();
+    let deadline = started + OWNED_REGISTRY_TIMEOUT;
+    let token_path = kimi_home.join("server.token");
+    let mut logged_warnings = HashSet::new();
+    let mut last_port_fallback: Option<Instant> = None;
+
+    while Instant::now() < deadline {
+        if let Some(status) = child
+            .try_wait()
+            .context("failed to inspect kimi-code process during registry discovery")?
+        {
+            anyhow::bail!("kimi-code exited before instance registration completed: {status}");
+        }
+
+        let registry = instance_registry::read_live_instances(kimi_home);
+        for warning in registry.warnings {
+            if logged_warnings.insert(warning.clone()) {
+                log_manager::append_line(app, super::redaction::redact_backend_text(&warning));
+            }
+        }
+        if let Ok(token) = token_resolver::read_server_token_at(&token_path) {
+            for instance in instance_registry::owned_candidates(
+                &registry.instances,
+                child.id(),
+                previous_server_ids,
+                launch_time_ms,
+            ) {
+                let Some(origin) = instance.origin() else {
+                    continue;
+                };
+                if probe_liveness(&origin).is_ok()
+                    && probe_bearer_auth(&origin, &token.value).is_ok()
+                {
+                    return Ok(OwnedRuntimeReady {
+                        port: instance.port,
+                        origin,
+                        token,
+                        instance: Some(instance),
+                    });
+                }
+            }
+
+            let now = Instant::now();
+            let should_probe_ports = started.elapsed() >= OWNED_FAST_POLL_WINDOW
+                && last_port_fallback
+                    .map(|last| now.duration_since(last) >= Duration::from_secs(1))
+                    .unwrap_or(true);
+            if should_probe_ports {
+                last_port_fallback = Some(now);
+                let final_port = base_port.saturating_add(OWNED_PORT_FALLBACK_COUNT);
+                for port in base_port..=final_port {
+                    let origin = format!("http://127.0.0.1:{port}");
+                    if probe_liveness(&origin).is_ok()
+                        && probe_bearer_auth(&origin, &token.value).is_ok()
+                    {
+                        return Ok(OwnedRuntimeReady {
+                            port,
+                            origin,
+                            token,
+                            instance: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        let interval = if started.elapsed() < OWNED_FAST_POLL_WINDOW {
+            OWNED_FAST_POLL_INTERVAL
+        } else {
+            OWNED_SLOW_POLL_INTERVAL
+        };
+        thread::sleep(interval);
+    }
+
+    anyhow::bail!(
+        "no authenticated kimi-code registry instance appeared for child pid={} near base port={} within {} seconds",
+        child.id(),
+        base_port,
+        OWNED_REGISTRY_TIMEOUT.as_secs()
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -724,14 +940,21 @@ fn finish_ready(
     if ownership == RuntimeOwnership::OwnedByShell {
         spawn_monitor(app.clone(), generation);
     } else {
-        spawn_external_monitor(app.clone(), generation, origin, token.value);
+        spawn_external_monitor(app.clone(), generation, origin, token.path, token.value);
     }
     Ok(())
 }
 
-fn spawn_external_monitor(app: AppHandle, generation: u64, origin: String, token: String) {
+fn spawn_external_monitor(
+    app: AppHandle,
+    generation: u64,
+    origin: String,
+    token_path: PathBuf,
+    initial_token: String,
+) {
     thread::spawn(move || {
         let mut failures = 0u8;
+        let mut token = initial_token;
         loop {
             thread::sleep(EXTERNAL_MONITOR_INTERVAL);
             let should_continue = app
@@ -747,7 +970,16 @@ fn spawn_external_monitor(app: AppHandle, generation: u64, origin: String, token
             if !should_continue {
                 return;
             }
-            if probe_liveness(&origin).is_ok() && probe_bearer_auth(&origin, &token).is_ok() {
+            let healthy = probe_liveness(&origin).is_ok()
+                && (probe_bearer_auth(&origin, &token).is_ok()
+                    || token_resolver::read_server_token_at(&token_path)
+                        .ok()
+                        .filter(|refreshed| probe_bearer_auth(&origin, &refreshed.value).is_ok())
+                        .map(|refreshed| {
+                            token = refreshed.value;
+                        })
+                        .is_some());
+            if healthy {
                 failures = 0;
                 continue;
             }
@@ -888,6 +1120,19 @@ fn spawn_backend_process(
     }
 
     command.current_dir(work_dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        // SAFETY: setsid is async-signal-safe and the closure performs no allocation or locking.
+        unsafe {
+            command.pre_exec(|| {
+                nix::unistd::setsid()
+                    .map(|_| ())
+                    .map_err(|error| std::io::Error::from_raw_os_error(error as i32))
+            });
+        }
+    }
 
     let mut child = command
         .spawn()
@@ -969,7 +1214,7 @@ fn probe_kimi_web_contract(kimi_path: &Path, kimi_shell_path: Option<&PathBuf>) 
             Err(_) => return ContractProbe::Unavailable,
         }
     }
-    force_terminate(child.id());
+    let _ = child.kill();
     let _ = child.wait();
     ContractProbe::TimedOut
 }
@@ -1083,33 +1328,6 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
     window_manager::show_control_center(app, "backend_crashed");
 }
 
-fn stop_child_for_generation(app: &AppHandle, generation: u64) {
-    let child = {
-        let state = app.state::<AppState>();
-        let mut runtime = match state.runtime.lock() {
-            Ok(lock) => lock,
-            Err(_) => return,
-        };
-
-        if runtime.generation != generation {
-            return;
-        }
-
-        runtime.child.take()
-    };
-
-    if let Some(mut child) = child {
-        let reason = terminate_child(&mut child).to_string();
-        let state = app.state::<AppState>();
-        let lock_result = state.runtime.lock();
-        if let Ok(mut runtime) = lock_result {
-            if runtime.generation == generation {
-                runtime.last_exit_reason = Some(format!("stop_child_for_generation:{reason}"));
-            }
-        }
-    }
-}
-
 fn write_runtime_locator_ready(
     app: &AppHandle,
     origin: &str,
@@ -1171,13 +1389,31 @@ fn terminate_child_if_running(child: &mut Child) {
 #[cfg(unix)]
 fn soft_terminate(pid: u32) {
     use nix::{sys::signal, unistd::Pid};
-    let _ = signal::kill(Pid::from_raw(pid as i32), signal::Signal::SIGTERM);
+    if let Some(group) = safe_owned_process_group(pid) {
+        let _ = signal::killpg(Pid::from_raw(group), signal::Signal::SIGTERM);
+    } else if let Ok(pid) = i32::try_from(pid) {
+        let _ = signal::kill(Pid::from_raw(pid), signal::Signal::SIGTERM);
+    }
 }
 
 #[cfg(unix)]
 fn force_terminate(pid: u32) {
     use nix::{sys::signal, unistd::Pid};
-    let _ = signal::kill(Pid::from_raw(pid as i32), signal::Signal::SIGKILL);
+    if let Some(group) = safe_owned_process_group(pid) {
+        let _ = signal::killpg(Pid::from_raw(group), signal::Signal::SIGKILL);
+    } else if let Ok(pid) = i32::try_from(pid) {
+        let _ = signal::kill(Pid::from_raw(pid), signal::Signal::SIGKILL);
+    }
+}
+
+#[cfg(unix)]
+fn safe_owned_process_group(pid: u32) -> Option<i32> {
+    let group = i32::try_from(pid).ok().filter(|group| *group > 0)?;
+    let pid = nix::unistd::Pid::from_raw(group);
+    if nix::unistd::getpgid(Some(pid)).ok()? != pid || nix::unistd::getpgrp() == pid {
+        return None;
+    }
+    Some(group)
 }
 
 #[cfg(windows)]
@@ -1213,6 +1449,43 @@ mod tests {
             build_kimi_web_args(57999),
             vec!["web", "--no-open", "--port", "57999"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backend_spawn_uses_dedicated_process_group_and_terminates_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "kimi-backend-process-group-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let log_path = root.join("backend.log");
+        fs::write(&executable, b"#!/bin/sh\nexec /bin/sleep 30\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut child = spawn_backend_process(
+            &executable,
+            &root,
+            &build_kimi_web_args(58627),
+            &log_path,
+            None,
+            None,
+        )
+        .unwrap();
+        let pid = nix::unistd::Pid::from_raw(child.id() as i32);
+        assert_eq!(nix::unistd::getpgid(Some(pid)).unwrap(), pid);
+        assert_ne!(nix::unistd::getpgrp(), pid);
+        assert_eq!(terminate_child(&mut child), "graceful_exit");
+        assert!(child.try_wait().unwrap().is_some());
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

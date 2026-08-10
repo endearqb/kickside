@@ -67,6 +67,41 @@ if (framelessCapability?.windows?.includes("agent-room")) {
   errors.push("frameless window controls must not include retired agent-room");
 }
 
+const macosOverlayTitlebarCapability = capabilityList.find(
+  (item) => item.identifier === "macos-overlay-titlebar",
+);
+if (!macosOverlayTitlebarCapability) {
+  errors.push("missing macos-overlay-titlebar capability");
+} else {
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.platforms ?? []) !==
+    JSON.stringify(["macOS"])
+  ) {
+    errors.push("macos-overlay-titlebar must only target macOS");
+  }
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.windows ?? []) !==
+    JSON.stringify(["main"])
+  ) {
+    errors.push("macos-overlay-titlebar must only target the main window");
+  }
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.permissions ?? []) !==
+    JSON.stringify(["core:window:allow-start-dragging"])
+  ) {
+    errors.push("macos-overlay-titlebar must only allow start-dragging");
+  }
+}
+
+for (const item of capabilityList) {
+  if (
+    item?.permissions?.includes("core:window:allow-start-dragging") &&
+    !["frameless-window-controls", "macos-overlay-titlebar"].includes(item.identifier)
+  ) {
+    errors.push(`start-dragging permission has an unexpected owner: ${item.identifier}`);
+  }
+}
+
 for (const identifier of ["prefill", "workspace-import-picker"]) {
   const item = capabilityList.find((candidate) => candidate.identifier === identifier);
   if (item?.permissions?.includes("agent-room-command-access")) {

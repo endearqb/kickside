@@ -2696,9 +2696,10 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "Valid Skill");
+        let canonical_valid = fs::canonicalize(&valid).expect("canonical valid skill path");
         assert_eq!(
             records[0].canonical_path,
-            skill_center_store::path_to_display_string(&valid)
+            skill_center_store::path_to_display_string(&canonical_valid)
         );
         assert_eq!(skipped, vec!["broken-skill".to_string()]);
     }

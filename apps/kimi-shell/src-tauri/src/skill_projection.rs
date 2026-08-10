@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 use anyhow::Context;
@@ -58,9 +59,8 @@ pub fn materialize_skill(
 
     #[cfg(not(windows))]
     {
-        match std::os::unix::fs::symlink(source_dir, target_dir) {
-            Ok(_) => return Ok(SkillProjectionMethod::Symlink),
-            Err(_) => {}
+        if std::os::unix::fs::symlink(source_dir, target_dir).is_ok() {
+            return Ok(SkillProjectionMethod::Symlink);
         }
     }
 

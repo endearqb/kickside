@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
@@ -23,7 +24,7 @@ type fakeService struct {
 	resolved        []string
 	updated         []string
 	imported        []domain.SessionImportRequest
-	requestStopCall int
+	requestStopCall atomic.Int32
 }
 
 type testEnvelope struct {
@@ -115,7 +116,7 @@ func (f *fakeService) DebugPrompt(_ context.Context, _ runtime.PromptRequest) (r
 }
 
 func (f *fakeService) RequestStop() error {
-	f.requestStopCall++
+	f.requestStopCall.Add(1)
 	return nil
 }
 
@@ -490,7 +491,7 @@ func TestApprovalsAndRuntimeStopEndpoints(t *testing.T) {
 	if stopResponse.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected stop 202, got %d", stopResponse.StatusCode)
 	}
-	if fake.requestStopCall == 0 {
+	if fake.requestStopCall.Load() == 0 {
 		t.Fatalf("expected RequestStop to be called")
 	}
 }

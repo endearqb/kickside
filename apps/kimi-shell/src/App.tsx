@@ -92,6 +92,9 @@ function App() {
   }
 
   const controlCenterProps = {
+    supportsExplorerContextMenu:
+      shell.platformCapabilities?.supportsExplorerContextMenu === true,
+    kimiInstallMode: shell.platformCapabilities?.kimiInstallMode ?? "externalGuided",
     status: shell.status,
     diagnostics: shell.diagnostics,
     kimiDoctorResult: shell.kimiDoctorResult,
@@ -281,7 +284,7 @@ function App() {
 
   return (
     <main
-      className={`shell-root theme-${shell.themeMode} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
+      className={`shell-root theme-${shell.themeMode} platform-${shell.platformCapabilities?.os ?? "loading"} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
     >
       <ShellTitlebar
         screen={shell.screen}
@@ -294,6 +297,7 @@ function App() {
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}
         tauriRuntime={shell.tauriRuntime}
+        nativeWindowControls={shell.platformCapabilities?.nativeWindowControls === true}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
         onRetry={shell.handleRuntimeOnlyRetry}

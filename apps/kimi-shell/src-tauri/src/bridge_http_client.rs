@@ -878,6 +878,26 @@ fn truncate_for_error(value: &str, max_chars: usize) -> String {
     result
 }
 
+fn map_admin_session_record(session: AdminBridgeSessionRecord) -> BridgeSessionRecord {
+    BridgeSessionRecord {
+        source: crate::types::BridgeSessionSource::Bridge,
+        session_id: session.kimi_session_id,
+        work_dir: session.work_dir,
+        last_message_at: session.last_message_at,
+        summary: session.summary,
+        session_state: session.session_state,
+        lease_owner: session.lease_owner,
+        lease_expires_at: session.lease_expires_at,
+        auto_approve: session.auto_approve,
+        provider_name: session.provider_name,
+        runtime_metadata_json: session.runtime_metadata_json,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        switchable: true,
+        importable: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1608,25 +1628,5 @@ mod tests {
         assert!(routes[0].2.contains(r#""decision":"continue""#));
         assert_eq!(routes[2].0, "PUT");
         assert_eq!(routes[3].0, "DELETE");
-    }
-}
-
-fn map_admin_session_record(session: AdminBridgeSessionRecord) -> BridgeSessionRecord {
-    BridgeSessionRecord {
-        source: crate::types::BridgeSessionSource::Bridge,
-        session_id: session.kimi_session_id,
-        work_dir: session.work_dir,
-        last_message_at: session.last_message_at,
-        summary: session.summary,
-        session_state: session.session_state,
-        lease_owner: session.lease_owner,
-        lease_expires_at: session.lease_expires_at,
-        auto_approve: session.auto_approve,
-        provider_name: session.provider_name,
-        runtime_metadata_json: session.runtime_metadata_json,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        switchable: true,
-        importable: false,
     }
 }

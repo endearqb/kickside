@@ -2,6 +2,60 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlatformOs {
+    Windows,
+    Macos,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformArch {
+    Aarch64,
+    X86_64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowControlPlacement {
+    LeftNative,
+    RightCustom,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum KimiInstallMode {
+    ExternalGuided,
+    WindowsManaged,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReleaseChannel {
+    Development,
+    AdHoc,
+    DeveloperId,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilities {
+    pub os: PlatformOs,
+    pub arch: PlatformArch,
+    pub native_window_controls: bool,
+    pub window_control_placement: WindowControlPlacement,
+    pub supports_app_menu: bool,
+    pub supports_dock_reopen: bool,
+    pub supports_explorer_context_menu: bool,
+    pub supports_finder_quick_action: bool,
+    pub supports_opened_event: bool,
+    pub supports_tray: bool,
+    pub hotkey_label: String,
+    pub kimi_install_mode: KimiInstallMode,
+    pub release_channel: ReleaseChannel,
+}
+
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
 pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 11;
 
@@ -511,6 +565,7 @@ pub struct MainWindowCloseDecisionInput {
     pub remember: bool,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MainWindowCloseDecisionRequestPayload {

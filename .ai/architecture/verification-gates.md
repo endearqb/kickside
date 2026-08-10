@@ -2,28 +2,37 @@
 
 ## Shell
 
-```powershell
-Set-Location apps/kimi-shell/src-tauri
-cargo check
-cargo test --no-run
+```bash
+cd apps/kimi-shell
+node scripts/build_bridge_sidecar.mjs
+cd src-tauri
+cargo fmt --all -- --check
+cargo check --locked
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
 ```
 
-```powershell
-Set-Location apps/kimi-shell
+```bash
+cd apps/kimi-shell
+pnpm exec tsc --noEmit
 pnpm test
-.\node_modules\.bin\tsc.cmd --noEmit
+pnpm check:nfr:security
+node --test scripts/generate_updater_manifest.test.mjs
 ```
 
 ## IM Bridge
 
-```powershell
-Set-Location apps/kimi-im-bridge
+```bash
+cd apps/kimi-im-bridge
+go vet ./...
 go test ./...
+go test -race ./...
 ```
 
 ## Notes
 - 当前 Windows 环境中 Rust test binary 运行阶段可能报既有 `STATUS_ENTRYPOINT_NOT_FOUND`；能运行时优先执行完整 `cargo test`。
 - `pnpm exec` 可能触发非交互 install/purge 防护；本地已有 `node_modules` 时优先调用 `.\node_modules\.bin\tsc.cmd`。
+- Apple Silicon 本机开发包使用 `pnpm tauri:build:macos:local`；该命令只验证可构建/可启动 `.app`，不授权 Developer ID、notarization 或 updater 发布结论。
 
 ## Manual Release Gates
 
@@ -41,3 +50,6 @@ P5 发布前仍需要人工或专用环境验证：
 - 断网、下载失败或损坏签名必须保留当前安装，且检查/下载失败前不得停止后端或 Bridge。
 - GitHub Release 必须同时包含 NSIS/MSI、对应 `.sig` 和可解析的 `latest.json`；tag 必须与 `apps/kimi-shell/package.json` 版本一致。
 - `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 只在仓库 Actions Secrets 中配置；发布日志和资产不得泄露密钥内容。
+- macOS arm64 `.app` / DMG 必须在干净账户验证 traffic lights、App/Edit/Window 菜单、关闭隐藏、Dock reopen、Cmd+Q owned runtime 收口、OAuth 跳转、WebSocket、下载、文件选择和中文 IME。
+- `codesign --verify --deep --strict`、`spctl --assess`、notarization 与 stapling 必须针对最终 DMG 内的 app 通过；Developer ID certificate、Apple ID app-specific password 与 Team ID 只存 Actions Secrets。
+- GitHub Release 必须同时包含 Windows updater、macOS `.app.tar.gz`、两端 `.sig`、DMG 及同时含 `windows-x86_64`/`darwin-aarch64` 的唯一 `latest.json`；任一 build job 失败时 draft 不得发布。

@@ -1,15 +1,19 @@
 use std::{
-    path::PathBuf,
     sync::{Mutex, OnceLock},
     thread,
     time::Duration,
 };
 
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
+
 use serde::Serialize;
+#[cfg(target_os = "windows")]
+use tauri::WebviewWindow;
 use tauri::{
-    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindow,
-    WebviewWindowBuilder,
+    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindowBuilder,
 };
+#[cfg(target_os = "windows")]
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
 #[cfg(windows)]
@@ -25,12 +29,15 @@ use crate::{
     log_manager, settings_store,
     types::{
         MainWindowCloseBehavior, MainWindowCloseDecision, MainWindowCloseDecisionInput,
-        MainWindowCloseDecisionRequestPayload, OpenRequestErrorPayload, PrefillChatPayload,
-        PrefillStatusPayload, PrefillStatusState, ShellRoutePayload, StartupFailureKind,
-        StartupMonitorTargetRoute, StartupPhase, SubmitPrefillAck, WebviewRuntimeKind,
-        WorkspaceImportRequestPayload, WorkspaceImportResult, WorkspaceSessionBridgePayload,
+        OpenRequestErrorPayload, PrefillChatPayload, PrefillStatusPayload, PrefillStatusState,
+        ShellRoutePayload, StartupFailureKind, StartupMonitorTargetRoute, StartupPhase,
+        SubmitPrefillAck, WebviewRuntimeKind, WorkspaceImportRequestPayload, WorkspaceImportResult,
+        WorkspaceSessionBridgePayload,
     },
 };
+
+#[cfg(target_os = "windows")]
+use crate::types::MainWindowCloseDecisionRequestPayload;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 pub const PREFILL_WINDOW_LABEL: &str = "prefill";
@@ -49,11 +56,13 @@ const PREFILL_STATUS_EVENT: &str = "prefill-status";
 const OPEN_REQUEST_ERROR_EVENT: &str = "open-request-error";
 const WORKSPACE_IMPORT_REQUEST_EVENT: &str = "workspace-import-request";
 const WORKSPACE_IMPORT_RESULT_EVENT: &str = "workspace-import-result";
+#[cfg(target_os = "windows")]
 pub const MAIN_WINDOW_CLOSE_DECISION_REQUEST_EVENT: &str = "main-window-close-decision-request";
 const STARTUP_TRACE_LIMIT: usize = 48;
 const MAIN_TASK_ENTER_TIMEOUT: Duration = Duration::from_secs(4);
 const MAIN_WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(8);
 const FRONTEND_READY_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(target_os = "windows")]
 const DOWNLOAD_SAVE_DIALOG_TITLE: &str = "Save download";
 
 const PREFILL_WIDTH: f64 = 720.0;
@@ -96,6 +105,7 @@ impl<T> UnsafeSend<T> {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn selected_file_path(selection: Option<FilePath>) -> Option<PathBuf> {
     selection.and_then(|value| value.into_path().ok())
 }
@@ -301,14 +311,6 @@ unsafe fn attach_windows_download_save_hook(
             }
         })
         .map_err(|error| format!("failed to access main platform webview for download hook: {error}"))
-}
-
-#[cfg(not(windows))]
-fn attach_windows_download_save_hook(
-    _window: &WebviewWindow,
-    _app: &AppHandle,
-) -> Result<(), String> {
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -618,12 +620,14 @@ pub fn handle_prefill_window_destroyed(app: &AppHandle, source: &str) {
     );
 }
 
+#[cfg(target_os = "windows")]
 fn load_main_window_close_behavior(app: &AppHandle) -> MainWindowCloseBehavior {
     settings_store::load_or_default(app)
         .map(|settings| settings.main_window_close_behavior)
         .unwrap_or(MainWindowCloseBehavior::Ask)
 }
 
+#[cfg(target_os = "windows")]
 fn emit_main_window_close_decision_request(app: &AppHandle, source: &str) -> bool {
     let payload = MainWindowCloseDecisionRequestPayload {
         title: "关闭主窗口".to_string(),
@@ -656,6 +660,7 @@ pub fn minimize_main_window_to_tray(app: &AppHandle, source: &str) {
     }
 }
 
+#[cfg(target_os = "windows")]
 pub fn handle_main_close_requested(app: &AppHandle, source: &str) -> bool {
     let close_behavior = load_main_window_close_behavior(app);
     let action = {
@@ -1213,6 +1218,17 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+pub fn hide_main_window(app: &AppHandle, source: &str) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if let Err(error) = window.hide() {
+            log_manager::append_line(
+                app,
+                format!("failed to hide main window (source={source}): {error}"),
+            );
+        }
+    }
+}
+
 fn next_agent_room_visibility(visible: bool) -> bool {
     !visible
 }
@@ -1623,13 +1639,16 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
         }
     };
 
-    if let Err(error) = unsafe { attach_windows_download_save_hook(&window, app) } {
-        log_manager::append_line(
-            app,
-            format!(
-                "failed to access main platform webview for download hook; falling back to default download behavior: {error}"
-            ),
-        );
+    #[cfg(target_os = "windows")]
+    unsafe {
+        if let Err(error) = attach_windows_download_save_hook(&window, app) {
+            log_manager::append_line(
+                app,
+                format!(
+                    "failed to access main platform webview for download hook; falling back to default download behavior: {error}"
+                ),
+            );
+        }
     }
 
     apply_main_window_geometry(app, &window, source);
@@ -2145,7 +2164,10 @@ fn apply_prefill_window_geometry(app: &AppHandle, window: &tauri::WebviewWindow,
             format!("failed to set prefill size (source={source}): {error}"),
         );
     }
+    #[cfg(target_os = "windows")]
     let _ = window.set_decorations(false);
+    #[cfg(target_os = "macos")]
+    let _ = window.set_decorations(true);
     #[cfg(target_os = "windows")]
     let _ = window.set_shadow(true);
     let _ = window.center();
@@ -2168,7 +2190,10 @@ fn apply_main_window_geometry(app: &AppHandle, window: &tauri::WebviewWindow, so
             format!("failed to set main size (source={source}): {error}"),
         );
     }
+    #[cfg(target_os = "windows")]
     let _ = window.set_decorations(false);
+    #[cfg(target_os = "macos")]
+    let _ = window.set_decorations(true);
     #[cfg(target_os = "windows")]
     let _ = window.set_shadow(true);
 }
@@ -2205,7 +2230,10 @@ fn apply_workspace_import_picker_geometry(
             format!("failed to set workspace import picker size (source={source}): {error}"),
         );
     }
+    #[cfg(target_os = "windows")]
     let _ = window.set_decorations(false);
+    #[cfg(target_os = "macos")]
+    let _ = window.set_decorations(true);
     #[cfg(target_os = "windows")]
     let _ = window.set_shadow(true);
     let _ = window.center();

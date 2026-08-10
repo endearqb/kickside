@@ -284,6 +284,8 @@ func (o *SessionObserver) observeOnce(ctx context.Context, subscription Observer
 }
 
 func (o *SessionObserver) observerHello(conn *websocket.Conn, subscription ObserverSubscription, cursors map[string]ObserverCursor) (string, error) {
+	epoch := ""
+	helloSent := false
 	for {
 		if err := conn.SetReadDeadline(time.Now().Add(o.options.HelloTimeout)); err != nil {
 			return "", err
@@ -298,14 +300,22 @@ func (o *SessionObserver) observerHello(conn *websocket.Conn, subscription Obser
 				return "", err
 			}
 		case "server_hello":
-			epoch := payloadString(frame.Payload, "epoch")
+			epoch = payloadString(frame.Payload, "epoch")
 			wireCursors := make(map[string]wsCursor, len(subscription.SessionIDs))
 			for _, sessionID := range subscription.SessionIDs {
 				cursor := cursors[sessionID]
 				wireCursors[sessionID] = wsCursor{Seq: int(cursor.Seq), Epoch: cursor.Epoch}
 			}
-			err := conn.WriteJSON(map[string]any{"type": "client_hello", "id": fmt.Sprintf("agent-room-observer-%d", subscription.Generation), "payload": map[string]any{"subscriptions": subscription.SessionIDs, "cursors": wireCursors}})
-			return epoch, err
+			if err := conn.WriteJSON(map[string]any{"type": "client_hello", "id": fmt.Sprintf("agent-room-observer-%d", subscription.Generation), "payload": map[string]any{"subscriptions": subscription.SessionIDs, "cursors": wireCursors}}); err != nil {
+				return "", err
+			}
+			helloSent = true
+		case "ack":
+			if helloSent {
+				return firstNonEmptyString(payloadString(frame.Payload, "epoch"), epoch), nil
+			}
+		case "resync_required":
+			return "", errors.New("runtime observer requires resync during hello")
 		case "error":
 			return "", errors.New("runtime observer hello failed")
 		}

@@ -809,6 +809,23 @@
 - 重复 cycle 来自健康后端上的“重新连接”操作，不是 Server 启动失败；首次引导重构遗漏了已有完成回调的 UI 入口。
 - npm/pnpm 升级保持原逻辑，未知安装来源继续拒绝；普通 `reused_external` 停止语义不变。
 
+## macOS V1（Apple Silicon）
+
+### Checklist
+- [x] 读取治理、架构、DESIGN 与 2026-08-05 macOS Research/PRD/SPEC/Plan
+- [x] 审查当前仓库并并行调研 Kimi Code 0.34.0 与 Tauri/macOS 官方实践
+- [x] 接受 macOS 平台边界与 Kimi instance registry ADR
+- [x] 完成跨平台 build/verify、target-triple Bridge 与平台配置
+- [x] 完成 PlatformCapabilities、原生 traffic lights、App Menu、Dock reopen 与 Cmd+Q
+- [x] 完成 Finder-safe Kimi 定位、instance registry 与 Unix process-group 管理
+- [x] 完成 macOS guided install 与 Windows-only UI 隔离
+- [x] 通过前端/Rust/Go G0/G1 及本机 unsigned `.app` smoke
+- [ ] Developer ID、notarization、stapling、DMG 与 updater G3（需要外部证书）
+
+### Review
+- 2026-08-05 文档基线已过期：当前 Kimi Code 稳定版为 0.34.0；Agent Room 已被 Accepted ADR 下线，不进入 macOS 验收。
+- 当前主机是 arm64 macOS 26.5.1；本地 `.app` 已构建并以临时 Kimi Code 0.34.0 启动，registry 实际端口与 Bearer OpenAPI probe 通过。自动 UI 验收受宿主辅助功能/屏幕录制权限限制；Developer ID/notarization/DMG/updater 仍需 Apple 凭据完成 G3。
+
 ## 控制中心 API 配置 canonical 化
 
 ### Checklist

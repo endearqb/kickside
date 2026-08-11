@@ -19,7 +19,7 @@ operations, diagnostics, and platform-specific packaging into one workspace-orie
 - Windows Explorer context-menu launch for folders, single files, and multi-file selections, creating independent sessions without restarting a running backend
 - Native macOS traffic lights, App/Edit/Window menus, close-to-hide, Dock reopen, and graceful Cmd+Q
 - Compact assistant settings with app self-update, platform-aware install guidance, read-only authentication/API health, Kimi Code Web settings guidance, default work directory, and IM channels
-- Windows-managed Kimi Code install/upgrade plus macOS external guided install using the official native installer
+- Windows-managed Kimi Code install/upgrade plus macOS guided install and in-app upgrade of the located native executable
 - Unified Control Center for overview, quick setup, runtime diagnostics, and IM Bridge operations
 - IM Bridge workspace with Feishu-focused controls for channel status, work directory, approvals, and session switching
 - Platform-native window lifecycle, tray behavior, diagnostics access, and NSIS/MSI/app/DMG outputs

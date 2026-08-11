@@ -196,14 +196,18 @@ fn cleanup_replaced_session_skills(
 }
 
 pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u16) {
-    start_session_poller(app.clone(), generation, workspace_port);
-
     {
         let state = app.state::<AppState>();
         let lock = state.runtime.lock();
         let Ok(mut runtime) = lock else {
             return;
         };
+        if runtime.generation != generation
+            || runtime.state != BackendState::Running
+            || runtime.workspace_port != Some(workspace_port)
+        {
+            return;
+        }
         if runtime.pending_workspace_bootstraps.is_empty() {
             if let Some(work_dir) = runtime.effective_work_dir.clone() {
                 runtime
@@ -218,6 +222,7 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
             }
         }
     }
+    start_session_poller(app.clone(), generation, workspace_port);
     kick_workspace_bootstrap_worker(app);
 }
 

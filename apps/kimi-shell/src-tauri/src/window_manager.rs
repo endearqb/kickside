@@ -566,6 +566,19 @@ pub fn permit_process_exit(app: &AppHandle, source: &str) {
     log_manager::append_line(app, format!("process exit permitted (source={source})"));
 }
 
+pub fn revoke_process_exit(app: &AppHandle, source: &str) {
+    let lock = shared_navigation_state().lock();
+    let Ok(mut state) = lock else {
+        log_manager::append_line(
+            app,
+            format!("navigation state mutex poisoned while revoking exit (source={source})"),
+        );
+        return;
+    };
+    state.allow_process_exit = false;
+    log_manager::append_line(app, format!("process exit revoked (source={source})"));
+}
+
 pub fn should_prevent_process_exit(_app: &AppHandle) -> bool {
     let lock = shared_navigation_state().lock();
     let Ok(state) = lock else {

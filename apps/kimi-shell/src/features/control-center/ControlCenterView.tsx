@@ -41,6 +41,8 @@ import {
 } from "@/features/control-center/InstallFlowModal";
 import { WorkspaceHubPanel } from "@/features/control-center/WorkspaceHubPanel";
 import { WorkspaceSchedulePanel } from "@/features/control-center/WorkspaceSchedulePanel";
+import { MacKimiInstallGuidance } from "@/features/control-center/MacKimiInstallGuidance";
+import { MacKimiUpgradePanel } from "@/features/control-center/MacKimiUpgradePanel";
 import {
   ControlCenterUnifiedRail,
   type UnifiedRailGroup,
@@ -281,6 +283,7 @@ export function ControlCenterView({
   onInstallAppUpdate,
   onCompleteOnboarding,
   onOpenExternalUrl,
+  onOpenSystemTerminal,
   installMessage,
 }: ControlCenterViewProps) {
   const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
@@ -640,10 +643,8 @@ export function ControlCenterView({
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
-  const installPrimaryActionLabel = externalGuidedInstall
-    ? installReady
-      ? "查看升级说明"
-      : "查看安装说明"
+  const installPrimaryActionLabel = externalGuidedInstall && !installReady
+    ? "查看安装说明"
     : !installReady
       ? "一键安装 Kimi Code"
       : kimiCodeUpdatePresentation.primaryLabel;
@@ -652,7 +653,11 @@ export function ControlCenterView({
     : kimiCodeUpdatePresentation.barLabel;
   async function handleStartOnboardingInstallTask(taskId: InstallTaskId) {
     setExpandedOnboardingCard("install");
-    if (!installPrerequisitesReady && (taskId === "quick_install_core" || taskId === "upgrade_kimi")) {
+    if (
+      !externalGuidedInstall &&
+      !installPrerequisitesReady &&
+      (taskId === "quick_install_core" || taskId === "upgrade_kimi")
+    ) {
       return;
     }
     await onStartInstallTask(taskId);
@@ -662,20 +667,24 @@ export function ControlCenterView({
       type="button"
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
-      onClick={() =>
-        void (externalGuidedInstall
-          ? onOpenExternalUrl(
-              "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
-            )
-          : handleStartOnboardingInstallTask(installPrimaryTaskId))
-      }
+      onClick={() => {
+        if (externalGuidedInstall && !installReady) {
+          setExpandedOnboardingCard("install");
+          return;
+        }
+        void handleStartOnboardingInstallTask(installPrimaryTaskId);
+      }}
       disabled={
         installBusy ||
         installProbeBusy ||
-        (!externalGuidedInstall &&
-          ((installReady && kimiCodeUpdatePresentation.disabled) || !installPrerequisitesReady))
+        (installReady && kimiCodeUpdatePresentation.disabled) ||
+        (!externalGuidedInstall && !installPrerequisitesReady)
       }
-      title={externalGuidedInstall ? undefined : installPrerequisiteIssues.join("；") || undefined}
+      title={
+        externalGuidedInstall
+          ? undefined
+          : installPrerequisiteIssues.join("；") || undefined
+      }
     >
       {installPrimaryActionLabel}
     </Button>
@@ -1434,49 +1443,16 @@ export function ControlCenterView({
               <p className="cc-config-error">{kimiCodeUpdateError}</p>
             ) : null}
             <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-            {externalGuidedInstall ? (
-              <div className="cc-config-grid">
-                <p className="hint">
-                  macOS 版不会在后台执行远程安装脚本。请复制官方命令到 Terminal，完成后回到这里重新检测。
-                </p>
-                <pre className="cc-install-command-code">
-                  curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-                </pre>
-                <div className="cc-step-secondary-actions">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="cc-action-btn"
-                    onClick={() =>
-                      copyText("curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash")
-                    }
-                  >
-                    复制安装命令
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="cc-action-btn"
-                    onClick={() => copyText("kimi upgrade")}
-                  >
-                    复制升级命令
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="cc-action-btn"
-                    onClick={() =>
-                      void onOpenExternalUrl(
-                        "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
-                      )
-                    }
-                  >
-                    打开官方文档
-                  </Button>
-                </div>
-                <p className="hint">
-                  默认原生安装位置为 ~/.kimi-code/bin/kimi；也可以通过“选择 Kimi 路径”使用其他受信任的安装。
-                </p>
+            {externalGuidedInstall && !installReady ? (
+              <>
+                <MacKimiInstallGuidance
+                  onOpenTerminal={onOpenSystemTerminal}
+                  onOpenDocs={() =>
+                    onOpenExternalUrl(
+                      "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
+                    )
+                  }
+                />
                 <div className="cc-step-secondary-actions">
                   <Button
                     type="button"
@@ -1495,7 +1471,16 @@ export function ControlCenterView({
                     保存并重试
                   </Button>
                 </div>
-              </div>
+              </>
+            ) : externalGuidedInstall ? (
+              <MacKimiUpgradePanel
+                session={installSessionSnapshot}
+                detectedKimiPath={installPathDisplay}
+                upgradeLabel={kimiCodeUpdatePresentation.primaryLabel}
+                upgradeDisabled={kimiCodeUpdatePresentation.disabled || installProbeBusy}
+                onUpgrade={() => handleStartOnboardingInstallTask("upgrade_kimi")}
+                onCancel={onCancelInstallTask}
+              />
             ) : (
               <InstallFlowTaskContent
                 session={installSessionSnapshot}
@@ -3135,10 +3120,12 @@ export function ControlCenterView({
       "还没有安装输出。";
     return (
       <div className="cc-unified-rail-footer-stack">
-        {assistantSettingsSectionActive && expandedOnboardingCard === "install" ? (
+        {assistantSettingsSectionActive &&
+        expandedOnboardingCard === "install" &&
+        (!externalGuidedInstall || installSessionSnapshot.taskId === "upgrade_kimi") ? (
           <div className="cc-rail-install-terminal">
             <div className="cc-rail-install-terminal-head">
-              <strong>内置终端</strong>
+              <strong>{externalGuidedInstall ? "升级日志" : "内置终端"}</strong>
               <span>{installSessionSnapshot.status}</span>
             </div>
             <pre>{installConsoleText}</pre>

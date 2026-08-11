@@ -15,6 +15,7 @@
         "core:webview:allow-set-webview-size",
         "core:webview:allow-webview-close",
         "dialog:allow-open",
+        "dialog:allow-ask",
         "main-command-access"
       ]
     },
@@ -56,7 +57,11 @@
       "local": true,
       "platforms": ["macOS"],
       "windows": ["main"],
-      "permissions": ["core:window:allow-start-dragging"]
+      "permissions": [
+        "core:window:allow-start-dragging",
+        "core:window:allow-toggle-maximize",
+        "core:window:allow-is-maximized"
+      ]
     }
   ]
 }

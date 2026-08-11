@@ -22,8 +22,13 @@ surface are stale: Kimi Code 0.34.0 is current, and Agent Room is retired by an 
   titlebar and Explorer integration.
 - Add one additive `PlatformCapabilities` Tauri contract. Frontend platform decisions must consume
   that contract rather than scattered user-agent checks.
-- Keep Kimi Code external to the app. macOS V1 detects and validates the official executable and
-  provides guided installation; it must not silently execute a remote `curl | sh` pipeline.
+- Keep Kimi Code external to the app. macOS detects and validates the official executable and
+  provides guided first installation. It may ask macOS to open Terminal.app, but must not paste,
+  type or execute the remote `curl | sh` pipeline on the user's behalf. Once Kimi Code is installed,
+  a user-confirmed managed upgrade may stop only the Shell-owned backend, invoke the validated
+  executable directly with the single `upgrade` argument, stream redacted output, re-probe, and
+  restart the backend; it must not route through PowerShell, a shell command string, or kill a
+  reused external runtime.
 - Package the Go IM Bridge through Tauri `externalBin` with target-triple source artifacts. The
   bundled executable keeps the stable runtime name `kimi-im-bridge` / `kimi-im-bridge.exe`.
 - Local development may use unsigned/ad-hoc `.app` artifacts. Public distribution requires a

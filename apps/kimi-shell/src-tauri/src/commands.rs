@@ -156,6 +156,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::get_diagnostics,
         super::open_logs_folder,
         super::open_external_url,
+        super::open_system_terminal,
         super::open_folder,
         super::open_kimi_config_dir,
         super::load_kimi_code_access_config,

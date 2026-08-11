@@ -1,3 +1,27 @@
+# WorkspaceHub 目标目录原生选择
+
+## 任务契约
+
+- 用户目标：目标目录不再只能手动输入，改为与默认工作目录一致的“路径输入 + 浏览 + 打开目录”交互。
+- 直接交付物：Harness path 变量接入系统目录选择器和 Finder/Explorer 打开动作，并补交互测试。
+- 影响范围：WorkspaceHub Harness 变量表单、局部样式和前端测试。
+- 非目标：不改变 Harness manifest、目录创建规则、Workspace 注册格式或 Tauri capability。
+- 验收：路径仍可手输；浏览返回目录后回填；有路径时可打开目录；空路径时打开按钮禁用；前端 gate 通过。
+
+## Checklist
+
+- [x] 识别 `type: "path"` 的 Harness 变量并保留文本输入。
+- [x] 使用 Tauri 原生目录选择器回填目标路径。
+- [x] 复用受控 `open_folder` 调用链打开当前目录。
+- [x] 增加浏览、回填和打开目录回归测试。
+- [x] 完成 TypeScript、全量 Vitest、security gate 与生产构建。
+
+## Review
+
+- 当前目标目录原先确实只有普通输入框；本轮按变量类型增强，后续新增 path 变量会自动获得相同交互。
+- 目录选择沿用 native-feel T3，采用操作系统 picker；不新增 WebView 自绘文件浏览器，也不扩大文件系统权限。
+- 验证结果：43 个测试文件 / 212 项测试、TypeScript、安全 gate 和 Vite production build 通过。
+
 # 控制中心 API 编辑退场与 Kimi 登录浏览器放行
 
 ## 任务契约
@@ -825,6 +849,25 @@
 ### Review
 - 2026-08-05 文档基线已过期：当前 Kimi Code 稳定版为 0.34.0；Agent Room 已被 Accepted ADR 下线，不进入 macOS 验收。
 - 当前主机是 arm64 macOS 26.5.1；本地 `.app` 已构建并以临时 Kimi Code 0.34.0 启动，registry 实际端口与 Bearer OpenAPI probe 通过。自动 UI 验收受宿主辅助功能/屏幕录制权限限制；Developer ID/notarization/DMG/updater 仍需 Apple 凭据完成 G3。
+
+## macOS V1 审查修复与合并门禁
+
+### Checklist
+- [x] owned child 在 spawn 后立即登记，并以 lifecycle operation 串行 stop/restart/monitor 清理
+- [x] Unix 保存不可变 process-group identity，TERM/KILL 后确认整组消失；未确认时保留 owned ledger 并阻止退出
+- [x] owned registry 归属收紧为本次 child PID + launch time；删除新增 server-id/端口启发式归属
+- [x] external runtime 在 stop/restart/quit 路径保持 never-kill
+- [x] macOS 安装指引增加复制反馈、打开 Terminal 与本地中文步骤，不自动执行远程脚本
+- [x] macOS 已安装 Kimi Code 支持原生确认后的应用内升级、实时脱敏日志、复检与后端自动重启
+- [x] PR CI 实际运行 Rust tests，并构建/校验/上传 macOS arm64 `.app`
+- [x] release gate 精确验证 NSIS、MSI、DMG、app updater 资产及 macOS 架构/签名
+- [x] 用 macOS Kimi 0.34.0 隔离 smoke 确认 registry PID 与 spawned PID 一致、health/Bearer 均为 200
+- [ ] 用最终 Windows Kimi 0.34 安装基线确认 registry PID 与 spawned PID 一致
+- [ ] Developer ID、notarization、stapling、最终 DMG 与真实 updater E2E G3
+
+### Review
+- 自动化代码门禁通过后可进入合并候选；最后两项属于真实安装/发布环境 G3，其中签名公证项不应伪装为本地完成。
+- 若未来 Kimi wrapper 把 registry PID 改为 descendant，只能用 OS 可证明的进程树/进程组关系扩展，不能恢复共享 token、端口或新增 server-id 启发式。
 
 ## 控制中心 API 配置 canonical 化
 

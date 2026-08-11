@@ -185,4 +185,22 @@ describe("ShellTitlebar", () => {
     expect(appActions?.contains(screen.getByRole("button", { name: "打开控制中心" }))).toBe(true);
     expect(header?.querySelector(".titlebar-right")).toBeNull();
   });
+
+  it("routes a primary-button double click on the macOS drag zone to window zoom", () => {
+    const onTitlebarDoubleClick = vi.fn();
+    const { container } = render(
+      <ShellTitlebar
+        {...titlebarProps}
+        tauriRuntime
+        nativeWindowControls
+        onTitlebarDoubleClick={onTitlebarDoubleClick}
+      />,
+    );
+
+    const dragZone = container.querySelector(".titlebar-workspace-drag-zone");
+    expect(dragZone).toBeTruthy();
+    fireEvent.doubleClick(dragZone!, { button: 0 });
+
+    expect(onTitlebarDoubleClick).toHaveBeenCalledOnce();
+  });
 });

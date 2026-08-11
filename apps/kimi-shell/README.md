@@ -20,7 +20,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows / macOS 桌面壳程序�
 - Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器；Windows 安装版下载使用原生“另存为”。macOS 13 使用 WKWebView 共享 data store，不传仅 Windows 支持的 `dataDirectory`。
 - 平台原生体验：macOS 使用原生 traffic lights、App/Edit/View/Window 菜单、关闭主窗口隐藏、Dock reopen 恢复与 Cmd+Q graceful exit；Windows 保持自定义标题栏和 close-to-tray。
 - Windows 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“Kimi 小助手”中文名称并可编辑；macOS 不渲染 Explorer 设置项。
-- 安装边界：Windows 保留受管安装任务；macOS 只展示/复制官方 native install 与 `kimi upgrade` 命令并重新探测，不在后台执行远程 pipe。
+- 安装边界：Windows 保留受管安装任务；macOS 首次安装继续展示/复制官方 native install 命令并可调用系统打开 Terminal.app，但不会自动粘贴或执行远程 pipe；已安装后的升级由原生确认对话框授权，小助手停止 owned `kimi web` 后对已验证的 executable 直接执行单参数 `upgrade`，实时展示脱敏日志，成功后重新探测并自动重启后端；外部复用实例保持 never-kill。
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
 - 认证与 API 诊断：控制中心只读展示当前认证模式、Kimi 登录和 Provider API 健康状态；API、模型与 Search / Fetch 服务编辑由 Kimi Code Web 内置设置负责
 - 安全退出流程：退出读秒窗 + 状态反馈

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceHubPanel } from "./WorkspaceHubPanel";
+
+const openDialog = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));
 
 const workspace = {
   id: "workspace-1",
@@ -22,7 +26,22 @@ const harness = {
   summary: "Harness summary",
   tags: [],
   template: "default",
-  variables: [],
+  variables: [
+    {
+      key: "workspaceName",
+      label: "工作区名称",
+      type: "string",
+      required: true,
+      secret: false,
+    },
+    {
+      key: "workDir",
+      label: "目标目录",
+      type: "path",
+      required: true,
+      secret: false,
+    },
+  ],
   skills: [],
   postCreate: {},
 };
@@ -88,5 +107,36 @@ describe("WorkspaceHubPanel detail", () => {
     expect(await screen.findByRole("heading", { name: harness.name })).toBeTruthy();
     expect(screen.getByRole("button", { name: "创建工作区" })).toBeTruthy();
     expect(screen.getAllByText("变量").length).toBeGreaterThan(0);
+  });
+
+  it("browses for a target directory and opens the selected path", async () => {
+    const onOpenWorkspace = vi.fn(async () => undefined);
+    openDialog.mockResolvedValue("/Users/demo/Projects/Selected");
+
+    render(
+      <WorkspaceHubPanel
+        detailOnly
+        onOpenWorkspace={onOpenWorkspace}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /Demo Harness/ }));
+    const targetInput = await screen.findByRole("textbox", { name: "目标目录 *" });
+    fireEvent.change(targetInput, { target: { value: "/Users/demo/Projects/Existing" } });
+    fireEvent.click(screen.getByRole("button", { name: "浏览" }));
+
+    await waitFor(() => {
+      expect(openDialog).toHaveBeenCalledWith({
+        title: "选择目标目录",
+        multiple: false,
+        directory: true,
+      });
+      expect((targetInput as HTMLInputElement).value).toBe("/Users/demo/Projects/Selected");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "打开目标目录" }));
+    await waitFor(() => {
+      expect(onOpenWorkspace).toHaveBeenCalledWith("/Users/demo/Projects/Selected");
+    });
   });
 });

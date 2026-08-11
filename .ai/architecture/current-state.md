@@ -3,7 +3,7 @@
 ## Shell Runtime
 - `apps/kimi-shell` 是共享一套 Tauri v2 + React 代码的 Windows x86_64 / Apple Silicon macOS 13+ 桌面壳。Windows 保持自定义标题栏与 close-to-tray；macOS 使用原生 decorations/traffic lights、App Menu、关闭隐藏、Dock reopen 与 Cmd+Q graceful exit。
 - 后端主路径使用 `kimi web --no-open --port <port>`；Shell 先读取 `<KIMI_CODE_HOME>/server/instances/*.json`，只接受有界大小、完整 schema、loopback host、存活 PID、health 与 Bearer contract 均通过的实例，再复用并标记为 `reused_external`。旧 `server/lock` 仅在无可用 registry record 时作 pre-0.28 兼容 fallback；退出、普通停止和重新连接只解除 external 连接、不终止外部进程。
-- Shell 自启实例在 spawn 前记录 registry server id，启动后优先按 child PID、其次按新增 server id 获取实际端口；Unix child 进入独立 process group，owned stop 执行 TERM→grace→KILL group，external instance 永不进入 kill 路径。registry fallback 与 Unix process group 兼容层的退出条件是 Kimi Code 最低支持版本明确高于对应旧协议且完成一次 G3。
+- Shell 自启实例只接受与本次 spawn child PID 精确一致、且启动时间不早于本次 launch 容差窗口的 registry record；新增 server id 与端口扫描不能证明 ownership。spawn 后立即登记 child 与不可变 process-group identity，start/stop/restart/monitor 通过单一 lifecycle operation 串行收口；Unix owned stop 执行 TERM→等待整组消失→KILL group，未确认整组退出时保留 owned ledger、拒绝 external 重分类和 App exit。external instance 永不进入 kill 路径。
 - Shell 从 `KIMI_CODE_HOME/server.token` 读取 server token；若未设置 `KIMI_CODE_HOME`，默认使用用户目录下 `.kimi-code/server.token`。
 - workspace URL 由 Shell 组装为 `http://127.0.0.1:<port>/#token=<token>`；对外状态只展示脱敏 token。
 - iframe/embed 导航通过专用 `get_workspace_embed_url` 获取 tokenized URL；`get_app_status` 与 `get_diagnostics` 只返回 redacted `workspaceUrl` 展示面。
@@ -18,7 +18,7 @@
 - Shell 前端已从 `useShellController.ts` 拆出安装流、轮询、Bridge 运行态刷新、Skill Center 状态/刷新、workspace embed URL 和 workspace import picker 控制器；Bridge 写操作与 Skill 动作 handler 仍在主 controller 中编排。
 - Shell 在配置目录写入 `kimi_runtime_locator.json`，包含 origin、token path、redacted token、generation、ownership 和 health，不包含明文 token。
 - P1A/P1B 当前不再默认启动 workspace proxy；后端 ready 后的 session bootstrap 已恢复，但走 `/api/v1`。
-- Windows 安装主链路从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和应用内首次安装走 npm 全局包 `@moonshot-ai/kimi-code`，升级跟随已识别的 Windows native/npm/pnpm 来源。macOS V1 不复用 PowerShell/npm managed task，只展示/复制官方 native install 命令与 `kimi upgrade`、打开官方文档并在用户完成后重新探测；默认原生 executable 为 `~/.kimi-code/bin/kimi`。
+- Windows 安装主链路从旧 uv/Python `kimi-cli` 切到 Kimi Code：quick/core 和应用内首次安装走 npm 全局包 `@moonshot-ai/kimi-code`，升级跟随已识别的 Windows native/npm/pnpm 来源。macOS 首次安装仍为 external guided：只展示/复制官方 native install 命令，可通过系统 `open -a Terminal` 打开 Terminal.app，但不粘贴或执行远程 pipe；已安装后的升级是独立 managed path，经原生确认后先收口 owned `kimi web`，再对 locator 验证后的绝对 executable 直接传入单参数 `upgrade`，stdout/stderr 脱敏后实时展示，成功后执行版本复检并自动重启后端，失败或取消则保持停止；external instance 永不进入 kill 路径。默认原生 executable 为 `~/.kimi-code/bin/kimi`。
 - Kimi locator 顺序为 configured path → `~/.kimi-code/bin/kimi` → `$KIMI_CODE_HOME/bin/kimi` → Homebrew/local candidates → inherited PATH → allowlisted bounded login shell。每个候选必须 canonical、regular、executable，并通过包含 token rotation/host controls 的新 Kimi Code `web --help` family markers，不能以 legacy Python `kimi-cli` 的较大 semver 冒充新实现。首个实体机 tested baseline 为 Kimi Code 0.34.0。
 - Shell 每个应用进程启动后会静默执行一次本地安装探测；已安装 Kimi Code 时通过官方 `https://code.kimi.com/kimi-code/latest` 检测一次新版本，并在控制中心安装/升级设置 bar 展示当前/最新版本。检测失败不阻塞启动或手动升级，升级成功后自动复检。
 - 安装兼容 Tauri commands `install_kimi_dependencies`、`install_kimi_code`、`upgrade_kimi_code`、`uninstall_kimi_code`、`install_nodejs` 仍在 `commands/install.rs` 注册为旧前端兼容层；主路径是 `start_install_task` + install catalog。退出条件：前端与已发布版本不再调用这些 compat commands 满一个发布周期后，移除 compat command 注册并通过 Shell G1 gate。
@@ -31,7 +31,7 @@
 - 控制中心的 Skill Center 与 WorkspaceHub 使用卡片目录进入只读文件详情；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 由跨平台 Node 脚本以 `CGO_ENABLED=0` 生成 `binaries/kimi-im-bridge-<target-triple>[.exe]`，通过 Tauri `externalBin` 打包；Bridge 提供稳定、无配置依赖的 `--version` probe。当前支持 `x86_64-pc-windows-msvc` 与 `aarch64-apple-darwin`。
 - Shell 已接入 Tauri v2 Updater：每个应用进程启动后后台检测一次，设置页支持手动重检和用户确认后的签名下载/安装；安装开始前走退出协调并停止 Kimi 后端与 IM Bridge，检查或下载失败不停止现有服务。
-- GitHub `v*` tag 发布 workflow 校验 tag 与 `apps/kimi-shell/package.json` 版本一致，先创建 draft，再并行构建 Windows x86_64 NSIS/MSI 与 macOS arm64 app/DMG，最后由签名文件合成同时包含 `windows-x86_64` / `darwin-aarch64` 的单一 `latest.json` 后才发布。macOS release job 注入 Developer ID 与 notarization 凭据；本地 `tauri:build:macos:local` 明确关闭 updater artifact，只产出 ad-hoc/unsigned 开发 `.app`。
+- Pull Request CI 在 Windows/macOS 实际执行 Rust tests，并由独立 Apple Silicon job 构建、检查架构和上传 unsigned `.app` artifact。GitHub `v*` tag 发布 workflow 校验 tag 与 `apps/kimi-shell/package.json` 版本一致，先创建 draft，再并行构建 Windows x86_64 NSIS/MSI 与 macOS arm64 app/DMG；发布前精确验证四类 installer、macOS app/sidecar arm64 与 codesign，再由签名文件合成同时包含 `windows-x86_64` / `darwin-aarch64` 的单一 `latest.json`。macOS release job 注入 Developer ID 与 notarization 凭据；本地 `tauri:build:macos:local` 明确关闭 updater artifact，只产出 ad-hoc/unsigned 开发 `.app`。
 
 ## IM Bridge
 - `apps/kimi-im-bridge` 仍是 Shell 托管的 Go sidecar。

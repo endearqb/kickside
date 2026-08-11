@@ -72,10 +72,56 @@ jobs:
       - name: Build target bridge sidecar
         working-directory: apps/kimi-shell
         run: node scripts/build_bridge_sidecar.mjs --target ${{ matrix.target }}
-      - run: cargo fmt -- --check
-      - run: cargo check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test --no-run
+      - run: cargo fmt --all -- --check
+      - run: cargo check --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  shell-macos-app:
+    name: macOS arm64 app bundle
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/kimi-shell/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kimi-im-bridge/go.mod
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: Verify Apple Silicon runner
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+      - name: Install frontend dependencies
+        working-directory: apps/kimi-shell
+        run: pnpm install --frozen-lockfile
+      - name: Build unsigned macOS app bundle
+        working-directory: apps/kimi-shell
+        run: pnpm tauri:build:macos:local
+      - name: Verify and package arm64 app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/kimi sidekick.app"
+          test -d "$app_path"
+          plutil -lint "$app_path/Contents/Info.plist"
+          lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
+          lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            kimi-sidekick-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kimi-sidekick-macos-arm64-app
+          path: kimi-sidekick-macos-arm64.zip
+          if-no-files-found: error
 
   shell-frontend:
     name: Frontend shell (${{ matrix.os }})

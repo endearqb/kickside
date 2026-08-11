@@ -14,9 +14,9 @@ force: normal stop, reconnect and application exit never terminate a reused exte
 - Use `<KIMI_CODE_HOME>/server/instances/*.json` as the primary Kimi Code runtime discovery source.
 - Accept records only after bounded-size JSON parsing, non-zero PID/port, loopback host validation,
   live-PID validation and health plus Bearer-authenticated API probing.
-- For an owned launch, snapshot server IDs before spawn and prefer a record whose PID matches the
-  child. A newly created record near the launch time is the secondary match; bounded port probing is
-  only a fallback while the child remains alive.
+- For an owned launch, accept only a record whose PID exactly matches the spawned child and whose
+  start time is within the bounded launch clock tolerance. A newly created server ID, an
+  authenticated port, or a shared token does not prove process ownership.
 - Preserve the legacy `server/lock` reader only as an explicitly registered compatibility path for
   pre-0.28 Kimi installations when no current registry candidate is usable. New features must not
   depend on the legacy path.
@@ -41,6 +41,9 @@ force: normal stop, reconnect and application exit never terminate a reused exte
   without exposing the server token.
 - A healthy external registry instance remains `reused_external`; only a child started by the shell
   is `owned_by_shell`.
+- If a future Kimi launcher records a wrapper descendant instead of the spawned PID, compatibility
+  may be added only with OS-verifiable process-tree/process-group evidence. It must not restore the
+  server-ID or port heuristic.
 - Token rotation may produce an auth failure while the process is alive. The shell must re-read
   `server.token` before declaring the runtime unavailable.
 - The legacy lock compatibility path exits after supported upgrade paths have moved active users to a
@@ -51,5 +54,7 @@ force: normal stop, reconnect and application exit never terminate a reused exte
 
 - Fixture tests cover valid/invalid records, loopback hosts, record size, ordering, PID liveness,
   owned PID matching and legacy fallback selection.
-- Integration smoke covers port auto-increment, multiple external instances, external-not-killed and
-  owned process-group shutdown.
+- Integration smoke covers port auto-increment, multiple external instances, external-not-killed,
+  exact-PID ownership, PID-reuse rejection and owned process-group shutdown. Supported Windows and
+  macOS Kimi baselines must prove their registry PID matches the spawned process (or provide
+  OS-verifiable descendant evidence) before release.

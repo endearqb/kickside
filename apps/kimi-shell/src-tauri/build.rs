@@ -135,6 +135,7 @@ const APP_COMMANDS: &[&str] = &[
     "get_diagnostics",
     "open_logs_folder",
     "open_external_url",
+    "open_system_terminal",
     "open_folder",
     "open_kimi_config_dir",
     "load_kimi_code_access_config",

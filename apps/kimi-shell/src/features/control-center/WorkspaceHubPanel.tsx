@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Boxes,
   CalendarClock,
@@ -348,6 +349,36 @@ export function WorkspaceHubPanel({
     }
   }
 
+  async function handlePickHarnessPath(variableKey: string) {
+    setMessage(null);
+    try {
+      const selected = await open({
+        title: "选择目标目录",
+        multiple: false,
+        directory: true,
+      });
+      if (typeof selected === "string") {
+        setValues((current) => ({
+          ...current,
+          [variableKey]: selected,
+        }));
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleOpenHarnessPath(variableKey: string) {
+    const path = valueFrom(values, variableKey).trim();
+    if (!path) return;
+    setMessage(null);
+    try {
+      await onOpenWorkspace(path);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function handleOpenWorkspace(workspace: WorkspaceRecord) {
     setBusy(true);
     setMessage(null);
@@ -587,13 +618,11 @@ export function WorkspaceHubPanel({
         </header>
         <div className="cc-surface-section-body">
           <div className="cc-control-detail-grid">
-            {selectedHarness.variables.map((variable) => (
-              <label key={variable.key} className="cc-control-field">
-                <span>
-                  {variable.label}
-                  {variable.required ? " *" : ""}
-                </span>
+            {selectedHarness.variables.map((variable) => {
+              const inputId = `workspace-hub-${selectedHarness.id}-${variable.key}`;
+              const input = (
                 <Input
+                  id={inputId}
                   value={valueFrom(values, variable.key)}
                   placeholder={variable.placeholder ?? ""}
                   type={variable.secret ? "password" : "text"}
@@ -604,8 +633,44 @@ export function WorkspaceHubPanel({
                     }))
                   }
                 />
-              </label>
-            ))}
+              );
+
+              return (
+                <div key={variable.key} className="cc-control-field">
+                  <label htmlFor={inputId}>
+                    {variable.label}
+                    {variable.required ? " *" : ""}
+                  </label>
+                  {variable.type === "path" ? (
+                    <div className="workspace-hub-path-row">
+                      {input}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="cc-action-btn cc-inline-btn"
+                        onClick={() => void handlePickHarnessPath(variable.key)}
+                        disabled={busy}
+                      >
+                        浏览
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        icon={<FolderOpen size={14} />}
+                        className="cc-inline-icon-btn"
+                        onClick={() => void handleOpenHarnessPath(variable.key)}
+                        disabled={busy || !valueFrom(values, variable.key).trim()}
+                        aria-label="打开目标目录"
+                        title="打开目标目录"
+                      />
+                    </div>
+                  ) : (
+                    input
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

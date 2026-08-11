@@ -134,7 +134,12 @@ impl InstallManager {
             .into_iter()
             .find(|task| task.id == task_id)
             .ok_or_else(|| "unknown install task".to_string())?;
-        let powershell_diagnostic = Some(get_powershell_preflight());
+        validate_platform_task(task_id)?;
+        let powershell_diagnostic = if cfg!(windows) {
+            Some(get_powershell_preflight())
+        } else {
+            None
+        };
 
         {
             let mut state = self
@@ -281,6 +286,15 @@ impl InstallManager {
         });
     }
 
+    fn clear_running_pid(&self) {
+        let Ok(mut state) = self.inner.lock() else {
+            return;
+        };
+        if let Some(running) = state.running.as_mut() {
+            running.pid = None;
+        }
+    }
+
     fn finish(
         &self,
         app: &AppHandle,
@@ -362,7 +376,41 @@ pub fn get_install_mirror_health_report(
 
 pub fn build_install_flow_catalog(app: &AppHandle) -> InstallFlowCatalog {
     let mirror_config = resolved_mirror_config(app);
-    catalog::build_install_flow_catalog_with_mirror_config(&mirror_config)
+    let mut catalog = catalog::build_install_flow_catalog_with_mirror_config(&mirror_config);
+    configure_platform_install_catalog(&mut catalog);
+    catalog
+}
+
+fn validate_platform_task(task_id: InstallTaskId) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if task_id != InstallTaskId::UpgradeKimi {
+        return Err(
+            "macOS only manages Kimi Code upgrades in the app; installation remains externally guided."
+                .to_string(),
+        );
+    }
+    let _ = task_id;
+    Ok(())
+}
+
+fn configure_platform_install_catalog(catalog: &mut InstallFlowCatalog) {
+    #[cfg(target_os = "macos")]
+    if let Some(upgrade) = catalog
+        .tasks
+        .iter_mut()
+        .find(|task| task.id == InstallTaskId::UpgradeKimi)
+    {
+        let step = catalog::step(
+            "upgrade_kimi",
+            "Upgrade Kimi Code",
+            "Run the installed Kimi Code updater.",
+            "kimi upgrade",
+        );
+        upgrade.description =
+            "Upgrade the installed Kimi Code and restart the app backend.".to_string();
+        upgrade.official_steps = vec![step.clone()];
+        upgrade.mirror_steps = vec![step];
+    }
 }
 
 pub fn get_powershell_preflight() -> PowerShellPreflightSummary {
@@ -826,6 +874,12 @@ fn run_managed_task(
     task: InstallTaskDefinition,
     source: InstallSource,
 ) {
+    #[cfg(target_os = "macos")]
+    if task.id == InstallTaskId::UpgradeKimi {
+        run_macos_upgrade_task(manager, app, task, source);
+        return;
+    }
+
     if let Err(error) = prepare_managed_task(manager, app, &task, source) {
         manager.finish_failure(app, "Stop app backend", Some(1), Some(error));
         return;
@@ -882,6 +936,262 @@ fn run_managed_task(
         Some(0),
         managed_task_success_message(&task),
     );
+}
+
+#[cfg(target_os = "macos")]
+fn run_macos_upgrade_task(
+    manager: &InstallManager,
+    app: &AppHandle,
+    task: InstallTaskDefinition,
+    source: InstallSource,
+) {
+    let settings = match settings_store::load_or_default(app) {
+        Ok(settings) => settings,
+        Err(error) => {
+            manager.finish_failure(
+                app,
+                "Locate Kimi Code",
+                Some(1),
+                Some(format!("Failed to load Kimi Code settings: {error}")),
+            );
+            return;
+        }
+    };
+    let kimi_path = match kimi_locator::locate(&settings) {
+        Ok(path) => path,
+        Err(error) => {
+            manager.finish_failure(app, "Locate Kimi Code", Some(1), Some(error));
+            return;
+        }
+    };
+    push_system_log(
+        manager,
+        task.id,
+        source,
+        format!("Verified Kimi Code executable: {}", kimi_path.display()),
+    );
+
+    if let Err(error) = prepare_managed_task(manager, app, &task, source) {
+        manager.finish_failure(app, "Stop app backend", Some(1), Some(error));
+        return;
+    }
+    if manager.is_cancel_requested() {
+        manager.finish(
+            app,
+            InstallSessionStatus::Cancelled,
+            None,
+            "Kimi Code upgrade cancelled before execution.".to_string(),
+        );
+        return;
+    }
+
+    let step = catalog::steps_for_source(&task, source)
+        .into_iter()
+        .next()
+        .expect("macOS upgrade catalog must contain one step");
+    let _ = manager.update_snapshot(|state| {
+        state.snapshot.status = InstallSessionStatus::Running;
+        state.snapshot.stage = InstallSessionStage::ExecuteStep;
+        state.snapshot.current_step_id = Some(step.id.clone());
+        state.snapshot.current_step_title = Some(step.title.clone());
+        state.snapshot.message = Some("Running the installed Kimi Code updater.".to_string());
+    });
+    push_system_log(
+        manager,
+        task.id,
+        source,
+        format!("Running `{}` with `upgrade`.", kimi_path.display()),
+    );
+
+    let child = match spawn_macos_upgrade_process(&kimi_path) {
+        Ok(child) => child,
+        Err(error) => {
+            manager.finish_failure(app, &step.title, Some(1), Some(error));
+            return;
+        }
+    };
+    let status = match run_macos_upgrade_child(manager, task.id, source, &step, child) {
+        Ok(Some(status)) if status.success() => status,
+        Ok(Some(status)) => {
+            manager.finish_failure(app, &step.title, status.code().or(Some(1)), None);
+            return;
+        }
+        Ok(None) => {
+            manager.finish(
+                app,
+                InstallSessionStatus::Cancelled,
+                None,
+                "Kimi Code upgrade cancelled; the app backend remains stopped.".to_string(),
+            );
+            return;
+        }
+        Err(error) => {
+            manager.finish_failure(app, &step.title, Some(1), Some(error));
+            return;
+        }
+    };
+
+    let _ = manager.update_snapshot(|state| {
+        state.snapshot.stage = InstallSessionStage::Probe;
+        state.snapshot.current_step_id = None;
+        state.snapshot.current_step_title = Some("Re-check Kimi Code".to_string());
+        state.snapshot.message = Some("Re-checking the upgraded Kimi Code executable.".to_string());
+    });
+    let upgraded_version = match query_kimi_version(&kimi_path) {
+        Ok(version) => version,
+        Err(error) => {
+            manager.finish_failure(app, "Re-check Kimi Code", Some(1), Some(error));
+            return;
+        }
+    };
+    push_system_log(
+        manager,
+        task.id,
+        source,
+        format!("Kimi Code re-check succeeded: {upgraded_version}"),
+    );
+    debug_assert!(status.success());
+    manager.finish(
+        app,
+        InstallSessionStatus::Succeeded,
+        Some(0),
+        "Kimi Code upgrade completed. Restarting the app backend.".to_string(),
+    );
+    push_system_log(
+        manager,
+        task.id,
+        source,
+        "Starting the app-managed Kimi backend after upgrade.".to_string(),
+    );
+    backend_manager::start_backend(app.clone());
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_macos_upgrade_process(kimi_path: &Path) -> Result<std::process::Child, String> {
+    macos_upgrade_command(kimi_path)
+        .spawn()
+        .map_err(|error| format!("failed to start `{} upgrade`: {error}", kimi_path.display()))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_upgrade_command(kimi_path: &Path) -> Command {
+    use std::os::unix::process::CommandExt;
+
+    let mut command = Command::new(kimi_path);
+    command_utils::configure_system_command(&mut command);
+    command
+        .arg("upgrade")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+    // SAFETY: setsid is async-signal-safe; no allocation or locking occurs after fork.
+    unsafe {
+        command.pre_exec(|| {
+            nix::unistd::setsid()
+                .map(|_| ())
+                .map_err(std::io::Error::other)
+        });
+    }
+    command
+}
+
+#[cfg(target_os = "macos")]
+fn run_macos_upgrade_child(
+    manager: &InstallManager,
+    task_id: InstallTaskId,
+    source: InstallSource,
+    step: &InstallTaskStep,
+    mut child: std::process::Child,
+) -> Result<Option<std::process::ExitStatus>, String> {
+    let pid = child.id();
+    manager.set_running_pid(pid);
+    let stdout_handle = child.stdout.take().map(|pipe| {
+        let manager = manager.clone();
+        let step_id = step.id.clone();
+        thread::spawn(move || {
+            stream_output(
+                manager,
+                task_id,
+                source,
+                Some(step_id),
+                InstallLogStream::Stdout,
+                pipe,
+            )
+        })
+    });
+    let stderr_handle = child.stderr.take().map(|pipe| {
+        let manager = manager.clone();
+        let step_id = step.id.clone();
+        thread::spawn(move || {
+            stream_output(
+                manager,
+                task_id,
+                source,
+                Some(step_id),
+                InstallLogStream::Stderr,
+                pipe,
+            )
+        })
+    });
+
+    let mut cancel_started_at = None;
+    let status = loop {
+        if manager.is_cancel_requested() && cancel_started_at.is_none() {
+            terminate_process_tree(pid);
+            cancel_started_at = Some(std::time::Instant::now());
+        }
+        if cancel_started_at.is_some_and(|started| started.elapsed() >= Duration::from_secs(2)) {
+            force_terminate_process_tree(pid);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => thread::sleep(Duration::from_millis(50)),
+            Err(error) => return Err(format!("failed to wait for Kimi Code upgrade: {error}")),
+        }
+    };
+    confirm_upgrade_process_group_stopped(pid)?;
+    manager.clear_running_pid();
+    if let Some(handle) = stdout_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
+    }
+    if manager.is_cancel_requested() {
+        Ok(None)
+    } else {
+        Ok(Some(status))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn confirm_upgrade_process_group_stopped(pid: u32) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while upgrade_process_group_alive(pid) && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    if !upgrade_process_group_alive(pid) {
+        return Ok(());
+    }
+
+    force_terminate_process_tree(pid);
+    let force_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    while upgrade_process_group_alive(pid) && std::time::Instant::now() < force_deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    if upgrade_process_group_alive(pid) {
+        return Err("Kimi Code upgrade process group did not confirm shutdown.".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn upgrade_process_group_alive(pid: u32) -> bool {
+    match nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid as i32), None) {
+        Ok(()) | Err(nix::errno::Errno::EPERM) => true,
+        Err(nix::errno::Errno::ESRCH) => false,
+        Err(_) => true,
+    }
 }
 
 fn run_fallback_task(
@@ -1929,10 +2239,21 @@ fn terminate_process_tree(pid: u32) {
             .status();
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let _ = pid;
+        let _ = nix::sys::signal::killpg(
+            nix::unistd::Pid::from_raw(pid as i32),
+            nix::sys::signal::Signal::SIGTERM,
+        );
     }
+}
+
+#[cfg(unix)]
+fn force_terminate_process_tree(pid: u32) {
+    let _ = nix::sys::signal::killpg(
+        nix::unistd::Pid::from_raw(pid as i32),
+        nix::sys::signal::Signal::SIGKILL,
+    );
 }
 
 fn truncate_log_line(line: &str) -> String {
@@ -1978,7 +2299,7 @@ fn push_stream_line(
     stream: InstallLogStream,
     bytes: &[u8],
 ) {
-    let line = decode_stream_bytes(bytes);
+    let line = backend_manager::redact_backend_text(&decode_stream_bytes(bytes));
     if line.trim().is_empty() {
         return;
     }
@@ -2070,6 +2391,57 @@ mod tests {
         );
         assert_eq!(parse_kimi_version("not-a-version"), None);
         assert!((0, 30, 1) > parse_kimi_version("0.30.0").unwrap());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_upgrade_uses_the_located_executable_without_a_shell() {
+        let path = PathBuf::from("/tmp/kimi code/bin/kimi");
+        let command = macos_upgrade_command(&path);
+
+        assert_eq!(command.get_program(), path.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("upgrade")]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_catalog_exposes_only_the_native_upgrade_command() {
+        let mut flow = catalog::build_install_flow_catalog_with_mirror_config(
+            &resolved_mirror_config_from_settings(&AppSettings::default()),
+        );
+        configure_platform_install_catalog(&mut flow);
+        let upgrade = flow
+            .tasks
+            .iter()
+            .find(|task| task.id == InstallTaskId::UpgradeKimi)
+            .expect("upgrade task should exist");
+
+        assert_eq!(upgrade.official_steps[0].command, "kimi upgrade");
+        assert_eq!(upgrade.mirror_steps[0].command, "kimi upgrade");
+        assert!(validate_platform_task(InstallTaskId::UpgradeKimi).is_ok());
+        assert!(validate_platform_task(InstallTaskId::InstallKimi).is_err());
+    }
+
+    #[test]
+    fn streamed_install_output_is_redacted_before_reaching_the_snapshot() {
+        let manager = InstallManager::default();
+
+        push_stream_line(
+            &manager,
+            InstallTaskId::UpgradeKimi,
+            InstallSource::Official,
+            Some("upgrade_kimi".to_string()),
+            InstallLogStream::Stdout,
+            b"Token: install-secret\n",
+        );
+
+        let snapshot = manager.snapshot().expect("snapshot");
+        assert_eq!(snapshot.logs.len(), 1);
+        assert_eq!(snapshot.logs[0].text, "Token: [REDACTED]");
+        assert!(!snapshot.logs[0].text.contains("install-secret"));
     }
 
     #[test]

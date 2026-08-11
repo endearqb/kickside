@@ -280,6 +280,7 @@ function App() {
     onCompleteOnboarding: shell.handleCompleteOnboarding,
     onSkipOnboarding: shell.handleSkipOnboarding,
     onOpenExternalUrl: shell.handleOpenExternalUrl,
+    onOpenSystemTerminal: shell.handleOpenSystemTerminal,
   };
 
   return (

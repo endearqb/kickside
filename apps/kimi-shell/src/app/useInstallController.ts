@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { createEmptyInstallSessionSnapshot } from "@/app/types";
 import { createDefaultInstallSettingsView } from "@/app/shellControllerDefaults";
 import type {
@@ -20,6 +21,18 @@ import type {
 
 const INSTALL_PROBE_TIMEOUT_MS = 180_000;
 const INSTALL_PROBE_INTERVAL_MS = 1500;
+
+export function requestKimiUpgradeConfirmation() {
+  return ask(
+    "升级会先停止小助手管理的 Kimi 后端，并暂时中断正在使用它的连接。升级完成后小助手会重新检测并自动重启后端。",
+    {
+      title: "升级 Kimi Code",
+      kind: "warning",
+      okLabel: "开始升级",
+      cancelLabel: "取消",
+    },
+  );
+}
 
 type UseInstallControllerOptions = {
   tauriRuntime: boolean;
@@ -287,7 +300,7 @@ export function useInstallController({
       const task = catalog.tasks.find((item) => item.id === taskId);
       if (
         taskId === "upgrade_kimi" &&
-        !window.confirm("升级将停止当前 Kimi Server 和正在使用它的连接。继续升级吗？")
+        !(await requestKimiUpgradeConfirmation())
       ) {
         return;
       }

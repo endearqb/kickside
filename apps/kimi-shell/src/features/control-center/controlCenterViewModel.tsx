@@ -350,6 +350,7 @@ export type ControlCenterViewProps = {
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;
+  onOpenSystemTerminal: () => Promise<void>;
   installMessage: string;
 };
 

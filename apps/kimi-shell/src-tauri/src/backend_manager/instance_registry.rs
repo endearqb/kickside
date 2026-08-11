@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
@@ -10,7 +9,7 @@ use serde::Deserialize;
 const MAX_INSTANCE_FILE_BYTES: u64 = 64 * 1024;
 const MAX_SERVER_ID_BYTES: usize = 256;
 const MAX_HOST_VERSION_BYTES: usize = 128;
-const OWNED_STARTED_AT_TOLERANCE_MS: u64 = 5_000;
+const OWNED_LAUNCH_CLOCK_TOLERANCE_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub(super) struct ServerInstance {
@@ -85,38 +84,22 @@ pub(super) fn read_live_instances(kimi_home: &Path) -> RegistryScan {
     scan
 }
 
-pub(super) fn server_ids(instances: &[ServerInstance]) -> HashSet<String> {
-    instances
-        .iter()
-        .map(|instance| instance.server_id.clone())
-        .collect()
-}
-
 pub(super) fn owned_candidates(
     instances: &[ServerInstance],
     child_pid: u32,
-    previous_server_ids: &HashSet<String>,
     launch_time_ms: u64,
 ) -> Vec<ServerInstance> {
-    let mut matches = instances
+    instances
         .iter()
-        .filter(|instance| instance.pid == child_pid)
+        .filter(|instance| {
+            instance.pid == child_pid
+                && instance
+                    .started_at
+                    .saturating_add(OWNED_LAUNCH_CLOCK_TOLERANCE_MS)
+                    >= launch_time_ms
+        })
         .cloned()
-        .collect::<Vec<_>>();
-    matches.extend(
-        instances
-            .iter()
-            .filter(|instance| {
-                instance.pid != child_pid
-                    && !previous_server_ids.contains(&instance.server_id)
-                    && instance
-                        .started_at
-                        .saturating_add(OWNED_STARTED_AT_TOLERANCE_MS)
-                        >= launch_time_ms
-            })
-            .cloned(),
-    );
-    matches
+        .collect()
 }
 
 fn read_instance_file(path: &Path) -> Result<ServerInstance, String> {
@@ -320,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn owned_candidate_prefers_child_pid_then_new_server_id() {
+    fn owned_candidate_accepts_only_the_spawned_child_pid() {
         let child_pid = std::process::id();
         let instances = vec![
             ServerInstance {
@@ -351,16 +334,30 @@ mod tests {
                 host_version: None,
             },
         ];
-        let previous = HashSet::from(["old".to_string()]);
-
-        let candidates = owned_candidates(&instances, child_pid, &previous, 10_000);
+        let candidates = owned_candidates(&instances, child_pid, 10_000);
         assert_eq!(
             candidates
                 .iter()
                 .map(|instance| instance.server_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["child", "new-wrapper"]
+            vec!["child"]
         );
+    }
+
+    #[test]
+    fn owned_candidate_rejects_stale_record_after_pid_reuse() {
+        let child_pid = std::process::id();
+        let instances = vec![ServerInstance {
+            server_id: "stale-child".to_string(),
+            pid: child_pid,
+            host: "127.0.0.1".to_string(),
+            port: 58627,
+            started_at: 1_000,
+            heartbeat_at: 1_000,
+            host_version: None,
+        }];
+
+        assert!(owned_candidates(&instances, child_pid, 10_000).is_empty());
     }
 
     #[test]

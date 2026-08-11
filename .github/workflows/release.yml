@@ -125,6 +125,40 @@ jobs:
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
+      - name: Verify macOS arm64 release bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          bundle_root="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle"
+          app_path="$bundle_root/macos/kimi sidekick.app"
+          test -d "$app_path"
+          plutil -lint "$app_path/Contents/Info.plist"
+          lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
+          lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
+          codesign --verify --deep --strict "$app_path"
+          test "$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')" = "1"
+          test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz' | wc -l | tr -d ' ')" = "1"
+          test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz.sig' | wc -l | tr -d ' ')" = "1"
+
+      - name: Verify Windows release bundles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bundleRoot = "apps/kimi-shell/src-tauri/target/release/bundle"
+          $nsis = @(Get-ChildItem "$bundleRoot/nsis" -File -Filter "*-setup.exe")
+          $msi = @(Get-ChildItem "$bundleRoot/msi" -File -Filter "*.msi")
+          if ($nsis.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($nsis.Count)."
+          }
+          if ($msi.Count -ne 1) {
+            throw "Expected exactly one MSI installer, found $($msi.Count)."
+          }
+          if (-not (Test-Path "$($nsis[0].FullName).sig" -PathType Leaf)) {
+            throw "Missing NSIS updater signature for $($nsis[0].Name)."
+          }
+
   publish:
     name: Publish cross-platform updater manifest
     needs: build
@@ -152,9 +186,12 @@ jobs:
           }
 
           windows_bundle="$(exactly_one '*-setup.exe')"
+          windows_msi="$(exactly_one '*.msi')"
           macos_bundle="$(exactly_one '*.app.tar.gz')"
+          macos_dmg="$(exactly_one '*.dmg')"
           test -f "$windows_bundle.sig"
           test -f "$macos_bundle.sig"
+          echo "Verified installers: $(basename "$windows_bundle"), $(basename "$windows_msi"), $(basename "$macos_bundle"), $(basename "$macos_dmg")"
 
           version="$(node -p "require('./apps/kimi-shell/package.json').version")"
           base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"

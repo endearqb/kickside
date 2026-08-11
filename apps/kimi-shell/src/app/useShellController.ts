@@ -2311,6 +2311,16 @@ export function useShellController() {
     }
   }
 
+  async function handleOpenSystemTerminal() {
+    try {
+      await invoke("open_system_terminal");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setActionError(`无法打开 Terminal：${message}`);
+      throw error;
+    }
+  }
+
   async function handleOpenFolder(path: string) {
     const trimmed = path.trim();
     if (!trimmed) {
@@ -3807,6 +3817,7 @@ export function useShellController() {
     handleOpenLogs,
     handleQuitAppGracefully,
     handleOpenExternalUrl,
+    handleOpenSystemTerminal,
     handleOpenFolder,
     handleOpenPaneFolder,
     handlePaneSessionObserved,

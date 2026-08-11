@@ -46,6 +46,9 @@ if (!capability) {
   if (!permissions.includes("dialog:allow-open")) {
     errors.push("dialog:allow-open must be present");
   }
+  if (!permissions.includes("dialog:allow-ask")) {
+    errors.push("dialog:allow-ask must be present for native destructive-action confirmation");
+  }
 
   const forbiddenPrefixes = ["shell:", "fs:", "http:", "process:"];
   for (const permission of permissions) {
@@ -87,18 +90,30 @@ if (!macosOverlayTitlebarCapability) {
   }
   if (
     JSON.stringify(macosOverlayTitlebarCapability.permissions ?? []) !==
-    JSON.stringify(["core:window:allow-start-dragging"])
+    JSON.stringify([
+      "core:window:allow-start-dragging",
+      "core:window:allow-toggle-maximize",
+      "core:window:allow-is-maximized",
+    ])
   ) {
-    errors.push("macos-overlay-titlebar must only allow start-dragging");
+    errors.push(
+      "macos-overlay-titlebar must only allow start-dragging, toggle-maximize and is-maximized",
+    );
   }
 }
 
-for (const item of capabilityList) {
-  if (
-    item?.permissions?.includes("core:window:allow-start-dragging") &&
-    !["frameless-window-controls", "macos-overlay-titlebar"].includes(item.identifier)
-  ) {
-    errors.push(`start-dragging permission has an unexpected owner: ${item.identifier}`);
+for (const permission of [
+  "core:window:allow-start-dragging",
+  "core:window:allow-toggle-maximize",
+  "core:window:allow-is-maximized",
+]) {
+  for (const item of capabilityList) {
+    if (
+      item?.permissions?.includes(permission) &&
+      !["frameless-window-controls", "macos-overlay-titlebar"].includes(item.identifier)
+    ) {
+      errors.push(`${permission} has an unexpected owner: ${item.identifier}`);
+    }
   }
 }
 

@@ -33,6 +33,7 @@ go test -race ./...
 - 当前 Windows 环境中 Rust test binary 运行阶段可能报既有 `STATUS_ENTRYPOINT_NOT_FOUND`；能运行时优先执行完整 `cargo test`。
 - `pnpm exec` 可能触发非交互 install/purge 防护；本地已有 `node_modules` 时优先调用 `.\node_modules\.bin\tsc.cmd`。
 - Apple Silicon 本机开发包使用 `pnpm tauri:build:macos:local`；该命令只验证可构建/可启动 `.app`，不授权 Developer ID、notarization 或 updater 发布结论。
+- PR CI 必须实际执行 `cargo test --locked`，不能以 `--no-run` 代替；macOS PR job 必须上传经过 `plutil`/`lipo` 校验的 unsigned `.app` artifact，但该 artifact 不代表签名或公证通过。
 
 ## Manual Release Gates
 

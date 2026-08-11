@@ -98,7 +98,7 @@
 .titlebar-actions button,
 .titlebar-right button,
 .titlebar-window-controls button {
-  cursor: pointer;
+  cursor: default;
 }
 
 .titlebar-retry-btn {
@@ -285,11 +285,11 @@
 
 .titlebar-drag {
   user-select: none;
-  cursor: grab;
+  cursor: default;
 }
 
 .titlebar-drag:active {
-  cursor: grabbing;
+  cursor: default;
 }
 
 .titlebar-identity {
@@ -8370,6 +8370,27 @@ input:focus {
   white-space: pre-wrap;
 }
 
+.cc-mac-upgrade-console {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--cc-code-bg);
+}
+
+.cc-mac-upgrade-console pre {
+  min-height: 112px;
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  color: var(--cc-foreground);
+  font-family: "JetBrains Mono", SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .cc-control-stage {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -9161,6 +9182,14 @@ input:focus {
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.control-center-shell .workspace-hub-path-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .control-center-shell .cc-unified-detail-section {
@@ -10936,6 +10965,10 @@ input:focus {
   .control-center-shell .workspace-hub-directory-panel > .directory-toolbar,
   .control-center-shell .skill-center-directory-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .control-center-shell .workspace-hub-path-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
   .control-center-shell .skill-center-directory-filters,

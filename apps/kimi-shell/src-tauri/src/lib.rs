@@ -512,6 +512,11 @@ fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_system_terminal() -> Result<(), String> {
+    backend_manager::open_system_terminal()
+}
+
+#[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     backend_manager::open_folder(&path)
 }
@@ -1176,7 +1181,14 @@ pub fn run() {
             }
             agent_room_event_pump::stop(app_handle);
             if should_attempt_stop_backend(app_handle) {
-                let _ = backend_manager::stop_backend(app_handle);
+                if let Err(error) = backend_manager::stop_backend(app_handle) {
+                    api.prevent_exit();
+                    log_manager::append_line(
+                        app_handle,
+                        format!("prevented process exit because backend stop failed: {error:#}"),
+                    );
+                    return;
+                }
             }
             if should_attempt_stop_bridge(app_handle) {
                 let _ = bridge_manager::stop_bridge(app_handle);
@@ -1746,7 +1758,14 @@ fn duration_to_u64_ms(value: u128) -> u64 {
 }
 
 pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
-    if is_graceful_exit_in_progress(&app) {
+    use std::sync::atomic::Ordering;
+
+    if app
+        .state::<AppState>()
+        .graceful_exit_started
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
         return;
     }
 
@@ -1763,6 +1782,17 @@ pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
                 &app,
                 format!("shutdown stop_backend failed (source={source}): {error:#}"),
             );
+            emit_shutdown_progress(
+                &app,
+                "shutdown_blocked",
+                Some("后台进程尚未确认关闭；应用将保持运行以便重试。"),
+                Some(duration_to_u64_ms(started.elapsed().as_millis())),
+            );
+            app.state::<AppState>()
+                .graceful_exit_started
+                .store(false, Ordering::Release);
+            window_manager::revoke_process_exit(&app, "shutdown_blocked");
+            return;
         }
         emit_shutdown_progress(
             &app,
@@ -1772,15 +1802,6 @@ pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
         );
         app.exit(0);
     });
-}
-
-fn is_graceful_exit_in_progress(app: &AppHandle) -> bool {
-    let state = app.state::<AppState>();
-    let lock = state.runtime.lock();
-    let Ok(runtime) = lock else {
-        return false;
-    };
-    matches!(runtime.state, BackendState::Stopping)
 }
 
 fn emit_shutdown_progress(

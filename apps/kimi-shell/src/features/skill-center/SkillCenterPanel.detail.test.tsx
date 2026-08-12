@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { DiscoveredSkillRecord, InstalledSkill } from "@/app/types";
@@ -230,5 +230,48 @@ describe("SkillCenterPanel detail", () => {
     fireEvent.click(within(workspaceMenu).getByRole("menuitem", { name: /Workspace B/ }));
     expect(onSelectWorkspaceSkillTarget).toHaveBeenCalledWith("workspace-b");
     expect(container.querySelector(".skill-center-container-switch.skill-center-compact-tabs")).toBeTruthy();
+  });
+
+  it("publishes skill library and workspace targets to the unified rail", async () => {
+    const onRailGroupsChange = vi.fn();
+    const onSectionChange = vi.fn();
+    const onSelectSkill = vi.fn();
+    render(
+      <SkillCenterPanel
+        {...baseProps()}
+        installedSkills={[installedSkill]}
+        skillDiscoverySnapshot={{ scannedAt: "", workspaces: [], records: [discoveredSkill] }}
+        workspaceSkillTargets={[
+          {
+            id: "workspace-a",
+            scope: "workspace",
+            label: "Workspace A",
+            rootPath: "C:/workspace-a",
+            readOnly: false,
+            isCurrent: true,
+            containerRoots: [],
+          },
+        ]}
+        onSectionChange={onSectionChange}
+        onSelectSkill={onSelectSkill}
+        onRailGroupsChange={onRailGroupsChange}
+      />,
+    );
+
+    await waitFor(() => expect(onRailGroupsChange).toHaveBeenCalled());
+    const groups = onRailGroupsChange.mock.calls[onRailGroupsChange.mock.calls.length - 1][0];
+    expect(groups.map((group: { label: string }) => group.label)).toEqual([
+      "Skill 视图",
+      "技能库",
+      "工作区目标",
+    ]);
+    expect(groups[1].items.map((item: { label: string }) => item.label)).toEqual([
+      installedSkill.name,
+      discoveredSkill.name,
+    ]);
+    expect(groups[2].items[0]).toMatchObject({ label: "Workspace A", meta: "可编辑" });
+    groups[1].items[0].onSelect();
+    expect(onSectionChange).toHaveBeenCalledWith("manage");
+    expect(onSelectSkill).toHaveBeenCalledWith(installedSkill.id);
   });
 });

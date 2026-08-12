@@ -8171,12 +8171,15 @@ input:focus {
 
 .cc-unified-rail-body {
   min-height: 0;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 12px 8px 16px;
   scrollbar-gutter: stable;
 }
 
 .cc-unified-rail-group {
+  min-width: 0;
   display: grid;
   gap: 3px;
 }
@@ -8230,11 +8233,13 @@ input:focus {
 }
 
 .cc-unified-rail-list {
+  min-width: 0;
   display: grid;
   gap: 2px;
 }
 
 .cc-unified-rail-item {
+  min-width: 0;
   min-height: 34px;
   width: 100%;
   display: flex;
@@ -8277,6 +8282,7 @@ input:focus {
 }
 
 .cc-unified-rail-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9122,10 +9128,45 @@ input:focus {
   overflow: hidden;
 }
 
-.control-center-shell .workspace-hub-detail-card {
+.control-center-shell .workspace-hub-harness-detail-shell {
   min-height: 0;
   height: 100%;
+  overflow: hidden;
+}
+
+.control-center-shell .workspace-hub-harness-detail {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  align-content: start;
+  gap: 18px;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 4px 24px 0;
+  scrollbar-gutter: stable;
+}
+
+.control-center-shell .workspace-hub-harness-overview,
+.control-center-shell .workspace-hub-harness-section {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.control-center-shell .workspace-hub-harness-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--cc-border);
+}
+
+.control-center-shell .workspace-hub-harness-detail .cc-control-detail-grid {
+  gap: 16px 18px;
+}
+
+.control-center-shell .workspace-hub-harness-detail .cc-control-detail-grid > div {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .control-center-shell .workspace-hub-detail-top {
@@ -10738,26 +10779,8 @@ input:focus {
   min-width: 0;
 }
 
-@keyframes cc-view-in {
-  from {
-    opacity: 0;
-    transform: translateY(2px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .control-center-shell .cc-main > * {
-  animation: cc-view-in 160ms ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .control-center-shell .cc-main > * {
-    animation: none;
-  }
+  animation: none;
 }
 
 @media (max-width: 1120px) {
@@ -10991,5 +11014,276 @@ input:focus {
   .control-center-shell .cc-image-top-controls button,
   .control-center-shell .skill-center-directory-filters > summary {
     min-height: 44px;
+  }
+}
+
+/* Approved control-center information architecture: quiet rail + compact detail lists. */
+@media (min-width: 761px) {
+  .control-center-shell {
+    grid-template-columns: 232px minmax(0, 1fr);
+  }
+}
+
+.control-center-shell button,
+.control-center-shell summary,
+.control-center-shell .directory-card-open,
+.control-center-shell .directory-card-corner-action {
+  cursor: default !important;
+}
+
+.control-center-shell .cc-image-detail-top h1 {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.cc-settings-page {
+  gap: 22px;
+}
+
+.cc-settings-page-head {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0;
+}
+
+.cc-settings-bars {
+  gap: 22px;
+}
+
+.cc-settings-group {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cc-settings-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.cc-settings-group-title h2 {
+  margin: 0;
+  color: var(--cc-foreground);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.cc-settings-group-list {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  background: var(--cc-surface);
+}
+
+.cc-settings-group-list .cc-settings-bar {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.cc-settings-group-list .cc-settings-bar + .cc-settings-bar {
+  border-top: 1px solid var(--cc-border);
+}
+
+.cc-settings-group-list .cc-settings-bar-head {
+  min-height: 70px;
+  padding: 12px 16px;
+}
+
+.cc-settings-group-list .cc-settings-bar-detail {
+  padding: 0 16px 16px;
+}
+
+.cc-settings-group-list .cc-settings-bar.is-expanded {
+  background: var(--cc-background-subtle);
+}
+
+.cc-settings-group-list .cc-image-row-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cc-settings-group-list .cc-image-row-desc {
+  margin-top: 4px;
+  color: var(--cc-muted);
+  font-size: 13px;
+}
+
+.cc-rail-runtime-status {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  color: var(--cc-muted);
+  font-size: 12px;
+}
+
+.control-center-shell .skill-center-directory-grid,
+.control-center-shell .workspace-hub-directory-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  overflow-x: hidden;
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  background: var(--cc-surface);
+}
+
+.control-center-shell .skill-center-directory-grid {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card,
+.control-center-shell .workspace-hub-directory-grid .directory-card {
+  min-height: 78px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  transition: none;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card + .directory-card,
+.control-center-shell .workspace-hub-directory-grid .directory-card + .directory-card {
+  border-top: 1px solid var(--cc-border);
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card:hover,
+.control-center-shell .skill-center-directory-grid .directory-card:focus-within,
+.control-center-shell .skill-center-directory-grid .directory-card.is-active,
+.control-center-shell .workspace-hub-directory-grid .directory-card:hover,
+.control-center-shell .workspace-hub-directory-grid .directory-card:focus-within,
+.control-center-shell .workspace-hub-directory-grid .directory-card.is-active {
+  border-color: transparent;
+  background: var(--cc-surface-hover);
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-open,
+.control-center-shell .workspace-hub-directory-grid .directory-card-open {
+  min-height: 78px;
+  padding: 12px 16px;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-main,
+.control-center-shell .workspace-hub-directory-grid .directory-card-main {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.65fr) minmax(160px, 0.7fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-title-row,
+.control-center-shell .workspace-hub-directory-grid .directory-card-title-row {
+  min-width: 0;
+  padding-right: 0;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-meta,
+.control-center-shell .workspace-hub-directory-grid .directory-card-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card p,
+.control-center-shell .workspace-hub-directory-grid .directory-card p {
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-badges,
+.control-center-shell .workspace-hub-directory-grid .directory-card-badges {
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card-corner-slot,
+.control-center-shell .workspace-hub-directory-grid .directory-card-corner-slot,
+.control-center-shell .skill-center-directory-grid .directory-card-corner-action,
+.control-center-shell .workspace-hub-directory-grid .directory-card-corner-action {
+  top: 22px;
+  right: 14px;
+}
+
+.control-center-shell .skill-center-directory-grid .directory-card:has(.directory-card-corner-slot) .directory-card-main,
+.control-center-shell .workspace-hub-directory-grid .directory-card:has(.directory-card-corner-slot) .directory-card-main,
+.control-center-shell .skill-center-directory-grid .directory-card:has(.directory-card-corner-action) .directory-card-main,
+.control-center-shell .workspace-hub-directory-grid .directory-card:has(.directory-card-corner-action) .directory-card-main {
+  padding-right: 40px;
+}
+
+.workspace-hub-template-preview {
+  min-width: 0;
+  border-top: 1px solid var(--cc-border);
+  padding-top: 4px;
+}
+
+.workspace-hub-template-preview > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cc-foreground);
+  font-size: 13px;
+  list-style: none;
+}
+
+.workspace-hub-template-preview > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-hub-template-preview > summary small {
+  color: var(--cc-muted);
+  font-size: 12px;
+}
+
+.workspace-hub-template-preview[open] > summary {
+  border-bottom: 1px solid var(--cc-border);
+  margin-bottom: 14px;
+}
+
+@media (max-width: 980px) {
+  .control-center-shell .skill-center-directory-grid .directory-card-main,
+  .control-center-shell .workspace-hub-directory-grid .directory-card-main {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .control-center-shell .skill-center-directory-grid .directory-card-meta,
+  .control-center-shell .workspace-hub-directory-grid .directory-card-meta,
+  .control-center-shell .skill-center-directory-grid .directory-card p,
+  .control-center-shell .workspace-hub-directory-grid .directory-card p {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .cc-settings-group-list .cc-settings-bar-head {
+    min-height: 0;
+  }
+
+  .control-center-shell .skill-center-directory-grid .directory-card-main,
+  .control-center-shell .workspace-hub-directory-grid .directory-card-main {
+    grid-template-columns: 1fr;
+  }
+
+  .control-center-shell .skill-center-directory-grid .directory-card-badges,
+  .control-center-shell .workspace-hub-directory-grid .directory-card-badges {
+    justify-content: flex-start;
   }
 }

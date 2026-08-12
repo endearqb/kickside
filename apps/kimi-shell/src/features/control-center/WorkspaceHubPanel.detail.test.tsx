@@ -95,7 +95,7 @@ describe("WorkspaceHubPanel detail", () => {
   });
 
   it("keeps harness creation controls unchanged", async () => {
-    render(
+    const { container } = render(
       <WorkspaceHubPanel
         detailOnly
         onOpenWorkspace={vi.fn(async () => undefined)}
@@ -107,6 +107,35 @@ describe("WorkspaceHubPanel detail", () => {
     expect(await screen.findByRole("heading", { name: harness.name })).toBeTruthy();
     expect(screen.getByRole("button", { name: "创建工作区" })).toBeTruthy();
     expect(screen.getAllByText("变量").length).toBeGreaterThan(0);
+    expect((screen.getByText("模板文件").closest("details") as HTMLDetailsElement).open).toBe(false);
+    const backButton = screen.getByRole("button", { name: "返回" });
+    expect(backButton.closest(".cc-image-detail-top")).toBeTruthy();
+    expect(container.querySelectorAll(".workspace-hub-harness-detail")).toHaveLength(1);
+    expect(container.querySelector(".workspace-hub-detail-card")).toBeNull();
+  });
+
+  it("publishes harnesses and registered workspaces to the unified rail", async () => {
+    const onRailGroupsChange = vi.fn();
+    render(
+      <WorkspaceHubPanel
+        detailOnly
+        onOpenWorkspace={vi.fn(async () => undefined)}
+        onRailGroupsChange={onRailGroupsChange}
+      />,
+    );
+
+    await waitFor(() => {
+      const latest = onRailGroupsChange.mock.calls[onRailGroupsChange.mock.calls.length - 1]?.[0];
+      expect(latest?.[0]?.items).toHaveLength(1);
+      expect(latest?.[1]?.items).toHaveLength(1);
+    });
+    const groups = onRailGroupsChange.mock.calls[onRailGroupsChange.mock.calls.length - 1][0];
+    expect(groups.map((group: { label: string }) => group.label)).toEqual([
+      "Harness 模板",
+      "已注册工作区",
+    ]);
+    expect(groups[0].items[0]).toMatchObject({ label: harness.name, meta: `v${harness.version}` });
+    expect(groups[1].items[0]).toMatchObject({ label: workspace.name, statusLabel: "可选" });
   });
 
   it("browses for a target directory and opens the selected path", async () => {

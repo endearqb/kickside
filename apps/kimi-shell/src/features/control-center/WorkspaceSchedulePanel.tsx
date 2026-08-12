@@ -242,7 +242,7 @@ export function WorkspaceSchedulePanel({
             id: `schedule:${workspace.id}`,
             label: workspace.name,
             meta: `${itemTasks.length} 任务`,
-            statusLabel: itemHeartbeat?.enabled ? "ready" : "idle",
+            statusLabel: itemHeartbeat?.enabled ? "运行中" : "已停止",
             statusTone: itemHeartbeat?.enabled ? ("success" as const) : ("neutral" as const),
             active: workspace.id === selectedWorkspaceId,
             onSelect: () => void handleWorkspaceChange(workspace.id),

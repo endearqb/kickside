@@ -306,6 +306,7 @@ export function ControlCenterView({
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
+  const [contextualRailGroups, setContextualRailGroups] = useState<UnifiedRailGroup[]>([]);
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsTaskReturnCardRef = useRef<OnboardingCardId | null>(null);
@@ -634,6 +635,7 @@ export function ControlCenterView({
   const appUpdatePrimaryAction = (
     <Button
       type="button"
+      variant={appUpdateAvailable ? "default" : "outline"}
       icon={appUpdateAvailable ? <Download size={15} /> : <RefreshCcw size={15} />}
       className="cc-action-btn"
       onClick={() => void (appUpdateAvailable ? onInstallAppUpdate() : onCheckAppUpdate())}
@@ -707,6 +709,7 @@ export function ControlCenterView({
   const workDirPrimaryAction = (
     <Button
       type="button"
+      variant={workDirDirty ? "default" : "outline"}
       icon={workDirDirty ? <Check size={15} /> : <FolderOpen size={15} />}
       className="cc-action-btn"
       onClick={() =>
@@ -738,6 +741,7 @@ export function ControlCenterView({
   const bridgePrimaryAction = (
     <Button
       type="button"
+      variant={visibleBridgeConnectors.length === 0 ? "default" : "outline"}
       icon={<Plus size={15} />}
       className="cc-action-btn"
       onClick={() => {
@@ -755,6 +759,7 @@ export function ControlCenterView({
   const logsPrimaryAction = (
     <Button
       type="button"
+      variant="outline"
       icon={<FolderOpen size={15} />}
       className="cc-action-btn"
       onClick={() => void onOpenLogs()}
@@ -840,6 +845,10 @@ export function ControlCenterView({
     });
   }, []);
 
+  const handleContextualRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroups(groups);
+  }, []);
+
   const handleRailItemActivate = useCallback((itemId: string) => {
     setActiveFocusId(itemId);
     if (focusClearTimerRef.current !== null) {
@@ -856,7 +865,7 @@ export function ControlCenterView({
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(focusDomId(activeFocusId))?.scrollIntoView({
         block: "nearest",
-        behavior: "smooth",
+        behavior: "auto",
       });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -1370,20 +1379,78 @@ export function ControlCenterView({
       },
     }));
 
-    return [
+    const pageGroups: UnifiedRailGroup[] = [
       {
         id: "sections",
         label: "页面",
         items: topLevelItems,
       },
     ];
+
+    if (assistantSettingsSectionActive) {
+      pageGroups.push({
+        id: "settings:quick-locations",
+        label: "快速定位",
+        items: [
+          {
+            id: "onboarding:app_update",
+            label: "更新与运行",
+            onSelect: () => setExpandedOnboardingCard("app_update"),
+          },
+          {
+            id: "onboarding:work_dir",
+            label: "工作目录与通道",
+            onSelect: () => setExpandedOnboardingCard("work_dir"),
+          },
+          {
+            id: "onboarding:doctor",
+            label: "诊断与日志",
+            onSelect: () => {
+              setExpandedOnboardingCard("doctor");
+              void onRefreshDiagnostics();
+            },
+          },
+        ],
+      });
+      return pageGroups;
+    }
+
+    return [...pageGroups, ...contextualRailGroups];
   }, [
     activeControlSection,
     handleSelectControlSection,
     assistantSettingsSectionActive,
+    contextualRailGroups,
+    onRefreshDiagnostics,
   ]);
 
   function renderOnboardingSection() {
+    const settingsGroups: Array<{
+      id: string;
+      title: string;
+      stepIds: OnboardingCardId[];
+    }> = [
+      {
+        id: "updates",
+        title: "更新与运行",
+        stepIds: ["app_update", "install", "auth"],
+      },
+      {
+        id: "workspace",
+        title: "工作目录与通道",
+        stepIds: [
+          "work_dir",
+          ...(supportsExplorerContextMenu ? (["context_menu"] as OnboardingCardId[]) : []),
+          "bridge",
+        ],
+      },
+      {
+        id: "diagnostics",
+        title: "诊断与日志",
+        stepIds: ["doctor", "logs"],
+      },
+    ];
+
     function renderStepDetail(stepId: OnboardingCardId) {
       if (stepId === "app_update") {
         return (
@@ -1549,6 +1616,16 @@ export function ControlCenterView({
               <Button
                 type="button"
                 variant="outline"
+                icon={<RefreshCcw size={15} />}
+                className="cc-action-btn"
+                onClick={() => void onRetry()}
+                disabled={actionBusy}
+              >
+                {status?.runtimeOwnership === "reused_external" ? "重新连接后端" : "重启后端"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
                 className="cc-action-btn"
                 onClick={() => void onRefreshDiagnostics()}
                 disabled={diagnosticsBusy}
@@ -1600,55 +1677,76 @@ export function ControlCenterView({
         id={focusDomId("onboarding")}
         className={`cc-image-detail-page cc-settings-page ${activeFocusId === "onboarding" ? "is-focus" : ""}`}
       >
+        <header className="cc-image-detail-top cc-settings-page-head">
+          <div>
+            <h1>小助手设置</h1>
+          </div>
+        </header>
         <section className="cc-onboarding-steps cc-settings-bars">
-          <ul className="cc-image-row-list">
-            {onboardingSteps.map((step) => {
-              const expanded = expandedOnboardingCard === step.id;
-              return (
-                <li
-                  key={step.id}
-                  id={focusDomId(`onboarding:${step.id}`)}
-                  className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
-                >
-                  <div className="cc-settings-bar-head">
-                    <button
-                      type="button"
-                      className="cc-settings-bar-toggle"
-                      onClick={() => {
-                        const next = expanded ? null : step.id;
-                        setExpandedOnboardingCard(next);
-                        if (next === "auth") void onRefreshOnboarding();
-                        if (next === "doctor") void onRefreshDiagnostics();
-                        if (next === "logs") {
-                          void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()]);
-                        }
-                      }}
-                      aria-expanded={expanded}
-                      aria-controls={`cc-settings-detail-${step.id}`}
-                    >
-                      <div>
-                        <div className="cc-image-row-title">
-                          <span className={`cc-dot ${step.statusTone}`} />
-                          {step.title}
+          {settingsGroups.map((group) => (
+            <section key={group.id} className="cc-settings-group">
+              <div className="cc-settings-group-title">
+                <h2>{group.title}</h2>
+              </div>
+              <ul className="cc-image-row-list cc-settings-group-list">
+                {group.stepIds
+                  .map((stepId) => onboardingSteps.find((item) => item.id === stepId))
+                  .filter((step): step is OnboardingStepView => Boolean(step))
+                  .map((step) => {
+                    const expanded = expandedOnboardingCard === step.id;
+                    return (
+                      <li
+                        key={step.id}
+                        id={focusDomId(`onboarding:${step.id}`)}
+                        className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
+                      >
+                        <div className="cc-settings-bar-head">
+                          <button
+                            type="button"
+                            className="cc-settings-bar-toggle"
+                            onClick={() => {
+                              const next = expanded ? null : step.id;
+                              setExpandedOnboardingCard(next);
+                              if (next === "auth") void onRefreshOnboarding();
+                              if (next === "doctor") void onRefreshDiagnostics();
+                              if (next === "logs") {
+                                void Promise.all([
+                                  onRefreshDiagnostics(),
+                                  onRefreshBridgeLogTail(),
+                                ]);
+                              }
+                            }}
+                            aria-expanded={expanded}
+                            aria-controls={`cc-settings-detail-${step.id}`}
+                          >
+                            <div>
+                              <div className="cc-image-row-title">
+                                <span className={`cc-dot ${step.statusTone}`} />
+                                {step.title}
+                              </div>
+                              <div className="cc-image-row-desc">{step.actionLabel}</div>
+                            </div>
+                            <ChevronRight
+                              size={16}
+                              className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
+                            />
+                          </button>
+                          <div className="cc-image-row-actions">{step.primaryAction}</div>
                         </div>
-                        <div className="cc-image-row-desc">{step.actionLabel}</div>
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
-                      />
-                    </button>
-                    <div className="cc-image-row-actions">
-                      {step.primaryAction}
-                    </div>
-                  </div>
-                  {expanded ? (
-                    <div id={`cc-settings-detail-${step.id}`} className="cc-settings-bar-detail">{renderStepDetail(step.id)}</div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                        {expanded ? (
+                          <div
+                            id={`cc-settings-detail-${step.id}`}
+                            className="cc-settings-bar-detail"
+                          >
+                            {renderStepDetail(step.id)}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </section>
+          ))}
         </section>
       </section>
     );
@@ -2187,6 +2285,7 @@ export function ControlCenterView({
             onFilterChange={onSkillCenterFilterChange}
             detailOnly
             activeFocusId={activeFocusId}
+            onRailGroupsChange={handleContextualRailGroupsChange}
           />
           </div>
         </div>
@@ -3137,16 +3236,20 @@ export function ControlCenterView({
           actionBusy={actionBusy}
           onEnter={onCompleteOnboarding}
         />
-        <Button
-          type="button"
-          variant="outline"
-          className="cc-rail-restart-btn"
-          icon={<RefreshCcw size={15} />}
-          onClick={() => void onRetry()}
-          disabled={actionBusy}
-        >
-          {status?.runtimeOwnership === "reused_external" ? "重新连接后端" : "重启后端"}
-        </Button>
+        <div className="cc-rail-runtime-status" aria-live="polite">
+          <span className={`cc-dot ${status?.state === "running" ? "success" : status?.state === "crashed" ? "danger" : "neutral"}`} />
+          <span>
+            {status?.state === "running"
+              ? status.runtimeOwnership === "reused_external"
+                ? "已连接外部后端"
+                : "后端运行中"
+              : status?.state === "starting"
+                ? "后端启动中"
+                : status?.state === "crashed"
+                  ? "后端异常"
+                  : "后端已停止"}
+          </span>
+        </div>
       </div>
     );
   }
@@ -3187,12 +3290,14 @@ export function ControlCenterView({
                     }}
                     detailOnly
                     activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleContextualRailGroupsChange}
                   />
                 ) : null}
                 {activeControlSection === "schedule" ? (
                   <WorkspaceSchedulePanel
                     detailOnly
                     activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleContextualRailGroupsChange}
                   />
                 ) : null}
                 {assistantSettingsSectionActive ? (

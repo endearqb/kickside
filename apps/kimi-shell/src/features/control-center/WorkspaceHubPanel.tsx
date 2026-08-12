@@ -548,135 +548,115 @@ export function WorkspaceHubPanel({
   );
 
   const harnessDetail = selectedHarness ? (
-    <div className="cc-control-detail-stack">
-      <div className="cc-control-detail-head">
-        <div className="cc-control-detail-copy">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            icon={<ChevronLeft size={14} />}
-            onClick={handleBackToDirectory}
-          >
-            返回
-          </Button>
-          <h3>{selectedHarness.name}</h3>
+    <div className="workspace-hub-harness-detail">
+      <section className="workspace-hub-harness-overview">
+        <ControlCenterDescList
+          columns={4}
+          items={[
+            { label: "变量", value: `${selectedHarness.variables.length} 个` },
+            { label: "技能", value: `${selectedHarness.skills.length} 个` },
+            { label: "模板", value: selectedHarness.template },
+            { label: "创建后动作", value: selectedHarness.postCreate.openWith ?? "无自动打开" },
+          ]}
+        />
+
+        <div className="cc-control-description">
+          <span>描述</span>
+          <p>{selectedHarness.summary}</p>
         </div>
-        <div className="cc-control-action-row">
-          <Button
-            variant="outline"
-            icon={<Search size={15} />}
-            onClick={handleDryRun}
-            disabled={busy}
-          >
-            预览文件
-          </Button>
-          <Button icon={<Sparkles size={15} />} onClick={handleCreate} disabled={busy}>
-            创建工作区
-          </Button>
-        </div>
-      </div>
 
-      <ControlCenterDescList
-        columns={4}
-        items={[
-          { label: "变量", value: `${selectedHarness.variables.length} 个` },
-          { label: "技能", value: `${selectedHarness.skills.length} 个` },
-          { label: "模板", value: selectedHarness.template },
-          { label: "创建后动作", value: selectedHarness.postCreate.openWith ?? "无自动打开" },
-        ]}
-      />
+        {selectedHarness.tags.length > 0 ? (
+          <div className="cc-control-chip-row">
+            {selectedHarness.tags.map((tag) => (
+              <ControlCenterStatusBadge key={tag} tone="neutral">
+                {tag}
+              </ControlCenterStatusBadge>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
-      <div className="cc-control-description">
-        <span>描述</span>
-        <p>{selectedHarness.summary}</p>
-      </div>
-
-      {selectedHarness.tags.length > 0 ? (
-        <div className="cc-control-chip-row">
-          {selectedHarness.tags.map((tag) => (
-            <ControlCenterStatusBadge key={tag} tone="neutral">
-              {tag}
-            </ControlCenterStatusBadge>
-          ))}
-        </div>
-      ) : null}
-
-      <DirectoryFilePreview
-        entityKey={`harness:${selectedHarness.id}`}
-        description={selectedHarness.summary}
-        loadEntries={loadSelectedHarnessFileEntries}
-        readFile={readSelectedHarnessFile}
-      />
-
-      <section className="cc-surface-section">
+      <section className="workspace-hub-harness-section">
         <header className="cc-surface-section-header">
           <div className="cc-surface-section-copy">
             <h4>变量</h4>
-            <p>Secret 字段不会在预览中插值。</p>
+            {selectedHarness.variables.some((variable) => variable.secret) ? (
+              <p>Secret 字段不会在预览中插值。</p>
+            ) : null}
           </div>
         </header>
-        <div className="cc-surface-section-body">
-          <div className="cc-control-detail-grid">
-            {selectedHarness.variables.map((variable) => {
-              const inputId = `workspace-hub-${selectedHarness.id}-${variable.key}`;
-              const input = (
-                <Input
-                  id={inputId}
-                  value={valueFrom(values, variable.key)}
-                  placeholder={variable.placeholder ?? ""}
-                  type={variable.secret ? "password" : "text"}
-                  onChange={(event) =>
-                    setValues((current) => ({
-                      ...current,
-                      [variable.key]: event.currentTarget.value,
-                    }))
-                  }
-                />
-              );
+        <div className="cc-control-detail-grid">
+          {selectedHarness.variables.map((variable) => {
+            const inputId = `workspace-hub-${selectedHarness.id}-${variable.key}`;
+            const input = (
+              <Input
+                id={inputId}
+                value={valueFrom(values, variable.key)}
+                placeholder={variable.placeholder ?? ""}
+                type={variable.secret ? "password" : "text"}
+                onChange={(event) =>
+                  setValues((current) => ({
+                    ...current,
+                    [variable.key]: event.currentTarget.value,
+                  }))
+                }
+              />
+            );
 
-              return (
-                <div key={variable.key} className="cc-control-field">
-                  <label htmlFor={inputId}>
-                    {variable.label}
-                    {variable.required ? " *" : ""}
-                  </label>
-                  {variable.type === "path" ? (
-                    <div className="workspace-hub-path-row">
-                      {input}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="cc-action-btn cc-inline-btn"
-                        onClick={() => void handlePickHarnessPath(variable.key)}
-                        disabled={busy}
-                      >
-                        浏览
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        icon={<FolderOpen size={14} />}
-                        className="cc-inline-icon-btn"
-                        onClick={() => void handleOpenHarnessPath(variable.key)}
-                        disabled={busy || !valueFrom(values, variable.key).trim()}
-                        aria-label="打开目标目录"
-                        title="打开目标目录"
-                      />
-                    </div>
-                  ) : (
-                    input
-                  )}
-                </div>
-              );
-            })}
-          </div>
+            return (
+              <div key={variable.key} className="cc-control-field">
+                <label htmlFor={inputId}>
+                  {variable.label}
+                  {variable.required ? " *" : ""}
+                </label>
+                {variable.type === "path" ? (
+                  <div className="workspace-hub-path-row">
+                    {input}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="cc-action-btn cc-inline-btn"
+                      onClick={() => void handlePickHarnessPath(variable.key)}
+                      disabled={busy}
+                    >
+                      浏览
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      icon={<FolderOpen size={14} />}
+                      className="cc-inline-icon-btn"
+                      onClick={() => void handleOpenHarnessPath(variable.key)}
+                      disabled={busy || !valueFrom(values, variable.key).trim()}
+                      aria-label="打开目标目录"
+                      title="打开目标目录"
+                    />
+                  </div>
+                ) : (
+                  input
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
 
+      <details className="workspace-hub-template-preview">
+        <summary>
+          <span>模板文件</span>
+          <small>展开查看将生成的目录和内容</small>
+        </summary>
+        <DirectoryFilePreview
+          entityKey={`harness:${selectedHarness.id}`}
+          description={selectedHarness.summary}
+          loadEntries={loadSelectedHarnessFileEntries}
+          readFile={readSelectedHarnessFile}
+        />
+      </details>
+
       {dryRun ? (
-        <section className="cc-surface-section">
+        <section className="workspace-hub-harness-section">
           <header className="cc-surface-section-header">
             <div className="cc-surface-section-copy">
               <h4>预览文件树</h4>
@@ -710,7 +690,7 @@ export function WorkspaceHubPanel({
       ) : null}
 
       {createdWorkspace ? (
-        <section className="cc-surface-section">
+        <section className="workspace-hub-harness-section">
           <header className="cc-surface-section-header">
             <div className="cc-surface-section-copy">
               <h4>创建结果</h4>
@@ -770,8 +750,8 @@ export function WorkspaceHubPanel({
           return {
             id: itemId,
             label: workspace.name,
-            statusLabel: "ready",
-            statusTone: "success" as const,
+            statusLabel: "可选",
+            statusTone: "neutral" as const,
             active: itemId === selectedItemId,
             onSelect: () => setSelectedItemId(itemId),
           };
@@ -786,7 +766,7 @@ export function WorkspaceHubPanel({
   }, [onRailGroupsChange, railGroups]);
 
   const detailContent = selectedKind === "workspace" ? workspaceDetail : harnessDetail;
-  const showWorkspaceDetailHeader = detailOnly && Boolean(selectedWorkspace);
+  const showDetailHeader = detailOnly && Boolean(selectedHarness || selectedWorkspace);
 
   if (detailOnly) {
     return (
@@ -797,10 +777,39 @@ export function WorkspaceHubPanel({
         <div
           id={focusDomId("workspace_hub")}
           className={`cc-image-detail-top ${
-            showWorkspaceDetailHeader ? "workspace-hub-detail-top" : ""
+            showDetailHeader ? "workspace-hub-detail-top" : ""
           } ${activeFocusId === "workspace_hub" ? "is-focus" : ""}`}
         >
-          {showWorkspaceDetailHeader && selectedWorkspace ? (
+          {showDetailHeader && selectedHarness ? (
+            <>
+              <div className="workspace-hub-top-title">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  icon={<ChevronLeft size={14} />}
+                  onClick={handleBackToDirectory}
+                  disabled={busy}
+                >
+                  返回
+                </Button>
+                <h1>{selectedHarness.name}</h1>
+              </div>
+              <div className="cc-image-top-controls workspace-hub-detail-top-actions">
+                <Button
+                  variant="outline"
+                  icon={<Search size={15} />}
+                  onClick={handleDryRun}
+                  disabled={busy}
+                >
+                  预览文件
+                </Button>
+                <Button icon={<Sparkles size={15} />} onClick={handleCreate} disabled={busy}>
+                  创建工作区
+                </Button>
+              </div>
+            </>
+          ) : showDetailHeader && selectedWorkspace ? (
             <>
               <div className="workspace-hub-top-title">
                 <Button
@@ -866,7 +875,7 @@ export function WorkspaceHubPanel({
             {detailContent}
           </section>
         ) : detailContent ? (
-          <section className="cc-image-card workspace-hub-detail-card">
+          <section className="workspace-hub-harness-detail-shell">
             {detailContent}
           </section>
         ) : (

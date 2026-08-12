@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Eraser, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
@@ -26,6 +26,7 @@ import { ControlCenterStatusBadge } from "@/components/control-center/ControlCen
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { UnifiedRailGroup } from "@/features/control-center/ControlCenterUnifiedRail";
 import { DirectoryCardGrid, type DirectoryCardItem } from "@/features/directory/DirectoryCardGrid";
 import { DirectoryFilePreview } from "@/features/directory/DirectoryFilePreview";
 import {
@@ -111,6 +112,7 @@ type SkillCenterPanelProps = {
   railActions?: ReactNode;
   detailOnly?: boolean;
   activeFocusId?: string | null;
+  onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
 };
 
 function statusForSkill(
@@ -300,6 +302,7 @@ export function SkillCenterPanel({
   onSectionChange,
   railActions,
   detailOnly = false,
+  onRailGroupsChange,
 }: SkillCenterPanelProps) {
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
   const [directoryPrimarySource, setDirectoryPrimarySource] =
@@ -785,6 +788,111 @@ export function SkillCenterPanel({
 
   const skillDirectoryEmptyCopy = getSkillDirectoryEmptyCopy(manageEntries.length);
   const hasDirectoryDetail = Boolean(selectedInstalledSkill || selectedDiscoveredRecord);
+  const workspaceTargets = useMemo(
+    () => workspaceSkillTargets.filter((target) => target.scope === "workspace"),
+    [workspaceSkillTargets],
+  );
+  const railActionRefs = useRef({
+    onSectionChange,
+    onSelectDiscoveredSkill,
+    onSelectSkill,
+    onSelectWorkspaceSkillTarget,
+  });
+  railActionRefs.current = {
+    onSectionChange,
+    onSelectDiscoveredSkill,
+    onSelectSkill,
+    onSelectWorkspaceSkillTarget,
+  };
+  const railGroups = useMemo<UnifiedRailGroup[]>(
+    () => [
+      {
+        id: "skill_center:views",
+        label: "Skill 视图",
+        items: [
+          {
+            id: "skill_center:list",
+            label: "技能库",
+            meta: manageEntries.length,
+            active: section === "manage",
+            onSelect: () => railActionRefs.current.onSectionChange("manage"),
+          },
+          {
+            id: "skill_center:workspace",
+            label: "工作区目标",
+            meta: workspaceTargets.length,
+            active: section === "workspace_insights",
+            onSelect: () => railActionRefs.current.onSectionChange("workspace_insights"),
+          },
+        ],
+      },
+      {
+        id: "skill_center:library",
+        label: "技能库",
+        count: manageEntries.length,
+        collapsible: true,
+        items: manageEntries.map((entry) => {
+          if (entry.kind === "installed") {
+            return {
+              id: `skill:${entry.installedSkill.id}`,
+              label: entry.installedSkill.name,
+              statusLabel: entry.installedSkill.trusted ? "已信任" : "待配置",
+              statusTone: entry.installedSkill.trusted
+                ? ("success" as const)
+                : ("warning" as const),
+              active: section === "manage" && selectedSkillId === entry.installedSkill.id,
+              onSelect: () => {
+                railActionRefs.current.onSectionChange("manage");
+                railActionRefs.current.onSelectSkill(entry.installedSkill.id);
+              },
+            };
+          }
+          return {
+            id: `skill:${entry.discoveredRecord.discoveryId}`,
+            label: entry.discoveredRecord.name,
+            statusLabel: "待配置",
+            statusTone: "warning" as const,
+            active:
+              section === "manage" &&
+              selectedDiscoveryId === entry.discoveredRecord.discoveryId,
+            onSelect: () => {
+              railActionRefs.current.onSectionChange("manage");
+              railActionRefs.current.onSelectDiscoveredSkill(entry.discoveredRecord.discoveryId);
+            },
+          };
+        }),
+      },
+      {
+        id: "skill_center:targets",
+        label: "工作区目标",
+        count: workspaceTargets.length,
+        collapsible: true,
+        items: workspaceTargets.map((target) => ({
+          id: `skill-target:${target.id}`,
+          label: target.label,
+          meta: target.readOnly ? "只读" : "可编辑",
+          active:
+            section === "workspace_insights" && selectedWorkspaceSkillTargetId === target.id,
+          onSelect: () => {
+            railActionRefs.current.onSectionChange("workspace_insights");
+            railActionRefs.current.onSelectWorkspaceSkillTarget(target.id);
+          },
+        })),
+      },
+    ],
+    [
+      manageEntries,
+      section,
+      selectedDiscoveryId,
+      selectedSkillId,
+      selectedWorkspaceSkillTargetId,
+      workspaceTargets,
+    ],
+  );
+
+  useEffect(() => {
+    onRailGroupsChange?.(railGroups);
+  }, [onRailGroupsChange, railGroups]);
 
   function renderManageEntry(entry: ManageListEntry) {
     const isSelected =

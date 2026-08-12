@@ -1,3 +1,54 @@
+# 技能库滚动与 WorkspaceHub 详情收敛
+
+## 任务契约
+
+- 用户目标：技能库可独立滚动；WorkspaceHub Harness 详情减少 AI slop，返回入口放到符合桌面习惯的位置。
+- 直接交付物：滚动约束修复、详情层级扁平化、标题栏返回与操作、回归测试和重建 macOS App。
+- 影响范围：控制中心 CSS、WorkspaceHub Harness 详情及测试。
+- 非目标：不改变 Harness 数据、创建流程、文件权限或后端接口。
+- 验收：Skill 长列表可纵向滚动且无横向滚动条；Harness 仅保留必要层级；返回位于页面标题栏；前端 gate 与 macOS 构建通过。
+
+## Checklist
+
+- [x] 恢复 Skill 目录列表独立纵向滚动并禁止 Rail 横向溢出。
+- [x] 将 Harness 返回、标题、预览和创建操作提升到页面标题栏。
+- [x] 移除 Harness 外层卡片与变量字段卡片嵌套。
+- [x] 补充 WorkspaceHub 结构回归测试。
+- [x] 完成全量前端 gate 与 macOS `.app` 重建。
+
+## Review
+
+- 根因是紧凑目录列表的后置样式把已有纵向滚动覆盖为 `overflow: hidden`；现在列表恢复独立纵向滚动，统一 Rail 禁止横向溢出并对长名称省略。
+- WorkspaceHub Harness 详情改成页面标题栏返回 + 主操作、无框概览、分隔线分区，移除了外层卡片和字段卡片的重复层级。
+- 已验证：TypeScript；43 个测试文件 / 214 项测试；安全 gate；Vite production build；macOS arm64 `.app` 构建；Info.plist、主程序和 Bridge 架构校验。
+
+# 控制中心已确认原型落地
+
+## 任务契约
+
+- 用户目标：按已确认的优化原型改造正式控制中心，而不是继续停留在 HTML 预览。
+- 直接交付物：统一 Rail、三组小助手设置、紧凑 Skill / WorkspaceHub 列表、变量优先的 Harness 创建详情与回归测试。
+- 影响范围：控制中心 React 组件、Skill / WorkspaceHub / 调度面板、局部样式和组件测试。
+- 非目标：不修改 Tauri command、安装升级状态机、Bridge 契约、Workspace / Skill 持久化格式或发布配置。
+- 验收：四个一级页面保持可达；Rail 显示当前页面对象上下文；原有操作不丢失；类型检查、全量前端测试、安全 gate 和生产构建通过。
+
+## Checklist
+
+- [x] 将小助手设置收拢为三个任务分区并保留八个动作入口。
+- [x] 将 Skill、Harness、已注册工作区和调度工作区接入统一 Rail。
+- [x] 将 Skill / WorkspaceHub 对象卡压缩为可扫描列表。
+- [x] 将 Harness 变量表单前置，模板文件改为按需展开。
+- [x] 将重启后端移入诊断分区，Rail footer 改为运行状态。
+- [x] 移除控制中心页面动画、平滑滚动和按钮手型鼠标。
+- [x] 补充统一 Rail 与 WorkspaceHub 交互测试。
+- [x] 完成 TypeScript、全量 Vitest、安全 gate 与生产构建。
+
+## Review
+
+- 采用 native-feel T3“采用平台，不与平台竞争”：目录继续使用系统 picker，控制中心导航与按钮保持默认箭头鼠标，不增加 Web 式页面过渡。
+- 本轮只改变信息架构与视觉密度；安装、升级、诊断、Bridge、Skill 和 Workspace 操作仍走原有 handler。
+- 已验证：43 个测试文件 / 214 项测试、TypeScript、安全 gate 和 Vite production build 通过；双平台真机视觉与字体缩放属于发布前 G3。
+
 # WorkspaceHub 目标目录原生选择
 
 ## 任务契约

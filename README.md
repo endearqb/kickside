@@ -38,25 +38,21 @@ operations, diagnostics, and platform-specific packaging into one workspace-orie
 
 ## App Preview
 
-Main workspace with the persistent Code/Chat shell and desktop-level navigation:
+Workspace Grid keeps Kimi Code, Kimi Chat, and active sessions visible in one resizable desktop workspace:
 
-![Kimi Sidekick workspace](apps/kimi-shell/public/home.png)
+![Kimi Sidekick six-pane Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
 
-Assistant settings groups first-run tasks and common environment fixes into focused expandable bars:
+Assistant Settings brings app updates, Kimi Code upgrades, work directories, IM channels, and diagnostics into one control surface:
 
-![Kimi Sidekick quick setup](apps/kimi-shell/public/quick_setup.png)
+![Kimi Sidekick assistant settings](apps/kimi-shell/public/assistant-settings.png)
 
-Install and Upgrade keeps PowerShell preflight, dependency readiness, and upgrade entry points in one place:
+Skill Center provides a searchable catalog for built-in and workspace skills:
 
-![Kimi Sidekick install and upgrade](apps/kimi-shell/public/install&updata.png)
+![Kimi Sidekick Skill Center](apps/kimi-shell/public/skill-center.png)
 
-Control Center brings overview, quick setup, diagnostics, and operational entry points into one tabbed workspace:
+Session settings and parallel panes keep model, thinking, permissions, Swarm mode, and long-running tasks close to the conversation:
 
-![Kimi Sidekick control center](apps/kimi-shell/public/control_center.png)
-
-IM Bridge provides channel controls, current binding/session switching, and working-directory management for bridge-driven workflows:
-
-![Kimi Sidekick IM Bridge](apps/kimi-shell/public/IM_bridge.png)
+![Kimi Sidekick session settings and parallel panes](apps/kimi-shell/public/workspace-session-settings.png)
 
 ## Local Development
 
@@ -91,7 +87,7 @@ Release notes are stored under:
 
 - `apps/kimi-shell/docs`
 
-Pushing a `vX.Y.Z` tag matching `apps/kimi-shell/package.json` creates a draft release, builds Windows x86_64 and macOS arm64 bundles, and publishes one signed cross-platform `latest.json`. Tauri updater signing plus Apple Developer ID/notarization Secrets must be configured before tagging; the release remains unpublished if either platform fails.
+Pushing a `vX.Y.Z` tag matching `apps/kimi-shell/package.json` creates a draft release, builds Windows x86_64 and macOS arm64 bundles, and publishes one signed cross-platform `latest.json`. Release `v0.1.24` is the explicitly labeled macOS ad-hoc/unsigned transition build; later releases fail closed until the normal Developer ID signing and notarization flow is restored.
 
 ## License
 

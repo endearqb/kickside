@@ -34,25 +34,21 @@ Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 
 
 ## 界面预览
 
-主工作区：提供常驻的 Code / Chat 桌面壳，以及稳定的导航与切换体验。
+Workspace Grid：在一个可调整布局的桌面工作区中同时展示 Kimi Code、Kimi Chat 与多个活跃会话。
 
-![Kimi 小助手主界面](apps/kimi-shell/public/home.png)
+![Kimi 小助手六窗格 Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
 
-快速设置：将首次安装、环境修复和关键引导步骤集中到更聚焦的 onboarding 流程中。
+小助手设置：集中管理应用更新、Kimi Code 升级、工作目录、外部 IM 通道与诊断日志。
 
-![Kimi 小助手快速设置](apps/kimi-shell/public/quick_setup.png)
+![Kimi 小助手设置](apps/kimi-shell/public/assistant-settings.png)
 
-安装与升级：把 PowerShell 预检、依赖就绪状态和升级入口放到同一个面板里。
+Skill 中心：以可搜索目录统一查看内置 Skill 和工作区 Skill。
 
-![Kimi 小助手安装与升级](apps/kimi-shell/public/install&updata.png)
+![Kimi 小助手 Skill 中心](apps/kimi-shell/public/skill-center.png)
 
-控制中心：以统一多标签工作台承载概览、快速设置、运行诊断和日常操作入口。
+会话设置与并行工作：在对话旁直接调整模型、思考强度、权限和 Swarm 模式，并同时跟踪多个任务。
 
-![Kimi 小助手控制中心](apps/kimi-shell/public/control_center.png)
-
-IM Bridge：集中处理通道状态、当前绑定/会话切换，以及默认工作目录等桥接工作流配置。
-
-![Kimi 小助手 IM Bridge](apps/kimi-shell/public/IM_bridge.png)
+![Kimi 小助手会话设置与并行工作](apps/kimi-shell/public/workspace-session-settings.png)
 
 ## 本地开发
 

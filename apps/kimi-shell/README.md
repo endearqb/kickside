@@ -28,13 +28,21 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows / macOS 桌面壳程序�
 
 ## 界面预览
 
-主 workspace：
+六窗格 Workspace Grid：
 
-![Kimi 小助手主界面](public/home.png)
+![Kimi 小助手六窗格 Workspace Grid](public/workspace-grid.png)
 
-控制中心：
+小助手设置：
 
-![Kimi 小助手控制中心](public/control_center.png)
+![Kimi 小助手设置](public/assistant-settings.png)
+
+Skill 中心：
+
+![Kimi 小助手 Skill 中心](public/skill-center.png)
+
+会话设置与并行工作：
+
+![Kimi 小助手会话设置与并行工作](public/workspace-session-settings.png)
 
 ## 运行环境
 

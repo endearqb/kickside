@@ -13,6 +13,7 @@ use std::{
 use crate::{command_utils, types::AppSettings};
 
 const KIMI_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(unix)]
 const LOGIN_SHELL_OUTPUT_LIMIT: u64 = 64 * 1024;
 const KIMI_HELP_OUTPUT_LIMIT: u64 = 64 * 1024;
 
@@ -317,6 +318,7 @@ fn allowed_login_shell(shell: &Path) -> bool {
     })
 }
 
+#[cfg(unix)]
 fn parse_login_shell_output(output: &[u8]) -> Option<PathBuf> {
     String::from_utf8_lossy(output)
         .lines()
@@ -408,6 +410,7 @@ fn shell_candidate_paths() -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn login_shell_parser_uses_last_absolute_path_and_ignores_noise() {
         let output = b"welcome\nrelative/kimi\n/first/kimi\nplugin output\n/final/kimi\n";

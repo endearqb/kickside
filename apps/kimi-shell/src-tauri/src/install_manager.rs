@@ -286,6 +286,7 @@ impl InstallManager {
         });
     }
 
+    #[cfg(target_os = "macos")]
     fn clear_running_pid(&self) {
         let Ok(mut state) = self.inner.lock() else {
             return;
@@ -393,9 +394,9 @@ fn validate_platform_task(task_id: InstallTaskId) -> Result<(), String> {
     Ok(())
 }
 
-fn configure_platform_install_catalog(catalog: &mut InstallFlowCatalog) {
+fn configure_platform_install_catalog(_catalog: &mut InstallFlowCatalog) {
     #[cfg(target_os = "macos")]
-    if let Some(upgrade) = catalog
+    if let Some(upgrade) = _catalog
         .tasks
         .iter_mut()
         .find(|task| task.id == InstallTaskId::UpgradeKimi)

@@ -1117,3 +1117,30 @@
 - 根因是 keep-alive wrapper 的 `display: contents` 去掉了 Skill 页的确定高度包含块；内部 `flex: 1 1 0` 列表因此再次压缩为 0，筛选浮层也被过短祖先的 overflow 边界裁切。
 - 修复保留真实 wrapper box，统一主区域只有一个 `1fr` 可见页；Skill 顶部控件不滚动，列表获得剩余高度并独立滚动。
 - 新增 CSS 源码契约测试，避免 jsdom 无布局计算导致同类 CSS 回归再次漏过。
+
+# macOS V1 合并与 0.1.23 双平台发布
+
+## 任务契约
+
+- 用户目标：将 `codex/macos-v1` 合并到 `main`，提升版本号并发布 Windows/macOS Release，确认 Windows 影响与测试责任。
+- 直接交付物：`0.1.23` 版本提交、Windows/macOS PR CI、合并到 `main`、`v0.1.23` Release；若发布凭据缺失则明确 blocked 条件。
+- 影响范围：共享 React/Rust/Go 应用、Windows/macOS 打包配置、CI、Release workflow 和版本元数据。
+- 非目标：不扩展 Intel macOS、Universal binary 或新的安装器类型；不绕过签名、公证和安装生命周期 G3。
+- 验收：本地 Windows G0/G1 通过，PR CI 两端全绿，main 合并成功；Release 同时包含 Windows NSIS/MSI、macOS updater/DMG 与唯一 `latest.json`，否则按项目宪法标记 blocked。
+- 保守假设：使用下一个补丁版本 `0.1.23`；保留同一 `com.kimi.shell` 应用身份。
+
+## Checklist
+
+- [x] 核对分支差异、版本、发布工作流与 Secrets。
+- [x] 提升 package/Cargo/Tauri 版本至 `0.1.23`。
+- [x] 修复 Windows clippy 与 Unix-only 测试边界。
+- [x] 完成 Windows 本地 Rust、前端、Go 与安全 gate。
+- [ ] 创建 PR 并通过 Windows/macOS CI。
+- [ ] 合并到 `main`。
+- [ ] 配置 Apple 签名/公证 Secrets 并发布 `v0.1.23`。
+- [ ] 完成 Windows/macOS 安装与 updater G3。
+
+## Review
+
+- `codex/macos-v1` 修改 109 个文件，包含共享 UI、Rust 生命周期、Bridge 和 Windows 发布配置；Windows 必须回归，不是仅 macOS 受影响。
+- 当前仓库仅配置两个 Tauri updater Secrets，缺少 6 个 Apple Developer ID/公证 Secrets；Release 工作流会在 prepare 阶段 fail closed。

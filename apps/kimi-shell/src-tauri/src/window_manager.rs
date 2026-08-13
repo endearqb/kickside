@@ -1231,6 +1231,7 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn hide_main_window(app: &AppHandle, source: &str) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         if let Err(error) = window.hide() {

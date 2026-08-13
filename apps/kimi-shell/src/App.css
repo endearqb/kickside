@@ -6247,7 +6247,7 @@ input:focus {
 .skill-center {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -6267,6 +6267,8 @@ input:focus {
 .skill-center-content {
   min-height: 0;
   min-width: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -6838,40 +6840,42 @@ input:focus {
   display: grid;
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 8px;
   align-content: start;
   min-width: 0;
   overflow: hidden;
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid var(--cc-line);
-  background: color-mix(in srgb, var(--surface) 90%, rgba(255, 255, 255, 0.12));
 }
 
 .skill-center-workspace-list {
   display: grid;
   min-height: 0;
-  grid-auto-rows: 72px;
+  grid-auto-rows: minmax(72px, auto);
   align-content: start;
-  gap: 10px;
+  gap: 0;
   min-width: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  border: 1px solid var(--cc-border);
+  border-radius: 14px;
+  background: var(--cc-surface);
   scrollbar-gutter: stable;
 }
 
 .skill-center-workspace-item {
   display: grid;
-  height: 72px;
+  min-height: 72px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-width: 0;
   overflow: hidden;
   padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--cc-line);
-  background: color-mix(in srgb, var(--surface) 88%, rgba(255, 255, 255, 0.12));
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.skill-center-workspace-item + .skill-center-workspace-item {
+  border-top: 1px solid var(--cc-border);
 }
 
 .skill-center-workspace-copy {
@@ -7663,7 +7667,7 @@ input:focus {
   }
 
   .skill-center-workspace-section {
-    padding: 14px;
+    padding: 0;
   }
 
   .skill-center-list-item {
@@ -8416,6 +8420,7 @@ input:focus {
 
 .control-center-shell .cc-main {
   min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   padding: 16px 18px;
   overflow: auto;
   background: transparent;
@@ -8572,9 +8577,17 @@ input:focus {
   text-align: left;
 }
 
-.control-center-shell .cc-empty-state-icon,
-.control-center-shell .cc-empty-state-copy p {
+.control-center-shell .cc-empty-state-icon {
   display: none;
+}
+
+.control-center-shell .cc-empty-state-copy p {
+  display: block;
+  max-width: 62ch;
+  margin: 3px 0 0;
+  color: var(--cc-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .control-center-shell .cc-empty-state-copy strong {
@@ -9011,7 +9024,7 @@ input:focus {
   padding-bottom: 12px;
 }
 
-.control-center-shell .skill-center-page {
+.control-center-shell .cc-image-detail-page.skill-center-page {
   min-height: 0;
   height: 100%;
   grid-template-rows: auto minmax(0, 1fr);
@@ -9030,6 +9043,7 @@ input:focus {
 .control-center-shell .skill-center-page .skill-center-directory-surface {
   height: 100%;
   max-height: none;
+  overflow: visible;
   margin-bottom: 0;
 }
 
@@ -9048,8 +9062,15 @@ input:focus {
 
 .control-center-shell .skill-center-directory-toolbar {
   position: relative;
-  z-index: 2;
+  z-index: 10;
   grid-template-columns: minmax(220px, 1fr) auto;
+}
+
+.control-center-shell input.skill-center-directory-search:focus,
+.control-center-shell input.skill-center-directory-search:focus-visible {
+  border-color: var(--cc-border-strong);
+  outline: none;
+  box-shadow: none;
 }
 
 .control-center-shell .skill-center-directory-filters {
@@ -9084,7 +9105,7 @@ input:focus {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 4;
+  z-index: 20;
   width: min(520px, calc(100vw - 380px));
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr));
@@ -10770,8 +10791,7 @@ input:focus {
 .cc-image-detail-top.is-focus,
 .cc-image-card.is-focus,
 .cc-image-row.is-focus {
-  outline: 2px solid color-mix(in srgb, var(--cc-accent) 45%, transparent);
-  outline-offset: 2px;
+  outline: none;
 }
 
 .cc-image-row .cc-toggle-field,
@@ -10956,6 +10976,91 @@ input:focus {
   .control-center-shell .cc-log-block-head,
   .control-center-shell .cc-onboarding-detail-head {
     flex-direction: column;
+  }
+}
+
+/* Control Center native interaction and theme completion. */
+.cc-preserved-page:not([hidden]) {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.cc-preserved-page[hidden] {
+  display: none !important;
+}
+
+.control-center-shell .cc-unified-rail-item:hover,
+.control-center-shell .cc-unified-rail-item.is-active {
+  background: var(--cc-rail-selected);
+  color: var(--cc-foreground);
+}
+
+.control-center-shell .cc-unified-rail-item:focus-visible,
+.control-center-shell .cc-unified-rail-group-head:focus-visible,
+.control-center-shell .cc-unified-rail-exit:focus-visible,
+.control-center-shell .cc-action-menu-item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--cc-info) 68%, transparent);
+  outline-offset: -2px;
+}
+
+.control-center-shell .cc-tag {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: var(--radius-tag);
+  background: var(--cc-surface-muted);
+  color: var(--cc-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.control-center-shell button:not(:disabled):active,
+.control-center-shell summary:active {
+  transform: translateY(1px);
+}
+
+.dark .control-center-shell,
+.theme-dark .control-center-shell {
+  --cc-background: #171a1c;
+  --cc-background-subtle: #1d2022;
+  --cc-surface: #232729;
+  --cc-surface-muted: #2b3032;
+  --cc-surface-hover: #323739;
+  --cc-rail: #1d2022;
+  --cc-rail-selected: #34393b;
+  --cc-border: #3b4042;
+  --cc-border-strong: #555b5e;
+  --cc-foreground: #f2f2ef;
+  --cc-muted: #b3b4af;
+  --cc-soft: #858782;
+  --cc-accent: #58a47c;
+  --cc-info: #78a7dd;
+  --cc-warning: #c89245;
+  --cc-danger: #df6a59;
+  --cc-code-bg: #1b1e20;
+  --cc-code-border: #353a3c;
+  background:
+    radial-gradient(circle at 18% -8%, color-mix(in srgb, var(--cc-accent) 10%, transparent), transparent 34%),
+    var(--cc-background);
+}
+
+.dark .control-center-shell::after,
+.theme-dark .control-center-shell::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 30%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-center-shell *,
+  .control-center-shell *::before,
+  .control-center-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 

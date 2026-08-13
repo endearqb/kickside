@@ -15,6 +15,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type {
   AppStatus,
   BridgeConnectorConfig,
@@ -30,7 +31,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterTag } from "@/components/control-center/ControlCenterTag";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
+import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import {
   KimiCodeAccessTaskContent,
@@ -92,6 +95,27 @@ const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
   importToDefaultWorkspace: "导入到默认工作区",
   importWithWorkspacePicker: "选择其他工作区",
 };
+
+type PreservedControlPage = "settings" | "skill_center" | "workspace_hub" | "schedule";
+
+export function ControlCenterPreservedPage({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="cc-preserved-page"
+      hidden={!active}
+      aria-hidden={!active}
+      inert={!active}
+    >
+      {children}
+    </div>
+  );
+}
 
 function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
@@ -306,8 +330,21 @@ export function ControlCenterView({
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
-  const [contextualRailGroups, setContextualRailGroups] = useState<UnifiedRailGroup[]>([]);
+  const [contextualRailGroupsBySection, setContextualRailGroupsBySection] = useState<
+    Partial<Record<ControlSectionId, UnifiedRailGroup[]>>
+  >({});
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
+  const activePreservedPage: PreservedControlPage = isAssistantSettingsSection(activeControlSection)
+    ? "settings"
+    : activeControlSection === "skill_center" ||
+        activeControlSection === "workspace_hub" ||
+        activeControlSection === "schedule"
+      ? activeControlSection
+      : "settings";
+  const [visitedControlPages, setVisitedControlPages] = useState<Set<PreservedControlPage>>(
+    () => new Set([activePreservedPage]),
+  );
+  const bridgeDeleteDialogRef = useDialogFocusBoundary(Boolean(bridgeDeleteConfirm));
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsTaskReturnCardRef = useRef<OnboardingCardId | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
@@ -845,9 +882,22 @@ export function ControlCenterView({
     });
   }, []);
 
-  const handleContextualRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
-    setContextualRailGroups(groups);
+  const handleWorkspaceHubRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, workspace_hub: groups }));
   }, []);
+  const handleScheduleRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, schedule: groups }));
+  }, []);
+  const handleSkillRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, skill_center: groups }));
+  }, []);
+
+  useEffect(() => {
+    setVisitedControlPages((current) => {
+      if (current.has(activePreservedPage)) return current;
+      return new Set([...current, activePreservedPage]);
+    });
+  }, [activePreservedPage]);
 
   const handleRailItemActivate = useCallback((itemId: string) => {
     setActiveFocusId(itemId);
@@ -1387,41 +1437,13 @@ export function ControlCenterView({
       },
     ];
 
-    if (assistantSettingsSectionActive) {
-      pageGroups.push({
-        id: "settings:quick-locations",
-        label: "快速定位",
-        items: [
-          {
-            id: "onboarding:app_update",
-            label: "更新与运行",
-            onSelect: () => setExpandedOnboardingCard("app_update"),
-          },
-          {
-            id: "onboarding:work_dir",
-            label: "工作目录与通道",
-            onSelect: () => setExpandedOnboardingCard("work_dir"),
-          },
-          {
-            id: "onboarding:doctor",
-            label: "诊断与日志",
-            onSelect: () => {
-              setExpandedOnboardingCard("doctor");
-              void onRefreshDiagnostics();
-            },
-          },
-        ],
-      });
-      return pageGroups;
-    }
-
-    return [...pageGroups, ...contextualRailGroups];
+    if (assistantSettingsSectionActive) return pageGroups;
+    return [...pageGroups, ...(contextualRailGroupsBySection[activeControlSection] ?? [])];
   }, [
     activeControlSection,
     handleSelectControlSection,
     assistantSettingsSectionActive,
-    contextualRailGroups,
-    onRefreshDiagnostics,
+    contextualRailGroupsBySection,
   ]);
 
   function renderOnboardingSection() {
@@ -1995,7 +2017,7 @@ export function ControlCenterView({
             <ControlCenterStatusBadge
               tone={selectedInstalledSkill.trusted ? "success" : "warning"}
             >
-              {selectedInstalledSkill.trusted ? "已信任" : "未信任"}
+              {selectedInstalledSkill.trusted ? "已信任" : "待配置"}
             </ControlCenterStatusBadge>
             <Button
               type="button"
@@ -2085,9 +2107,9 @@ export function ControlCenterView({
         ) : null}
         {selectedDiscoveredRecord ? (
           <>
-            <ControlCenterStatusBadge tone="warning">待导入</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="warning">待配置</ControlCenterStatusBadge>
             {selectedDiscoveredRecord.hasScripts ? (
-              <ControlCenterStatusBadge tone="neutral">包含 scripts/</ControlCenterStatusBadge>
+              <ControlCenterTag>包含 scripts/</ControlCenterTag>
             ) : null}
             <Button
               type="button"
@@ -2119,30 +2141,24 @@ export function ControlCenterView({
               },
             ]}
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="cc-action-btn"
-            onClick={() => onSkillCenterSectionChange("workspace_insights")}
+          <ControlCenterActionMenu
+            label="Skill 中心更多操作"
             disabled={skillCenterBusy}
-          >
-            工作区目标
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            icon={<RefreshCcw size={14} />}
-            onClick={() => {
-              void (async () => {
-                await onRefreshSkillCenterState();
-                await onRefreshSkillDiscoveryState();
-              })();
-            }}
-            disabled={skillCenterBusy}
-            aria-label="刷新 Skill 中心"
-            title="刷新 Skill 中心"
+            items={[
+              {
+                label: "管理工作区目标",
+                onSelect: () => onSkillCenterSectionChange("workspace_insights"),
+              },
+              {
+                label: "刷新技能目录",
+                onSelect: () => {
+                  void (async () => {
+                    await onRefreshSkillCenterState();
+                    await onRefreshSkillDiscoveryState();
+                  })();
+                },
+              },
+            ]}
           />
         </div>
       ) : (
@@ -2285,7 +2301,8 @@ export function ControlCenterView({
             onFilterChange={onSkillCenterFilterChange}
             detailOnly
             activeFocusId={activeFocusId}
-            onRailGroupsChange={handleContextualRailGroupsChange}
+            onRailGroupsChange={handleSkillRailGroupsChange}
+            onOpenExternalUrl={onOpenExternalUrl}
           />
           </div>
         </div>
@@ -2293,10 +2310,21 @@ export function ControlCenterView({
     );
   }
 
-  function closeBridgeConnectorSecretsTask() {
+  async function closeBridgeConnectorSecretsTask() {
     const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
-    if (hasPendingDraft && !window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？")) {
-      return;
+    if (hasPendingDraft) {
+      let confirmed = false;
+      try {
+        confirmed = await ask("当前凭据草稿尚未保存，返回后将丢失这些内容。", {
+          title: "放弃未保存的凭据",
+          kind: "warning",
+          okLabel: "放弃更改",
+          cancelLabel: "继续编辑",
+        });
+      } catch {
+        confirmed = window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？");
+      }
+      if (!confirmed) return;
     }
     setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
     closeSettingsTask();
@@ -3264,6 +3292,7 @@ export function ControlCenterView({
         expandedGroups={expandedUnifiedRailGroups}
         onToggleGroup={handleToggleUnifiedRailGroup}
         onExit={onClose}
+        exitLabel={surface === "modal" ? "关闭" : "退出"}
         onItemActivate={handleRailItemActivate}
         footer={renderUnifiedRailFooter()}
       />
@@ -3275,11 +3304,11 @@ export function ControlCenterView({
               isOnboardingSection ? "cc-main-onboarding" : ""
             }`}
           >
-            {activeTask ? (
-              renderActiveTask()
-            ) : (
-              <>
-                {activeControlSection === "workspace_hub" ? (
+            {activeTask ? renderActiveTask() : null}
+            {visitedControlPages.has("workspace_hub") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "workspace_hub"}
+              >
                   <WorkspaceHubPanel
                     onOpenWorkspace={onOpenFolder}
                     onOpenSchedule={() => setActiveControlSection("schedule")}
@@ -3290,32 +3319,54 @@ export function ControlCenterView({
                     }}
                     detailOnly
                     activeFocusId={activeFocusId}
-                    onRailGroupsChange={handleContextualRailGroupsChange}
+                    onRailGroupsChange={handleWorkspaceHubRailGroupsChange}
+                    onOpenExternalUrl={onOpenExternalUrl}
                   />
-                ) : null}
-                {activeControlSection === "schedule" ? (
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("schedule") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "schedule"}
+              >
                   <WorkspaceSchedulePanel
                     detailOnly
                     activeFocusId={activeFocusId}
-                    onRailGroupsChange={handleContextualRailGroupsChange}
+                    onRailGroupsChange={handleScheduleRailGroupsChange}
                   />
-                ) : null}
-                {assistantSettingsSectionActive ? (
-                  renderOnboardingSection()
-                ) : null}
-                {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
-              </>
-            )}
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("settings") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "settings"}
+              >
+                {renderOnboardingSection()}
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("skill_center") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "skill_center"}
+              >
+                {renderSkillCenterSection()}
+              </ControlCenterPreservedPage>
+            ) : null}
           </div>
         </div>
       </div>
       {bridgeDeleteConfirm ? (
         <div className="main-close-decision-overlay" role="presentation">
           <div
+            ref={bridgeDeleteDialogRef}
             className="main-close-decision-card"
             role="dialog"
             aria-modal="true"
             aria-label={`删除机器人 ${bridgeDeleteConfirm.connectorLabel}`}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              closeBridgeDeleteConfirm();
+            }}
           >
             <h3>删除机器人</h3>
             <p>
@@ -3327,6 +3378,7 @@ export function ControlCenterView({
               <Button
                 type="button"
                 variant="outline"
+                data-dialog-autofocus
                 onClick={closeBridgeDeleteConfirm}
                 disabled={bridgeBusy}
               >

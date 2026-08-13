@@ -16,7 +16,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows / macOS 桌面壳程序�
 - 后端守护与健康探测：优先按 `<KIMI_CODE_HOME>/server/instances/*.json` 发现并复用健康的既有 Kimi Server，旧 `server/lock` 仅作兼容 fallback；否则拉起 `kimi web --no-open --port <port>`，读取 `server.token` 并用 `#token=` 接入 workspace。Unix owned runtime 使用独立进程组并由 Shell 负责 TERM/KILL 收口，external runtime 永不误杀。
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
 - 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；启动后会静默探测 Kimi Code 安装环境与官方最新版本，并在安装/升级设置 bar 提示可用更新；API、模型与服务编辑统一引导到 Kimi Code Web 内置设置，微信/飞书扫码仍在对应设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
-- Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的卡片目录；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
+- Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的紧凑目录；Skill 工作区目标合并 discovery index 与 WorkspaceHub 完整注册表并按路径去重；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
 - Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器；Windows 安装版下载使用原生“另存为”。macOS 13 使用 WKWebView 共享 data store，不传仅 Windows 支持的 `dataDirectory`。
 - 平台原生体验：macOS 使用原生 traffic lights、App/Edit/View/Window 菜单、关闭主窗口隐藏、Dock reopen 恢复与 Cmd+Q graceful exit；Windows 保持自定义标题栏和 close-to-tray。
 - Windows 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“Kimi 小助手”中文名称并可编辑；macOS 不渲染 Explorer 设置项。

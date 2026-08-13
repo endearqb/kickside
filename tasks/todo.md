@@ -1,3 +1,108 @@
+# 工作区 Skill 连续列表与目标选择稳定化
+
+## 任务契约
+
+- 用户目标：将“已有 Skill / 从受管 Skill 投影”改成技能库相同的连续行列表；修复工作区目标切换闪烁和条目不全。
+- 直接交付物：连续列表视觉、无竞态目标选择、完整注册工作区目标源、回归测试和新 macOS `.app`。
+- 影响范围：Skill Center workspace detail、Skill controller、workspace target Rust 聚合与测试。
+- 非目标：不改变 Workspace/Skill 持久化格式、导入语义、容器路径或 Tauri command 名称与返回结构。
+- 验收：两组列表不再逐项圆角卡片；快速选择不被迟到请求覆盖；WorkspaceHub 已注册工作区全部出现在目标源；双端 gate 和 App 构建通过。
+
+## Checklist
+
+- [x] 审计 workspace detail 结构、选择调用链和 Rust 目标数据源。
+- [x] 将两组列表改为单边框容器内的连续分隔行。
+- [x] 合并 Skill 扫描索引与 WorkspaceHub 完整注册表并按路径去重。
+- [x] 将目标选择改为 inventory 就绪后原子提交，并拒绝迟到请求。
+- [x] 删除进入页面与选择目标时的重复刷新触发。
+- [x] 增加 React 竞态、列表结构、CSS 契约和 Rust 合并回归测试。
+- [x] 完成前端/Rust 全量 gate 与 macOS `.app` 构建。
+- [ ] 用户在真实 App 中确认全部工作区、快速切换和两组列表视觉。
+
+## Review
+
+- 闪烁由三条并发路径共同造成：section handler 主动刷新、可见性 effect 再次刷新、selected id effect 又重新拉取全部目标；旧 inventory 晚返回时会覆盖新目标。
+- 当前选择流程先获取目标 inventory，再在同一提交中更新 selected target、inventory 和 container；请求序号保证快速 A→B 时迟到的 A 结果无法回写。
+- 旧版 WorkspaceHub 已注册记录可能未进入后来新增的 Skill workspace index；后端现在运行时合并两者，无需破坏性迁移旧数据。
+- 列表视觉遵循 DESIGN 的连续桌面列表：分组本身无卡片背景，每组只有一个边框容器，内部条目用细分隔线。
+
+# Skill Center 列表与筛选裁切根因修复
+
+## 任务契约
+
+- 用户目标：修复 Skill 中心仍看不到技能列表、筛选浮层仍被裁切的问题。
+- 直接交付物：真实布局根因修复、可计算布局复现、回归测试和新 macOS `.app`。
+- 影响范围：Skill Center 内层 surface 类名、外层页面 CSS 作用域与相关测试。
+- 非目标：不改变 Skill 数据、扫描、筛选排序逻辑或 Tauri command。
+- 验收：35 条数据对应的列表获得非零可滚动高度；筛选浮层完整显示在列表上方；全量 gate 与 macOS 构建通过。
+
+## Checklist
+
+- [x] 用与生产一致的 DOM/CSS 层级复现 2px 列表和浮层裁切。
+- [x] 读取每层 `clientHeight`、`scrollHeight`、Grid track 与命中层级。
+- [x] 消除外层页面和内层面板复用 `skill-center-page` 的类名冲突。
+- [x] 将两行页面 Grid 规则收紧到外层 `cc-image-detail-page`。
+- [x] 增加组件类名隔离与 CSS 作用域回归测试。
+- [x] 完成 TypeScript、全量测试、安全 gate、前端构建和 macOS `.app` 构建。
+- [ ] 用户在新构建 App 中确认列表、滚动与筛选浮层视觉。
+
+## Review
+
+- 上一轮把症状归因于 keep-alive 百分比高度链，但可运行布局复现显示直接根因是类名碰撞：`SkillCenterPanel` 的 `surface="page"` 生成了 `skill-center-page`，与外层页面壳同名。
+- 外层的 `auto + minmax(0, 1fr)` 两行 Grid 因此误套到只有一个子节点的内层面板；内容进入 `auto` 行，空的第二行占走剩余空间，目录列表最终只有约 2px 边框，绝对定位的筛选浮层也被同一错误行裁切。
+- 修复后同一复现页中列表从约 2px 恢复到约 505px，`scrollHeight=2788`、`clientHeight=504`；浮层约 129px 高且命中层级位于列表之上。
+- 本次没有增加固定高度、resize 重试或延时刷新，修复的是错误样式作用域本身。
+
+# Skill 中心首次进入列表塌缩修复
+
+## 任务契约
+
+- 用户目标：首次进入 Skill 中心就正常显示技能列表，不再依赖点击技能库等子菜单触发恢复。
+- 直接交付物：根因修复、初始加载回归测试和原因说明。
+- 影响范围：Skill Center 高度布局与组件测试。
+- 非目标：不改变 Skill 数据、筛选排序、工作区目标或后端接口。
+- 验收：初始数据加载完成后不切换 section 即显示技能条目；长列表保持独立滚动；前端 gate 通过。
+
+## Checklist
+
+- [x] 确认截图中的 35 条数据已加载，排除扫描与筛选状态问题。
+- [x] 定位遗留两行 Grid、百分比高度链与零 flex-basis 的首次布局循环。
+- [x] 将 Skill 根容器和唯一内容行改为确定的单行 Grid。
+- [x] 增加初始加载完成后无需切换 section 的组件回归测试。
+- [x] 完成 TypeScript、全量前端测试、安全 gate、生产构建、macOS `.app` 构建与 diff 检查。
+- [ ] 在真实 macOS WKWebView 中冷进入 Skill 中心，确认首帧列表高度与滚动。
+
+## Review
+
+- 根因不是 Skill 数据缺失：左侧计数与主体卡片共用 `manageEntries`，截图中的 35 已证明数据存在。
+- 当前组件仅有一个直接内容节点，但旧 CSS 仍按两行布局；紧凑列表启用 `flex: 1 1 0` 后，首次布局无法从 auto 行和百分比高度链取得确定主轴，列表被压成细条，子菜单切换触发重新布局后恢复。
+- 根修是删除过时的空 Grid 行并显式定义唯一内容行，保留独立滚动；没有加入延时、resize 监听或强制刷新补丁。
+- 已验证：Skill 定向测试 6 项；43 个测试文件 / 216 项测试；TypeScript；安全 gate；Vite production build；macOS arm64 `.app` 构建及 Info.plist/主程序/Bridge 架构校验；`git diff --check`。真实 WKWebView 首帧仍需手工确认。
+
+# Skill 搜索焦点与筛选浮层关闭
+
+## 任务契约
+
+- 用户目标：搜索框聚焦效果更克制；筛选与排序浮层可以自然关闭。
+- 直接交付物：局部焦点样式、点击外部关闭、Escape 关闭及回归测试。
+- 影响范围：Skill 目录 UI 和测试。
+- 非目标：不改变筛选项、筛选逻辑或排序逻辑。
+- 验收：搜索框不再出现厚重阴影；浮层可由外部点击、Escape 和原按钮关闭；键盘焦点可恢复；前端 gate 通过。
+
+## Checklist
+
+- [x] 将 Skill 搜索框改为无阴影轻量焦点描边。
+- [x] 支持点击浮层外部关闭。
+- [x] 支持 Escape 关闭并把焦点归还触发按钮。
+- [x] 保留按钮再次点击关闭和浮层内多项连续调整。
+- [x] 完成定向与全量前端验证。
+
+## Review
+
+- 搜索框聚焦时移除叠加阴影，只保留低对比度两像素描边，键盘焦点仍清晰可见。
+- 筛选浮层支持点击外部与 Escape 关闭；Escape 关闭后焦点返回“筛选与排序”，浮层内部可连续调整多个条件。
+- 已验证：TypeScript；43 个测试文件 / 215 项测试；安全 gate；Vite production build；macOS arm64 `.app` 构建及 Info.plist/主程序/Bridge 架构校验；`git diff --check`。
+
 # 技能库滚动与 WorkspaceHub 详情收敛
 
 ## 任务契约
@@ -933,3 +1038,82 @@
 ### Review
 - Search/Fetch 不再用无意义 GET 冒充成功，也不在验证时消耗真实搜索或抓取请求。
 - 非 API 配置、用户自定义 Provider/Model 和仍被引用的旧 Provider 保持不变。
+# 控制中心原生交互与信息架构收口
+
+## 任务契约
+
+- 用户目标：按控制中心全面审查建议完成可落地的交互、信息架构、状态保留和视觉一致性优化。
+- 直接交付物：修复 Esc 弹层优先级与焦点管理；完善更多菜单和 Unified Rail 键盘操作；调度页只保留 Unified Rail 对象导航；保留页面选择与滚动上下文；统一状态、空状态、焦点和暗色变量；补充测试与验证记录。
+- 影响范围：`App.tsx`、控制中心共享组件、ControlCenterView、WorkspaceHub、Schedule、Skill Center、Directory preview、控制中心样式和相关测试。
+- 非目标：不新增 Tauri command，不改变安装/升级、Bridge、Workspace 或 Skill 持久化契约；不把现有控制中心迁移为新的原生 Settings 窗口。
+- 约束：保留当前用户未提交修改；遵循 `DESIGN.md` 两栏结构、状态词表和 native-feel T3；不新增运行时依赖。
+- 验收：内层 Esc 不关闭控制中心；弹窗焦点可圈定并恢复；菜单支持外点、Esc、方向键；Rail 支持 roving focus、方向键、Home/End 和 typeahead；调度对象列表不重复；页面切换保留上下文；G0/G1、安全 gate 和生产构建通过。
+- 保守假设：原生独立 Settings 窗口属于后续单独架构任务，本轮保留当前 modal/fullscreen 两种入口；暗色模式沿用现有 CSS `prefers-color-scheme` 能力，不引入新的主题持久化状态。
+- 架构事实入口：`.ai/architecture/current-state.md`、`module-map.md`、`dependency-boundaries.md`、`verification-gates.md`。
+- 验证入口：`pnpm exec tsc --noEmit`、`pnpm test`、`pnpm check:nfr:security`、`pnpm build`。
+
+## Checklist
+
+- [x] 建立 dismissible layer、dialog focus 与 Unified Rail 键盘测试。
+- [x] 修复 Esc 优先级和控制中心 modal 焦点圈定/恢复。
+- [x] 完善通用更多菜单的外点、Esc、方向键与焦点恢复。
+- [x] 为 Unified Rail 增加 roving focus、方向键、Home/End 与 typeahead。
+- [x] 删除调度详情区重复的工作区列表与标题。
+- [x] 保留 WorkspaceHub/调度选择、筛选与页面滚动上下文。
+- [x] 收敛状态词表、空状态、焦点视觉、暗色变量和 pressed state。
+- [x] 完成 G0/G1、安全 gate、生产构建与变更记录。
+
+## Review
+
+- 控制中心现在遵循“最内层先处理 Escape”的 dismiss 顺序；modal、二次确认和菜单均能圈定或恢复焦点，外层只在事件未被消费时关闭。
+- Unified Rail 采用 roving tab stop，支持方向键、Home/End、展开/折叠和名称快速定位；调度对象只在 Rail 出现一次，详情页不再重复列表与标题。
+- 一级页面访问后保持挂载，切换页面不会丢失筛选、选中项、表单与滚动上下文；隐藏页面使用 `hidden`、`aria-hidden` 与 `inert` 隔离。
+- 元数据改用中性 Tag，状态徽标收敛到设计词表；补齐暗色变量、轻量焦点、pressed/reduced-motion，并把外链确认改为原生 dialog + 系统 opener。
+- 已验证 TypeScript、47 个测试文件 / 224 项测试、安全 gate、生产构建和 `git diff --check`；真实 macOS/Windows 的 VoiceOver/Narrator、系统字体缩放和暗色视觉仍属于发布前 G3。
+# Skill 技能库页面覆盖修复
+
+## 任务契约
+
+- 用户目标：恢复控制中心中消失的技能库目录页面，并让左侧“技能库”稳定返回该页面。
+- 直接交付物：修正 Skill 页面分支、Rail 返回目录语义、回归测试和重新构建的 macOS App。
+- 影响范围：`SkillCenterPanel.tsx`、Skill Center 组件测试和本地 macOS 构建产物。
+- 非目标：不改变 Skill 数据、扫描、导入、投影或工作区目标契约。
+- 验收：manage 目录态只渲染技能库，不渲染工作区目标；点击顶层“技能库”清除详情选择；前端 gate 与 macOS App 构建通过。
+
+## Checklist
+
+- [x] 确认技能数据仍存在，问题是目录与工作区目标同时占据同一 Grid 行。
+- [x] 将目录、详情、工作区目标改为显式互斥渲染。
+- [x] 顶层“技能库”同时切换 manage 并清除详情选择。
+- [x] 增加页面覆盖与 Rail 返回目录回归断言。
+- [x] 完成 TypeScript、全量测试、安全 gate、生产构建和 macOS App 重建。
+
+## Review
+
+- 根因是 `manage && hasDetail ? manageDetail : workspaceInsights` 把合法的 `manage + noDetail` 目录态误当成工作区目标态；目录组件虽然存在，但后渲染分支将它覆盖。
+- 修复后页面状态为 `manage/noDetail → 技能库目录`、`manage/hasDetail → Skill 详情`、`workspace_insights → 工作区目标`，不再依赖 DOM 顺序或 Grid 覆盖关系。
+- 已验证 TypeScript、47 个测试文件 / 224 项测试、安全 gate、生产构建以及 macOS arm64 `.app` 构建。
+# Skill 目录高度、焦点与筛选浮层修复
+
+## 任务契约
+
+- 用户目标：恢复可见的 Skill 列表，移除搜索框聚焦阴影，并让筛选下拉完整显示。
+- 直接交付物：确定高度链、列表独立滚动、浮层层级、无阴影 focus 样式、CSS 契约测试和新 macOS App。
+- 影响范围：控制中心 keep-alive wrapper、Skill 目录 CSS、样式测试与本地 App 产物。
+- 非目标：不改变 Skill 数据、筛选逻辑、排序逻辑或导入操作。
+- 验收：35 条数据对应的列表区域不塌缩；搜索聚焦无 outline/box-shadow；筛选面板不被列表或父容器裁切；全量 gate 与 App 构建通过。
+
+## Checklist
+
+- [x] 将 active preserved page 从 `display: contents` 改为确定高度 Grid 项。
+- [x] 固定 `.cc-main` 单一可见页为 `minmax(0, 1fr)`。
+- [x] 保留 Skill 列表独立滚动并允许筛选浮层可见溢出。
+- [x] 搜索聚焦只改变边框，移除 outline 与 box-shadow。
+- [x] 增加 CSS 高度、浮层和焦点契约测试。
+- [x] 完成 48 个测试文件 / 227 项测试、安全 gate、生产构建与 macOS App 重建。
+
+## Review
+
+- 根因是 keep-alive wrapper 的 `display: contents` 去掉了 Skill 页的确定高度包含块；内部 `flex: 1 1 0` 列表因此再次压缩为 0，筛选浮层也被过短祖先的 overflow 边界裁切。
+- 修复保留真实 wrapper box，统一主区域只有一个 `1fr` 可见页；Skill 顶部控件不滚动，列表获得剩余高度并独立滚动。
+- 新增 CSS 源码契约测试，避免 jsdom 无布局计算导致同类 CSS 回归再次漏过。

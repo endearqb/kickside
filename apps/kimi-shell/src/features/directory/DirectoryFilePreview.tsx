@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check, ChevronRight, Copy, FileText } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type { SkillFileContent, SkillFileEntry } from "@/app/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ type DirectoryFilePreviewProps = {
   onOpenRoot?: () => Promise<void> | void;
   className?: string;
   showDescription?: boolean;
+  onOpenExternalUrl?: (url: string) => Promise<void> | void;
 };
 
 export function DirectoryFilePreview({
@@ -24,6 +26,7 @@ export function DirectoryFilePreview({
   onOpenRoot,
   className,
   showDescription = true,
+  onOpenExternalUrl,
 }: DirectoryFilePreviewProps) {
   const [entries, setEntries] = useState<SkillFileEntry[] | null>(null);
   const [entriesError, setEntriesError] = useState<string | null>(null);
@@ -33,6 +36,8 @@ export function DirectoryFilePreview({
   const [fileModes, setFileModes] = useState<Record<string, FileMode>>({});
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  const [treeFocusPath, setTreeFocusPath] = useState("");
   const treeItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const contentPaneRef = useRef<HTMLElement | null>(null);
 
@@ -45,6 +50,7 @@ export function DirectoryFilePreview({
     setSelectedPath("");
     setFileModes({});
     setExpandedDirs(new Set());
+    setTreeFocusPath("");
 
     loadEntries()
       .then((nextEntries) => {
@@ -52,6 +58,7 @@ export function DirectoryFilePreview({
         const defaultPath = pickDefaultFile(nextEntries) ?? "";
         setEntries(nextEntries);
         setSelectedPath(defaultPath);
+        setTreeFocusPath(defaultPath || nextEntries[0]?.relPath || "");
         setExpandedDirs(new Set(parentDirs(defaultPath)));
       })
       .catch((error: unknown) => {
@@ -113,6 +120,11 @@ export function DirectoryFilePreview({
   const activeMode = selectedPath
     ? fileModes[selectedPath] ?? (canPreview ? "preview" : "source")
     : "source";
+  const effectiveTreeFocusPath = visibleEntries.some((entry) => entry.relPath === treeFocusPath)
+    ? treeFocusPath
+    : visibleEntries.find((entry) => entry.relPath === selectedPath)?.relPath ??
+      visibleEntries[0]?.relPath ??
+      "";
 
   function setMode(mode: FileMode) {
     if (!selectedPath) return;
@@ -121,6 +133,7 @@ export function DirectoryFilePreview({
 
   function selectFilePath(relPath: string, focus = false) {
     setSelectedPath(relPath);
+    setTreeFocusPath(relPath);
     setExpandedDirs((current) => new Set([...current, ...parentDirs(relPath)]));
     if (focus) {
       window.requestAnimationFrame(() => treeItemRefs.current[relPath]?.focus());
@@ -140,7 +153,10 @@ export function DirectoryFilePreview({
   function focusTreeEntry(entry: SkillFileEntry | undefined) {
     if (!entry) return;
     if (!entry.isDir) selectFilePath(entry.relPath, true);
-    else window.requestAnimationFrame(() => treeItemRefs.current[entry.relPath]?.focus());
+    else {
+      setTreeFocusPath(entry.relPath);
+      window.requestAnimationFrame(() => treeItemRefs.current[entry.relPath]?.focus());
+    }
   }
 
   function handleTreeItemKeyDown(event: KeyboardEvent<HTMLButtonElement>, entry: SkillFileEntry) {
@@ -172,12 +188,17 @@ export function DirectoryFilePreview({
 
   async function copyCurrentFile() {
     if (!content?.text || content.truncated) return;
-    await navigator.clipboard.writeText(content.text);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(content.text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopyError("复制失败，请检查系统剪贴板权限。");
+    }
   }
 
-  function openMarkdownLink(href: string) {
+  async function openMarkdownLink(href: string) {
     if (/^\s*javascript:/i.test(href)) return;
     const normalized = resolveRelativeFilePath(selectedPath, href);
     const linkedEntry = entries?.find((entry) => !entry.isDir && entry.relPath === normalized);
@@ -185,9 +206,21 @@ export function DirectoryFilePreview({
       setSelectedPath(linkedEntry.relPath);
       return;
     }
-    if (/^https?:\/\//i.test(href) && window.confirm("打开外部链接？")) {
-      window.open(href, "_blank", "noopener,noreferrer");
+    if (!/^https?:\/\//i.test(href)) return;
+    let confirmed = false;
+    try {
+      confirmed = await ask("将在系统默认浏览器中打开此链接。", {
+        title: "打开外部链接",
+        kind: "info",
+        okLabel: "打开浏览器",
+        cancelLabel: "取消",
+      });
+    } catch {
+      confirmed = window.confirm("在系统浏览器打开外部链接？");
     }
+    if (!confirmed) return;
+    if (onOpenExternalUrl) await onOpenExternalUrl(href);
+    else window.open(href, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -242,10 +275,12 @@ export function DirectoryFilePreview({
               aria-selected={selectedPath === entry.relPath}
               aria-level={fileDepth(entry.relPath) + 1}
               aria-expanded={entry.isDir ? expandedDirs.has(entry.relPath) : undefined}
+              tabIndex={effectiveTreeFocusPath === entry.relPath ? 0 : -1}
               ref={(node) => {
                 treeItemRefs.current[entry.relPath] = node;
               }}
               onClick={() => (entry.isDir ? toggleDirectory(entry.relPath) : selectFilePath(entry.relPath))}
+              onFocus={() => setTreeFocusPath(entry.relPath)}
               onKeyDown={(event) => handleTreeItemKeyDown(event, entry)}
               title={entry.relPath}
             >
@@ -265,7 +300,10 @@ export function DirectoryFilePreview({
           ))}
         </aside>
 
-        <section ref={contentPaneRef} className="directory-file-content" aria-live="polite">
+        <section ref={contentPaneRef} className="directory-file-content">
+          <span className="sr-only" role="status" aria-live="polite">
+            {copyError || (copied ? "已复制当前文件" : "")}
+          </span>
           {!showDescription && selectedPath && !entriesError && !contentError ? (
             <div className="directory-file-content-header">
               <strong>{selectedEntry?.relPath ?? content?.relPath ?? selectedPath}</strong>
@@ -333,7 +371,7 @@ export function DirectoryFilePreview({
                 </div>
               ) : null}
               {activeMode === "preview" && canPreview ? (
-                <MarkdownPreview text={content.text} onOpenLink={openMarkdownLink} />
+                <MarkdownPreview text={content.text} onOpenLink={(href) => void openMarkdownLink(href)} />
               ) : (
                 <pre className="directory-code-viewer">{content.text}</pre>
               )}

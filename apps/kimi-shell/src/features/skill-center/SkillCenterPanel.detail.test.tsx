@@ -176,6 +176,7 @@ describe("SkillCenterPanel detail", () => {
       <SkillCenterPanel
         {...baseProps()}
         section="workspace_insights"
+        installedSkills={[installedSkill]}
         selectedWorkspaceSkillTargetId="workspace-a"
         onSelectWorkspaceSkillTarget={onSelectWorkspaceSkillTarget}
         workspaceSkillTargets={[
@@ -218,10 +219,28 @@ describe("SkillCenterPanel detail", () => {
             containerRoots: [{ containerKind: "agents", containerPath: "C:/workspace-a/.agents/skills" }],
           },
           scannedAt: "2026-07-13T00:00:00.000Z",
-          containers: [{ containerKind: "agents", containerPath: "C:/workspace-a/.agents/skills", readOnly: false, skills: [] }],
+          containers: [{
+            containerKind: "agents",
+            containerPath: "C:/workspace-a/.agents/skills",
+            readOnly: false,
+            skills: [{
+              skillKey: "workspace-skill",
+              name: "Workspace Skill",
+              description: "Workspace description",
+              projectionName: "workspace-skill",
+              hasScripts: false,
+              skillPath: "C:/workspace-a/.agents/skills/workspace-skill",
+              containerKind: "agents",
+            }],
+          }],
         }}
       />,
     );
+
+    const workspaceLists = screen.getAllByRole("list");
+    expect(workspaceLists).toHaveLength(2);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(container.querySelectorAll(".skill-center-workspace-list")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: "查看工作区" }));
     const workspaceMenu = screen.getByRole("menu", { name: "查看工作区" });
@@ -236,6 +255,7 @@ describe("SkillCenterPanel detail", () => {
     const onRailGroupsChange = vi.fn();
     const onSectionChange = vi.fn();
     const onSelectSkill = vi.fn();
+    const onBackToDirectory = vi.fn();
     render(
       <SkillCenterPanel
         {...baseProps()}
@@ -254,6 +274,7 @@ describe("SkillCenterPanel detail", () => {
         ]}
         onSectionChange={onSectionChange}
         onSelectSkill={onSelectSkill}
+        onBackToDirectory={onBackToDirectory}
         onRailGroupsChange={onRailGroupsChange}
       />,
     );
@@ -270,8 +291,60 @@ describe("SkillCenterPanel detail", () => {
       discoveredSkill.name,
     ]);
     expect(groups[2].items[0]).toMatchObject({ label: "Workspace A", meta: "可编辑" });
+    groups[0].items[0].onSelect();
+    expect(onSectionChange).toHaveBeenCalledWith("manage");
+    expect(onBackToDirectory).toHaveBeenCalledOnce();
     groups[1].items[0].onSelect();
     expect(onSectionChange).toHaveBeenCalledWith("manage");
     expect(onSelectSkill).toHaveBeenCalledWith(installedSkill.id);
+  });
+
+  it("shows skills when the initial directory load completes without a section change", () => {
+    const props = baseProps();
+    const { container, rerender } = render(
+      <SkillCenterPanel {...props} busy detailOnly />,
+    );
+
+    const panel = container.querySelector(".skill-center");
+    expect(panel?.classList.contains("skill-center-surface-page")).toBe(true);
+    expect(panel?.classList.contains("skill-center-page")).toBe(false);
+    expect(container.querySelector('[aria-label="正在加载目录"]')).toBeTruthy();
+
+    rerender(
+      <SkillCenterPanel
+        {...props}
+        busy={false}
+        detailOnly
+        installedSkills={[installedSkill]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /installed-skill/i })).toBeTruthy();
+    expect(container.querySelector(".skill-center-directory-grid")).toBeTruthy();
+    expect(container.querySelector(".skill-center-workspace-shell")).toBeNull();
+    expect(screen.queryByText("选择一个工作区目标")).toBeNull();
+    expect(props.onSectionChange).not.toHaveBeenCalled();
+  });
+
+  it("dismisses directory filters on outside pointer and Escape", () => {
+    render(<SkillCenterPanel {...baseProps()} detailOnly />);
+
+    const summary = screen.getByText("筛选与排序");
+    const details = summary.closest("details") as HTMLDetailsElement;
+
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    fireEvent.pointerDown(document.body);
+    expect(details.open).toBe(false);
+
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
+    const leakedEscape = vi.fn();
+    window.addEventListener("keydown", leakedEscape);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(details.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+    expect(leakedEscape).not.toHaveBeenCalled();
+    window.removeEventListener("keydown", leakedEscape);
   });
 });

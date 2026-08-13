@@ -5,7 +5,7 @@ import { WorkspaceHubPanel } from "./WorkspaceHubPanel";
 
 const openDialog = vi.hoisted(() => vi.fn());
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: openDialog, ask: vi.fn() }));
 
 const workspace = {
   id: "workspace-1",

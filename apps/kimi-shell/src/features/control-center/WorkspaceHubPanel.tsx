@@ -14,7 +14,7 @@ import type { WorkspaceSkillTarget } from "@/app/types";
 import { ControlCenterDescList } from "@/components/control-center/ControlCenterDescList";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterEmptyState } from "@/components/control-center/ControlCenterEmptyState";
-import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterTag } from "@/components/control-center/ControlCenterTag";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,7 @@ type WorkspaceHubPanelProps = {
   detailOnly?: boolean;
   activeFocusId?: string | null;
   onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
+  onOpenExternalUrl?: (url: string) => Promise<void> | void;
 };
 
 type WorkspaceHubDirectoryType = "all" | "harness" | "workspace";
@@ -178,6 +179,7 @@ export function WorkspaceHubPanel({
   detailOnly = false,
   activeFocusId,
   onRailGroupsChange,
+  onOpenExternalUrl,
 }: WorkspaceHubPanelProps) {
   const [harnesses, setHarnesses] = useState<HarnessManifest[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
@@ -536,7 +538,7 @@ export function WorkspaceHubPanel({
               <span className="cc-control-list-item-copy">
                 <strong>{workspace.name}</strong>
               </span>
-              <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
+              <ControlCenterTag>已注册</ControlCenterTag>
             </span>
           </button>
         );
@@ -568,9 +570,9 @@ export function WorkspaceHubPanel({
         {selectedHarness.tags.length > 0 ? (
           <div className="cc-control-chip-row">
             {selectedHarness.tags.map((tag) => (
-              <ControlCenterStatusBadge key={tag} tone="neutral">
+              <ControlCenterTag key={tag}>
                 {tag}
-              </ControlCenterStatusBadge>
+              </ControlCenterTag>
             ))}
           </div>
         ) : null}
@@ -652,6 +654,7 @@ export function WorkspaceHubPanel({
           description={selectedHarness.summary}
           loadEntries={loadSelectedHarnessFileEntries}
           readFile={readSelectedHarnessFile}
+          onOpenExternalUrl={onOpenExternalUrl}
         />
       </details>
 
@@ -663,9 +666,7 @@ export function WorkspaceHubPanel({
               <p>{dryRun.files.length} 个文件或目录将被写入目标工作区。</p>
             </div>
             {dryRun.warnings.length > 0 ? (
-              <ControlCenterStatusBadge tone="warning">
-                {dryRun.warnings.length} warning
-              </ControlCenterStatusBadge>
+              <ControlCenterTag>{dryRun.warnings.length} 个警告</ControlCenterTag>
             ) : null}
           </header>
           <div className="cc-surface-section-body">
@@ -716,6 +717,7 @@ export function WorkspaceHubPanel({
       description={selectedWorkspace.cwd}
       loadEntries={loadSelectedWorkspaceFileEntries}
       readFile={readSelectedWorkspaceFile}
+      onOpenExternalUrl={onOpenExternalUrl}
       onOpenRoot={() => onOpenWorkspace(selectedWorkspace.cwd)}
       showDescription={false}
       className="workspace-hub-workspace-file-preview"
@@ -825,13 +827,13 @@ export function WorkspaceHubPanel({
                 <h1>{selectedWorkspace.name}</h1>
               </div>
               <div className="cc-image-top-controls workspace-hub-detail-top-actions">
-                <ControlCenterStatusBadge tone="success">已注册</ControlCenterStatusBadge>
-                <ControlCenterStatusBadge tone="neutral">
+                <ControlCenterTag>已注册</ControlCenterTag>
+                <ControlCenterTag>
                   {formatRuntime(selectedWorkspace.agentRuntime)}
-                </ControlCenterStatusBadge>
-                <ControlCenterStatusBadge tone="neutral">
+                </ControlCenterTag>
+                <ControlCenterTag>
                   {selectedWorkspace.source}
-                </ControlCenterStatusBadge>
+                </ControlCenterTag>
                 {onOpenSchedule ? (
                   <Button
                     variant="ghost"

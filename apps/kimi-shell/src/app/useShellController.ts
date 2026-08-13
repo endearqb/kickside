@@ -246,7 +246,6 @@ export function useShellController() {
     setSelectedDiscoveryDetail,
     workspaceSkillTargets,
     selectedWorkspaceSkillTargetId,
-    setSelectedWorkspaceSkillTargetId,
     workspaceSkillInventory,
     selectedWorkspaceSkillContainerKind,
     setSelectedWorkspaceSkillContainerKind,
@@ -258,6 +257,7 @@ export function useShellController() {
     refreshSelectedDiscoveryDetail,
     refreshWorkspaceSkillRecommendationsState,
     refreshWorkspaceSkillInventoryState,
+    selectWorkspaceSkillTargetState,
   } = useSkillCenterController({ setActionError });
   const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
   const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
@@ -2004,13 +2004,12 @@ export function useShellController() {
     if (!visible) {
       return;
     }
-    void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
+    void refreshWorkspaceSkillManagementState();
   }, [
     activeControlSection,
     controlCenterModalOpen,
     isWorkspaceImportPickerRoute,
     screen,
-    selectedWorkspaceSkillTargetId,
     skillCenterSection,
     status?.activeSessionId,
     status?.activeSessionWorkDir,
@@ -3240,9 +3239,8 @@ export function useShellController() {
   }
 
   async function handleSelectWorkspaceSkillTarget(targetId: string) {
-    setSelectedWorkspaceSkillTargetId(targetId);
     try {
-      await refreshWorkspaceSkillInventoryState(targetId);
+      await selectWorkspaceSkillTargetState(targetId);
     } catch (error) {
       setActionError(String(error));
     }
@@ -3368,7 +3366,6 @@ export function useShellController() {
   function handleSkillCenterSectionChange(section: SkillCenterSectionId) {
     setSkillCenterSection(section);
     if (section === "workspace_insights") {
-      void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
       return;
     }
     void refreshSkillDiscoveryState(selectedDiscoveryId);

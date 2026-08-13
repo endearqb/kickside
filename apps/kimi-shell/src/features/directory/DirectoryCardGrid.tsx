@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type DirectoryCardBadge = {
@@ -28,7 +29,6 @@ type DirectoryCardGridProps = {
   empty?: ReactNode;
   className?: string;
   loading?: boolean;
-  skeletonCount?: number;
 };
 
 export function DirectoryCardGrid({
@@ -36,7 +36,6 @@ export function DirectoryCardGrid({
   empty,
   className,
   loading = false,
-  skeletonCount = 6,
 }: DirectoryCardGridProps) {
   if (loading && items.length === 0) {
     return (
@@ -45,14 +44,10 @@ export function DirectoryCardGrid({
         aria-busy="true"
         aria-label="正在加载目录"
       >
-        {Array.from({ length: skeletonCount }).map((_, index) => (
-          <div key={index} className="directory-card-skeleton" aria-hidden="true">
-            <span className="directory-skeleton-line is-title" />
-            <span className="directory-skeleton-line" />
-            <span className="directory-skeleton-line is-short" />
-            <span className="directory-skeleton-pill" />
-          </div>
-        ))}
+        <div className="directory-loading-state" role="status">
+          <LoaderCircle size={16} aria-hidden="true" />
+          <span>正在加载目录</span>
+        </div>
       </div>
     );
   }

@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCcw,
   Settings,
+  TerminalSquare,
   Square,
   X,
 } from "lucide-react";
@@ -57,6 +58,9 @@ type ShellTitlebarProps = {
   onToggleMaximizeWindow: () => void;
   onCloseWindow: () => void;
   onTitlebarDoubleClick: () => void;
+  dshEnabled?: boolean;
+  dshBusy?: boolean;
+  onCreateDshPane?: () => Promise<void>;
 };
 
 export function ShellTitlebar({
@@ -83,6 +87,9 @@ export function ShellTitlebar({
   onToggleMaximizeWindow,
   onCloseWindow,
   onTitlebarDoubleClick,
+  dshEnabled = false,
+  dshBusy = false,
+  onCreateDshPane = async () => undefined,
 }: ShellTitlebarProps) {
   const panes = useWorkspaceGridStore((state) => state.panes);
   const addPane = useWorkspaceGridStore((state) => state.addPane);
@@ -200,6 +207,21 @@ export function ShellTitlebar({
                   <MessageCircle size={14} aria-hidden />
                   <span>Chat</span>
                 </button>
+                {dshEnabled ? (
+                  <button
+                    type="button"
+                    className="titlebar-pane-option"
+                    role="menuitem"
+                    disabled={dshBusy}
+                    onClick={() => {
+                      setPaneMenuOpen(false);
+                      void onCreateDshPane().catch(() => undefined);
+                    }}
+                  >
+                    <TerminalSquare size={14} aria-hidden />
+                    <span>DeepSeek Harness · 实验性</span>
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

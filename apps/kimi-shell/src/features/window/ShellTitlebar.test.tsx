@@ -69,6 +69,24 @@ describe("ShellTitlebar", () => {
     ).toBe("chat");
   });
 
+  it("exposes DSH only when enabled and routes creation through the owner callback", () => {
+    const onCreateDshPane = vi.fn(async () => undefined);
+    const { rerender } = render(<ShellTitlebar {...titlebarProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
+    expect(screen.queryByRole("menuitem", { name: /DeepSeek Harness/ })).toBeNull();
+
+    rerender(
+      <ShellTitlebar
+        {...titlebarProps}
+        dshEnabled
+        onCreateDshPane={onCreateDshPane}
+      />,
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: /DeepSeek Harness/ }));
+    expect(onCreateDshPane).toHaveBeenCalledOnce();
+    expect(useWorkspaceGridStore.getState().panes.some((pane) => pane.kind === "dsh")).toBe(false);
+  });
+
   it("opens Code and Chat from the titlebar browser menu", () => {
     const onOpenExternalUrl = vi.fn();
     render(

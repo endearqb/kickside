@@ -57,7 +57,7 @@ pub struct PlatformCapabilities {
 }
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -497,6 +497,7 @@ pub struct AppSettings {
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
     pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
+    pub agent_backends: AgentBackendSettings,
     pub context_menu_desired_enabled: bool,
     pub context_menu_labels: ContextMenuLabelsInput,
 }
@@ -526,8 +527,33 @@ impl Default for AppSettings {
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),
             kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
+            agent_backends: AgentBackendSettings::default(),
             context_menu_desired_enabled: true,
             context_menu_labels: ContextMenuLabelsInput::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentBackendSettings {
+    pub dsh: DshSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DshSettings {
+    pub enabled: bool,
+    pub port_range: [u16; 2],
+    pub start_timeout_sec: u64,
+}
+
+impl Default for DshSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port_range: [3_080, 3_179],
+            start_timeout_sec: 60,
         }
     }
 }

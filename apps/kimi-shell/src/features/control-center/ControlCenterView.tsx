@@ -39,6 +39,7 @@ import {
   KimiCodeAccessTaskContent,
 } from "@/features/control-center/KimiCodeAccessPanel";
 import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
+import { DshSettingsPanel } from "@/features/control-center/DshSettingsPanel";
 import {
   InstallFlowTaskContent,
 } from "@/features/control-center/InstallFlowModal";
@@ -1705,6 +1706,7 @@ export function ControlCenterView({
           </div>
         </header>
         <section className="cc-onboarding-steps cc-settings-bars">
+          <DshSettingsPanel />
           {settingsGroups.map((group) => (
             <section key={group.id} className="cc-settings-group">
               <div className="cc-settings-group-title">

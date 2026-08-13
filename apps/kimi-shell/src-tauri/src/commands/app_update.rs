@@ -67,12 +67,7 @@ pub(crate) async fn install_app_update(
     app: AppHandle,
     progress: Channel<AppUpdateProgress>,
 ) -> Result<(), String> {
-    let before_exit_app = app.clone();
-    let updater = app
-        .updater_builder()
-        .on_before_exit(move || prepare_for_update_exit(&before_exit_app))
-        .build()
-        .map_err(|error| error.to_string())?;
+    let updater = app.updater().map_err(|error| error.to_string())?;
     let update = updater
         .check()
         .await
@@ -89,8 +84,8 @@ pub(crate) async fn install_app_update(
     let mut downloaded = 0_u64;
     let progress_for_chunks = progress.clone();
     let progress_for_finish = progress.clone();
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             move |chunk_length, total| {
                 downloaded = downloaded.saturating_add(chunk_length as u64);
                 let _ = progress_for_chunks.send(AppUpdateProgress {
@@ -110,22 +105,23 @@ pub(crate) async fn install_app_update(
             },
         )
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    prepare_for_update_exit(&app).map_err(|error| error.to_string())?;
+    update.install(bytes).map_err(|error| error.to_string())
 }
 
-fn prepare_for_update_exit(app: &AppHandle) {
-    window_manager::permit_process_exit(app, "app_update_install");
+fn prepare_for_update_exit(app: &AppHandle) -> anyhow::Result<()> {
     log_manager::append_line(
         app,
         "app update installer requested graceful runtime shutdown",
     );
 
-    if let Err(error) = backend_manager::stop_backend(app) {
-        log_manager::append_line(app, format!("app update stop_backend failed: {error:#}"));
-    }
-    if let Err(error) = bridge_manager::stop_bridge(app) {
-        log_manager::append_line(app, format!("app update stop_bridge failed: {error:#}"));
-    }
+    backend_manager::stop_backend(app)?;
+    crate::dsh_manager::stop(app)?;
+    bridge_manager::stop_bridge(app)?;
+    window_manager::permit_process_exit(app, "app_update_install");
+    Ok(())
 }
 
 #[cfg(test)]

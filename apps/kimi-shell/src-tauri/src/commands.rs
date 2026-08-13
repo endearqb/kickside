@@ -35,6 +35,15 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::save_work_dir,
         app_update::check_app_update,
         app_update::install_app_update,
+        // DeepSeek Harness (main window only)
+        super::dsh_manager::dsh_get_settings,
+        super::dsh_manager::dsh_save_settings,
+        super::dsh_manager::dsh_get_preflight,
+        super::dsh_manager::dsh_install,
+        super::dsh_manager::dsh_start,
+        super::dsh_manager::dsh_get_status,
+        super::dsh_manager::dsh_stop,
+        super::dsh_manager::dsh_get_log_tail,
         // workspace grid
         workspace_grid::grid_list_sessions,
         workspace_grid::grid_get_session,

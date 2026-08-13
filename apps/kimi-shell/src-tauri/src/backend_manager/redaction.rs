@@ -47,7 +47,14 @@ impl SecretRedactor {
         for secret in &self.secrets {
             output = output.replace(secret, REDACTED);
         }
-        for marker in ["authorization: bearer ", "#token=", "token:"] {
+        for marker in [
+            "authorization: bearer ",
+            "#token=",
+            "token:",
+            "api_key=",
+            "apikey=",
+            "deepseek_api_key=",
+        ] {
             output = redact_marker_values(output, marker);
         }
         output
@@ -133,7 +140,7 @@ mod tests {
         let redactor =
             SecretRedactor::new(vec!["api secret".to_string(), "api%20secret".to_string()]);
         let output = redactor.redact(
-            "Token: generated-token\nurl=/#token=url-token&x=1\nAuthorization: Bearer bearer-token\napi secret api%20secret",
+            "Token: generated-token\nurl=/#token=url-token&x=1\nAuthorization: Bearer bearer-token\nDEEPSEEK_API_KEY=deepseek-secret\napi secret api%20secret",
         );
 
         for secret in [
@@ -142,6 +149,7 @@ mod tests {
             "bearer-token",
             "api secret",
             "api%20secret",
+            "deepseek-secret",
         ] {
             assert!(!output.contains(secret));
         }

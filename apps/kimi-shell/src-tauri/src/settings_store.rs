@@ -164,4 +164,18 @@ mod tests {
         .expect("deserialize enabled settings");
         assert!(round_trip.agent_room_enabled);
     }
+
+    #[test]
+    fn dsh_settings_default_off_and_round_trip_under_agent_backends() {
+        let legacy = serde_json::json!({"schemaVersion": 11});
+        let restored: AppSettings = serde_json::from_value(legacy).expect("legacy settings");
+        assert!(!restored.agent_backends.dsh.enabled);
+        assert_eq!(restored.agent_backends.dsh.port_range, [3_080, 3_179]);
+
+        let mut enabled = restored;
+        enabled.agent_backends.dsh.enabled = true;
+        let value = serde_json::to_value(&enabled).expect("serialize settings");
+        assert_eq!(value["agentBackends"]["dsh"]["enabled"], true);
+        assert!(value.get("providers").is_none());
+    }
 }

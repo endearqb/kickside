@@ -17,6 +17,8 @@ import {
   MessageCircle,
   Minimize2,
   RefreshCcw,
+  Square,
+  TerminalSquare,
   Trash2,
 } from "lucide-react";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
@@ -34,8 +36,10 @@ import {
 } from "@/services/externalWebviewService";
 import { buildCodePaneUrl } from "./paneUrl";
 import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
+import type { DshStatus } from "@/services/dshService";
 
 const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
+const DSH_GUIDE_ACK_KEY = "kimi-dsh-first-use-guide-v1";
 
 interface PaneFrameProps {
   pane: WorkspacePane | null;
@@ -51,6 +55,8 @@ interface PaneFrameProps {
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
+  dshStatus: DshStatus | null;
+  dshError: string | null;
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
@@ -72,6 +78,8 @@ interface PaneFrameProps {
   onResumePane: () => void;
   onPaneDragStart: (event: ReactPointerEvent<HTMLElement>) => void;
   onToggleMaximize: () => void;
+  onStopDsh: () => Promise<DshStatus>;
+  onRefreshDsh: () => Promise<DshStatus | null>;
 }
 
 export function PaneFrame({
@@ -88,6 +96,8 @@ export function PaneFrame({
   chatIframeRef,
   codePaneState,
   chatPaneState,
+  dshStatus,
+  dshError,
   actionBusy,
   onRetry,
   onOpenLogs,
@@ -105,6 +115,8 @@ export function PaneFrame({
   onResumePane,
   onPaneDragStart,
   onToggleMaximize,
+  onStopDsh,
+  onRefreshDsh,
 }: PaneFrameProps) {
   const paneIframeRef = useRef<HTMLIFrameElement | null>(null);
   const sessionObservationGenerationRef = useRef(0);
@@ -162,6 +174,7 @@ export function PaneFrame({
     chatIframeRef,
     codePaneState,
     chatPaneState,
+    dshStatus,
     onCodeFrameLoad,
     onCodeFrameError,
     onChatFrameLoad,
@@ -220,6 +233,7 @@ export function PaneFrame({
           {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
           {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
           {pane.kind === "external" ? <Globe2 size={14} aria-hidden /> : null}
+          {pane.kind === "dsh" ? <TerminalSquare size={14} aria-hidden /> : null}
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
@@ -244,13 +258,31 @@ export function PaneFrame({
               <FolderOpen size={14} aria-hidden />
             </IconButton>
           ) : null}
-          {pane.kind !== "agent_room" ? (
+          {pane.kind !== "agent_room" && pane.kind !== "dsh" ? (
             <IconButton
               label={viewToggle.label}
               onClick={() => onConfigurePane(viewToggle.target)}
               active={viewToggle.active}
             >
               {viewToggle.icon}
+            </IconButton>
+          ) : null}
+          {pane.kind === "dsh" ? (
+            <IconButton
+              label={dshStatus?.state === "running" ? "停止 DeepSeek Harness" : "刷新 DeepSeek Harness"}
+              onClick={() => {
+                if (dshStatus?.state === "running" || dshStatus?.state === "starting") {
+                  void onStopDsh();
+                } else {
+                  void onRefreshDsh();
+                }
+              }}
+            >
+              {dshStatus?.state === "running" || dshStatus?.state === "starting" ? (
+                <Square size={13} aria-hidden />
+              ) : (
+                <RefreshCcw size={14} aria-hidden />
+              )}
             </IconButton>
           ) : null}
           <IconButton
@@ -300,6 +332,8 @@ export function PaneFrame({
               }
             });
         }}
+        dshError={dshError}
+        onRefreshDsh={onRefreshDsh}
       /> : null}
     </article>
   );
@@ -358,6 +392,8 @@ interface PaneContentProps {
   onResumePane: () => void;
   iframeRef: MutableRefObject<HTMLIFrameElement | null>;
   onIframeLoad: () => void;
+  dshError: string | null;
+  onRefreshDsh: () => Promise<DshStatus | null>;
 }
 
 function PaneContent({
@@ -374,6 +410,8 @@ function PaneContent({
   onResumePane,
   iframeRef,
   onIframeLoad,
+  dshError,
+  onRefreshDsh,
 }: PaneContentProps) {
   const embedHostRef = useRef<HTMLDivElement | null>(null);
   const embeddedControllerRef =
@@ -385,6 +423,9 @@ function PaneContent({
     "idle" | "opening" | "active" | "failed"
   >("idle");
   const [embeddedError, setEmbeddedError] = useState("");
+  const [showDshGuide, setShowDshGuide] = useState(
+    () => pane.kind === "dsh" && window.localStorage.getItem(DSH_GUIDE_ACK_KEY) !== "1",
+  );
   const sourceUrl = source.url ?? "";
 
   useEffect(() => {
@@ -547,15 +588,15 @@ function PaneContent({
     return (
       <div className="workspace-empty">
         <div className="workspace-empty-copy">
-          <h3>窗格尚未准备完成</h3>
-          <p>当前窗格没有可用地址。优先重试后端；如果依然没有恢复，再打开日志目录继续排查。</p>
+          <h3>{pane.kind === "dsh" ? "DeepSeek Harness 尚未就绪" : "窗格尚未准备完成"}</h3>
+          <p>{pane.kind === "dsh" ? (dshError ?? "正在等待本地 DSH 服务；可刷新状态或查看日志。") : "当前窗格没有可用地址。优先重试后端；如果依然没有恢复，再打开日志目录继续排查。"}</p>
         </div>
         <div className="workspace-empty-actions">
           <Button
             type="button"
             icon={<RefreshCcw size={14} />}
             className="cc-action-btn"
-            onClick={onRetry}
+            onClick={() => pane.kind === "dsh" ? void onRefreshDsh() : onRetry()}
             disabled={actionBusy}
           >
             重试后端启动
@@ -594,15 +635,17 @@ function PaneContent({
           >
             恢复窗格
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            icon={<ExternalLink size={14} />}
-            className="cc-action-btn cc-doc-btn"
-            onClick={() => onOpenExternalUrl(sourceUrl)}
-          >
-            在浏览器打开
-          </Button>
+          {pane.kind !== "dsh" ? (
+            <Button
+              type="button"
+              variant="outline"
+              icon={<ExternalLink size={14} />}
+              className="cc-action-btn cc-doc-btn"
+              onClick={() => onOpenExternalUrl(sourceUrl)}
+            >
+              在浏览器打开
+            </Button>
+          ) : null}
           {pane.kind === "external" ? (
             <Button
               type="button"
@@ -679,6 +722,38 @@ function PaneContent({
             </div>
           )}
 
+          {pane.kind === "dsh" && showDshGuide && loadState === "ready" ? (
+            <div className="workspace-overlay">
+              <div className="workspace-fallback">
+                <h3>DeepSeek Harness 已在本机运行</h3>
+                <p>
+                  在 DSH 界面中确认工作区，并在 Settings → Models 完成 DeepSeek API key 设置。凭据由 DSH 自己保存，小助手不会读取。
+                </p>
+                <div className="workspace-fallback-actions">
+                  <Button
+                    type="button"
+                    className="cc-action-btn"
+                    onClick={() => {
+                      window.localStorage.setItem(DSH_GUIDE_ACK_KEY, "1");
+                      setShowDshGuide(false);
+                    }}
+                  >
+                    我知道了
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<ExternalLink size={14} />}
+                    className="cc-action-btn cc-doc-btn"
+                    onClick={() => onOpenExternalUrl("https://platform.deepseek.com/")}
+                  >
+                    打开 DeepSeek 开放平台
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {loadState === "blocked" && (
             <div className="workspace-overlay">
               <div className="workspace-fallback">
@@ -691,20 +766,22 @@ function PaneContent({
                     type="button"
                     icon={<RefreshCcw size={14} />}
                     className="cc-action-btn"
-                    onClick={onRetry}
+                    onClick={() => pane.kind === "dsh" ? void onRefreshDsh() : onRetry()}
                     disabled={actionBusy}
                   >
                     重试加载
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    icon={<ExternalLink size={14} />}
-                    className="cc-action-btn cc-doc-btn"
-                    onClick={() => onOpenExternalUrl(sourceUrl)}
-                  >
-                    在浏览器打开
-                  </Button>
+                  {pane.kind !== "dsh" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      icon={<ExternalLink size={14} />}
+                      className="cc-action-btn cc-doc-btn"
+                      onClick={() => onOpenExternalUrl(sourceUrl)}
+                    >
+                      在浏览器打开
+                    </Button>
+                  ) : null}
                   {pane.kind === "external" ? (
                     <>
                       <Button
@@ -825,6 +902,7 @@ interface PaneSourceInput {
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
+  dshStatus: DshStatus | null;
   onCodeFrameLoad: () => void;
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
@@ -852,11 +930,31 @@ function resolvePaneSource({
   chatIframeRef,
   codePaneState,
   chatPaneState,
+  dshStatus,
   onCodeFrameLoad,
   onCodeFrameError,
   onChatFrameLoad,
   onChatFrameError,
 }: PaneSourceInput): PaneSource {
+  if (pane.kind === "dsh") {
+    const exactUrl = dshStatus?.state === "running" ? dshStatus.url : undefined;
+    const trusted = exactUrl && /^http:\/\/127\.0\.0\.1:\d+$/.test(exactUrl) ? exactUrl : null;
+    return {
+      url: trusted,
+      title: "DeepSeek Harness",
+      frameKey: `${pane.id}:${trusted ?? dshStatus?.state ?? "stopped"}`,
+      loadState:
+        dshStatus?.state === "running"
+          ? "ready"
+          : dshStatus?.state === "crashed"
+            ? "blocked"
+            : dshStatus?.state === "stopped"
+              ? "blocked"
+              : "loading",
+      onLoad: () => undefined,
+      onError: () => undefined,
+    };
+  }
   if (pane.kind === "code") {
     const sessionUrl =
       pane.sessionId && codeRemoteUrl

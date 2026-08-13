@@ -7,6 +7,7 @@ import type {
   WorkspaceViewKind,
 } from "@/app/types";
 import { WorkspaceGridView } from "@/features/workspace-grid/WorkspaceGridView";
+import type { DshStatus } from "@/services/dshService";
 
 export type WorkspaceViewProps = {
   activeWorkspaceView: WorkspaceViewKind;
@@ -36,6 +37,10 @@ export type WorkspaceViewProps = {
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
   onChatFrameError: () => void;
+  dshStatus?: DshStatus | null;
+  dshError?: string | null;
+  onStopDsh?: () => Promise<DshStatus>;
+  onRefreshDsh?: () => Promise<DshStatus | null>;
 };
 
 export function WorkspaceView(props: WorkspaceViewProps) {

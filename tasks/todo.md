@@ -1,3 +1,34 @@
+# DSH 接入评审与 P0 Web pane
+
+## 任务契约
+
+- 用户目标：基于 DSH research/PRD/spec/plan 审查并对齐真实代码库，优化计划后实现安全、可验证的开发目标。
+- 直接交付物：对齐评审、Accepted ADR、修订后的 PRD/spec/plan、DSH P0 Web pane、测试和架构/变更记录。
+- 影响范围：Shell 设置、Rust 生命周期/安装/权限、Workspace Grid、控制中心、退出/更新；Bridge headless 只收敛设计，不在安全前置未完成时实现。
+- 非目标：不建立预测性 AgentBackendRegistry；不扩 external allowlist；不持久化 DSH PID/URL/凭据；不把 DSH one-shot 伪装成 Kimi RuntimeAdapter。
+- 验收：默认关闭；固定 pin 私有安装；单实例显式启停；精确 loopback URL；关闭/退出收口；日志脱敏；前端/Rust/ACL gate 通过；发布级双平台缺口如实记录。
+
+## Checklist
+
+- [x] 阅读治理、架构、设计系统、计划文档和相关目录 README。
+- [x] 核验 DSH 上游 pin、启动入口与 headless approval fail-closed 行为。
+- [x] 完成 Shell/Grid/Bridge 三条代码链审计并修正计划误判。
+- [x] 新增对齐审查和 Accepted ADR，修订 PRD/spec/plan。
+- [x] 实现 schema 12、专属 dsh_manager、私有安装、preflight、生命周期、状态与脱敏日志。
+- [x] 接入独立 dsh pane、控制中心实验开关、目录选择和首次使用引导。
+- [x] 接入 main-only command ACL、退出与更新停止路径。
+- [x] 完成 TypeScript、定向/全量前端、Rust 与 command registry 验证。
+- [ ] Windows WebView2/私有安装/进程树真机 G3。
+- [ ] macOS WKWebView/私有安装完整真机 G3（固定 npm 包本次 >2min 未完成，已停止）。
+- [ ] headless A-8/A-10、系统凭据库和双平台 descendant-kill gate；未完成前保持 No-Go。
+
+## Review
+
+- P0 采用专属薄 manager，符合“抽象由重复证明”；Kimi runtime 没有被强行迁移。
+- DSH URL/PID/状态只存在 Rust 活状态，Grid 只持久化稳定的 pane kind/workDir；generic external 安全边界未扩大。
+- headless 不是现有 Kimi RuntimeAdapter 的第四实现；三条 connector 也不共享完整取消/心跳/轮询语义，因此计划改为 one-shot router、飞书先行、逐通道验收。
+- 自动化可证明契约、回归和 Unix 整树终止；双平台发布级完成仍依赖明确列出的 G3，不以 CI 代替真机。
+
 # 工作区 Skill 连续列表与目标选择稳定化
 
 ## 任务契约

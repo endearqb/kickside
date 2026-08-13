@@ -421,6 +421,22 @@ describe("workspace grid store", () => {
     );
   });
 
+  it("never persists a DSH runtime URL", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    const paneId = store.getState().addPane({
+      kind: "dsh",
+      url: "http://127.0.0.1:3080",
+      workDir: "D:/repo",
+    });
+    const runtimePane = store.getState().panes.find((pane) => pane.id === paneId);
+    expect(runtimePane?.url).toBeUndefined();
+
+    const persisted = toPersistedWorkspaceGridState(store.getState());
+    const persistedPane = persisted.panes.find((pane) => pane.id === paneId);
+    expect(persistedPane).toMatchObject({ kind: "dsh", workDir: "D:/repo" });
+    expect(persistedPane?.url).toBeUndefined();
+  });
+
   it("keeps pane workDir/theme optional while loading persisted panes", () => {
     const state = loadWorkspaceGridState(
       writableStorage({

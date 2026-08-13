@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useShellController } from "@/app/useShellController";
+import { useDshController } from "@/app/useDshController";
 import { Button } from "@/components/ui/button";
 import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
@@ -12,6 +14,7 @@ import {
 } from "@/features/workspace-import/WorkspaceImportModal";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
+import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import "./App.css";
 import "./components/control-center/control-center.css";
@@ -19,6 +22,7 @@ import "./features/directory/directory.css";
 
 function App() {
   const shell = useShellController();
+  const dsh = useDshController(shell.tauriRuntime);
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
@@ -314,6 +318,33 @@ function App() {
     onOpenSystemTerminal: shell.handleOpenSystemTerminal,
   };
 
+  async function handleCreateDshPane() {
+    const existing = useWorkspaceGridStore
+      .getState()
+      .panes.find((pane) => pane.kind === "dsh");
+    if (existing) {
+      useWorkspaceGridStore.getState().showPane(existing.id);
+      if (
+        dsh.status?.state !== "running" &&
+        dsh.status?.state !== "starting" &&
+        existing.workDir
+      ) {
+        await dsh.start(existing.workDir);
+      }
+      return;
+    }
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    const paneId = useWorkspaceGridStore.getState().addPane({
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: selected,
+      storageNamespace: "workspace-grid-pane-dsh",
+    });
+    if (!paneId) return;
+    await dsh.start(selected);
+  }
+
   return (
     <main
       className={`shell-root theme-${shell.themeMode} platform-${shell.platformCapabilities?.os ?? "loading"} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
@@ -342,6 +373,9 @@ function App() {
         onToggleMaximizeWindow={shell.handleToggleMaximizeWindow}
         onCloseWindow={shell.handleCloseWindow}
         onTitlebarDoubleClick={shell.handleTitlebarDoubleClick}
+        dshEnabled={dsh.settings?.enabled === true}
+        dshBusy={dsh.busy}
+        onCreateDshPane={handleCreateDshPane}
       />
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}
@@ -382,6 +416,10 @@ function App() {
             onCodeFrameError={shell.handleWorkspaceFrameError}
             onChatFrameLoad={shell.handleChatFrameLoad}
             onChatFrameError={shell.handleChatFrameError}
+            dshStatus={dsh.status}
+            dshError={dsh.error}
+            onStopDsh={dsh.stop}
+            onRefreshDsh={dsh.refresh}
           />
         </div>
 

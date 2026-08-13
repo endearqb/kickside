@@ -952,7 +952,8 @@ function isPaneKind(value: unknown): value is WorkspacePaneKind {
     value === "code" ||
     value === "chat" ||
     value === "external" ||
-    value === "agent_room"
+    value === "agent_room" ||
+    value === "dsh"
   );
 }
 
@@ -993,6 +994,22 @@ function sanitizePane(pane: WorkspacePane): WorkspacePane {
       workDir: undefined,
       storageNamespace: undefined,
       theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
+    };
+  }
+  if (pane.kind === "dsh") {
+    return {
+      ...pane,
+      carrier: "iframe",
+      title: normalizePaneTitle(pane.kind, pane.title),
+      sessionId: undefined,
+      activeSessionId: undefined,
+      roomId: undefined,
+      // Runtime authority comes exclusively from Rust status.
+      url: undefined,
+      workDir: sanitizeWorkDir(pane.workDir),
+      storageNamespace:
+        sanitizeStorageNamespace(pane.storageNamespace) ??
+        createPaneStorageNamespace(pane.id),
     };
   }
   return {
@@ -1084,6 +1101,7 @@ function defaultPaneTitle(kind: WorkspacePaneKind): string {
   if (kind === "code") return getKimiAssistantDisplayName();
   if (kind === "chat") return "Kimi Chat";
   if (kind === "agent_room") return "Agent Room";
+  if (kind === "dsh") return "DeepSeek Harness";
   return "外部网页";
 }
 

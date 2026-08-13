@@ -356,6 +356,8 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 chatIframeRef={props.chatIframeRef}
                 codePaneState={props.codePaneState}
                 chatPaneState={props.chatPaneState}
+                dshStatus={props.dshStatus ?? null}
+                dshError={props.dshError ?? null}
                 actionBusy={props.actionBusy}
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
@@ -377,9 +379,15 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 }}
                 onRemovePane={() => {
                   if (pane) {
-                    removePane(pane.id);
+                    if (pane.kind === "dsh") {
+                      void (props.onStopDsh?.() ?? Promise.resolve()).then(() => removePane(pane.id));
+                    } else {
+                      removePane(pane.id);
+                    }
                   }
                 }}
+                onStopDsh={props.onStopDsh ?? (async () => ({ state: "stopped", pinnedVersion: "" }))}
+                onRefreshDsh={props.onRefreshDsh ?? (async () => null)}
                 onResumePane={() => {
                   if (pane) {
                     setPaneMountPolicy(pane.id, "eager");

@@ -12,6 +12,7 @@ mod bridge_settings_store;
 mod command_utils;
 mod commands;
 mod context_menu;
+mod dsh_manager;
 mod enhanced_web;
 mod feishu_onboarding;
 mod harness;
@@ -1180,6 +1181,14 @@ pub fn run() {
                 return;
             }
             agent_room_event_pump::stop(app_handle);
+            if let Err(error) = dsh_manager::stop(app_handle) {
+                api.prevent_exit();
+                log_manager::append_line(
+                    app_handle,
+                    format!("prevented process exit because DSH stop failed: {error:#}"),
+                );
+                return;
+            }
             if should_attempt_stop_backend(app_handle) {
                 if let Err(error) = backend_manager::stop_backend(app_handle) {
                     api.prevent_exit();
@@ -1196,6 +1205,7 @@ pub fn run() {
         }
         RunEvent::Exit => {
             agent_room_event_pump::stop(app_handle);
+            let _ = dsh_manager::stop(app_handle);
             if should_attempt_stop_backend(app_handle) {
                 let _ = backend_manager::stop_backend(app_handle);
             }
@@ -1777,6 +1787,23 @@ pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
     thread::spawn(move || {
         let started = Instant::now();
         emit_shutdown_progress(&app, "stopping_backend", Some("正在关闭后端服务…"), Some(0));
+        if let Err(error) = dsh_manager::stop(&app) {
+            log_manager::append_line(
+                &app,
+                format!("shutdown dsh stop failed (source={source}): {error:#}"),
+            );
+            emit_shutdown_progress(
+                &app,
+                "shutdown_blocked",
+                Some("DSH 进程尚未确认关闭；应用将保持运行以便重试。"),
+                Some(duration_to_u64_ms(started.elapsed().as_millis())),
+            );
+            app.state::<AppState>()
+                .graceful_exit_started
+                .store(false, Ordering::Release);
+            window_manager::revoke_process_exit(&app, "dsh_shutdown_blocked");
+            return;
+        }
         if let Err(error) = backend_manager::stop_backend(&app) {
             log_manager::append_line(
                 &app,

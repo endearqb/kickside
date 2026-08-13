@@ -12,10 +12,10 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows / macOS 桌面壳程序�
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
-- Workspace Grid V2 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，标题栏通过 `+` 直接新建 Code/Chat 窗格；新窗格排在第一格，布局按可见窗格数量自动扩展或在删除后缩减，支持 1/2/3/4/5/6 个可见窗格、最多 12 个总窗格与 Pane Shelf 收纳。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用；V2 兼容输入保留一个发布周期后退出。
+- Workspace Grid V2 壳层：常驻 `Kimi Code Web` 与 `Kimi Chat`，标题栏通过 `+` 直接新建 Code/Chat 窗格；开启本地实验开关并完成固定版本安装后，还可选择项目目录创建单实例 DeepSeek Harness pane。DSH URL/PID/状态不进入 Grid 持久化，关闭 pane 会先停止 owned 进程。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用。
 - 后端守护与健康探测：优先按 `<KIMI_CODE_HOME>/server/instances/*.json` 发现并复用健康的既有 Kimi Server，旧 `server/lock` 仅作兼容 fallback；否则拉起 `kimi web --no-open --port <port>`，读取 `server.token` 并用 `#token=` 接入 workspace。Unix owned runtime 使用独立进程组并由 Shell 负责 TERM/KILL 收口，external runtime 永不误杀。
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
-- 控制中心：小助手设置以 8 个互斥展开项承载小助手更新、安装/升级、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；启动后会静默探测 Kimi Code 安装环境与官方最新版本，并在安装/升级设置 bar 提示可用更新；API、模型与服务编辑统一引导到 Kimi Code Web 内置设置，微信/飞书扫码仍在对应设置项内完成，复用外部 Server 时侧边栏底部提供重新连接
+- 控制中心：小助手设置承载更新、安装/升级、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；“实验性后端”区域管理 DSH 开关、Node/npm preflight、私有固定版本安装与脱敏日志尾部。API、模型与服务编辑统一引导到 Kimi Code Web/DSH 各自内置设置。
 - Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的紧凑目录；Skill 工作区目标合并 discovery index 与 WorkspaceHub 完整注册表并按路径去重；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
 - Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器；Windows 安装版下载使用原生“另存为”。macOS 13 使用 WKWebView 共享 data store，不传仅 Windows 支持的 `dataDirectory`。
 - 平台原生体验：macOS 使用原生 traffic lights、App/Edit/View/Window 菜单、关闭主窗口隐藏、Dock reopen 恢复与 Cmd+Q graceful exit；Windows 保持自定义标题栏和 close-to-tray。
@@ -24,7 +24,7 @@ Kimi 小助手是基于 `Tauri v2 + React` 的 Windows / macOS 桌面壳程序�
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
 - 认证与 API 诊断：控制中心只读展示当前认证模式、Kimi 登录和 Provider API 健康状态；API、模型与 Search / Fetch 服务编辑由 Kimi Code Web 内置设置负责
 - 安全退出流程：退出读秒窗 + 状态反馈
-- 本体更新：安装版启动后后台检测一次，设置页可手动重检并在用户确认后下载签名更新；安装前停止 Kimi 后端与 IM Bridge
+- 本体更新：安装版启动后后台检测一次，设置页可手动重检并在用户确认后下载签名更新；安装前停止 Kimi 后端、DSH owned 实例与 IM Bridge
 
 ## 界面预览
 
@@ -78,6 +78,7 @@ pnpm check:nfr:reliability
 ## 代码组织
 
 - `src/app/useShellController.ts` 保留窗口、workspace、prefill、Skill 动作 handler 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，轮询放在 `src/app/useShellPollingController.ts`，Bridge 运行态刷新放在 `src/app/useBridgeRuntimeController.ts`，Skill Center 状态和刷新放在 `src/app/useSkillCenterController.ts`，workspace embed URL 与 import picker 状态分别放在 `src/app/useWorkspaceEmbedUrl.ts`、`src/app/useWorkspaceImportController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
+- DSH 前端状态切片位于 `src/app/useDshController.ts`，IPC 契约位于 `src/services/dshService.ts`；Rust `src-tauri/src/dsh_manager.rs` 负责固定 pin、私有安装、精确 loopback URL、owned process group 和日志，不推广为通用 AgentBackend registry。
 - `src/platform/` 只负责加载 additive `PlatformCapabilities` 并提供 fail-closed 平台状态；产品组件不得自行解析 user agent 决定原生能力。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`；`src-tauri/src/macos_kimi_upgrade.sh` 只负责按 Rust 传入的固定官方 origin、目标版本和已验证路径下载/校验/原子替换 macOS native binary，不执行远程脚本。
@@ -93,6 +94,7 @@ pnpm check:nfr:reliability
 - 冻结的 Agent Room 兼容代码不具备窗口 capability，Shell 与 Bridge 双端恒定关闭；历史 token/route 约束继续遵守，旧数据不得进入日志或诊断。
 - `main` 窗口保留 webview 创建权限；`prefill` 与 `workspace-import-picker` 不共享这组权限，Picker 仅额外持有目录选择所需的 `dialog:allow-open`。
 - 外部 iframe 只允许内置 Kimi origin 和 `VITE_KIMI_EXTERNAL_FRAME_ALLOWLIST` 中的精确 origin；任意外部 URL 应通过显式“在浏览器打开”或“在应用窗口打开”动作承载。
+- DSH pane 不复用 external allowlist：只接受 Rust 当前活状态返回的精确 `http://127.0.0.1:<port>`，不提供系统浏览器 fallback，不持久化 URL/PID/端口；生产启动只执行私有前缀内已校验的固定入口，不使用运行时 npx fallback。
 - `workspaceUrl` 展示面只能使用 redacted 值；带 `#token=` 的 URL 只用于 iframe/embed 导航，不进入诊断、日志或可见文本。
 - Kimi 后端 stdout/stderr 必须先脱敏再写入 `backend.log`；日志读取和诊断导出仍需二次脱敏。
 

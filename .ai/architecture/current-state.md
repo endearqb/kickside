@@ -4,6 +4,7 @@
 - `apps/kimi-shell` 是共享一套 Tauri v2 + React 代码的 Windows x86_64 / Apple Silicon macOS 13+ 桌面壳。Windows 保持自定义标题栏与 close-to-tray；macOS 使用原生 decorations/traffic lights、App Menu、关闭隐藏、Dock reopen 与 Cmd+Q graceful exit。
 - 后端主路径使用 `kimi web --no-open --port <port>`；Shell 先读取 `<KIMI_CODE_HOME>/server/instances/*.json`，只接受有界大小、完整 schema、loopback host、存活 PID、health 与 Bearer contract 均通过的实例，再复用并标记为 `reused_external`。旧 `server/lock` 仅在无可用 registry record 时作 pre-0.28 兼容 fallback；退出、普通停止和重新连接只解除 external 连接、不终止外部进程。
 - Shell 自启实例只接受与本次 spawn child PID 精确一致、且启动时间不早于本次 launch 容差窗口的 registry record；新增 server id 与端口扫描不能证明 ownership。spawn 后立即登记 child 与不可变 process-group identity，start/stop/restart/monitor 通过单一 lifecycle operation 串行收口；Unix owned stop 执行 TERM→等待整组消失→KILL group，未确认整组退出时保留 owned ledger、拒绝 external 重分类和 App exit。external instance 永不进入 kill 路径。
+- Shell 新增默认关闭的 DSH P0：`AppSettings` schema 12 使用 `agentBackends.dsh`；专属 `dsh_manager` 将 `@deepseek-ai/dsh@0.1.0-rc.6` 安装到壳私有前缀，经 package version/固定 `lib/bin.js` 校验后才由受控 Node 绝对路径启动。P0 单实例只信任当前持有的 Child/process group 与本次分配的精确 `http://127.0.0.1:<port>`；运行时 PID/端口/URL/状态不持久化，应用退出、更新、关闭开关和关闭 pane 都先做有界整树停止。
 - Shell 从 `KIMI_CODE_HOME/server.token` 读取 server token；若未设置 `KIMI_CODE_HOME`，默认使用用户目录下 `.kimi-code/server.token`。
 - workspace URL 由 Shell 组装为 `http://127.0.0.1:<port>/#token=<token>`；对外状态只展示脱敏 token。
 - iframe/embed 导航通过专用 `get_workspace_embed_url` 获取 tokenized URL；`get_app_status` 与 `get_diagnostics` 只返回 redacted `workspaceUrl` 展示面。
@@ -13,6 +14,7 @@
 - `workspace_session.rs` 使用 `GET /api/v1/sessions?page_size=100`、`POST /api/v1/workspaces { root }` 和 `POST /api/v1/sessions` 的最小映射；session 主键兼容官方 `id`，工作目录优先从 `metadata.cwd` 提取。
 - Workspace Grid 前端已引入 `zustand` 切片，使用 Pane/Slot 分离模型和 1/2/3/4/5/6 窗预设；标题栏 `+` 菜单直接新建 Code/Chat，新窗格头插并按可见数量自动扩展，删除可见窗格后压紧并自动缩减，六格时新增会将原末格收入 Pane Shelf。Grid 同时支持逐缝拖拽 resize + 持久化自定义 track、键盘切换、pane header 拖拽交换、iframe 内跨站 http(s) 链接系统浏览器打开（含 Kimi Code 登录验证页）、外部页 timeout fallback、嵌入式 Tauri 子 Webview 承载、独立应用 WebviewWindow fallback、mount policy 挂起/恢复、6 个可见窗格与 12 个总窗格上限；Windows native Webview 保留 per-pane `dataDirectory` namespace，macOS 13 使用默认共享 WKWebsiteDataStore 并省略该 unsupported option；旧双窗 localStorage 键保留为迁移兼容层。
 - Workspace Grid 的三窗预设是左侧主 pane + 右侧上下两 pane；空 pane 和 pane header 不再提供 Kimi.com 新建/切换入口，external pane carrier 仅保留兼容、fallback 与已保存布局渲染能力。
+- Workspace Grid V2 接受 additive `dsh` kind，但 DSH iframe src 只由 Rust 活状态投影；Grid sanitizer 始终丢弃 DSH persisted URL。generic external origin allowlist 未扩大，DSH 也不提供外部浏览器 fallback。
 - Shell 已暴露 `grid_list_sessions` / `grid_get_session` / `grid_create_session` Tauri command，薄封装既有 `/api/v1` session 查单、列表与创建逻辑；当前 Grid UI 新建 Code pane 或把现有 pane 切换为 Code 时不再自动创建 session，而是打开 Kimi Code Web 根页面，旧持久化 pane 若已有 `sessionId` 仍会构造 `/sessions/{id}` URL。
 - Workspace Grid 持久化 state 在加载/恢复时会归一化未知 preset、超限或重复 pane、幽灵 slot 引用和失效 active/maximized pane；Code pane 可保存历史 `workDir` 元数据，但 header “打开当前会话目录”以 pane iframe 当前路由为权威，按 session id 精确查询且失败时不回退缓存；pane 可保存独立 `light` / `dark` 主题，未设置独立主题的 pane 跟随全局主题；Code session pane URL 会从运行时 workspace URL 保留 `#token=` bootstrap，但 token 不写入 persisted state。
 - Shell 前端已从 `useShellController.ts` 拆出安装流、轮询、Bridge 运行态刷新、Skill Center 状态/刷新、workspace embed URL 和 workspace import picker 控制器；Bridge 写操作与 Skill 动作 handler 仍在主 controller 中编排。
@@ -30,6 +32,7 @@
 - 控制中心不再编辑 Kimi API 配置，只读展示 `authMode`、Kimi 登录与 Provider API 健康状态，并引导到 Kimi Code Web 内置设置完成 API、模型和服务配置；配置读取仍供认证状态计算使用。已发布的 `load/save/test_kimi_code_access_config` 与配置目录 command 暂作旧前端兼容保留，不向当前 UI 提供编辑入口；退出条件是支持升级的旧版本完成一个发布周期后，由单独的序列化契约 ADR 接受移除并通过 Shell G1 gate。
 - 控制中心的 Skill Center 与 WorkspaceHub 使用紧凑目录进入只读文件详情；Skill 工作区目标在读取边界合并 Skill discovery index 与 WorkspaceHub registry、按规范化路径去重，因此旧版已注册但尚未被 Skill 扫描的工作区仍可选择；已注册工作区通过 `workspace_list_file_entries` / `workspace_read_file` 按 workspace id 解析根目录，并复用 Skill 文件预览的目录穿越、符号链接、隐藏目录、数量、大小和二进制保护。
 - Bundled Bridge sidecar 由跨平台 Node 脚本以 `CGO_ENABLED=0` 生成 `binaries/kimi-im-bridge-<target-triple>[.exe]`，通过 Tauri `externalBin` 打包；Bridge 提供稳定、无配置依赖的 `--version` probe。当前支持 `x86_64-pc-windows-msvc` 与 `aarch64-apple-darwin`。
+- DSH headless 尚未进入 Bridge。审查确认现有 RuntimeAdapter/ExecutionService 是 Kimi session 契约；未来必须使用 one-shot task executor + 显式 backend router，并以系统凭据库、默认 `workspace-write` fail-closed、双平台 descendant-kill 和逐 connector 验收为硬前置。
 - Shell 已接入 Tauri v2 Updater：每个应用进程启动后后台检测一次，设置页支持手动重检和用户确认后的签名下载/安装；安装开始前走退出协调并停止 Kimi 后端与 IM Bridge，检查或下载失败不停止现有服务。
 - Pull Request CI 在 Windows/macOS 实际执行 Rust tests，并由独立 Apple Silicon job 构建、检查架构和上传 unsigned `.app` artifact。GitHub `v*` tag 发布 workflow 校验 tag 与 `apps/kimi-shell/package.json` 版本一致，先创建 draft，再并行构建 Windows x86_64 NSIS/MSI 与 macOS arm64 app/DMG；发布前精确验证四类 installer、macOS app/sidecar arm64、macOS 产物仅含 ad-hoc identity 且无 Apple signing authority，以及两端 updater `.sig`，再合成同时包含 `windows-x86_64` / `darwin-aarch64` 的单一 `latest.json`。`0.1.24` 是明确标注警告的临时未签名 macOS 发布；恢复常规公开发布时必须重新启用 Developer ID、notarization、stapling 与 Gatekeeper 验证。本地 `tauri:build:macos:local` 明确关闭 updater artifact，只产出 ad-hoc/unsigned 开发 `.app`。
 
@@ -62,6 +65,7 @@
 - 开发期 `runtime-probe` 与 loopback `fake-runtime` 作为历史测试工具保留，不进入产品 UI；不得作为恢复 Agent Room 的入口。
 
 ## Known Gaps
+- DSH P0 自动化已覆盖 schema/argv/pin/URL 持久化/Unix descendant-kill，但 Windows 私有安装、WebView2 交互与 taskkill 整树证据，以及 macOS WKWebView 真实交互仍是发布 G3。2026-08-14 本机 npm 固定包安装在超过两分钟后仍未完成，被人工终止；它证明运行时 npx 不可作为启动路径，但不构成成功安装证据。
 - Agent Room 冻结兼容墓碑仍保留 Tauri command/type、Go 内部实现和 V2 输入类型；退出条件是支持升级的版本完成一个发布周期的布局归一，并由 release gate 证明无旧客户端依赖。
 - 历史 Agent Room Run/Queue 在冻结时不伪造 terminal 状态，数据库可能保留最后一次持久化状态；如需导出或删除数据，必须走独立的破坏性数据决策。
 - `agent_connector_bindings`、approval link、turn origin 和 session lease 存在普通 IM 共享调用方，不能按 Agent Room 名称直接删除；后续瘦身需先拆分共享依赖。

@@ -1216,7 +1216,7 @@
 - [x] 完成必要本地 gate 与 Windows NSIS/MSI 构建。
 - [x] 修复 main CI 在 macOS 暴露的 stop endpoint 异步测试竞态。
 - [x] 推送 `main` 并通过 Windows/macOS CI。
-- [ ] 推送 `v0.1.24`，确认 GitHub Release 工作流与资产。
+- [x] 推送 `v0.1.24`，确认 GitHub Release 工作流与资产。
 - [ ] 用户在 Windows 安装包和 Apple Silicon Mac 上完成 G3 手工验证。
 
 ## Review
@@ -1225,3 +1225,5 @@
 - 本地已生成 `kimi sidekick_0.1.24_x64-setup.exe` 与 `kimi sidekick_0.1.24_x64_en-US.msi`，主程序 ProductVersion 为 `0.1.24`。
 - Tauri `--no-sign` 会同时跳过 updater `.sig`，因此 Release 不使用该参数；macOS 改用官方支持的 `signingIdentity: "-"` ad-hoc identity，既不需要 Apple Secrets，也保留 Tauri updater 签名。
 - main CI 八个 jobs 全部通过；macOS Go stop endpoint 竞态修复已由 runner 复核。
+- Release workflow 四个 jobs 全部通过并正式发布；线上包含 NSIS、MSI、Windows updater `.sig`、macOS app updater、macOS updater `.sig`、DMG 与唯一 `latest.json`。
+- `latest.json` 版本为 `0.1.24`，包含 `windows-x86_64` 和 `darwin-aarch64`；Release 顶部显示“⚠️ macOS 版本未签名”。

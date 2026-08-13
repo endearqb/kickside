@@ -2,6 +2,8 @@
   const CHAT_BRIDGE_SOURCE = "kimi-shell-chat-external-link-bridge";
   const EXTERNAL_BRIDGE_SOURCE = "kimi-shell-external-link-bridge";
   const THEME_SYNC_SOURCE = "kimi-shell-theme-sync";
+  const KIMI_COLOR_SCHEME_KEY = "kimi-web.color-scheme";
+  const LEGACY_THEME_KEY = "kimi-theme";
   const SESSION_SYNC_SOURCE = "kimi-shell-session-sync";
   const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
   const CHAT_ORIGIN = "https://www.kimi.com";
@@ -9,14 +11,14 @@
   const THEME_STYLE_ID = "kimi-sidekick-pane-theme";
   const THEME_PALETTES = {
     light: {
-      background: "#FBF8F2",
-      color: "#101418",
-      themeColor: "#FBF8F2",
+      background: "#ffffff",
+      color: "#24292f",
+      themeColor: "#ffffff",
     },
     dark: {
-      background: "#101418",
-      color: "#F2EEE7",
-      themeColor: "#101418",
+      background: "#121212",
+      color: "rgba(255, 255, 255, 0.84)",
+      themeColor: "#121212",
     },
   };
 
@@ -39,6 +41,16 @@
       return;
     }
 
+    try {
+      localStorage.setItem(KIMI_COLOR_SCHEME_KEY, theme);
+      localStorage.setItem(LEGACY_THEME_KEY, theme);
+    } catch (_) {
+      // Storage can be unavailable for sandboxed or privacy-restricted frames.
+    }
+
+    document.documentElement.dataset.colorScheme = theme;
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.style.colorScheme = theme;
     document.documentElement.dataset.kimiSidekickTheme = theme;
     if (document.body) {
       document.body.dataset.kimiSidekickTheme = theme;

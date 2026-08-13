@@ -31,6 +31,7 @@ const registeredCommands = match
 
 const commandRegistry = {
   runtime: [
+    "platform::get_platform_capabilities",
     "get_app_status",
     "get_workspace_embed_url",
     "retry_start_backend",
@@ -184,6 +185,7 @@ const commandRegistry = {
     "get_diagnostics",
     "open_logs_folder",
     "open_external_url",
+    "open_system_terminal",
     "open_folder",
     "open_kimi_config_dir",
     "load_kimi_code_access_config",
@@ -365,6 +367,7 @@ const expectedPermissions = new Map([
   [
     "workspace-import-command-access",
     [
+      "get_platform_capabilities",
       "list_workspace_import_targets",
       "get_active_workspace_import_request",
       "complete_workspace_import_request",

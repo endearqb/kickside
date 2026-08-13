@@ -5,10 +5,14 @@ use std::process::Command;
 
 use anyhow::{anyhow, bail, Context};
 use reqwest::blocking::Client;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+#[cfg(windows)]
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::{command_utils, log_manager};
+#[cfg(windows)]
+use crate::command_utils;
+use crate::log_manager;
 
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_RESPONSE_SNIPPET_LIMIT: usize = 240;
@@ -23,6 +27,7 @@ enum HttpRequestMethod {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HttpResponseSource {
     Reqwest,
+    #[cfg(windows)]
     WindowsNative,
 }
 
@@ -446,11 +451,6 @@ catch {
     );
 }
 
-#[cfg(not(windows))]
-fn should_try_windows_native_fallback(_: &TransportFailure) -> bool {
-    false
-}
-
 #[cfg(windows)]
 fn should_try_windows_native_fallback(failure: &TransportFailure) -> bool {
     matches!(
@@ -481,6 +481,7 @@ fn transport_failure_label(kind: TransportFailureKind) -> &'static str {
 fn response_source_label(source: HttpResponseSource) -> &'static str {
     match source {
         HttpResponseSource::Reqwest => "reqwest",
+        #[cfg(windows)]
         HttpResponseSource::WindowsNative => "windows_native",
     }
 }
@@ -516,19 +517,20 @@ mod tests {
         status: String,
     }
 
+    #[cfg(windows)]
     #[test]
     fn classify_transport_failure_recognizes_connection_reset_and_eof() {
         let reset = TransportFailure {
             kind: TransportFailureKind::ConnectionReset,
             message: "connection reset by peer".to_string(),
         };
-        assert!(should_try_windows_native_fallback(&reset) || cfg!(not(windows)));
+        assert!(should_try_windows_native_fallback(&reset));
 
         let eof = TransportFailure {
             kind: TransportFailureKind::UnexpectedEof,
             message: "unexpected EOF".to_string(),
         };
-        assert!(should_try_windows_native_fallback(&eof) || cfg!(not(windows)));
+        assert!(should_try_windows_native_fallback(&eof));
     }
 
     #[test]

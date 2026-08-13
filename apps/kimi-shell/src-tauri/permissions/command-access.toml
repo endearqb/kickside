@@ -2,7 +2,7 @@
 identifier = "main-command-access"
 description = "Allows the main window to invoke all application commands."
 commands.allow = [
-  "get_app_status", "get_workspace_embed_url", "retry_start_backend", "restart_backend_runtime_only",
+  "get_platform_capabilities", "get_app_status", "get_workspace_embed_url", "retry_start_backend", "restart_backend_runtime_only",
   "report_loading_rendered", "notify_frontend_ready", "get_startup_monitor_status",
   "complete_startup_monitor_route", "submit_prefill", "recover_main_window_boot",
   "quit_app_gracefully", "get_main_window_close_behavior", "save_main_window_close_behavior",
@@ -41,7 +41,7 @@ commands.allow = [
   "harness_dry_run", "list_harness_file_entries", "read_harness_file", "harness_create",
   "schedule_list", "schedule_set_heartbeat", "schedule_create_task", "schedule_update_task",
   "schedule_delete_task", "schedule_run_now", "schedule_list_runs", "get_diagnostics",
-  "open_logs_folder", "open_external_url", "open_folder", "open_kimi_config_dir",
+  "open_logs_folder", "open_external_url", "open_system_terminal", "open_folder", "open_kimi_config_dir",
   "load_kimi_code_access_config", "save_kimi_code_access_config", "test_kimi_code_access_config",
   "run_kimi_doctor", "register_install_session_channel", "get_install_flow_catalog",
   "get_install_session_snapshot", "start_install_task", "cancel_install_task",
@@ -71,6 +71,7 @@ commands.allow = [
 identifier = "workspace-import-command-access"
 description = "Allows the workspace import picker to service the active import request."
 commands.allow = [
+  "get_platform_capabilities",
   "list_workspace_import_targets",
   "get_active_workspace_import_request",
   "complete_workspace_import_request",

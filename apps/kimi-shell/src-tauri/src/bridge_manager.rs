@@ -973,10 +973,14 @@ fn spawn_bridge_stdio_redactor<R>(
 
 fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<ResolvedSourcePath> {
     let env_override = std::env::var_os("KIMI_IM_BRIDGE_BIN").map(PathBuf::from);
+    let executable_dir = app.path().executable_dir().ok();
+    let target_artifact_path = target_artifact_binary_path();
     let dev_path = development_binary_path();
     let resource_dir = app.path().resource_dir().ok();
     resolve_bridge_binary_from_sources(
         env_override,
+        executable_dir,
+        target_artifact_path,
         dev_path,
         resource_dir,
         dev_workspace_fallback_enabled(),
@@ -985,6 +989,8 @@ fn resolve_bridge_binary_path(app: &AppHandle) -> anyhow::Result<ResolvedSourceP
 
 fn resolve_bridge_binary_from_sources(
     env_override: Option<PathBuf>,
+    executable_dir: Option<PathBuf>,
+    target_artifact_path: PathBuf,
     development_path: PathBuf,
     resource_dir: Option<PathBuf>,
     allow_workspace_fallback: bool,
@@ -1002,6 +1008,27 @@ fn resolve_bridge_binary_from_sources(
     }
 
     let mut checked = Vec::new();
+    if let Some(executable_dir) = executable_dir {
+        let candidate = executable_dir.join(binary_name());
+        if candidate.exists() {
+            return Ok(ResolvedSourcePath {
+                path: candidate,
+                source: "external_bin:bundle_root",
+            });
+        }
+        checked.push("external_bin:bundle_root:missing".to_string());
+    } else {
+        checked.push("external_bin:bundle_root:unavailable".to_string());
+    }
+
+    if target_artifact_path.exists() {
+        return Ok(ResolvedSourcePath {
+            path: target_artifact_path,
+            source: "external_bin:target_artifact",
+        });
+    }
+    checked.push("external_bin:target_artifact:missing".to_string());
+
     if let Some(resource_dir) = resource_dir {
         let resource_candidates = vec![
             (
@@ -1039,6 +1066,12 @@ fn resolve_bridge_binary_from_sources(
     ))
 }
 
+fn target_artifact_binary_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(target_artifact_binary_name())
+}
+
 fn development_binary_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -1057,6 +1090,24 @@ fn binary_name() -> OsString {
     #[cfg(not(windows))]
     {
         OsString::from("kimi-im-bridge")
+    }
+}
+
+fn target_artifact_binary_name() -> OsString {
+    #[cfg(windows)]
+    {
+        OsString::from(format!(
+            "kimi-im-bridge-{}.exe",
+            env!("TAURI_ENV_TARGET_TRIPLE")
+        ))
+    }
+
+    #[cfg(not(windows))]
+    {
+        OsString::from(format!(
+            "kimi-im-bridge-{}",
+            env!("TAURI_ENV_TARGET_TRIPLE")
+        ))
     }
 }
 
@@ -1831,13 +1882,20 @@ mod tests {
     fn resolve_binary_prefers_env_override_before_other_candidates() {
         let temp = TempDirGuard::new("binary-priority");
         let env_path = temp.path.join("env").join(binary_name());
+        let executable_dir = temp.path.join("bundle");
+        let target_artifact_path = temp.path.join("source").join(target_artifact_binary_name());
         let dev_path = temp.path.join("dev").join(binary_name());
         let resource_dir = temp.path.join("resource");
 
         fs::create_dir_all(env_path.parent().expect("env parent")).expect("env parent");
+        fs::create_dir_all(&executable_dir).expect("bundle parent");
+        fs::create_dir_all(target_artifact_path.parent().expect("source parent"))
+            .expect("source parent");
         fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
         fs::create_dir_all(resource_dir.join("binaries")).expect("resource parent");
         fs::write(&env_path, b"env").expect("env binary");
+        fs::write(executable_dir.join(binary_name()), b"bundle").expect("bundle binary");
+        fs::write(&target_artifact_path, b"source").expect("source binary");
         fs::write(&dev_path, b"dev").expect("dev binary");
         fs::write(
             resource_dir.join("binaries").join(binary_name()),
@@ -1847,6 +1905,8 @@ mod tests {
 
         let resolved = resolve_bridge_binary_from_sources(
             Some(env_path.clone()),
+            Some(executable_dir),
+            target_artifact_path,
             dev_path,
             Some(resource_dir),
             false,
@@ -1863,8 +1923,79 @@ mod tests {
     }
 
     #[test]
+    fn resolve_binary_prefers_external_bin_bundle_root() {
+        let temp = TempDirGuard::new("binary-bundle-priority");
+        let executable_dir = temp.path.join("bundle");
+        let bundle_binary = executable_dir.join(binary_name());
+        let target_artifact_path = temp.path.join("source").join(target_artifact_binary_name());
+        let dev_path = temp.path.join("dev").join(binary_name());
+        let resource_dir = temp.path.join("resource");
+        fs::create_dir_all(&executable_dir).expect("bundle parent");
+        fs::create_dir_all(target_artifact_path.parent().expect("source parent"))
+            .expect("source parent");
+        fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
+        fs::create_dir_all(&resource_dir).expect("resource parent");
+        fs::write(&bundle_binary, b"bundle").expect("bundle binary");
+        fs::write(&target_artifact_path, b"source").expect("source binary");
+        fs::write(&dev_path, b"dev").expect("dev binary");
+        fs::write(resource_dir.join(binary_name()), b"resource").expect("resource binary");
+
+        let resolved = resolve_bridge_binary_from_sources(
+            None,
+            Some(executable_dir),
+            target_artifact_path,
+            dev_path,
+            Some(resource_dir),
+            false,
+        )
+        .expect("binary should resolve");
+
+        assert_eq!(
+            resolved,
+            ResolvedSourcePath {
+                path: bundle_binary,
+                source: "external_bin:bundle_root",
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_binary_prefers_target_artifact_before_legacy_resource() {
+        let temp = TempDirGuard::new("binary-target-priority");
+        let target_artifact_path = temp.path.join("source").join(target_artifact_binary_name());
+        let dev_path = temp.path.join("dev").join(binary_name());
+        let resource_dir = temp.path.join("resource");
+        fs::create_dir_all(target_artifact_path.parent().expect("source parent"))
+            .expect("source parent");
+        fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
+        fs::create_dir_all(&resource_dir).expect("resource parent");
+        fs::write(&target_artifact_path, b"source").expect("source binary");
+        fs::write(&dev_path, b"dev").expect("dev binary");
+        fs::write(resource_dir.join(binary_name()), b"resource").expect("resource binary");
+
+        let resolved = resolve_bridge_binary_from_sources(
+            None,
+            None,
+            target_artifact_path.clone(),
+            dev_path,
+            Some(resource_dir),
+            false,
+        )
+        .expect("binary should resolve");
+
+        assert_eq!(
+            resolved,
+            ResolvedSourcePath {
+                path: target_artifact_path,
+                source: "external_bin:target_artifact",
+            }
+        );
+    }
+
+    #[test]
     fn resolve_binary_prefers_resource_candidate_before_development_binary() {
         let temp = TempDirGuard::new("binary-resource-priority");
+        let target_artifact_path = temp.path.join("source").join(target_artifact_binary_name());
         let dev_path = temp.path.join("dev").join(binary_name());
         let resource_dir = temp.path.join("resource");
         let resource_binary = resource_dir.join("binaries").join(binary_name());
@@ -1874,9 +2005,15 @@ mod tests {
         fs::write(&dev_path, b"dev").expect("dev binary");
         fs::write(&resource_binary, b"resource").expect("resource binary");
 
-        let resolved =
-            resolve_bridge_binary_from_sources(None, dev_path, Some(resource_dir.clone()), false)
-                .expect("binary should resolve");
+        let resolved = resolve_bridge_binary_from_sources(
+            None,
+            None,
+            target_artifact_path,
+            dev_path,
+            Some(resource_dir.clone()),
+            false,
+        )
+        .expect("binary should resolve");
 
         assert_eq!(
             resolved,
@@ -1891,6 +2028,8 @@ mod tests {
     fn resolve_binary_disables_workspace_fallback_by_default() {
         let err = resolve_bridge_binary_from_sources(
             None,
+            None,
+            PathBuf::from("missing-target-artifact"),
             PathBuf::from("D:\\MyProject\\kimi-app\\apps\\kimi-im-bridge\\bin\\kimi-im-bridge.exe"),
             None,
             false,
@@ -1909,8 +2048,15 @@ mod tests {
         fs::create_dir_all(dev_path.parent().expect("dev parent")).expect("dev parent");
         fs::write(&dev_path, b"dev").expect("dev binary");
 
-        let resolved = resolve_bridge_binary_from_sources(None, dev_path.clone(), None, true)
-            .expect("workspace fallback should resolve when explicitly enabled");
+        let resolved = resolve_bridge_binary_from_sources(
+            None,
+            None,
+            temp.path.join("missing-target-artifact"),
+            dev_path.clone(),
+            None,
+            true,
+        )
+        .expect("workspace fallback should resolve when explicitly enabled");
 
         assert_eq!(
             resolved,
@@ -1927,6 +2073,8 @@ mod tests {
             Some(PathBuf::from(
                 "D:\\MyProject\\kimi-app\\apps\\kimi-im-bridge\\bin\\kimi-im-bridge.exe",
             )),
+            None,
+            PathBuf::from("missing-target-artifact"),
             PathBuf::from("ignored"),
             None,
             false,

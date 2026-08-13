@@ -114,6 +114,7 @@ import { useShellPollingController } from "@/app/useShellPollingController";
 import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
 import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+import { usePlatformCapabilities } from "@/platform/usePlatformCapabilities";
 import {
   getGridSession,
   resolveCurrentPaneWorkDir,
@@ -157,6 +158,7 @@ type BootHint = Pick<
 >;
 
 export function useShellController() {
+  const platform = usePlatformCapabilities();
   const [status, setStatus] = useState<AppStatus | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsInfo | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
@@ -244,7 +246,6 @@ export function useShellController() {
     setSelectedDiscoveryDetail,
     workspaceSkillTargets,
     selectedWorkspaceSkillTargetId,
-    setSelectedWorkspaceSkillTargetId,
     workspaceSkillInventory,
     selectedWorkspaceSkillContainerKind,
     setSelectedWorkspaceSkillContainerKind,
@@ -256,6 +257,7 @@ export function useShellController() {
     refreshSelectedDiscoveryDetail,
     refreshWorkspaceSkillRecommendationsState,
     refreshWorkspaceSkillInventoryState,
+    selectWorkspaceSkillTargetState,
   } = useSkillCenterController({ setActionError });
   const workspaceSkillAutoRestoreKeyRef = useRef<string | null>(null);
   const [feishuConnectorOnboarding, setFeishuConnectorOnboarding] =
@@ -2002,13 +2004,12 @@ export function useShellController() {
     if (!visible) {
       return;
     }
-    void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
+    void refreshWorkspaceSkillManagementState();
   }, [
     activeControlSection,
     controlCenterModalOpen,
     isWorkspaceImportPickerRoute,
     screen,
-    selectedWorkspaceSkillTargetId,
     skillCenterSection,
     status?.activeSessionId,
     status?.activeSessionWorkDir,
@@ -2306,6 +2307,16 @@ export function useShellController() {
       }
     } catch (error) {
       setActionError(String(error));
+    }
+  }
+
+  async function handleOpenSystemTerminal() {
+    try {
+      await invoke("open_system_terminal");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setActionError(`无法打开 Terminal：${message}`);
+      throw error;
     }
   }
 
@@ -3228,9 +3239,8 @@ export function useShellController() {
   }
 
   async function handleSelectWorkspaceSkillTarget(targetId: string) {
-    setSelectedWorkspaceSkillTargetId(targetId);
     try {
-      await refreshWorkspaceSkillInventoryState(targetId);
+      await selectWorkspaceSkillTargetState(targetId);
     } catch (error) {
       setActionError(String(error));
     }
@@ -3356,7 +3366,6 @@ export function useShellController() {
   function handleSkillCenterSectionChange(section: SkillCenterSectionId) {
     setSkillCenterSection(section);
     if (section === "workspace_insights") {
-      void refreshWorkspaceSkillManagementState(selectedWorkspaceSkillTargetId);
       return;
     }
     void refreshSkillDiscoveryState(selectedDiscoveryId);
@@ -3643,6 +3652,9 @@ export function useShellController() {
   }
 
   return {
+    platformCapabilities: platform.capabilities,
+    platformCapabilitiesStatus: platform.status,
+    platformCapabilitiesError: platform.error,
     status,
     diagnostics,
     kimiDoctorResult,
@@ -3802,6 +3814,7 @@ export function useShellController() {
     handleOpenLogs,
     handleQuitAppGracefully,
     handleOpenExternalUrl,
+    handleOpenSystemTerminal,
     handleOpenFolder,
     handleOpenPaneFolder,
     handlePaneSessionObserved,

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "prefill",
+        "title": "kimi sidekick",
+        "url": "prefill.html",
+        "create": false,
+        "visible": false,
+        "center": true,
+        "width": 720,
+        "height": 520,
+        "minWidth": 660,
+        "minHeight": 460,
+        "decorations": true,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true,
+        "transparent": false,
+        "shadow": true
+      },
+      {
+        "label": "main",
+        "title": "kimi sidekick",
+        "url": "index.html#/loading",
+        "create": false,
+        "visible": false,
+        "center": true,
+        "width": 1200,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 640,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": false,
+        "shadow": true
+      },
+      {
+        "label": "workspace-import-picker",
+        "title": "选择目标工作区",
+        "url": "index.html#/workspace-import-picker",
+        "create": false,
+        "visible": false,
+        "center": true,
+        "width": 720,
+        "height": 560,
+        "minWidth": 680,
+        "minHeight": 520,
+        "resizable": false,
+        "decorations": true,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true,
+        "transparent": false,
+        "shadow": true
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}

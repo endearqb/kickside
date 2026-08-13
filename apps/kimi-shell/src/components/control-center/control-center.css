@@ -450,7 +450,7 @@
   gap: 6px;
 }
 
-.cc-control-field > span {
+.cc-control-field > :is(span, label) {
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.2;

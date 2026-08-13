@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { Button } from "@/components/ui/button";
+import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
 import { LoadingView } from "@/features/loading/LoadingView";
 import {
@@ -22,13 +23,17 @@ function App() {
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
   const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
+  const controlCenterDialogRef = useDialogFocusBoundary(
+    shell.controlCenterModalOpen && shell.screen === "workspace",
+  );
   useEffect(() => {
     if (!shell.controlCenterModalOpen) {
       return;
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        event.preventDefault();
         shell.requestCloseControlCenter();
       }
     };
@@ -36,6 +41,32 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [shell.controlCenterModalOpen, shell.requestCloseControlCenter, shell.activeControlTask]);
+
+  useEffect(() => {
+    if (!shell.controlCenterModalOpen || shell.screen !== "workspace") return;
+    const overlay = controlCenterDialogRef.current?.parentElement;
+    const root = overlay?.parentElement;
+    if (!overlay || !root) return;
+    const siblings = Array.from(root.children).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement && element !== overlay,
+    );
+    const previous = siblings.map((element) => ({
+      element,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    }));
+    siblings.forEach((element) => {
+      element.inert = true;
+      element.setAttribute("aria-hidden", "true");
+    });
+    return () => {
+      previous.forEach(({ element, inert, ariaHidden }) => {
+        element.inert = inert;
+        if (ariaHidden === null) element.removeAttribute("aria-hidden");
+        else element.setAttribute("aria-hidden", ariaHidden);
+      });
+    };
+  }, [controlCenterDialogRef, shell.controlCenterModalOpen, shell.screen]);
 
   useEffect(() => {
     if (shell.shutdownProgress) {
@@ -92,6 +123,9 @@ function App() {
   }
 
   const controlCenterProps = {
+    supportsExplorerContextMenu:
+      shell.platformCapabilities?.supportsExplorerContextMenu === true,
+    kimiInstallMode: shell.platformCapabilities?.kimiInstallMode ?? "externalGuided",
     status: shell.status,
     diagnostics: shell.diagnostics,
     kimiDoctorResult: shell.kimiDoctorResult,
@@ -277,11 +311,12 @@ function App() {
     onCompleteOnboarding: shell.handleCompleteOnboarding,
     onSkipOnboarding: shell.handleSkipOnboarding,
     onOpenExternalUrl: shell.handleOpenExternalUrl,
+    onOpenSystemTerminal: shell.handleOpenSystemTerminal,
   };
 
   return (
     <main
-      className={`shell-root theme-${shell.themeMode} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
+      className={`shell-root theme-${shell.themeMode} platform-${shell.platformCapabilities?.os ?? "loading"} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
     >
       <ShellTitlebar
         screen={shell.screen}
@@ -294,6 +329,7 @@ function App() {
         shellScreenLabel={shell.shellScreenLabel}
         actionBusy={shell.actionBusy}
         tauriRuntime={shell.tauriRuntime}
+        nativeWindowControls={shell.platformCapabilities?.nativeWindowControls === true}
         isWindowMaximized={shell.isWindowMaximized}
         canOpenWorkspace={shell.canOpenWorkspace}
         onRetry={shell.handleRuntimeOnlyRetry}
@@ -384,7 +420,14 @@ function App() {
             }
           }}
         >
-          <div className="cc-shell-modal" role="dialog" aria-modal="true" aria-label="控制中心">
+          <div
+            ref={controlCenterDialogRef}
+            className="cc-shell-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="控制中心"
+            tabIndex={-1}
+          >
             <ControlCenterView surface="modal" {...controlCenterProps} />
           </div>
         </div>

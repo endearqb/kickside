@@ -1,4 +1,4 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   createEmptySessionSkillState,
   createEmptyWorkspaceSkillProfile,
@@ -102,6 +102,7 @@ export function useSkillCenterController({
     useState<WorkspaceSkillInventory | null>(null);
   const [selectedWorkspaceSkillContainerKind, setSelectedWorkspaceSkillContainerKind] =
     useState<SkillDiscoveryContainerKind>("agents");
+  const workspaceInventoryRequestIdRef = useRef(0);
 
   async function refreshInstalledSkills(preferredSkillId?: string | null) {
     const data = await listInstalledSkills();
@@ -223,52 +224,72 @@ export function useSkillCenterController({
     }
   }
 
-  async function refreshWorkspaceSkillTargetsState(preferredTargetId?: string | null) {
-    try {
-      const targets = await listWorkspaceSkillTargets();
-      setWorkspaceSkillTargets(targets);
-      const nextSelectedTargetId =
-        preferredTargetId &&
-        targets.some((target) => target.id === preferredTargetId)
-          ? preferredTargetId
-          : targets[0]?.id ?? null;
-      setSelectedWorkspaceSkillTargetId(nextSelectedTargetId);
-      return { targets, selectedWorkspaceSkillTargetId: nextSelectedTargetId };
-    } catch (error) {
-      setActionError(String(error));
-      setWorkspaceSkillTargets([]);
-      setSelectedWorkspaceSkillTargetId(null);
-      throw error;
-    }
+  function commitWorkspaceSkillInventory(inventory: WorkspaceSkillInventory | null) {
+    setWorkspaceSkillInventory(inventory);
+    const availableContainerKinds =
+      inventory?.containers.map((container) => container.containerKind) ?? [];
+    setSelectedWorkspaceSkillContainerKind((current) =>
+      availableContainerKinds.includes(current)
+        ? current
+        : availableContainerKinds[0] ?? "agents",
+    );
   }
 
   async function refreshWorkspaceSkillInventoryState(targetId?: string | null) {
+    const requestId = ++workspaceInventoryRequestIdRef.current;
     if (!targetId?.trim()) {
-      setWorkspaceSkillInventory(null);
+      commitWorkspaceSkillInventory(null);
       return null;
     }
     try {
       const inventory = await getWorkspaceSkillInventory(targetId);
-      setWorkspaceSkillInventory(inventory);
-      const availableContainerKinds = inventory.containers.map((container) => container.containerKind);
-      setSelectedWorkspaceSkillContainerKind((current) =>
-        availableContainerKinds.includes(current)
-          ? current
-          : availableContainerKinds[0] ?? "agents",
-      );
+      if (requestId !== workspaceInventoryRequestIdRef.current) return null;
+      commitWorkspaceSkillInventory(inventory);
       return inventory;
     } catch (error) {
+      if (requestId !== workspaceInventoryRequestIdRef.current) return null;
       setActionError(String(error));
-      setWorkspaceSkillInventory(null);
+      throw error;
+    }
+  }
+
+  async function selectWorkspaceSkillTargetState(targetId: string) {
+    const requestId = ++workspaceInventoryRequestIdRef.current;
+    try {
+      const inventory = await getWorkspaceSkillInventory(targetId);
+      if (requestId !== workspaceInventoryRequestIdRef.current) return null;
+      setSelectedWorkspaceSkillTargetId(targetId);
+      commitWorkspaceSkillInventory(inventory);
+      return inventory;
+    } catch (error) {
+      if (requestId !== workspaceInventoryRequestIdRef.current) return null;
+      setActionError(String(error));
       throw error;
     }
   }
 
   async function refreshWorkspaceSkillManagementState(preferredTargetId?: string | null) {
-    const { selectedWorkspaceSkillTargetId: nextTargetId } =
-      await refreshWorkspaceSkillTargetsState(preferredTargetId ?? selectedWorkspaceSkillTargetId);
-    await refreshWorkspaceSkillInventoryState(nextTargetId);
-    return nextTargetId;
+    const requestId = ++workspaceInventoryRequestIdRef.current;
+    try {
+      const targets = await listWorkspaceSkillTargets();
+      const preferredId = preferredTargetId ?? selectedWorkspaceSkillTargetId;
+      const nextTargetId =
+        preferredId && targets.some((target) => target.id === preferredId)
+          ? preferredId
+          : targets[0]?.id ?? null;
+      const inventory = nextTargetId
+        ? await getWorkspaceSkillInventory(nextTargetId)
+        : null;
+      if (requestId !== workspaceInventoryRequestIdRef.current) return nextTargetId;
+      setWorkspaceSkillTargets(targets);
+      setSelectedWorkspaceSkillTargetId(nextTargetId);
+      commitWorkspaceSkillInventory(inventory);
+      return nextTargetId;
+    } catch (error) {
+      if (requestId !== workspaceInventoryRequestIdRef.current) return null;
+      setActionError(String(error));
+      throw error;
+    }
   }
 
   async function refreshSkillCenterState(preferredSkillId?: string | null) {
@@ -339,6 +360,7 @@ export function useSkillCenterController({
     refreshSkillCenterState,
     refreshSkillDiscoveryState,
     refreshWorkspaceSkillManagementState,
+    selectWorkspaceSkillTargetState,
     refreshSelectedSkillDetail,
     refreshSelectedDiscoveryDetail,
     refreshWorkspaceSkillRecommendationsState,

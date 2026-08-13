@@ -3,9 +3,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DirectoryFilePreview, MarkdownPreview } from "./DirectoryFilePreview";
 
+const askDialog = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: askDialog }));
+
 describe("MarkdownPreview", () => {
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
   });
 
   it("renders raw html as text instead of DOM nodes", () => {
@@ -69,10 +73,16 @@ describe("MarkdownPreview", () => {
     const first = await screen.findByRole("treeitem", { name: /SKILL.md/ });
     const second = await screen.findByRole("treeitem", { name: /README.md/ });
     expect(first.getAttribute("aria-selected")).toBe("true");
+    expect(first.tabIndex).toBe(0);
+    expect(second.tabIndex).toBe(-1);
 
     fireEvent.keyDown(first, { key: "ArrowDown" });
 
-    await waitFor(() => expect(second.getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => {
+      expect(second.getAttribute("aria-selected")).toBe("true");
+      expect(second.tabIndex).toBe(0);
+      expect(first.tabIndex).toBe(-1);
+    });
   });
 
   it("puts preview actions inside the file content header without a description card", async () => {
@@ -225,6 +235,32 @@ describe("MarkdownPreview", () => {
 
     const next = await screen.findByRole("treeitem", { name: /next.md/ });
     await waitFor(() => expect(next.getAttribute("aria-selected")).toBe("true"));
+  });
+
+  it("confirms external links with the native dialog before using the system opener", async () => {
+    const onOpenExternalUrl = vi.fn(async () => undefined);
+    askDialog.mockResolvedValue(true);
+    render(
+      <DirectoryFilePreview
+        entityKey="skill:external-link"
+        description="Demo"
+        loadEntries={async () => [{ relPath: "SKILL.md", isDir: false }]}
+        readFile={async () => ({
+          relPath: "SKILL.md",
+          size: 24,
+          isBinary: false,
+          truncated: false,
+          text: "[Docs](https://example.com/docs)",
+        })}
+        onOpenExternalUrl={onOpenExternalUrl}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Docs" }));
+    await waitFor(() => {
+      expect(askDialog).toHaveBeenCalledOnce();
+      expect(onOpenExternalUrl).toHaveBeenCalledWith("https://example.com/docs");
+    });
   });
 
   it("shows a placeholder for truncated files", async () => {

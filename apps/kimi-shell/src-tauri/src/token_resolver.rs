@@ -3,38 +3,16 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
-    thread,
-    time::{Duration, Instant},
 };
 
 const KIMI_CODE_HOME_ENV: &str = "KIMI_CODE_HOME";
 const SERVER_TOKEN_FILE_NAME: &str = "server.token";
-const TOKEN_READ_TIMEOUT: Duration = Duration::from_secs(5);
-const TOKEN_READ_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerToken {
     pub path: PathBuf,
     pub value: String,
     pub redacted: String,
-}
-
-pub fn resolve_server_token_with_retry() -> anyhow::Result<ServerToken> {
-    let path = server_token_path()?;
-    let deadline = Instant::now() + TOKEN_READ_TIMEOUT;
-    loop {
-        match read_server_token(&path) {
-            Ok(token) => return Ok(token),
-            Err(error) if Instant::now() < deadline => {
-                let last_error = error;
-                thread::sleep(TOKEN_READ_INTERVAL);
-                if Instant::now() >= deadline {
-                    return Err(last_error);
-                }
-            }
-            Err(error) => return Err(error),
-        }
-    }
 }
 
 pub fn server_token_path() -> anyhow::Result<PathBuf> {
@@ -53,10 +31,6 @@ pub fn read_server_token_at(path: &Path) -> anyhow::Result<ServerToken> {
         redacted: redact_token(&value),
         value,
     })
-}
-
-fn read_server_token(path: &Path) -> anyhow::Result<ServerToken> {
-    read_server_token_at(path)
 }
 
 pub fn resolve_kimi_code_home() -> anyhow::Result<PathBuf> {

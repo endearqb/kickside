@@ -28,6 +28,29 @@ pub fn open_external_url(app: &AppHandle, url: &str) -> Result<(), String> {
     open_with_system_browser(parsed.as_str()).map_err(|error| error.to_string())
 }
 
+pub fn open_system_terminal() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let (program, args) = system_terminal_command();
+        Command::new(program)
+            .args(args)
+            .spawn()
+            .context("failed to open Terminal.app")
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("opening the system terminal is only supported on macOS".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn system_terminal_command() -> (&'static str, [&'static str; 2]) {
+    ("open", ["-a", "Terminal"])
+}
+
 fn external_url_log_display(url: &Url) -> String {
     let mut redacted = url.clone();
     redacted.set_query(None);
@@ -147,6 +170,14 @@ mod tests {
             external_url_log_display(&url),
             "https://example.com/oauth/callback"
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn system_terminal_uses_native_open_without_command_injection() {
+        let (program, args) = system_terminal_command();
+        assert_eq!(program, "open");
+        assert_eq!(args, ["-a", "Terminal"]);
     }
 
     #[cfg(target_os = "windows")]

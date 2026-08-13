@@ -44,6 +44,7 @@ type ShellTitlebarProps = {
   shellScreenLabel: string;
   actionBusy: boolean;
   tauriRuntime: boolean;
+  nativeWindowControls: boolean;
   isWindowMaximized: boolean;
   canOpenWorkspace: boolean;
   onRetry: () => void;
@@ -69,6 +70,7 @@ export function ShellTitlebar({
   shellScreenLabel,
   actionBusy,
   tauriRuntime,
+  nativeWindowControls,
   isWindowMaximized,
   canOpenWorkspace,
   onRetry,
@@ -130,9 +132,21 @@ export function ShellTitlebar({
     onTitlebarDoubleClick();
   };
 
+  const workspaceSettingsAction = screen === "workspace" && tauriRuntime ? (
+    <IconButton
+      icon={<Settings size={14} />}
+      label="打开控制中心"
+      onClick={onOpenControlCenter}
+      className="ghost mini titlebar-settings-btn"
+    />
+  ) : null;
+
   return (
-    <header className="titlebar">
-      <div className="titlebar-actions" data-no-drag="true">
+    <header className={`titlebar${screen === "workspace" ? " is-workspace" : ""}`}>
+      <div
+        className={`titlebar-actions${screen === "workspace" ? " is-workspace" : ""}`}
+        data-no-drag="true"
+      >
         {screen === "control_center" && canOpenWorkspace ? (
           <IconButton
             icon={<Monitor size={14} />}
@@ -243,6 +257,7 @@ export function ShellTitlebar({
             onToggle={onToggleTheme}
           />
         ) : null}
+        {nativeWindowControls ? workspaceSettingsAction : null}
       </div>
 
       <div className={`titlebar-identity${screen === "workspace" ? " is-workspace" : ""}`}>
@@ -267,7 +282,7 @@ export function ShellTitlebar({
         )}
       </div>
 
-      {tauriRuntime && (
+      {tauriRuntime && (!nativeWindowControls || screen !== "workspace") && (
         <div className="titlebar-right" data-no-drag="true">
           <div className="titlebar-utility-actions" data-no-drag="true">
             {screen !== "workspace" ? (
@@ -277,35 +292,30 @@ export function ShellTitlebar({
                 onToggle={onToggleTheme}
               />
             ) : null}
-            {screen === "workspace" ? (
+            {!nativeWindowControls ? workspaceSettingsAction : null}
+          </div>
+          {!nativeWindowControls ? (
+            <div className="titlebar-window-controls" data-no-drag="true">
               <IconButton
-                icon={<Settings size={14} />}
-                label="打开控制中心"
-                onClick={onOpenControlCenter}
-                className="ghost mini titlebar-settings-btn"
+                icon={<Minus size={14} />}
+                label="最小化窗口"
+                onClick={onMinimizeWindow}
+                className="window-control-btn"
               />
-            ) : null}
-          </div>
-          <div className="titlebar-window-controls" data-no-drag="true">
-            <IconButton
-              icon={<Minus size={14} />}
-              label="最小化窗口"
-              onClick={onMinimizeWindow}
-              className="window-control-btn"
-            />
-            <IconButton
-              icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
-              label={isWindowMaximized ? "还原窗口" : "最大化窗口"}
-              onClick={onToggleMaximizeWindow}
-              className="window-control-btn"
-            />
-            <IconButton
-              icon={<X size={14} />}
-              label="关闭窗口"
-              onClick={onCloseWindow}
-              className="window-control-btn close"
-            />
-          </div>
+              <IconButton
+                icon={isWindowMaximized ? <Copy size={12} /> : <Square size={12} />}
+                label={isWindowMaximized ? "还原窗口" : "最大化窗口"}
+                onClick={onToggleMaximizeWindow}
+                className="window-control-btn"
+              />
+              <IconButton
+                icon={<X size={14} />}
+                label="关闭窗口"
+                onClick={onCloseWindow}
+                className="window-control-btn close"
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </header>

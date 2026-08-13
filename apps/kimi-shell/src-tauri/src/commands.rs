@@ -12,6 +12,7 @@ pub(crate) mod workspace_import;
 pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         // runtime
+        super::platform::get_platform_capabilities,
         super::get_app_status,
         super::get_workspace_embed_url,
         super::retry_start_backend,
@@ -155,6 +156,7 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::get_diagnostics,
         super::open_logs_folder,
         super::open_external_url,
+        super::open_system_terminal,
         super::open_folder,
         super::open_kimi_config_dir,
         super::load_kimi_code_access_config,

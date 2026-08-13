@@ -106,7 +106,7 @@
   border-color: var(--border);
 }
 
-button,
+button:not(.workspace-grid-resize-handle),
 summary,
 label,
 [role="button"],

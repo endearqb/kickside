@@ -46,6 +46,9 @@ if (!capability) {
   if (!permissions.includes("dialog:allow-open")) {
     errors.push("dialog:allow-open must be present");
   }
+  if (!permissions.includes("dialog:allow-ask")) {
+    errors.push("dialog:allow-ask must be present for native destructive-action confirmation");
+  }
 
   const forbiddenPrefixes = ["shell:", "fs:", "http:", "process:"];
   for (const permission of permissions) {
@@ -65,6 +68,53 @@ const framelessCapability = capabilityList.find(
 );
 if (framelessCapability?.windows?.includes("agent-room")) {
   errors.push("frameless window controls must not include retired agent-room");
+}
+
+const macosOverlayTitlebarCapability = capabilityList.find(
+  (item) => item.identifier === "macos-overlay-titlebar",
+);
+if (!macosOverlayTitlebarCapability) {
+  errors.push("missing macos-overlay-titlebar capability");
+} else {
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.platforms ?? []) !==
+    JSON.stringify(["macOS"])
+  ) {
+    errors.push("macos-overlay-titlebar must only target macOS");
+  }
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.windows ?? []) !==
+    JSON.stringify(["main"])
+  ) {
+    errors.push("macos-overlay-titlebar must only target the main window");
+  }
+  if (
+    JSON.stringify(macosOverlayTitlebarCapability.permissions ?? []) !==
+    JSON.stringify([
+      "core:window:allow-start-dragging",
+      "core:window:allow-toggle-maximize",
+      "core:window:allow-is-maximized",
+    ])
+  ) {
+    errors.push(
+      "macos-overlay-titlebar must only allow start-dragging, toggle-maximize and is-maximized",
+    );
+  }
+}
+
+for (const permission of [
+  "core:window:allow-start-dragging",
+  "core:window:allow-toggle-maximize",
+  "core:window:allow-is-maximized",
+]) {
+  for (const item of capabilityList) {
+    if (
+      item?.permissions?.includes(permission) &&
+      !["frameless-window-controls", "macos-overlay-titlebar"].includes(item.identifier)
+    ) {
+      errors.push(`${permission} has an unexpected owner: ${item.identifier}`);
+    }
+  }
 }
 
 for (const identifier of ["prefill", "workspace-import-picker"]) {

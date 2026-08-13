@@ -9,9 +9,74 @@ permissions:
   contents: write
 
 jobs:
-  windows:
-    name: Windows installers and updater manifest
-    runs-on: windows-latest
+  prepare:
+    name: Validate and create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag and release secrets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./apps/kimi-shell/package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "Tag $GITHUB_REF_NAME does not match package version v$version." >&2
+            exit 1
+          }
+          for name in \
+            TAURI_SIGNING_PRIVATE_KEY \
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID; do
+            test -n "${!name:-}" || {
+              echo "Required release secret $name is not configured." >&2
+              exit 1
+            }
+          done
+          if gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft >/tmp/release-draft; then
+            test "$(cat /tmp/release-draft)" = "true" || {
+              echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
+              exit 1
+            }
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "Kimi Sidekick $GITHUB_REF_NAME"
+          fi
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Windows x86_64
+            os: windows-latest
+            args: --bundles nsis,msi
+            release_channel: ad_hoc
+          - label: macOS Apple Silicon
+            os: macos-15
+            args: --target aarch64-apple-darwin --bundles app,dmg
+            release_channel: developer_id
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,38 +95,115 @@ jobs:
           go-version-file: apps/kimi-im-bridge/go.mod
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Validate release tag and signing secrets
-        shell: pwsh
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          $version = (Get-Content apps/kimi-shell/package.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match package version v$version."
-          }
-          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY) -or
-              [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) {
-            throw "Tauri updater signing secrets are not configured."
-          }
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin' || '' }}
 
       - name: Install frontend dependencies
         working-directory: apps/kimi-shell
         run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v1
+      - name: Build, sign, notarize, and upload bundles
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+          KIMI_RELEASE_CHANNEL: ${{ matrix.release_channel }}
         with:
           projectPath: apps/kimi-shell
           tagName: ${{ github.ref_name }}
-          releaseName: Kimi 小助手 ${{ github.ref_name }}
-          releaseDraft: false
-          prerelease: false
-          generateReleaseNotes: true
-          uploadUpdaterJson: true
+          releaseDraft: true
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: true
           updaterJsonPreferNsis: true
-          args: --bundles nsis,msi
+          args: ${{ matrix.args }}
+
+      - name: Verify macOS arm64 release bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          bundle_root="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle"
+          app_path="$bundle_root/macos/kimi sidekick.app"
+          test -d "$app_path"
+          plutil -lint "$app_path/Contents/Info.plist"
+          lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
+          lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
+          codesign --verify --deep --strict "$app_path"
+          test "$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')" = "1"
+          test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz' | wc -l | tr -d ' ')" = "1"
+          test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz.sig' | wc -l | tr -d ' ')" = "1"
+
+      - name: Verify Windows release bundles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bundleRoot = "apps/kimi-shell/src-tauri/target/release/bundle"
+          $nsis = @(Get-ChildItem "$bundleRoot/nsis" -File -Filter "*-setup.exe")
+          $msi = @(Get-ChildItem "$bundleRoot/msi" -File -Filter "*.msi")
+          if ($nsis.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($nsis.Count)."
+          }
+          if ($msi.Count -ne 1) {
+            throw "Expected exactly one MSI installer, found $($msi.Count)."
+          }
+          if (-not (Test-Path "$($nsis[0].FullName).sig" -PathType Leaf)) {
+            throw "Missing NSIS updater signature for $($nsis[0].Name)."
+          }
+
+  publish:
+    name: Publish cross-platform updater manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets and build latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets
+
+          exactly_one() {
+            local pattern="$1"
+            mapfile -t matches < <(find release-assets -maxdepth 1 -type f -name "$pattern" -print)
+            test "${#matches[@]}" -eq 1 || {
+              echo "Expected one release asset matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            }
+            printf '%s' "${matches[0]}"
+          }
+
+          windows_bundle="$(exactly_one '*-setup.exe')"
+          windows_msi="$(exactly_one '*.msi')"
+          macos_bundle="$(exactly_one '*.app.tar.gz')"
+          macos_dmg="$(exactly_one '*.dmg')"
+          test -f "$windows_bundle.sig"
+          test -f "$macos_bundle.sig"
+          echo "Verified installers: $(basename "$windows_bundle"), $(basename "$windows_msi"), $(basename "$macos_bundle"), $(basename "$macos_dmg")"
+
+          version="$(node -p "require('./apps/kimi-shell/package.json').version")"
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          node apps/kimi-shell/scripts/generate_updater_manifest.mjs \
+            --version "$version" \
+            --tag "$GITHUB_REF_NAME" \
+            --pub-date "$(git show -s --format=%cI "$GITHUB_REF_NAME")" \
+            --notes "Kimi Sidekick $version" \
+            --windows-url "$base_url/$(basename "$windows_bundle")" \
+            --windows-signature-file "$windows_bundle.sig" \
+            --macos-url "$base_url/$(basename "$macos_bundle")" \
+            --macos-signature-file "$macos_bundle.sig" \
+            --output latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest

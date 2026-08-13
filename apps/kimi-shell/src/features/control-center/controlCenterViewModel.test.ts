@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   controlSections,
+  createExplorerContextMenuSteps,
   formatBridgeConnectorStateLabel,
   getStartupFailureMessage,
   getKimiDoctorSummary,
@@ -10,6 +11,7 @@ import {
   isAssistantSettingsSection,
   shouldShowStartupFailureDiagnostics,
 } from "./controlCenterViewModel";
+import { vi } from "vitest";
 import type { AppStatus, DiagnosticsInfo, InstallProbeStatus } from "@/app/types";
 
 const readyProbe: InstallProbeStatus = {
@@ -74,6 +76,16 @@ describe("getKimiCodeUpdatePresentation", () => {
 });
 
 describe("assistant settings navigation", () => {
+  it("does not construct the Explorer step on unsupported platforms", () => {
+    const createStep = vi.fn(() => ({ id: "context_menu" }));
+
+    expect(createExplorerContextMenuSteps(false, createStep)).toEqual([]);
+    expect(createStep).not.toHaveBeenCalled();
+    expect(createExplorerContextMenuSteps(true, createStep)).toEqual([
+      { id: "context_menu" },
+    ]);
+  });
+
   it("recognizes every section that renders assistant settings", () => {
     expect((["overview", "onboarding", "runtime_center"] as const).map(isAssistantSettingsSection)).toEqual([
       true,

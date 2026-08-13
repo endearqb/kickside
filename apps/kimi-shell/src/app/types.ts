@@ -6,6 +6,28 @@ export type BackendState =
   | "stopping"
   | "missing_kimi";
 
+export type PlatformOs = "windows" | "macos";
+export type PlatformArch = "aarch64" | "x86_64";
+export type WindowControlPlacement = "leftNative" | "rightCustom";
+export type KimiInstallMode = "externalGuided" | "windowsManaged";
+export type ReleaseChannel = "development" | "adHoc" | "developerId";
+
+export interface PlatformCapabilities {
+  os: PlatformOs;
+  arch: PlatformArch;
+  nativeWindowControls: boolean;
+  windowControlPlacement: WindowControlPlacement;
+  supportsAppMenu: boolean;
+  supportsDockReopen: boolean;
+  supportsExplorerContextMenu: boolean;
+  supportsFinderQuickAction: boolean;
+  supportsOpenedEvent: boolean;
+  supportsTray: boolean;
+  hotkeyLabel: string;
+  kimiInstallMode: KimiInstallMode;
+  releaseChannel: ReleaseChannel;
+}
+
 export type BridgePlatform = "telegram" | "feishu" | "weixin";
 export type BridgeApprovalPlatform = BridgePlatform | "agent_room";
 

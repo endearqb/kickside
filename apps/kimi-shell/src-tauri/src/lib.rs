@@ -18,8 +18,10 @@ mod harness;
 mod install_manager;
 mod kimi_locator;
 mod log_manager;
+mod menu_manager;
 mod onboarding_http;
 mod open_request;
+mod platform;
 mod port_manager;
 mod runtime_locator;
 mod scheduler;
@@ -507,6 +509,11 @@ fn open_logs_folder(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     backend_manager::open_external_url(&app, &url)
+}
+
+#[tauri::command]
+fn open_system_terminal() -> Result<(), String> {
+    backend_manager::open_system_terminal()
 }
 
 #[tauri::command]
@@ -1008,6 +1015,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_menu_event(|app, event| menu_manager::handle_menu_event(app, &event))
         .setup(|app| {
             let shared = AppState::new(app.handle())?;
             let hotkey_owner = shared.hotkey_owner;
@@ -1030,6 +1038,7 @@ pub fn run() {
             }
             scheduler::start(app.handle().clone());
 
+            menu_manager::setup_app_menu(app.handle())?;
             tray_manager::setup_tray(app.handle())?;
             if hotkey_owner {
                 if let Err(error) = shortcut_manager::register_default_hotkey(app.handle()) {
@@ -1104,11 +1113,16 @@ pub fn run() {
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
-                        if !window_manager::handle_main_close_requested(
-                            app_handle,
-                            "main_close_requested",
-                        ) {
-                            start_graceful_exit(app_handle.clone(), "main_close_requested");
+                        #[cfg(target_os = "macos")]
+                        window_manager::hide_main_window(app_handle, "macos_main_close_requested");
+                        #[cfg(not(target_os = "macos"))]
+                        {
+                            if !window_manager::handle_main_close_requested(
+                                app_handle,
+                                "main_close_requested",
+                            ) {
+                                start_graceful_exit(app_handle.clone(), "main_close_requested");
+                            }
                         }
                     }
                     tauri::WindowEvent::Destroyed => {
@@ -1167,7 +1181,14 @@ pub fn run() {
             }
             agent_room_event_pump::stop(app_handle);
             if should_attempt_stop_backend(app_handle) {
-                let _ = backend_manager::stop_backend(app_handle);
+                if let Err(error) = backend_manager::stop_backend(app_handle) {
+                    api.prevent_exit();
+                    log_manager::append_line(
+                        app_handle,
+                        format!("prevented process exit because backend stop failed: {error:#}"),
+                    );
+                    return;
+                }
             }
             if should_attempt_stop_bridge(app_handle) {
                 let _ = bridge_manager::stop_bridge(app_handle);
@@ -1181,6 +1202,10 @@ pub fn run() {
             if should_attempt_stop_bridge(app_handle) {
                 let _ = bridge_manager::stop_bridge(app_handle);
             }
+        }
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            window_manager::show_and_focus(app_handle);
         }
         _ => {}
     });
@@ -1732,8 +1757,15 @@ fn duration_to_u64_ms(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn start_graceful_exit(app: AppHandle, source: &str) {
-    if is_graceful_exit_in_progress(&app) {
+pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
+    use std::sync::atomic::Ordering;
+
+    if app
+        .state::<AppState>()
+        .graceful_exit_started
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
         return;
     }
 
@@ -1750,6 +1782,17 @@ fn start_graceful_exit(app: AppHandle, source: &str) {
                 &app,
                 format!("shutdown stop_backend failed (source={source}): {error:#}"),
             );
+            emit_shutdown_progress(
+                &app,
+                "shutdown_blocked",
+                Some("后台进程尚未确认关闭；应用将保持运行以便重试。"),
+                Some(duration_to_u64_ms(started.elapsed().as_millis())),
+            );
+            app.state::<AppState>()
+                .graceful_exit_started
+                .store(false, Ordering::Release);
+            window_manager::revoke_process_exit(&app, "shutdown_blocked");
+            return;
         }
         emit_shutdown_progress(
             &app,
@@ -1759,15 +1802,6 @@ fn start_graceful_exit(app: AppHandle, source: &str) {
         );
         app.exit(0);
     });
-}
-
-fn is_graceful_exit_in_progress(app: &AppHandle) -> bool {
-    let state = app.state::<AppState>();
-    let lock = state.runtime.lock();
-    let Ok(runtime) = lock else {
-        return false;
-    };
-    matches!(runtime.state, BackendState::Stopping)
 }
 
 fn emit_shutdown_progress(
@@ -1903,8 +1937,10 @@ mod tests {
 
     #[test]
     fn onboarding_is_shown_for_missing_kimi_even_if_completed() {
-        let mut settings = AppSettings::default();
-        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        let settings = AppSettings {
+            onboarding_completed_version: CURRENT_ONBOARDING_VERSION,
+            ..AppSettings::default()
+        };
         assert!(should_show_onboarding(
             &settings,
             false,
@@ -1914,8 +1950,10 @@ mod tests {
 
     #[test]
     fn onboarding_is_hidden_after_completion_for_normal_startup() {
-        let mut settings = AppSettings::default();
-        settings.onboarding_completed_version = CURRENT_ONBOARDING_VERSION;
+        let settings = AppSettings {
+            onboarding_completed_version: CURRENT_ONBOARDING_VERSION,
+            ..AppSettings::default()
+        };
         assert!(!should_show_onboarding(
             &settings,
             false,

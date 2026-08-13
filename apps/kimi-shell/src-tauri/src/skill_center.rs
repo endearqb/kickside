@@ -23,6 +23,7 @@ use crate::{
         WorkspaceManagedSkillRecord, WorkspaceSkillContainerInventory, WorkspaceSkillInventory,
         WorkspaceSkillProfile, WorkspaceSkillTarget, WorkspaceSkillTargetContainerRoot,
     },
+    workspaces,
 };
 
 const BUNDLED_SKILLS_DIR_NAME: &str = "skills";
@@ -1003,7 +1004,7 @@ pub fn list_workspace_skill_targets(app: &AppHandle) -> anyhow::Result<Vec<Works
         ));
     }
 
-    for root in discovery_roots(app)? {
+    for root in workspace_target_roots(app)? {
         if root.scope != SkillDiscoveryScope::Workspace {
             continue;
         }
@@ -2043,6 +2044,38 @@ fn discovery_roots(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot
     Ok(deduped)
 }
 
+fn workspace_target_roots(app: &AppHandle) -> anyhow::Result<Vec<WorkspaceDiscoveryRoot>> {
+    Ok(merge_registered_workspace_roots(
+        discovery_roots(app)?,
+        workspaces::list(app)?,
+    ))
+}
+
+fn merge_registered_workspace_roots(
+    mut roots: Vec<WorkspaceDiscoveryRoot>,
+    registered_workspaces: Vec<workspaces::WorkspaceRecord>,
+) -> Vec<WorkspaceDiscoveryRoot> {
+    for workspace in registered_workspaces {
+        let workspace_key = skill_center_store::normalize_workspace_key(&workspace.cwd);
+        if let Some(existing) = roots.iter_mut().find(|root| {
+            root.scope == SkillDiscoveryScope::Workspace
+                && skill_center_store::normalize_workspace_key(&root.path) == workspace_key
+        }) {
+            existing.label = workspace.name;
+            continue;
+        }
+        roots.push(WorkspaceDiscoveryRoot {
+            id: workspace_key,
+            scope: SkillDiscoveryScope::Workspace,
+            path: workspace.cwd,
+            label: workspace.name,
+            last_seen_at: workspace.last_opened_at.unwrap_or(workspace.updated_at),
+        });
+    }
+    roots.sort_by(|left, right| left.path.cmp(&right.path));
+    roots
+}
+
 fn project_skill_container_paths(root: &Path) -> Vec<(SkillDiscoveryContainerKind, PathBuf)> {
     vec![
         (
@@ -2106,6 +2139,15 @@ fn build_workspace_skill_target(
 }
 
 fn display_workspace_label(root_path: &Path, fallback: &str) -> String {
+    let normalized_fallback = skill_center_store::normalize_display_path(fallback);
+    let normalized_root = skill_center_store::normalize_workspace_key(
+        &skill_center_store::path_to_display_string(root_path),
+    );
+    if !normalized_fallback.is_empty()
+        && skill_center_store::normalize_workspace_key(&normalized_fallback) != normalized_root
+    {
+        return normalized_fallback;
+    }
     root_path
         .file_name()
         .and_then(|value| value.to_str())
@@ -2591,6 +2633,59 @@ mod tests {
     }
 
     #[test]
+    fn workspace_targets_merge_registered_workspaces_missing_from_discovery_index() {
+        let roots = vec![WorkspaceDiscoveryRoot {
+            id: "existing".to_string(),
+            scope: SkillDiscoveryScope::Workspace,
+            path: "/work/existing".to_string(),
+            label: "/work/existing".to_string(),
+            last_seen_at: "2026-08-01T00:00:00Z".to_string(),
+        }];
+        let registered = vec![
+            workspaces::WorkspaceRecord {
+                id: "ws-existing".to_string(),
+                name: "Existing Workspace".to_string(),
+                cwd: "/work/existing".to_string(),
+                harness_id: None,
+                harness_version: None,
+                agent_runtime: workspaces::AgentRuntime::KimiCode,
+                source: workspaces::WorkspaceSource::Manual,
+                tags: Vec::new(),
+                created_at: "2026-08-01T00:00:00Z".to_string(),
+                updated_at: "2026-08-02T00:00:00Z".to_string(),
+                last_opened_at: None,
+            },
+            workspaces::WorkspaceRecord {
+                id: "ws-legacy".to_string(),
+                name: "Legacy Registered Workspace".to_string(),
+                cwd: "/work/legacy".to_string(),
+                harness_id: None,
+                harness_version: None,
+                agent_runtime: workspaces::AgentRuntime::KimiCode,
+                source: workspaces::WorkspaceSource::Manual,
+                tags: Vec::new(),
+                created_at: "2026-07-01T00:00:00Z".to_string(),
+                updated_at: "2026-07-02T00:00:00Z".to_string(),
+                last_opened_at: None,
+            },
+        ];
+
+        let merged = merge_registered_workspace_roots(roots, registered);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(
+            merged
+                .iter()
+                .find(|root| root.path == "/work/existing")
+                .map(|root| root.label.as_str()),
+            Some("Existing Workspace")
+        );
+        assert!(merged.iter().any(|root| {
+            root.path == "/work/legacy" && root.label == "Legacy Registered Workspace"
+        }));
+    }
+
+    #[test]
     fn resolve_workspace_skill_profile_returns_matching_profile() {
         let profile = resolve_workspace_skill_profile(
             vec![WorkspaceSkillProfile {
@@ -2696,9 +2791,10 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "Valid Skill");
+        let canonical_valid = fs::canonicalize(&valid).expect("canonical valid skill path");
         assert_eq!(
             records[0].canonical_path,
-            skill_center_store::path_to_display_string(&valid)
+            skill_center_store::path_to_display_string(&canonical_valid)
         );
         assert_eq!(skipped, vec!["broken-skill".to_string()]);
     }

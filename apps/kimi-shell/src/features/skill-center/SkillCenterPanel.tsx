@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Eraser, FolderOpen, Plus, Sparkles } from "lucide-react";
 import type {
   DiscoveredSkillDetail,
@@ -23,9 +23,11 @@ import { ControlCenterEmptyState } from "@/components/control-center/ControlCent
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterSegmentedControl } from "@/components/control-center/ControlCenterSegmentedControl";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterTag } from "@/components/control-center/ControlCenterTag";
 import { ControlCenterWorkbenchLayout } from "@/components/control-center/ControlCenterWorkbenchLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { UnifiedRailGroup } from "@/features/control-center/ControlCenterUnifiedRail";
 import { DirectoryCardGrid, type DirectoryCardItem } from "@/features/directory/DirectoryCardGrid";
 import { DirectoryFilePreview } from "@/features/directory/DirectoryFilePreview";
 import {
@@ -111,6 +113,8 @@ type SkillCenterPanelProps = {
   railActions?: ReactNode;
   detailOnly?: boolean;
   activeFocusId?: string | null;
+  onRailGroupsChange?: (groups: UnifiedRailGroup[]) => void;
+  onOpenExternalUrl?: (url: string) => Promise<void> | void;
 };
 
 function statusForSkill(
@@ -133,16 +137,13 @@ function statusForSkill(
 }
 
 function renderStatusChip(label: string, tone: "ready" | "muted" | "warning") {
-  const mappedTone =
-    tone === "ready" ? "success" : tone === "warning" ? "warning" : "neutral";
-  return (
-    <ControlCenterStatusBadge
-      tone={mappedTone}
-      className={`skill-center-chip skill-center-chip-${tone}`}
-    >
-      {label}
-    </ControlCenterStatusBadge>
-  );
+  if (label === "已信任") {
+    return <ControlCenterStatusBadge tone="success">已信任</ControlCenterStatusBadge>;
+  }
+  if (label === "未信任" || label === "待导入") {
+    return <ControlCenterStatusBadge tone="warning">待配置</ControlCenterStatusBadge>;
+  }
+  return <ControlCenterTag className={`skill-center-chip skill-center-chip-${tone}`}>{label}</ControlCenterTag>;
 }
 
 function formatSkillSourceGroup(sourceType: InstalledSkill["sourceType"]) {
@@ -300,13 +301,40 @@ export function SkillCenterPanel({
   onSectionChange,
   railActions,
   detailOnly = false,
+  onRailGroupsChange,
+  onOpenExternalUrl,
 }: SkillCenterPanelProps) {
   const [manageContextId, setManageContextId] = useState<ManageContextId>("skill_center");
   const [directoryPrimarySource, setDirectoryPrimarySource] =
     useState<SkillDirectoryPrimarySource>("all");
   const [directorySource, setDirectorySource] = useState<SkillDirectorySourceFilter>("all");
   const [directorySort, setDirectorySort] = useState<SkillDirectorySortKey>("name");
+  const directoryFiltersRef = useRef<HTMLDetailsElement>(null);
   const actionErrorText = actionError?.trim() ?? "";
+
+  useEffect(() => {
+    function closeDirectoryFiltersOnOutsidePointer(event: PointerEvent) {
+      const details = directoryFiltersRef.current;
+      if (!details?.open || details.contains(event.target as Node)) return;
+      details.open = false;
+    }
+
+    function closeDirectoryFiltersOnEscape(event: globalThis.KeyboardEvent) {
+      const details = directoryFiltersRef.current;
+      if (event.key !== "Escape" || !details?.open) return;
+      event.preventDefault();
+      event.stopPropagation();
+      details.open = false;
+      details.querySelector<HTMLElement>("summary")?.focus();
+    }
+
+    document.addEventListener("pointerdown", closeDirectoryFiltersOnOutsidePointer);
+    document.addEventListener("keydown", closeDirectoryFiltersOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeDirectoryFiltersOnOutsidePointer);
+      document.removeEventListener("keydown", closeDirectoryFiltersOnEscape);
+    };
+  }, []);
 
   const keyword = search.trim().toLowerCase();
   const currentWorkspaceTarget =
@@ -785,6 +813,115 @@ export function SkillCenterPanel({
 
   const skillDirectoryEmptyCopy = getSkillDirectoryEmptyCopy(manageEntries.length);
   const hasDirectoryDetail = Boolean(selectedInstalledSkill || selectedDiscoveredRecord);
+  const workspaceTargets = useMemo(
+    () => workspaceSkillTargets.filter((target) => target.scope === "workspace"),
+    [workspaceSkillTargets],
+  );
+  const railActionRefs = useRef({
+    onSectionChange,
+    onSelectDiscoveredSkill,
+    onSelectSkill,
+    onSelectWorkspaceSkillTarget,
+  });
+  railActionRefs.current = {
+    onSectionChange,
+    onSelectDiscoveredSkill,
+    onSelectSkill,
+    onSelectWorkspaceSkillTarget,
+  };
+  const railGroups = useMemo<UnifiedRailGroup[]>(
+    () => [
+      {
+        id: "skill_center:views",
+        label: "Skill 视图",
+        items: [
+          {
+            id: "skill_center:list",
+            label: "技能库",
+            meta: manageEntries.length,
+            active: section === "manage",
+            onSelect: () => {
+              railActionRefs.current.onSectionChange("manage");
+              onBackToDirectory?.();
+            },
+          },
+          {
+            id: "skill_center:workspace",
+            label: "工作区目标",
+            meta: workspaceTargets.length,
+            active: section === "workspace_insights",
+            onSelect: () => railActionRefs.current.onSectionChange("workspace_insights"),
+          },
+        ],
+      },
+      {
+        id: "skill_center:library",
+        label: "技能库",
+        count: manageEntries.length,
+        collapsible: true,
+        items: manageEntries.map((entry) => {
+          if (entry.kind === "installed") {
+            return {
+              id: `skill:${entry.installedSkill.id}`,
+              label: entry.installedSkill.name,
+              statusLabel: entry.installedSkill.trusted ? "已信任" : "待配置",
+              statusTone: entry.installedSkill.trusted
+                ? ("success" as const)
+                : ("warning" as const),
+              active: section === "manage" && selectedSkillId === entry.installedSkill.id,
+              onSelect: () => {
+                railActionRefs.current.onSectionChange("manage");
+                railActionRefs.current.onSelectSkill(entry.installedSkill.id);
+              },
+            };
+          }
+          return {
+            id: `skill:${entry.discoveredRecord.discoveryId}`,
+            label: entry.discoveredRecord.name,
+            statusLabel: "待配置",
+            statusTone: "warning" as const,
+            active:
+              section === "manage" &&
+              selectedDiscoveryId === entry.discoveredRecord.discoveryId,
+            onSelect: () => {
+              railActionRefs.current.onSectionChange("manage");
+              railActionRefs.current.onSelectDiscoveredSkill(entry.discoveredRecord.discoveryId);
+            },
+          };
+        }),
+      },
+      {
+        id: "skill_center:targets",
+        label: "工作区目标",
+        count: workspaceTargets.length,
+        collapsible: true,
+        items: workspaceTargets.map((target) => ({
+          id: `skill-target:${target.id}`,
+          label: target.label,
+          meta: target.readOnly ? "只读" : "可编辑",
+          active:
+            section === "workspace_insights" && selectedWorkspaceSkillTargetId === target.id,
+          onSelect: () => {
+            railActionRefs.current.onSectionChange("workspace_insights");
+            railActionRefs.current.onSelectWorkspaceSkillTarget(target.id);
+          },
+        })),
+      },
+    ],
+    [
+      manageEntries,
+      onBackToDirectory,
+      section,
+      selectedDiscoveryId,
+      selectedSkillId,
+      selectedWorkspaceSkillTargetId,
+      workspaceTargets,
+    ],
+  );
+
+  useEffect(() => {
+    onRailGroupsChange?.(railGroups);
+  }, [onRailGroupsChange, railGroups]);
 
   function renderManageEntry(entry: ManageListEntry) {
     const isSelected =
@@ -834,7 +971,7 @@ export function SkillCenterPanel({
 
   return (
     <div
-      className={`skill-center skill-center-${surface} ${detailOnly ? "skill-center-detail-only" : ""}`}
+      className={`skill-center skill-center-surface-${surface} ${detailOnly ? "skill-center-detail-only" : ""}`}
       onKeyDownCapture={(event) => {
         if (shouldBackToSkillDirectory(event.key, hasDirectoryDetail) && onBackToDirectory) {
           event.preventDefault();
@@ -881,12 +1018,13 @@ export function SkillCenterPanel({
             />
             <div className="directory-toolbar skill-center-directory-toolbar">
               <Input
+                className="skill-center-directory-search"
                 value={search}
                 onChange={(event) => onSearchChange(event.currentTarget.value)}
                 placeholder="搜索 Skill、描述、来源或路径"
                 aria-label="搜索 Skill"
               />
-              <details className="skill-center-directory-filters">
+              <details ref={directoryFiltersRef} className="skill-center-directory-filters">
                 <summary>筛选与排序</summary>
                 <div className="skill-center-directory-filter-popover">
                   <label>
@@ -1100,6 +1238,7 @@ export function SkillCenterPanel({
                     description={selectedInstalledSkill.description || "这个技能没有提供描述。"}
                     loadEntries={loadSelectedInstalledFileEntries}
                     readFile={readSelectedInstalledFile}
+                    onOpenExternalUrl={onOpenExternalUrl}
                     onOpenRoot={() => onOpenFolder(selectedInstalledSkill.localPath)}
                     showDescription={false}
                     className="skill-center-file-preview"
@@ -1112,6 +1251,7 @@ export function SkillCenterPanel({
                     description={selectedDiscoveredRecord.description || "这个外部 Skill 没有提供描述。"}
                     loadEntries={loadSelectedDiscoveredFileEntries}
                     readFile={readSelectedDiscoveredFile}
+                    onOpenExternalUrl={onOpenExternalUrl}
                     onOpenRoot={() => onOpenFolder(selectedDiscoveredRecord.canonicalPath)}
                     showDescription={false}
                     className="skill-center-file-preview"
@@ -1132,7 +1272,7 @@ export function SkillCenterPanel({
               />
             }
           />
-        ) : (
+        ) : section === "workspace_insights" ? (
           <ControlCenterWorkbenchLayout
             mode="stack-on-mobile"
             railBodyClassName="skill-center-list"
@@ -1267,9 +1407,13 @@ export function SkillCenterPanel({
                       ) : workspaceExistingSkills.length === 0 ? (
                         <p className="skill-center-muted">这个容器里还没有匹配的 Skill。</p>
                       ) : (
-                        <div className="skill-center-workspace-list">
+                        <div className="skill-center-workspace-list" role="list">
                           {workspaceExistingSkills.map((skill) => (
-                            <div key={skill.skillPath} className="skill-center-workspace-item">
+                            <div
+                              key={skill.skillPath}
+                              className="skill-center-workspace-item"
+                              role="listitem"
+                            >
                               <div className="skill-center-workspace-copy">
                                 <div className="skill-center-workspace-item-head">
                                   <strong className="skill-center-item-name" title={skill.name}>
@@ -1302,9 +1446,13 @@ export function SkillCenterPanel({
                       ) : workspaceImportCandidates.length === 0 ? (
                         <p className="skill-center-muted">没有可导入的技能，或者这些技能已经存在于当前容器。</p>
                       ) : (
-                        <div className="skill-center-workspace-list">
+                        <div className="skill-center-workspace-list" role="list">
                           {workspaceImportCandidates.map((skill) => (
-                            <div key={skill.id} className="skill-center-workspace-item">
+                            <div
+                              key={skill.id}
+                              className="skill-center-workspace-item"
+                              role="listitem"
+                            >
                               <div className="skill-center-workspace-copy">
                                 <div className="skill-center-workspace-item-head">
                                   <strong className="skill-center-item-name" title={skill.name}>
@@ -1354,7 +1502,7 @@ export function SkillCenterPanel({
               />
             }
           />
-        )}
+        ) : null}
       </div>
     </div>
   );

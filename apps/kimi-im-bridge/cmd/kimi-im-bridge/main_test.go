@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func TestParseCommandVersionDoesNotRequireServiceFlags(t *testing.T) {
+	t.Parallel()
+
+	command, err := parseCommandFrom([]string{"--version"}, func(string) string { return "" }, os.ReadFile)
+	if err != nil {
+		t.Fatalf("parseCommandFrom returned error: %v", err)
+	}
+	if !command.printVersion {
+		t.Fatal("expected --version command")
+	}
+	if command.options.Version != version {
+		t.Fatalf("expected options version %q, got %q", version, command.options.Version)
+	}
+	if got, want := versionOutput(), "kimi-im-bridge "+version; got != want {
+		t.Fatalf("versionOutput() = %q, want %q", got, want)
+	}
+}
+
 func TestParseFlagsReadsAdminTokenFromEnv(t *testing.T) {
 	t.Parallel()
 

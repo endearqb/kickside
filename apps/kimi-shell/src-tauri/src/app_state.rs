@@ -3,7 +3,7 @@ use std::{
     fs::{File, OpenOptions},
     path::PathBuf,
     process::Child,
-    sync::Mutex,
+    sync::{atomic::AtomicBool, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -40,6 +40,7 @@ pub struct RuntimeState {
     pub generation: u64,
     pub start_cycle_id: u64,
     pub child: Option<Child>,
+    pub owned_process_group_id: Option<i32>,
     pub last_error: Option<String>,
     pub detected_kimi_path: Option<PathBuf>,
     pub effective_work_dir: Option<PathBuf>,
@@ -95,6 +96,7 @@ impl Default for RuntimeState {
             generation: 0,
             start_cycle_id: 0,
             child: None,
+            owned_process_group_id: None,
             last_error: None,
             detected_kimi_path: None,
             effective_work_dir: None,
@@ -222,6 +224,9 @@ pub struct WeixinOnboardingRuntimeState {
 
 pub struct AppState {
     pub runtime: Mutex<RuntimeState>,
+    pub backend_lifecycle_operation: Mutex<()>,
+    pub runtime_locator_write: Mutex<()>,
+    pub graceful_exit_started: AtomicBool,
     pub bridge_runtime: Mutex<BridgeProcessState>,
     pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
     pub weixin_onboarding: Mutex<Option<WeixinOnboardingRuntimeState>>,
@@ -274,6 +279,9 @@ impl AppState {
 
         Ok(Self {
             runtime: Mutex::new(RuntimeState::default()),
+            backend_lifecycle_operation: Mutex::new(()),
+            runtime_locator_write: Mutex::new(()),
+            graceful_exit_started: AtomicBool::new(false),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
             feishu_onboarding: Mutex::new(None),
             weixin_onboarding: Mutex::new(None),

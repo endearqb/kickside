@@ -32,6 +32,7 @@ use crate::{
 
 #[allow(dead_code)]
 mod config;
+mod instance_registry;
 mod lifecycle;
 mod redaction;
 mod system_open;
@@ -47,7 +48,9 @@ pub use config::{
     save_kimi_code_access_config, test_kimi_code_access_config,
 };
 pub use lifecycle::{restart_backend, set_session_work_dir, start_backend, stop_backend};
-pub use system_open::{open_external_url, open_folder, open_kimi_config_dir, open_logs_folder};
+pub use system_open::{
+    open_external_url, open_folder, open_kimi_config_dir, open_logs_folder, open_system_terminal,
+};
 
 pub fn redact_backend_text(input: &str) -> String {
     redaction::redact_backend_text(input)

@@ -410,7 +410,8 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     format!(
         r#"<script data-kimi-shell-theme-bridge>
 (function () {{
-  const THEME_KEY = "kimi-theme";
+  const THEME_KEY = "kimi-web.color-scheme";
+  const LEGACY_THEME_KEY = "kimi-theme";
   const BRIDGE_SOURCE = "{theme_bridge_source}";
   const SHELL_SOURCE = "{shell_theme_source}";
   const PREFILL_SOURCE = "{shell_prefill_source}";
@@ -521,7 +522,9 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   function notifyParent() {{
     try {{
       if (window.parent && window.parent !== window) {{
-        const current = normalizeTheme(localStorage.getItem(THEME_KEY));
+        const current = normalizeTheme(
+          localStorage.getItem(THEME_KEY) || localStorage.getItem(LEGACY_THEME_KEY)
+        );
         window.parent.postMessage({{ source: BRIDGE_SOURCE, theme: current }}, "*");
       }}
     }} catch (_) {{
@@ -533,6 +536,7 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     try {{
       const resolved = resolveTheme(mode);
       const root = document.documentElement;
+      root.dataset.colorScheme = mode;
       root.classList.toggle("dark", resolved === "dark");
       root.style.colorScheme = resolved;
     }} catch (_) {{
@@ -545,8 +549,10 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     try {{
       if (normalized === "system") {{
         localStorage.removeItem(THEME_KEY);
+        localStorage.removeItem(LEGACY_THEME_KEY);
       }} else {{
         localStorage.setItem(THEME_KEY, normalized);
+        localStorage.setItem(LEGACY_THEME_KEY, normalized);
       }}
     }} catch (_) {{
       // ignore
@@ -1125,6 +1131,14 @@ mod tests {
         assert!(script.contains(r#"APP_BRAND_EN = "kimi sidekick""#));
         assert!(script.contains(r#"normalized === "Kimi Code""#));
         assert!(script.contains("applyWorkspaceBrand"));
+    }
+
+    #[test]
+    fn theme_bridge_script_uses_current_kimi_color_scheme_contract() {
+        let script = theme_bridge_script_tag(57999);
+        assert!(script.contains(r#"THEME_KEY = "kimi-web.color-scheme""#));
+        assert!(script.contains(r#"LEGACY_THEME_KEY = "kimi-theme""#));
+        assert!(script.contains("root.dataset.colorScheme = mode"));
     }
 
     #[test]

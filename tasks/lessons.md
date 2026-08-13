@@ -1,5 +1,11 @@
 # Lessons Learned
 
+- 同一个选择动作若同时触发“局部详情请求”和“重新加载全集”，必须有单一提交点与 stale-request guard；否则 WebView 中会出现旧详情短暂回写、active 状态跳动和列表闪烁。对于后加入的索引功能，也不能假设历史注册数据已回填，应在读取边界合并 canonical registry 并按稳定主键去重。
+- 页面壳类名不能由内层组件的通用 `surface` 变体直接拼接复用：本次 `skill-center-page` 同时命中外层两行 Grid 和内层单内容面板，静态 CSS 看似正确但实际把列表压成 2px。布局 bug 修复必须至少做一次包含真实样式层级的 `clientHeight/scrollHeight/gridTemplateRows/elementsFromPoint` 验证，不能只依赖源码正则和 jsdom。
+- 需要保留页面状态时，`display: contents` 不能默认当作“无成本 wrapper”：在 Grid/Flex 百分比高度链里它会移除包含块，使后代 `height: 100%` 与 `flex-basis: 0` 重新落入不确定尺寸；keep-alive 页应保留一个 `min-height:0;height:100%` 的真实布局节点。
+- 同一容器包含“目录 / 详情 / 另一视图”三态时，不要用 `A ? B : C` 让第三态成为隐式兜底；合法的第四种组合会悄悄渲染错误页面，且可能因 Grid 重叠只在某次 CSS 收口后暴露。应显式枚举状态并测试错误分支不在 DOM 中。
+- 桌面控制中心若同时有页面级 Escape、弹层和确认框，必须建立“内层 `preventDefault + stopPropagation`、外层仅处理未消费事件”的 dismiss 契约，并用焦点圈定/恢复测试锁住；仅靠多个 window keydown handler 会让一次按键穿透关闭多层界面。
+- 可滚动 flex 子项使用 `flex: 1 1 0` 前，必须确认整条父级高度链有确定的 Grid/Flex track；遗留的 `auto + 1fr` 空行叠加多层 `height: 100%` 会在 WKWebView 首次布局时形成循环尺寸依赖，并可能只在二次布局后恢复。
 - 救火式重试逻辑必须显式“锁存成功状态”（latch）：一旦 fallback 导航成功，后续循环只能观察，不可继续发送会覆盖目标页面的导航指令。
 - 当 `tauri://localhost` 重试导航仍持续 `about:blank` 时，要尽快切换“协议绕行兜底”（直接导航 `http://127.0.0.1:<workspace_port>`），先恢复可用性再追协议根因。
 - 当截图显示 DevTools 目标仅有 `about:blank` 且无资源树时，优先按“协议加载时序故障”处理：在 Rust setup 加入 about:blank 自救重试导航，而不是只在前端层继续加 fallback。

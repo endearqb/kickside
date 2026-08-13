@@ -4,6 +4,8 @@ import { Webview } from "@tauri-apps/api/webview";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { normalizeEmbeddableUrl } from "@/features/workspace-grid/urlSafety";
+import { usePlatformCapabilitiesStore } from "@/platform/platformStore";
+import type { PlatformOs } from "@/app/types";
 
 interface OpenExternalWebviewWindowInput {
   url: string;
@@ -57,7 +59,7 @@ export async function openExternalWebviewWindow({
     minHeight: 520,
     center: true,
     resizable: true,
-    dataDirectory: createWebviewDataDirectory(storageNamespace),
+    ...createWebviewDataDirectoryOption(storageNamespace),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -87,7 +89,7 @@ export async function createEmbeddedExternalWebview({
     ...normalizeEmbeddedBounds(bounds),
     focus: true,
     dragDropEnabled: false,
-    dataDirectory: createWebviewDataDirectory(storageNamespace),
+    ...createWebviewDataDirectoryOption(storageNamespace),
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -134,9 +136,24 @@ function normalizeEmbeddedBounds(
   };
 }
 
-function createWebviewDataDirectory(storageNamespace?: string): string | undefined {
+export function createWebviewDataDirectoryOption(
+  storageNamespace?: string,
+): { dataDirectory?: string } {
+  const capabilities = usePlatformCapabilitiesStore.getState().capabilities;
+  return capabilities
+    ? createWebviewDataDirectoryOptionForPlatform(capabilities.os, storageNamespace)
+    : {};
+}
+
+export function createWebviewDataDirectoryOptionForPlatform(
+  os: PlatformOs,
+  storageNamespace?: string,
+): { dataDirectory?: string } {
+  if (os === "macos") {
+    return {};
+  }
   const namespace = storageNamespace?.trim().replace(/[^a-zA-Z0-9._-]/g, "-");
-  return namespace || undefined;
+  return namespace ? { dataDirectory: namespace } : {};
 }
 
 function createExternalWebviewLabel(): string {

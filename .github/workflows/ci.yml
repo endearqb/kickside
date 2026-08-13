@@ -8,8 +8,14 @@ on:
 
 jobs:
   bridge-go:
-    name: Go bridge Windows
-    runs-on: windows-latest
+    name: Go bridge (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
     defaults:
       run:
         working-directory: apps/kimi-im-bridge
@@ -35,24 +41,97 @@ jobs:
       - run: go test -race ./...
 
   shell-rust:
-    name: Rust shell
-    runs-on: windows-latest
+    name: Rust shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
     defaults:
       run:
         working-directory: apps/kimi-shell/src-tauri
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kimi-im-bridge/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - run: cargo fmt -- --check
-      - run: cargo check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test --no-run
+      - name: Verify Apple Silicon runner
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+      - name: Build target bridge sidecar
+        working-directory: apps/kimi-shell
+        run: node scripts/build_bridge_sidecar.mjs --target ${{ matrix.target }}
+      - run: cargo fmt --all -- --check
+      - run: cargo check --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  shell-macos-app:
+    name: macOS arm64 app bundle
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/kimi-shell/pnpm-lock.yaml
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/kimi-im-bridge/go.mod
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: Verify Apple Silicon runner
+        shell: bash
+        run: test "$(uname -m)" = "arm64"
+      - name: Install frontend dependencies
+        working-directory: apps/kimi-shell
+        run: pnpm install --frozen-lockfile
+      - name: Build unsigned macOS app bundle
+        working-directory: apps/kimi-shell
+        run: pnpm tauri:build:macos:local
+      - name: Verify and package arm64 app bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/kimi sidekick.app"
+          test -d "$app_path"
+          plutil -lint "$app_path/Contents/Info.plist"
+          lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
+          lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$app_path" \
+            kimi-sidekick-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kimi-sidekick-macos-arm64-app
+          path: kimi-sidekick-macos-arm64.zip
+          if-no-files-found: error
 
   shell-frontend:
-    name: Frontend shell
-    runs-on: windows-latest
+    name: Frontend shell (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
     defaults:
       run:
         working-directory: apps/kimi-shell
@@ -63,10 +142,11 @@ jobs:
           version: 10.34.4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           cache-dependency-path: apps/kimi-shell/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: .\node_modules\.bin\tsc.cmd --noEmit
+      - run: pnpm exec tsc --noEmit
       - run: pnpm test
+      - run: node --test scripts/generate_updater_manifest.test.mjs
       - run: pnpm check:nfr:security

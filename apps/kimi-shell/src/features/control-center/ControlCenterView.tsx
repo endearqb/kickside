@@ -15,6 +15,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type {
   AppStatus,
   BridgeConnectorConfig,
@@ -30,7 +31,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
+import { ControlCenterTag } from "@/components/control-center/ControlCenterTag";
 import { ControlCenterToggleField } from "@/components/control-center/ControlCenterToggleField";
+import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { BridgeRuntimePanel } from "@/features/bridge/BridgeRuntimePanel";
 import {
   KimiCodeAccessTaskContent,
@@ -41,6 +44,8 @@ import {
 } from "@/features/control-center/InstallFlowModal";
 import { WorkspaceHubPanel } from "@/features/control-center/WorkspaceHubPanel";
 import { WorkspaceSchedulePanel } from "@/features/control-center/WorkspaceSchedulePanel";
+import { MacKimiInstallGuidance } from "@/features/control-center/MacKimiInstallGuidance";
+import { MacKimiUpgradePanel } from "@/features/control-center/MacKimiUpgradePanel";
 import {
   ControlCenterUnifiedRail,
   type UnifiedRailGroup,
@@ -53,6 +58,7 @@ import {
   controlSections,
   createEmptyBridgeConnectorSecretDraft,
   defaultBridgeConnectorLabel,
+  createExplorerContextMenuSteps,
   findBridgeConnectorRecentError,
   focusDomId,
   formatBridgeConnectorStateLabel,
@@ -90,6 +96,27 @@ const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
   importWithWorkspacePicker: "选择其他工作区",
 };
 
+type PreservedControlPage = "settings" | "skill_center" | "workspace_hub" | "schedule";
+
+export function ControlCenterPreservedPage({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="cc-preserved-page"
+      hidden={!active}
+      aria-hidden={!active}
+      inert={!active}
+    >
+      {children}
+    </div>
+  );
+}
+
 function copyText(value: string) {
   void navigator.clipboard?.writeText(value);
 }
@@ -117,6 +144,8 @@ const CONTEXT_MENU_LABEL_FIELDS: Array<{
 
 export function ControlCenterView({
   surface,
+  supportsExplorerContextMenu,
+  kimiInstallMode,
   status,
   diagnostics,
   kimiDoctorResult,
@@ -278,6 +307,7 @@ export function ControlCenterView({
   onInstallAppUpdate,
   onCompleteOnboarding,
   onOpenExternalUrl,
+  onOpenSystemTerminal,
   installMessage,
 }: ControlCenterViewProps) {
   const [selectedBridgeConnectorId, setSelectedBridgeConnectorId] = useState<string | null>(null);
@@ -300,7 +330,21 @@ export function ControlCenterView({
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
     () => new Set(activeControlSection === "overview" ? [] : [activeControlSection]),
   );
+  const [contextualRailGroupsBySection, setContextualRailGroupsBySection] = useState<
+    Partial<Record<ControlSectionId, UnifiedRailGroup[]>>
+  >({});
   const [activeFocusId, setActiveFocusId] = useState<string | null>(null);
+  const activePreservedPage: PreservedControlPage = isAssistantSettingsSection(activeControlSection)
+    ? "settings"
+    : activeControlSection === "skill_center" ||
+        activeControlSection === "workspace_hub" ||
+        activeControlSection === "schedule"
+      ? activeControlSection
+      : "settings";
+  const [visitedControlPages, setVisitedControlPages] = useState<Set<PreservedControlPage>>(
+    () => new Set([activePreservedPage]),
+  );
+  const bridgeDeleteDialogRef = useDialogFocusBoundary(Boolean(bridgeDeleteConfirm));
   const bridgeCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const settingsTaskReturnCardRef = useRef<OnboardingCardId | null>(null);
   const focusClearTimerRef = useRef<number | null>(null);
@@ -319,6 +363,7 @@ export function ControlCenterView({
     appUpdateStatus === "downloading" ||
     appUpdateStatus === "installing";
   const appUpdateAvailable = appUpdateStatus === "available" && Boolean(appUpdateInfo?.version);
+  const externalGuidedInstall = kimiInstallMode === "externalGuided";
   const appUpdateActionLabel = !appUpdateSupported
     ? "仅安装版支持"
     : appUpdateStatus === "checking"
@@ -627,6 +672,7 @@ export function ControlCenterView({
   const appUpdatePrimaryAction = (
     <Button
       type="button"
+      variant={appUpdateAvailable ? "default" : "outline"}
       icon={appUpdateAvailable ? <Download size={15} /> : <RefreshCcw size={15} />}
       className="cc-action-btn"
       onClick={() => void (appUpdateAvailable ? onInstallAppUpdate() : onCheckAppUpdate())}
@@ -636,15 +682,21 @@ export function ControlCenterView({
     </Button>
   );
   const installPrimaryTaskId: InstallTaskId = installReady ? "upgrade_kimi" : "quick_install_core";
-  const installPrimaryActionLabel = !installReady
-    ? "一键安装 Kimi Code"
-    : kimiCodeUpdatePresentation.primaryLabel;
+  const installPrimaryActionLabel = externalGuidedInstall && !installReady
+    ? "查看安装说明"
+    : !installReady
+      ? "一键安装 Kimi Code"
+      : kimiCodeUpdatePresentation.primaryLabel;
   const installBarActionLabel = !installReady
     ? installPrimaryActionLabel
     : kimiCodeUpdatePresentation.barLabel;
   async function handleStartOnboardingInstallTask(taskId: InstallTaskId) {
     setExpandedOnboardingCard("install");
-    if (!installPrerequisitesReady && (taskId === "quick_install_core" || taskId === "upgrade_kimi")) {
+    if (
+      !externalGuidedInstall &&
+      !installPrerequisitesReady &&
+      (taskId === "quick_install_core" || taskId === "upgrade_kimi")
+    ) {
       return;
     }
     await onStartInstallTask(taskId);
@@ -654,14 +706,24 @@ export function ControlCenterView({
       type="button"
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
       className="cc-action-btn"
-      onClick={() => void handleStartOnboardingInstallTask(installPrimaryTaskId)}
+      onClick={() => {
+        if (externalGuidedInstall && !installReady) {
+          setExpandedOnboardingCard("install");
+          return;
+        }
+        void handleStartOnboardingInstallTask(installPrimaryTaskId);
+      }}
       disabled={
         installBusy ||
         installProbeBusy ||
         (installReady && kimiCodeUpdatePresentation.disabled) ||
-        !installPrerequisitesReady
+        (!externalGuidedInstall && !installPrerequisitesReady)
       }
-      title={installPrerequisiteIssues.join("；") || undefined}
+      title={
+        externalGuidedInstall
+          ? undefined
+          : installPrerequisiteIssues.join("；") || undefined
+      }
     >
       {installPrimaryActionLabel}
     </Button>
@@ -684,6 +746,7 @@ export function ControlCenterView({
   const workDirPrimaryAction = (
     <Button
       type="button"
+      variant={workDirDirty ? "default" : "outline"}
       icon={workDirDirty ? <Check size={15} /> : <FolderOpen size={15} />}
       className="cc-action-btn"
       onClick={() =>
@@ -715,6 +778,7 @@ export function ControlCenterView({
   const bridgePrimaryAction = (
     <Button
       type="button"
+      variant={visibleBridgeConnectors.length === 0 ? "default" : "outline"}
       icon={<Plus size={15} />}
       className="cc-action-btn"
       onClick={() => {
@@ -732,6 +796,7 @@ export function ControlCenterView({
   const logsPrimaryAction = (
     <Button
       type="button"
+      variant="outline"
       icon={<FolderOpen size={15} />}
       className="cc-action-btn"
       onClick={() => void onOpenLogs()}
@@ -817,6 +882,23 @@ export function ControlCenterView({
     });
   }, []);
 
+  const handleWorkspaceHubRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, workspace_hub: groups }));
+  }, []);
+  const handleScheduleRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, schedule: groups }));
+  }, []);
+  const handleSkillRailGroupsChange = useCallback((groups: UnifiedRailGroup[]) => {
+    setContextualRailGroupsBySection((current) => ({ ...current, skill_center: groups }));
+  }, []);
+
+  useEffect(() => {
+    setVisitedControlPages((current) => {
+      if (current.has(activePreservedPage)) return current;
+      return new Set([...current, activePreservedPage]);
+    });
+  }, [activePreservedPage]);
+
   const handleRailItemActivate = useCallback((itemId: string) => {
     setActiveFocusId(itemId);
     if (focusClearTimerRef.current !== null) {
@@ -833,7 +915,7 @@ export function ControlCenterView({
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(focusDomId(activeFocusId))?.scrollIntoView({
         block: "nearest",
-        behavior: "smooth",
+        behavior: "auto",
       });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -1244,7 +1326,7 @@ export function ControlCenterView({
   const showStartupFailureDiagnostics = shouldShowStartupFailureDiagnostics(status, diagnostics);
   const startupFailureMessage = getStartupFailureMessage(status, diagnostics);
   const doctorSummary = getKimiDoctorSummary(kimiDoctorResult, showStartupFailureDiagnostics);
-  const onboardingSteps: Array<{
+  type OnboardingStepView = {
     id: OnboardingCardId;
     index: string;
     title: string;
@@ -1252,7 +1334,8 @@ export function ControlCenterView({
     statusTone: "neutral" | "success" | "warning" | "danger";
     complete: boolean;
     primaryAction: ReactNode;
-  }> = [
+  };
+  const onboardingSteps: OnboardingStepView[] = [
     {
       id: "app_update",
       index: "01",
@@ -1271,15 +1354,18 @@ export function ControlCenterView({
       complete: installReady,
       primaryAction: installPrimaryAction,
     },
-    {
-      id: "context_menu",
-      index: "03",
-      title: "资源管理器右键菜单",
-      actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
-      statusTone: contextMenuStatusTone,
-      complete: contextMenuReady,
-      primaryAction: contextMenuPrimaryAction,
-    },
+    ...createExplorerContextMenuSteps<OnboardingStepView>(
+      supportsExplorerContextMenu,
+      () => ({
+        id: "context_menu" as const,
+        index: "03",
+        title: "资源管理器右键菜单",
+        actionLabel: runtimeContextMenuEnabled ? "已启用" : "启用右键菜单",
+        statusTone: contextMenuStatusTone,
+        complete: contextMenuReady,
+        primaryAction: contextMenuPrimaryAction,
+      }),
+    ),
     {
       id: "auth",
       index: "04",
@@ -1343,20 +1429,50 @@ export function ControlCenterView({
       },
     }));
 
-    return [
+    const pageGroups: UnifiedRailGroup[] = [
       {
         id: "sections",
         label: "页面",
         items: topLevelItems,
       },
     ];
+
+    if (assistantSettingsSectionActive) return pageGroups;
+    return [...pageGroups, ...(contextualRailGroupsBySection[activeControlSection] ?? [])];
   }, [
     activeControlSection,
     handleSelectControlSection,
     assistantSettingsSectionActive,
+    contextualRailGroupsBySection,
   ]);
 
   function renderOnboardingSection() {
+    const settingsGroups: Array<{
+      id: string;
+      title: string;
+      stepIds: OnboardingCardId[];
+    }> = [
+      {
+        id: "updates",
+        title: "更新与运行",
+        stepIds: ["app_update", "install", "auth"],
+      },
+      {
+        id: "workspace",
+        title: "工作目录与通道",
+        stepIds: [
+          "work_dir",
+          ...(supportsExplorerContextMenu ? (["context_menu"] as OnboardingCardId[]) : []),
+          "bridge",
+        ],
+      },
+      {
+        id: "diagnostics",
+        title: "诊断与日志",
+        stepIds: ["doctor", "logs"],
+      },
+    ];
+
     function renderStepDetail(stepId: OnboardingCardId) {
       if (stepId === "app_update") {
         return (
@@ -1416,30 +1532,70 @@ export function ControlCenterView({
               <p className="cc-config-error">{kimiCodeUpdateError}</p>
             ) : null}
             <div className="cc-step-secondary-actions">{installSecondaryAction}</div>
-            <InstallFlowTaskContent
-              session={installSessionSnapshot}
-              probe={installProbe}
-              probeBusy={installProbeBusy}
-              probeMessage={installMessage}
-              backendState={status?.state ?? null}
-              installSource={installSource}
-              installSettings={installSettings}
-              installSettingsBusy={installSettingsBusy}
-              installMirrorHealthReport={installMirrorHealthReport}
-              installMirrorHealthBusy={installMirrorHealthBusy}
-              powershellPreflight={powershellPreflight}
-              kimiPathInput={kimiPathInput}
-              detectedKimiPath={installPathDisplay}
-              onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
-              onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
-              onSourceChange={onInstallSourceChange}
-              onSaveInstallSettings={onSaveInstallSettings}
-              onStartTask={handleStartOnboardingInstallTask}
-              onRestartBackend={onRetry}
-              onPickKimiPath={onPickKimiPath}
-              onSavePathAndRetry={onSavePathAndRetry}
-              restartBusy={actionBusy}
-            />
+            {externalGuidedInstall && !installReady ? (
+              <>
+                <MacKimiInstallGuidance
+                  onOpenTerminal={onOpenSystemTerminal}
+                  onOpenDocs={() =>
+                    onOpenExternalUrl(
+                      "https://github.com/MoonshotAI/kimi-code/blob/main/docs/en/guides/getting-started.md#installation",
+                    )
+                  }
+                />
+                <div className="cc-step-secondary-actions">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="cc-action-btn"
+                    onClick={() => void onPickKimiPath()}
+                  >
+                    选择 Kimi 路径
+                  </Button>
+                  <Button
+                    type="button"
+                    className="cc-action-btn"
+                    onClick={() => void onSavePathAndRetry()}
+                    disabled={!kimiPathInput.trim() || actionBusy}
+                  >
+                    保存并重试
+                  </Button>
+                </div>
+              </>
+            ) : externalGuidedInstall ? (
+              <MacKimiUpgradePanel
+                session={installSessionSnapshot}
+                detectedKimiPath={installPathDisplay}
+                upgradeLabel={kimiCodeUpdatePresentation.primaryLabel}
+                upgradeDisabled={kimiCodeUpdatePresentation.disabled || installProbeBusy}
+                onUpgrade={() => handleStartOnboardingInstallTask("upgrade_kimi")}
+                onCancel={onCancelInstallTask}
+              />
+            ) : (
+              <InstallFlowTaskContent
+                session={installSessionSnapshot}
+                probe={installProbe}
+                probeBusy={installProbeBusy}
+                probeMessage={installMessage}
+                backendState={status?.state ?? null}
+                installSource={installSource}
+                installSettings={installSettings}
+                installSettingsBusy={installSettingsBusy}
+                installMirrorHealthReport={installMirrorHealthReport}
+                installMirrorHealthBusy={installMirrorHealthBusy}
+                powershellPreflight={powershellPreflight}
+                kimiPathInput={kimiPathInput}
+                detectedKimiPath={installPathDisplay}
+                onRefreshPowerShellPreflight={onRefreshPowerShellPreflight}
+                onRefreshMirrorHealth={onRefreshInstallMirrorHealth}
+                onSourceChange={onInstallSourceChange}
+                onSaveInstallSettings={onSaveInstallSettings}
+                onStartTask={handleStartOnboardingInstallTask}
+                onRestartBackend={onRetry}
+                onPickKimiPath={onPickKimiPath}
+                onSavePathAndRetry={onSavePathAndRetry}
+                restartBusy={actionBusy}
+              />
+            )}
           </div>
         );
       }
@@ -1478,6 +1634,16 @@ export function ControlCenterView({
                 disabled={kimiDoctorBusy}
               >
                 {kimiDoctorBusy ? "正在运行" : "运行 Kimi Doctor"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                icon={<RefreshCcw size={15} />}
+                className="cc-action-btn"
+                onClick={() => void onRetry()}
+                disabled={actionBusy}
+              >
+                {status?.runtimeOwnership === "reused_external" ? "重新连接后端" : "重启后端"}
               </Button>
               <Button
                 type="button"
@@ -1533,55 +1699,76 @@ export function ControlCenterView({
         id={focusDomId("onboarding")}
         className={`cc-image-detail-page cc-settings-page ${activeFocusId === "onboarding" ? "is-focus" : ""}`}
       >
+        <header className="cc-image-detail-top cc-settings-page-head">
+          <div>
+            <h1>小助手设置</h1>
+          </div>
+        </header>
         <section className="cc-onboarding-steps cc-settings-bars">
-          <ul className="cc-image-row-list">
-            {onboardingSteps.map((step) => {
-              const expanded = expandedOnboardingCard === step.id;
-              return (
-                <li
-                  key={step.id}
-                  id={focusDomId(`onboarding:${step.id}`)}
-                  className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
-                >
-                  <div className="cc-settings-bar-head">
-                    <button
-                      type="button"
-                      className="cc-settings-bar-toggle"
-                      onClick={() => {
-                        const next = expanded ? null : step.id;
-                        setExpandedOnboardingCard(next);
-                        if (next === "auth") void onRefreshOnboarding();
-                        if (next === "doctor") void onRefreshDiagnostics();
-                        if (next === "logs") {
-                          void Promise.all([onRefreshDiagnostics(), onRefreshBridgeLogTail()]);
-                        }
-                      }}
-                      aria-expanded={expanded}
-                      aria-controls={`cc-settings-detail-${step.id}`}
-                    >
-                      <div>
-                        <div className="cc-image-row-title">
-                          <span className={`cc-dot ${step.statusTone}`} />
-                          {step.title}
+          {settingsGroups.map((group) => (
+            <section key={group.id} className="cc-settings-group">
+              <div className="cc-settings-group-title">
+                <h2>{group.title}</h2>
+              </div>
+              <ul className="cc-image-row-list cc-settings-group-list">
+                {group.stepIds
+                  .map((stepId) => onboardingSteps.find((item) => item.id === stepId))
+                  .filter((step): step is OnboardingStepView => Boolean(step))
+                  .map((step) => {
+                    const expanded = expandedOnboardingCard === step.id;
+                    return (
+                      <li
+                        key={step.id}
+                        id={focusDomId(`onboarding:${step.id}`)}
+                        className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
+                      >
+                        <div className="cc-settings-bar-head">
+                          <button
+                            type="button"
+                            className="cc-settings-bar-toggle"
+                            onClick={() => {
+                              const next = expanded ? null : step.id;
+                              setExpandedOnboardingCard(next);
+                              if (next === "auth") void onRefreshOnboarding();
+                              if (next === "doctor") void onRefreshDiagnostics();
+                              if (next === "logs") {
+                                void Promise.all([
+                                  onRefreshDiagnostics(),
+                                  onRefreshBridgeLogTail(),
+                                ]);
+                              }
+                            }}
+                            aria-expanded={expanded}
+                            aria-controls={`cc-settings-detail-${step.id}`}
+                          >
+                            <div>
+                              <div className="cc-image-row-title">
+                                <span className={`cc-dot ${step.statusTone}`} />
+                                {step.title}
+                              </div>
+                              <div className="cc-image-row-desc">{step.actionLabel}</div>
+                            </div>
+                            <ChevronRight
+                              size={16}
+                              className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
+                            />
+                          </button>
+                          <div className="cc-image-row-actions">{step.primaryAction}</div>
                         </div>
-                        <div className="cc-image-row-desc">{step.actionLabel}</div>
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
-                      />
-                    </button>
-                    <div className="cc-image-row-actions">
-                      {step.primaryAction}
-                    </div>
-                  </div>
-                  {expanded ? (
-                    <div id={`cc-settings-detail-${step.id}`} className="cc-settings-bar-detail">{renderStepDetail(step.id)}</div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
+                        {expanded ? (
+                          <div
+                            id={`cc-settings-detail-${step.id}`}
+                            className="cc-settings-bar-detail"
+                          >
+                            {renderStepDetail(step.id)}
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </section>
+          ))}
         </section>
       </section>
     );
@@ -1830,7 +2017,7 @@ export function ControlCenterView({
             <ControlCenterStatusBadge
               tone={selectedInstalledSkill.trusted ? "success" : "warning"}
             >
-              {selectedInstalledSkill.trusted ? "已信任" : "未信任"}
+              {selectedInstalledSkill.trusted ? "已信任" : "待配置"}
             </ControlCenterStatusBadge>
             <Button
               type="button"
@@ -1920,9 +2107,9 @@ export function ControlCenterView({
         ) : null}
         {selectedDiscoveredRecord ? (
           <>
-            <ControlCenterStatusBadge tone="warning">待导入</ControlCenterStatusBadge>
+            <ControlCenterStatusBadge tone="warning">待配置</ControlCenterStatusBadge>
             {selectedDiscoveredRecord.hasScripts ? (
-              <ControlCenterStatusBadge tone="neutral">包含 scripts/</ControlCenterStatusBadge>
+              <ControlCenterTag>包含 scripts/</ControlCenterTag>
             ) : null}
             <Button
               type="button"
@@ -1954,30 +2141,24 @@ export function ControlCenterView({
               },
             ]}
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="cc-action-btn"
-            onClick={() => onSkillCenterSectionChange("workspace_insights")}
+          <ControlCenterActionMenu
+            label="Skill 中心更多操作"
             disabled={skillCenterBusy}
-          >
-            工作区目标
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            icon={<RefreshCcw size={14} />}
-            onClick={() => {
-              void (async () => {
-                await onRefreshSkillCenterState();
-                await onRefreshSkillDiscoveryState();
-              })();
-            }}
-            disabled={skillCenterBusy}
-            aria-label="刷新 Skill 中心"
-            title="刷新 Skill 中心"
+            items={[
+              {
+                label: "管理工作区目标",
+                onSelect: () => onSkillCenterSectionChange("workspace_insights"),
+              },
+              {
+                label: "刷新技能目录",
+                onSelect: () => {
+                  void (async () => {
+                    await onRefreshSkillCenterState();
+                    await onRefreshSkillDiscoveryState();
+                  })();
+                },
+              },
+            ]}
           />
         </div>
       ) : (
@@ -2120,6 +2301,8 @@ export function ControlCenterView({
             onFilterChange={onSkillCenterFilterChange}
             detailOnly
             activeFocusId={activeFocusId}
+            onRailGroupsChange={handleSkillRailGroupsChange}
+            onOpenExternalUrl={onOpenExternalUrl}
           />
           </div>
         </div>
@@ -2127,10 +2310,21 @@ export function ControlCenterView({
     );
   }
 
-  function closeBridgeConnectorSecretsTask() {
+  async function closeBridgeConnectorSecretsTask() {
     const hasPendingDraft = Object.values(bridgeConnectorSecretDraft).some((value) => value.trim());
-    if (hasPendingDraft && !window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？")) {
-      return;
+    if (hasPendingDraft) {
+      let confirmed = false;
+      try {
+        confirmed = await ask("当前凭据草稿尚未保存，返回后将丢失这些内容。", {
+          title: "放弃未保存的凭据",
+          kind: "warning",
+          okLabel: "放弃更改",
+          cancelLabel: "继续编辑",
+        });
+      } catch {
+        confirmed = window.confirm("当前凭据草稿尚未保存，确定返回上一层吗？");
+      }
+      if (!confirmed) return;
     }
     setBridgeConnectorSecretDraft(createEmptyBridgeConnectorSecretDraft());
     closeSettingsTask();
@@ -3053,10 +3247,12 @@ export function ControlCenterView({
       "还没有安装输出。";
     return (
       <div className="cc-unified-rail-footer-stack">
-        {assistantSettingsSectionActive && expandedOnboardingCard === "install" ? (
+        {assistantSettingsSectionActive &&
+        expandedOnboardingCard === "install" &&
+        (!externalGuidedInstall || installSessionSnapshot.taskId === "upgrade_kimi") ? (
           <div className="cc-rail-install-terminal">
             <div className="cc-rail-install-terminal-head">
-              <strong>内置终端</strong>
+              <strong>{externalGuidedInstall ? "升级日志" : "内置终端"}</strong>
               <span>{installSessionSnapshot.status}</span>
             </div>
             <pre>{installConsoleText}</pre>
@@ -3068,16 +3264,20 @@ export function ControlCenterView({
           actionBusy={actionBusy}
           onEnter={onCompleteOnboarding}
         />
-        <Button
-          type="button"
-          variant="outline"
-          className="cc-rail-restart-btn"
-          icon={<RefreshCcw size={15} />}
-          onClick={() => void onRetry()}
-          disabled={actionBusy}
-        >
-          {status?.runtimeOwnership === "reused_external" ? "重新连接后端" : "重启后端"}
-        </Button>
+        <div className="cc-rail-runtime-status" aria-live="polite">
+          <span className={`cc-dot ${status?.state === "running" ? "success" : status?.state === "crashed" ? "danger" : "neutral"}`} />
+          <span>
+            {status?.state === "running"
+              ? status.runtimeOwnership === "reused_external"
+                ? "已连接外部后端"
+                : "后端运行中"
+              : status?.state === "starting"
+                ? "后端启动中"
+                : status?.state === "crashed"
+                  ? "后端异常"
+                  : "后端已停止"}
+          </span>
+        </div>
       </div>
     );
   }
@@ -3092,6 +3292,7 @@ export function ControlCenterView({
         expandedGroups={expandedUnifiedRailGroups}
         onToggleGroup={handleToggleUnifiedRailGroup}
         onExit={onClose}
+        exitLabel={surface === "modal" ? "关闭" : "退出"}
         onItemActivate={handleRailItemActivate}
         footer={renderUnifiedRailFooter()}
       />
@@ -3103,11 +3304,11 @@ export function ControlCenterView({
               isOnboardingSection ? "cc-main-onboarding" : ""
             }`}
           >
-            {activeTask ? (
-              renderActiveTask()
-            ) : (
-              <>
-                {activeControlSection === "workspace_hub" ? (
+            {activeTask ? renderActiveTask() : null}
+            {visitedControlPages.has("workspace_hub") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "workspace_hub"}
+              >
                   <WorkspaceHubPanel
                     onOpenWorkspace={onOpenFolder}
                     onOpenSchedule={() => setActiveControlSection("schedule")}
@@ -3118,30 +3319,54 @@ export function ControlCenterView({
                     }}
                     detailOnly
                     activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleWorkspaceHubRailGroupsChange}
+                    onOpenExternalUrl={onOpenExternalUrl}
                   />
-                ) : null}
-                {activeControlSection === "schedule" ? (
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("schedule") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "schedule"}
+              >
                   <WorkspaceSchedulePanel
                     detailOnly
                     activeFocusId={activeFocusId}
+                    onRailGroupsChange={handleScheduleRailGroupsChange}
                   />
-                ) : null}
-                {assistantSettingsSectionActive ? (
-                  renderOnboardingSection()
-                ) : null}
-                {activeControlSection === "skill_center" ? renderSkillCenterSection() : null}
-              </>
-            )}
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("settings") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "settings"}
+              >
+                {renderOnboardingSection()}
+              </ControlCenterPreservedPage>
+            ) : null}
+            {visitedControlPages.has("skill_center") ? (
+              <ControlCenterPreservedPage
+                active={!activeTask && activePreservedPage === "skill_center"}
+              >
+                {renderSkillCenterSection()}
+              </ControlCenterPreservedPage>
+            ) : null}
           </div>
         </div>
       </div>
       {bridgeDeleteConfirm ? (
         <div className="main-close-decision-overlay" role="presentation">
           <div
+            ref={bridgeDeleteDialogRef}
             className="main-close-decision-card"
             role="dialog"
             aria-modal="true"
             aria-label={`删除机器人 ${bridgeDeleteConfirm.connectorLabel}`}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              closeBridgeDeleteConfirm();
+            }}
           >
             <h3>删除机器人</h3>
             <p>
@@ -3153,6 +3378,7 @@ export function ControlCenterView({
               <Button
                 type="button"
                 variant="outline"
+                data-dialog-autofocus
                 onClick={closeBridgeDeleteConfirm}
                 disabled={bridgeBusy}
               >

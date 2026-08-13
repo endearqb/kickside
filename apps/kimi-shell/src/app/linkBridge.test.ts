@@ -157,7 +157,7 @@ describe("link bridge iframe source checks", () => {
     );
   });
 
-  it("injects pane theme metadata and head style from theme sync messages", () => {
+  it("applies the Kimi color-scheme contract from pane theme sync messages", () => {
     window.eval(frameWorkspaceBridgeScript);
 
     window.dispatchEvent(
@@ -166,17 +166,32 @@ describe("link bridge iframe source checks", () => {
       }),
     );
 
+    expect(window.localStorage.getItem("kimi-web.color-scheme")).toBe("dark");
+    expect(window.localStorage.getItem("kimi-theme")).toBe("dark");
+    expect(document.documentElement.dataset.colorScheme).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.style.colorScheme).toBe("dark");
     expect(document.documentElement.dataset.kimiSidekickTheme).toBe("dark");
     expect(document.body.dataset.kimiSidekickTheme).toBe("dark");
     expect(document.head.querySelector('meta[name="color-scheme"]')?.getAttribute("content")).toBe(
       "dark",
     );
     expect(document.head.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe(
-      "#101418",
+      "#121212",
     );
     expect(document.getElementById("kimi-sidekick-pane-theme")?.textContent).toContain(
       "color-scheme: dark",
     );
+
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { source: "kimi-shell-theme-sync", theme: "light" },
+      }),
+    );
+
+    expect(window.localStorage.getItem("kimi-web.color-scheme")).toBe("light");
+    expect(document.documentElement.dataset.colorScheme).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
   it("parses only session messages from the exact iframe and origin", () => {

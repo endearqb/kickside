@@ -196,14 +196,18 @@ fn cleanup_replaced_session_skills(
 }
 
 pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u16) {
-    start_session_poller(app.clone(), generation, workspace_port);
-
     {
         let state = app.state::<AppState>();
         let lock = state.runtime.lock();
         let Ok(mut runtime) = lock else {
             return;
         };
+        if runtime.generation != generation
+            || runtime.state != BackendState::Running
+            || runtime.workspace_port != Some(workspace_port)
+        {
+            return;
+        }
         if runtime.pending_workspace_bootstraps.is_empty() {
             if let Some(work_dir) = runtime.effective_work_dir.clone() {
                 runtime
@@ -218,6 +222,7 @@ pub fn handle_backend_ready(app: &AppHandle, generation: u64, workspace_port: u1
             }
         }
     }
+    start_session_poller(app.clone(), generation, workspace_port);
     kick_workspace_bootstrap_worker(app);
 }
 
@@ -409,12 +414,12 @@ fn process_bootstrap_session(
     let existing_session = if force_create_new {
         None
     } else {
-        match fetch_sessions(&app) {
+        match fetch_sessions(app) {
             Ok(sessions) => select_latest_session_for_work_dir(&sessions, &work_dir),
             Err(error) => {
-                maybe_capture_workspace_auth_failure(&app, &error);
+                maybe_capture_workspace_auth_failure(app, &error);
                 log_manager::append_line(
-                        &app,
+                        app,
                         format!(
                             "workspace bootstrap failed to list sessions; fallback to create (source={source}, work_dir={}): {error}",
                             work_dir.display()
@@ -427,7 +432,7 @@ fn process_bootstrap_session(
 
     let (session, snapshot_source) = if let Some(snapshot) = existing_session {
         log_manager::append_line(
-            &app,
+            app,
             format!(
                 "bootstrap_resume_existing source={source} work_dir={} session_id={}",
                 work_dir.display(),
@@ -439,22 +444,22 @@ fn process_bootstrap_session(
         if !is_generation_alive(app, generation) {
             return false;
         }
-        let response = create_session_for_work_dir(&app, &work_dir);
+        let response = create_session_for_work_dir(app, &work_dir);
         let created = match response {
             Ok(session) => session,
             Err(error) => {
                 if !is_generation_alive(app, generation) {
                     return false;
                 }
-                maybe_capture_workspace_auth_failure(&app, &error);
+                maybe_capture_workspace_auth_failure(app, &error);
                 let error_message = format!(
                         "workspace bootstrap session creation failed (source={source}, work_dir={}): {error}",
                         work_dir.display()
                     );
-                log_manager::append_line(&app, error_message.clone());
+                log_manager::append_line(app, error_message.clone());
                 if force_create_new {
                     emit_bootstrap_open_request_error(
-                        &app,
+                        app,
                         &source,
                         "create_session_for_work_dir",
                         &error_message,
@@ -464,7 +469,7 @@ fn process_bootstrap_session(
             }
         };
         log_manager::append_line(
-            &app,
+            app,
             format!(
                 "bootstrap_create_new source={source} work_dir={} session_id={}",
                 work_dir.display(),
@@ -474,7 +479,7 @@ fn process_bootstrap_session(
         (session_snapshot_from_api(&created), "bootstrap_create_new")
     };
 
-    if !is_generation_alive(&app, generation) {
+    if !is_generation_alive(app, generation) {
         return false;
     }
 

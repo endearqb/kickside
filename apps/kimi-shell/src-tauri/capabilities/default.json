@@ -15,6 +15,7 @@
         "core:webview:allow-set-webview-size",
         "core:webview:allow-webview-close",
         "dialog:allow-open",
+        "dialog:allow-ask",
         "main-command-access"
       ]
     },
@@ -47,6 +48,18 @@
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-close",
+        "core:window:allow-is-maximized"
+      ]
+    },
+    {
+      "identifier": "macos-overlay-titlebar",
+      "description": "macOS-only permission required by the main Overlay titlebar drag region.",
+      "local": true,
+      "platforms": ["macOS"],
+      "windows": ["main"],
+      "permissions": [
+        "core:window:allow-start-dragging",
+        "core:window:allow-toggle-maximize",
         "core:window:allow-is-maximized"
       ]
     }

@@ -1215,7 +1215,8 @@
 - [x] 将 ad-hoc/未签名 macOS 例外限定为 `v0.1.24`，并保留 updater 签名门禁。
 - [x] 完成必要本地 gate 与 Windows NSIS/MSI 构建。
 - [x] 修复 main CI 在 macOS 暴露的 stop endpoint 异步测试竞态。
-- [ ] 推送 `main` 和 `v0.1.24`，确认 GitHub Release 工作流与资产。
+- [x] 推送 `main` 并通过 Windows/macOS CI。
+- [ ] 推送 `v0.1.24`，确认 GitHub Release 工作流与资产。
 - [ ] 用户在 Windows 安装包和 Apple Silicon Mac 上完成 G3 手工验证。
 
 ## Review
@@ -1223,3 +1224,4 @@
 - 版本已同步到 `0.1.24`；Rust fmt/clippy/265 项测试、TypeScript、230 项前端测试、Updater manifest 测试和安全 gate 均通过。
 - 本地已生成 `kimi sidekick_0.1.24_x64-setup.exe` 与 `kimi sidekick_0.1.24_x64_en-US.msi`，主程序 ProductVersion 为 `0.1.24`。
 - Tauri `--no-sign` 会同时跳过 updater `.sig`，因此 Release 不使用该参数；macOS 改用官方支持的 `signingIdentity: "-"` ad-hoc identity，既不需要 Apple Secrets，也保留 Tauri updater 签名。
+- main CI 八个 jobs 全部通过；macOS Go stop endpoint 竞态修复已由 runner 复核。

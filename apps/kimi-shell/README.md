@@ -111,7 +111,7 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
-推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。除 Tauri updater 私钥外，macOS 还要求 Apple Certificate、签名 identity、Apple ID/app-specific password 与 Team ID；任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
+推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。当前 `0.1.24` 过渡版本的 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc 签名，不包含 Developer ID 身份且不公证，Release 顶部必须标注“⚠️ macOS 版本未签名”；两端 updater artifact 仍使用 Tauri updater 私钥签名。恢复常规公开发布前，必须重新启用 Developer ID 签名、公证、stapling 及对应验证。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
 
 ## 安装包位置
 
@@ -123,6 +123,8 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 - `src-tauri/target/release/bundle/msi/kimi sidekick_<version>_x64_en-US.msi`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/kimi sidekick.app`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg`
+
+`src-tauri/tauri.macos.unsigned.conf.json` 仅供 `v0.1.24` 过渡 Release 使用，以 ad-hoc identity 保证 Apple Silicon 可运行；它不是 Developer ID 签名配置，后续常规版本不得继续使用。
 
 ## 发布资料
 

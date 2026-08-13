@@ -21,12 +21,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./apps/kimi-shell/package.json').version")"
@@ -34,15 +28,13 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package version v$version." >&2
             exit 1
           }
+          test "$GITHUB_REF_NAME" = "v0.1.24" || {
+            echo "The unsigned macOS release exception is restricted to v0.1.24. Restore the signed release workflow before publishing another version." >&2
+            exit 1
+          }
           for name in \
             TAURI_SIGNING_PRIVATE_KEY \
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD \
-            APPLE_CERTIFICATE \
-            APPLE_CERTIFICATE_PASSWORD \
-            APPLE_SIGNING_IDENTITY \
-            APPLE_ID \
-            APPLE_PASSWORD \
-            APPLE_TEAM_ID; do
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             test -n "${!name:-}" || {
               echo "Required release secret $name is not configured." >&2
               exit 1
@@ -58,6 +50,7 @@ jobs:
               --draft \
               --verify-tag \
               --generate-notes \
+              --notes $'⚠️ **macOS 版本未签名**\n\n此版本的 macOS 安装包未进行 Apple Developer ID 签名或公证，首次打开时可能需要在“系统设置 → 隐私与安全性”中手动允许。Windows/macOS 自动更新产物仍保留 Tauri updater 签名校验。' \
               --title "Kimi Sidekick $GITHUB_REF_NAME"
           fi
 
@@ -74,8 +67,8 @@ jobs:
             release_channel: ad_hoc
           - label: macOS Apple Silicon
             os: macos-15
-            args: --target aarch64-apple-darwin --bundles app,dmg
-            release_channel: developer_id
+            args: --target aarch64-apple-darwin --bundles app,dmg --config src-tauri/tauri.macos.unsigned.conf.json
+            release_channel: ad_hoc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -102,18 +95,12 @@ jobs:
         working-directory: apps/kimi-shell
         run: pnpm install --frozen-lockfile
 
-      - name: Build, sign, notarize, and upload bundles
+      - name: Build and upload bundles
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MACOSX_DEPLOYMENT_TARGET: "13.0"
           KIMI_RELEASE_CHANNEL: ${{ matrix.release_channel }}
         with:
@@ -138,6 +125,15 @@ jobs:
           lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
           lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
           codesign --verify --deep --strict "$app_path"
+          signature_details="$(codesign -dvv "$app_path" 2>&1)"
+          grep -q 'Signature=adhoc' <<<"$signature_details" || {
+            echo "Expected an ad-hoc macOS signature for this unsigned release." >&2
+            exit 1
+          }
+          if grep -q '^Authority=' <<<"$signature_details"; then
+            echo "Unexpected Apple signing authority on the unsigned macOS release." >&2
+            exit 1
+          fi
           test "$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')" = "1"
           test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz' | wc -l | tr -d ' ')" = "1"
           test "$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz.sig' | wc -l | tr -d ' ')" = "1"

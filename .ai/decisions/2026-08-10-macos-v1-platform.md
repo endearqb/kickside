@@ -32,8 +32,14 @@ surface are stale: Kimi Code 0.34.0 is current, and Agent Room is retired by an 
   reused external runtime.
 - Package the Go IM Bridge through Tauri `externalBin` with target-triple source artifacts. The
   bundled executable keeps the stable runtime name `kimi-im-bridge` / `kimi-im-bridge.exe`.
-- Local development may use unsigned/ad-hoc `.app` artifacts. Public distribution requires a
+- Local development may use unsigned/ad-hoc `.app` artifacts. Normal public distribution requires a
   Developer ID signed, hardened, notarized and stapled DMG plus a signed Tauri updater artifact.
+  As a temporary `0.1.24` exception explicitly requested by the product owner, GitHub Release may
+  publish an Apple Silicon `.app` / DMG with only the platform-required ad-hoc identity when the
+  release body starts with
+  “⚠️ macOS 版本未签名”; the Tauri updater artifact must remain signed. This exception expires once
+  Apple signing/notarization credentials are configured and must not silently carry into later
+  release workflow changes.
 - Keep the existing bundle identifier `com.kimi.shell` for this implementation. Changing application
   identity and migrating installed settings is a separate one-way decision.
 - Do not restore Agent Room for macOS. Its frozen compatibility tombstones remain governed by the
@@ -58,8 +64,9 @@ surface are stale: Kimi Code 0.34.0 is current, and Agent Room is retired by an 
 - macOS 13 uses the default shared WKWebView data store; per-pane `dataDirectory` is not requested on
   macOS because Tauri does not support it there. Raising the minimum to macOS 14 and adopting stable
   `dataStoreIdentifier` values requires a later decision and migration plan.
-- Developer ID credentials, notarization and real updater E2E remain external release gates. Without
-  those credentials the implementation can reach G0/G1 and an unsigned local `.app`, not “released”.
+- Developer ID credentials, notarization and real updater E2E remain external gates for a trusted
+  macOS release. The explicitly labeled `0.1.24` ad-hoc/unsigned exception may be distributed for testing,
+  but it must not be described as signed, notarized, Gatekeeper-trusted or production-ready.
 - The additive `get_platform_capabilities` command and target-triple sidecar naming are published
   contracts and must remain backward compatible.
 

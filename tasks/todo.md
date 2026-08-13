@@ -1198,3 +1198,27 @@
 - 检测缺失不是 latest endpoint 问题，而是 macOS 安装探针仍使用 Windows `kimi.exe` 候选；统一 locator 后无需前端特殊分支。
 - 上游 native 自更新契约已变化，退出码 0 只表示提示完成，不表示升级完成；现在以官方 manifest、checksum 和精确版本复检为唯一成功依据。
 - T3 “采用平台边界”：保留 macOS 用户确认、Unix 进程组取消与 owned-only 后端停止；不执行下载脚本，不引入新依赖。
+# 0.1.24 双平台过渡发布
+
+## 任务契约
+
+- 用户目标：将 Windows/macOS Kimi 修复合并到 `main`，版本号提升到 `0.1.24`，构建 Windows NSIS/MSI，并发布明确标注的未签名 macOS 过渡版。
+- 直接交付物：`main` 合并与版本提交、Windows 本地 NSIS/MSI、`v0.1.24` tag 及同时包含 Windows/macOS 资产的 GitHub Release。
+- 影响范围：版本元数据、Release workflow、macOS 发布 ADR/验证门禁与发布记录。
+- 非目标：不伪造 Apple Developer ID 签名或公证结论；不取消 Tauri updater 签名校验；不扩展 Intel/Universal macOS。
+- 验收：三处版本与 tag 均为 `0.1.24`；本地 Windows NSIS/MSI 构建成功；Release 顶部显示“⚠️ macOS 版本未签名”；macOS job 验证产物未代码签名，两端 updater `.sig` 与唯一 `latest.json` 仍存在。
+
+## Checklist
+
+- [x] 快进合并修复分支到本地 `main`。
+- [x] 同步 package/Cargo/Tauri 版本到 `0.1.24`。
+- [x] 将 ad-hoc/未签名 macOS 例外限定为 `v0.1.24`，并保留 updater 签名门禁。
+- [x] 完成必要本地 gate 与 Windows NSIS/MSI 构建。
+- [ ] 推送 `main` 和 `v0.1.24`，确认 GitHub Release 工作流与资产。
+- [ ] 用户在 Windows 安装包和 Apple Silicon Mac 上完成 G3 手工验证。
+
+## Review
+
+- 版本已同步到 `0.1.24`；Rust fmt/clippy/265 项测试、TypeScript、230 项前端测试、Updater manifest 测试和安全 gate 均通过。
+- 本地已生成 `kimi sidekick_0.1.24_x64-setup.exe` 与 `kimi sidekick_0.1.24_x64_en-US.msi`，主程序 ProductVersion 为 `0.1.24`。
+- Tauri `--no-sign` 会同时跳过 updater `.sig`，因此 Release 不使用该参数；macOS 改用官方支持的 `signingIdentity: "-"` ad-hoc identity，既不需要 Apple Secrets，也保留 Tauri updater 签名。

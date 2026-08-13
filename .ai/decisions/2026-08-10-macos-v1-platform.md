@@ -25,9 +25,10 @@ surface are stale: Kimi Code 0.34.0 is current, and Agent Room is retired by an 
 - Keep Kimi Code external to the app. macOS detects and validates the official executable and
   provides guided first installation. It may ask macOS to open Terminal.app, but must not paste,
   type or execute the remote `curl | sh` pipeline on the user's behalf. Once Kimi Code is installed,
-  a user-confirmed managed upgrade may stop only the Shell-owned backend, invoke the validated
-  executable directly with the single `upgrade` argument, stream redacted output, re-probe, and
-  restart the backend; it must not route through PowerShell, a shell command string, or kill a
+  a user-confirmed managed upgrade may stop only the Shell-owned backend, read the official native
+  manifest, download the matching binary, verify its published SHA-256, back up and atomically
+  replace the validated executable, stream redacted output, re-probe the exact target version, and
+  restart the backend. It must not execute a downloaded script, route through PowerShell, or kill a
   reused external runtime.
 - Package the Go IM Bridge through Tauri `externalBin` with target-triple source artifacts. The
   bundled executable keeps the stable runtime name `kimi-im-bridge` / `kimi-im-bridge.exe`.

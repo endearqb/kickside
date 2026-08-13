@@ -1144,3 +1144,57 @@
 
 - `codex/macos-v1` 修改 109 个文件，包含共享 UI、Rust 生命周期、Bridge 和 Windows 发布配置；Windows 必须回归，不是仅 macOS 受影响。
 - 当前仓库仅配置两个 Tauri updater Secrets，缺少 6 个 Apple Developer ID/公证 Secrets；Release 工作流会在 prepare 阶段 fail closed。
+
+# Windows 0.1.23 Kimi 后端启动修复
+
+## 任务契约
+
+- 用户目标：修复本地 0.1.23 Windows 安装版启动 Kimi Code 0.34.0 后误报“后端异常”，并重新提供 NSIS/MSI 测试包。
+- 直接交付物：Windows CMD shim 进程归属修复、安装状态探针统一、回归测试、0.1.23 本地 NSIS/MSI。
+- 影响范围：Rust instance registry、安装环境探针、Windows API feature、变更记录和本地 bundle。
+- 非目标：不改变 macOS/Unix 的严格直属 PID 规则，不降低 token/健康校验，不创建 release tag。
+- 验收：真实 `cmd.exe → 子进程` 可识别；Rust 全量测试与 clippy 通过；本地 NSIS/MSI 构建成功。
+- 保守假设：Kimi 的 npm/pnpm `.cmd` shim 是受支持的 Windows 安装形态；登记 PID 必须属于本次启动器进程树且记录时间不早于本次启动。
+
+## Checklist
+
+- [x] 从本机 app/backend 日志确认 Kimi 0.34.0 已 ready，但登记 Node PID 与 `.CMD` 启动 PID 不同。
+- [x] Windows owned candidate 接受启动器进程树内的新登记 PID，其他平台保持 PID 精确匹配。
+- [x] 安装探针复用 Kimi locator，消除 canonical `\\?\` CMD 路径误判。
+- [x] 增加 matcher 回归与真实 Windows `cmd.exe → 子进程` 快照测试。
+- [x] 完成 Rust 264 项测试与严格 clippy。
+- [x] 重新构建 0.1.23 NSIS/MSI 并核对产物。
+
+## Review
+
+- 0.1.23 合并后的安全加固只接受 registry PID 等于 `Command::spawn()` PID；Windows `.cmd` 通过 `cmd.exe` 派生 Node，故健康服务被拒绝并在 15 秒后清理。
+- 修复仍保留三道边界：进程必须属于本次启动器进程树、registry `started_at` 必须匹配本次启动时间、HTTP health 与 bearer auth 必须通过。
+- 安装页原有重复 `--version` 探针不认识 canonical 扩展路径，现直接复用已经验证 `web --help` 的 locator。
+- 本地关闭 updater artifact 后，0.1.23 NSIS/MSI 均构建成功；公开 Release 的 updater 签名配置未改变。
+
+# macOS Kimi Code 版本检测与 native 升级修复
+
+## 任务契约
+
+- 用户目标：macOS 正确显示 Kimi Code 可升级版本，并将 native 0.34.0 实际升级到官方 0.35.0，而不是执行 `kimi upgrade` 后虚报成功。
+- 直接交付物：跨平台统一安装探针、macOS 官方 manifest 下载与 checksum 升级器、严格版本复检/回滚、文档和回归测试。
+- 影响范围：Rust install manager、macOS 升级 shell、Terminal 手动命令、macOS ADR/README、变更记录。
+- 非目标：不自动执行远程 `curl | bash`，不停止外部复用实例，不改变 Windows 安装/升级任务。
+- 约束：只接受官方 HTTPS manifest/binary；校验 64 位 SHA-256；参数分离传递；下载文件先验证版本，替换前备份，替换原子化，复检失败自动回滚。
+- 验收：0.34.0 + latest 0.35.0 返回 available；用户确认后停止 owned backend；0.35.0 binary checksum/版本通过后替换；复检必须精确为 0.35.0 才成功并重启。
+
+## Checklist
+
+- [x] 确认 `kimi upgrade` 对 native macOS 只打印手动 install.sh 指引并以 0 退出。
+- [x] 安装探针统一复用 `kimi_locator`，让 macOS `~/.kimi-code/bin/kimi` 进入版本检查。
+- [x] 按官方 latest/manifest 下载匹配架构 binary，验证 SHA-256 和 `--version`。
+- [x] 备份旧 executable、同目录 staged file 原子替换、复检失败恢复 `.bak`。
+- [x] 手动“复制升级命令”同步为当前官方 install.sh 命令。
+- [x] 完成 Windows Rust 全量、clippy、TypeScript、前端测试、安全 gate、生产构建和 bash 语法检查。
+- [ ] 在 Apple Silicon macOS 构建 `.app` 并完成 0.34.0 → 0.35.0 真实 G3。
+
+## Review
+
+- 检测缺失不是 latest endpoint 问题，而是 macOS 安装探针仍使用 Windows `kimi.exe` 候选；统一 locator 后无需前端特殊分支。
+- 上游 native 自更新契约已变化，退出码 0 只表示提示完成，不表示升级完成；现在以官方 manifest、checksum 和精确版本复检为唯一成功依据。
+- T3 “采用平台边界”：保留 macOS 用户确认、Unix 进程组取消与 owned-only 后端停止；不执行下载脚本，不引入新依赖。

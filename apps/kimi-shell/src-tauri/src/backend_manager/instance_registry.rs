@@ -1,8 +1,12 @@
 use std::{
+    collections::HashSet,
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
 };
+
+#[cfg(windows)]
+use std::collections::HashMap;
 
 use serde::Deserialize;
 
@@ -89,10 +93,22 @@ pub(super) fn owned_candidates(
     child_pid: u32,
     launch_time_ms: u64,
 ) -> Vec<ServerInstance> {
+    let owned_pids = owned_process_ids(child_pid);
+    owned_candidates_matching(instances, child_pid, launch_time_ms, |pid, _| {
+        owned_pids.contains(&pid)
+    })
+}
+
+fn owned_candidates_matching(
+    instances: &[ServerInstance],
+    child_pid: u32,
+    launch_time_ms: u64,
+    belongs_to_launcher: impl Fn(u32, u32) -> bool,
+) -> Vec<ServerInstance> {
     instances
         .iter()
         .filter(|instance| {
-            instance.pid == child_pid
+            belongs_to_launcher(instance.pid, child_pid)
                 && instance
                     .started_at
                     .saturating_add(OWNED_LAUNCH_CLOCK_TOLERANCE_MS)
@@ -100,6 +116,59 @@ pub(super) fn owned_candidates(
         })
         .cloned()
         .collect()
+}
+
+#[cfg(not(windows))]
+fn owned_process_ids(launcher_pid: u32) -> HashSet<u32> {
+    HashSet::from([launcher_pid])
+}
+
+#[cfg(windows)]
+fn owned_process_ids(launcher_pid: u32) -> HashSet<u32> {
+    use windows::Win32::{
+        Foundation::CloseHandle,
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+    };
+
+    let Ok(snapshot) = (unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }) else {
+        return HashSet::from([launcher_pid]);
+    };
+    let parents = (|| {
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        unsafe { Process32FirstW(snapshot, &mut entry) }.ok()?;
+        let mut parents = HashMap::new();
+        loop {
+            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+            if unsafe { Process32NextW(snapshot, &mut entry) }.is_err() {
+                break;
+            }
+        }
+        Some(parents)
+    })();
+    let _ = unsafe { CloseHandle(snapshot) };
+
+    let Some(parents) = parents else {
+        return HashSet::from([launcher_pid]);
+    };
+
+    let mut owned = HashSet::from([launcher_pid]);
+    loop {
+        let before = owned.len();
+        for (&pid, &parent) in &parents {
+            if owned.contains(&parent) {
+                owned.insert(pid);
+            }
+        }
+        if owned.len() == before {
+            return owned;
+        }
+    }
 }
 
 fn read_instance_file(path: &Path) -> Result<ServerInstance, String> {
@@ -342,6 +411,65 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["child"]
         );
+    }
+
+    #[test]
+    fn owned_candidate_accepts_a_new_launcher_descendant() {
+        let child_pid = 100;
+        let instances = vec![
+            ServerInstance {
+                server_id: "descendant".to_string(),
+                pid: 102,
+                host: "127.0.0.1".to_string(),
+                port: 58627,
+                started_at: 10_001,
+                heartbeat_at: 10_001,
+                host_version: None,
+            },
+            ServerInstance {
+                server_id: "unrelated".to_string(),
+                pid: 103,
+                host: "127.0.0.1".to_string(),
+                port: 58628,
+                started_at: 10_002,
+                heartbeat_at: 10_002,
+                host_version: None,
+            },
+        ];
+
+        let candidates =
+            owned_candidates_matching(&instances, child_pid, 10_000, |pid, launcher| {
+                launcher == child_pid && pid == 102
+            });
+        assert_eq!(candidates, vec![instances[0].clone()]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_process_snapshot_tracks_cmd_descendants() {
+        use std::{process::Command, thread, time::Duration};
+
+        let mut launcher = Command::new("cmd")
+            .args(["/D", "/S", "/C", "ping -n 10 127.0.0.1 > nul"])
+            .spawn()
+            .expect("cmd launcher should start");
+        let launcher_pid = launcher.id();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let owned = loop {
+            let owned = owned_process_ids(launcher_pid);
+            if owned.iter().any(|pid| *pid != launcher_pid) || std::time::Instant::now() >= deadline
+            {
+                break owned;
+            }
+            thread::sleep(Duration::from_millis(25));
+        };
+
+        let _ = Command::new("taskkill")
+            .args(["/PID", &launcher_pid.to_string(), "/T", "/F"])
+            .status();
+        let _ = launcher.wait();
+        assert!(owned.contains(&launcher_pid));
+        assert!(owned.iter().any(|pid| *pid != launcher_pid));
     }
 
     #[test]

@@ -35,6 +35,11 @@ const EXECUTION_POLICY_SUGGESTION: &str =
     "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned";
 const KIMI_CODE_NPM_PACKAGE: &str = "@moonshot-ai/kimi-code";
 const KIMI_CODE_LATEST_URL: &str = "https://code.kimi.com/kimi-code/latest";
+#[cfg(target_os = "macos")]
+const KIMI_CODE_BINARY_BASE_URL: &str = "https://code.kimi.com/kimi-code/binaries";
+#[cfg(target_os = "macos")]
+const KIMI_CODE_INSTALL_COMMAND: &str =
+    "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash";
 const MIN_NODE_VERSION: (u32, u32, u32) = (22, 19, 0);
 const DEFAULT_GIT_MIRROR_RELEASE_PAGES: &[&str] = &[
     "https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/LatestRelease/",
@@ -404,8 +409,8 @@ fn configure_platform_install_catalog(_catalog: &mut InstallFlowCatalog) {
         let step = catalog::step(
             "upgrade_kimi",
             "Upgrade Kimi Code",
-            "Run the installed Kimi Code updater.",
-            "kimi upgrade",
+            "Download and install the checksum-verified official native binary.",
+            KIMI_CODE_INSTALL_COMMAND,
         );
         upgrade.description =
             "Upgrade the installed Kimi Code and restart the app backend.".to_string();
@@ -447,16 +452,7 @@ pub fn check_kimi_code_update(app: &AppHandle) -> Result<KimiCodeUpdateInfo, Str
     let settings = settings_store::load_or_default(app).map_err(|error| error.to_string())?;
     let kimi_path = kimi_locator::locate(&settings)?;
     let current_version = query_kimi_version(&kimi_path)?;
-    let latest_version = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|error| format!("创建 Kimi Code 更新检测客户端失败：{error}"))?
-        .get(KIMI_CODE_LATEST_URL)
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
-        .map_err(|error| format!("获取 Kimi Code 最新版本失败：{error}"))?
-        .text()
-        .map_err(|error| format!("读取 Kimi Code 最新版本失败：{error}"))?;
+    let latest_version = fetch_latest_kimi_version()?;
     let current = parse_kimi_version(&current_version)
         .ok_or_else(|| format!("无法识别当前 Kimi Code 版本：{current_version}"))?;
     let latest = parse_kimi_version(&latest_version)
@@ -467,6 +463,20 @@ pub fn check_kimi_code_update(app: &AppHandle) -> Result<KimiCodeUpdateInfo, Str
         latest_version: format_version(latest),
         available: latest > current,
     })
+}
+
+fn fetch_latest_kimi_version() -> Result<String, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("创建 Kimi Code 更新检测客户端失败：{error}"))?
+        .get(KIMI_CODE_LATEST_URL)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|error| format!("获取 Kimi Code 最新版本失败：{error}"))?
+        .text()
+        .map(|value| value.trim().to_string())
+        .map_err(|error| format!("读取 Kimi Code 最新版本失败：{error}"))
 }
 
 fn query_kimi_version(kimi_path: &Path) -> Result<String, String> {
@@ -508,6 +518,17 @@ fn parse_kimi_version(value: &str) -> Option<(u64, u64, u64)> {
 
 fn format_version(version: (u64, u64, u64)) -> String {
     format!("{}.{}.{}", version.0, version.1, version.2)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn confirm_kimi_upgrade_version(expected: (u64, u64, u64), actual: &str) -> Result<(), String> {
+    match parse_kimi_version(actual) {
+        Some(version) if version == expected => Ok(()),
+        _ => Err(format!(
+            "Kimi Code upgrade did not take effect: expected {}, found {actual}.",
+            format_version(expected)
+        )),
+    }
 }
 
 fn build_install_settings_view(settings: &AppSettings) -> InstallSettingsView {
@@ -971,6 +992,50 @@ fn run_macos_upgrade_task(
         source,
         format!("Verified Kimi Code executable: {}", kimi_path.display()),
     );
+    let current_version = match query_kimi_version(&kimi_path) {
+        Ok(version) => version,
+        Err(error) => {
+            manager.finish_failure(app, "Check current Kimi Code", Some(1), Some(error));
+            return;
+        }
+    };
+    let latest_version = match fetch_latest_kimi_version() {
+        Ok(version) => version,
+        Err(error) => {
+            manager.finish_failure(app, "Check latest Kimi Code", Some(1), Some(error));
+            return;
+        }
+    };
+    let Some(current) = parse_kimi_version(&current_version) else {
+        manager.finish_failure(
+            app,
+            "Check current Kimi Code",
+            Some(1),
+            Some(format!("Unrecognized Kimi Code version: {current_version}")),
+        );
+        return;
+    };
+    let Some(latest) = parse_kimi_version(&latest_version) else {
+        manager.finish_failure(
+            app,
+            "Check latest Kimi Code",
+            Some(1),
+            Some(format!(
+                "Unrecognized latest Kimi Code version: {latest_version}"
+            )),
+        );
+        return;
+    };
+    let target_version = format_version(latest);
+    if latest <= current {
+        manager.finish(
+            app,
+            InstallSessionStatus::Succeeded,
+            Some(0),
+            format!("Kimi Code {current_version} is already up to date."),
+        );
+        return;
+    }
 
     if let Err(error) = prepare_managed_task(manager, app, &task, source) {
         manager.finish_failure(app, "Stop app backend", Some(1), Some(error));
@@ -995,16 +1060,21 @@ fn run_macos_upgrade_task(
         state.snapshot.stage = InstallSessionStage::ExecuteStep;
         state.snapshot.current_step_id = Some(step.id.clone());
         state.snapshot.current_step_title = Some(step.title.clone());
-        state.snapshot.message = Some("Running the installed Kimi Code updater.".to_string());
+        state.snapshot.message = Some(format!(
+            "Downloading and installing Kimi Code {target_version}."
+        ));
     });
     push_system_log(
         manager,
         task.id,
         source,
-        format!("Running `{}` with `upgrade`.", kimi_path.display()),
+        format!(
+            "Installing checksum-verified Kimi Code {target_version} over {}.",
+            kimi_path.display()
+        ),
     );
 
-    let child = match spawn_macos_upgrade_process(&kimi_path) {
+    let child = match spawn_macos_upgrade_process(&kimi_path, &target_version) {
         Ok(child) => child,
         Err(error) => {
             manager.finish_failure(app, &step.title, Some(1), Some(error));
@@ -1041,7 +1111,13 @@ fn run_macos_upgrade_task(
     let upgraded_version = match query_kimi_version(&kimi_path) {
         Ok(version) => version,
         Err(error) => {
-            manager.finish_failure(app, "Re-check Kimi Code", Some(1), Some(error));
+            let rollback = rollback_macos_kimi_upgrade(&kimi_path);
+            manager.finish_failure(
+                app,
+                "Re-check Kimi Code",
+                Some(1),
+                Some(format!("{error} {rollback}")),
+            );
             return;
         }
     };
@@ -1051,6 +1127,16 @@ fn run_macos_upgrade_task(
         source,
         format!("Kimi Code re-check succeeded: {upgraded_version}"),
     );
+    if let Err(error) = confirm_kimi_upgrade_version(latest, &upgraded_version) {
+        let rollback = rollback_macos_kimi_upgrade(&kimi_path);
+        manager.finish_failure(
+            app,
+            "Re-check Kimi Code",
+            Some(1),
+            Some(format!("{error} {rollback}")),
+        );
+        return;
+    }
     debug_assert!(status.success());
     manager.finish(
         app,
@@ -1068,20 +1154,41 @@ fn run_macos_upgrade_task(
 }
 
 #[cfg(target_os = "macos")]
-fn spawn_macos_upgrade_process(kimi_path: &Path) -> Result<std::process::Child, String> {
-    macos_upgrade_command(kimi_path)
-        .spawn()
-        .map_err(|error| format!("failed to start `{} upgrade`: {error}", kimi_path.display()))
+fn rollback_macos_kimi_upgrade(kimi_path: &Path) -> String {
+    let mut backup = kimi_path.as_os_str().to_os_string();
+    backup.push(".bak");
+    let backup = PathBuf::from(backup);
+    match fs::rename(&backup, kimi_path) {
+        Ok(()) => "The previous Kimi Code binary was restored.".to_string(),
+        Err(error) => format!(
+            "Automatic rollback from {} failed: {error}",
+            backup.display()
+        ),
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn macos_upgrade_command(kimi_path: &Path) -> Command {
+fn spawn_macos_upgrade_process(
+    kimi_path: &Path,
+    latest_version: &str,
+) -> Result<std::process::Child, String> {
+    macos_upgrade_command(kimi_path, latest_version)
+        .spawn()
+        .map_err(|error| format!("failed to start the Kimi Code native updater: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_upgrade_command(kimi_path: &Path, latest_version: &str) -> Command {
     use std::os::unix::process::CommandExt;
 
-    let mut command = Command::new(kimi_path);
+    let script = include_str!("macos_kimi_upgrade.sh");
+    let mut command = Command::new("/bin/bash");
     command_utils::configure_system_command(&mut command);
     command
-        .arg("upgrade")
+        .args(["-c", script, "kimi-sidekick-upgrade"])
+        .arg(latest_version)
+        .arg(kimi_path)
+        .arg(KIMI_CODE_BINARY_BASE_URL)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
@@ -1834,27 +1941,9 @@ fn python313_ready() -> bool {
 }
 
 fn kimi_ready(app: &AppHandle) -> bool {
-    if let Ok(settings) = settings_store::load_or_default(app) {
-        if let Some(path) = settings
-            .kimi_path
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            let configured = PathBuf::from(path);
-            if command_succeeds_path(&configured, &["--version"])
-                || command_succeeds_path(&configured, &["-v"])
-            {
-                return true;
-            }
-        }
-    }
-
-    command_succeeds("kimi", &["--version"])
-        || command_succeeds("kimi", &["-v"])
-        || kimi_candidate_paths().iter().any(|path| {
-            command_succeeds_path(path, &["--version"]) || command_succeeds_path(path, &["-v"])
-        })
+    settings_store::load_or_default(app)
+        .ok()
+        .is_some_and(|settings| kimi_locator::locate(&settings).is_ok())
 }
 
 fn command_exists(name: &str) -> bool {
@@ -2040,19 +2129,6 @@ fn python_candidate_paths() -> Vec<PathBuf> {
                 .join("Python313")
                 .join("python.exe"),
         );
-    }
-    candidates
-}
-
-fn kimi_candidate_paths() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(home_dir) = user_home_dir() {
-        candidates.push(home_dir.join(".kimi-code").join("bin").join("kimi.exe"));
-        candidates.push(home_dir.join(".local").join("bin").join("kimi.exe"));
-        candidates.push(home_dir.join(".cargo").join("bin").join("kimi.exe"));
-    }
-    if let Some(app_data) = env::var_os("APPDATA").map(PathBuf::from) {
-        candidates.push(app_data.join("npm").join("kimi.cmd"));
     }
     candidates
 }
@@ -2394,17 +2470,29 @@ mod tests {
         assert!((0, 30, 1) > parse_kimi_version("0.30.0").unwrap());
     }
 
+    #[test]
+    fn upgrade_recheck_requires_the_exact_target_version() {
+        assert!(confirm_kimi_upgrade_version((0, 35, 0), "0.35.0").is_ok());
+        assert!(confirm_kimi_upgrade_version((0, 35, 0), "0.34.0")
+            .unwrap_err()
+            .contains("did not take effect"));
+        assert!(confirm_kimi_upgrade_version((0, 35, 0), "unknown").is_err());
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
-    fn macos_upgrade_uses_the_located_executable_without_a_shell() {
+    fn macos_upgrade_passes_version_path_and_official_origin_as_separate_args() {
         let path = PathBuf::from("/tmp/kimi code/bin/kimi");
-        let command = macos_upgrade_command(&path);
+        let command = macos_upgrade_command(&path, "0.35.0");
+        let args = command.get_args().collect::<Vec<_>>();
 
-        assert_eq!(command.get_program(), path.as_os_str());
-        assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
-            vec![std::ffi::OsStr::new("upgrade")]
-        );
+        assert_eq!(command.get_program(), std::ffi::OsStr::new("/bin/bash"));
+        assert_eq!(args[0], std::ffi::OsStr::new("-c"));
+        assert!(args[1].to_string_lossy().contains("shasum -a 256"));
+        assert_eq!(args[2], std::ffi::OsStr::new("kimi-sidekick-upgrade"));
+        assert_eq!(args[3], std::ffi::OsStr::new("0.35.0"));
+        assert_eq!(args[4], path.as_os_str());
+        assert_eq!(args[5], std::ffi::OsStr::new(KIMI_CODE_BINARY_BASE_URL));
     }
 
     #[cfg(target_os = "macos")]
@@ -2420,8 +2508,8 @@ mod tests {
             .find(|task| task.id == InstallTaskId::UpgradeKimi)
             .expect("upgrade task should exist");
 
-        assert_eq!(upgrade.official_steps[0].command, "kimi upgrade");
-        assert_eq!(upgrade.mirror_steps[0].command, "kimi upgrade");
+        assert_eq!(upgrade.official_steps[0].command, KIMI_CODE_INSTALL_COMMAND);
+        assert_eq!(upgrade.mirror_steps[0].command, KIMI_CODE_INSTALL_COMMAND);
         assert!(validate_platform_task(InstallTaskId::UpgradeKimi).is_ok());
         assert!(validate_platform_task(InstallTaskId::InstallKimi).is_err());
     }

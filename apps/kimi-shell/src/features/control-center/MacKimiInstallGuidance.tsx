@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 
 export const MAC_KIMI_INSTALL_COMMAND =
   "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash";
-export const MAC_KIMI_UPGRADE_COMMAND = "kimi upgrade";
+export const MAC_KIMI_UPGRADE_COMMAND = MAC_KIMI_INSTALL_COMMAND;
 
 type MacKimiInstallGuidanceProps = {
   onOpenTerminal: () => Promise<void>;

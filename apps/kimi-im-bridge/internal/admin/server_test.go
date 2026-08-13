@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/domain"
 	"github.com/endearqb/kimi-app/apps/kimi-im-bridge/internal/runtime"
@@ -491,8 +492,12 @@ func TestApprovalsAndRuntimeStopEndpoints(t *testing.T) {
 	if stopResponse.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected stop 202, got %d", stopResponse.StatusCode)
 	}
+	deadline := time.Now().Add(time.Second)
+	for fake.requestStopCall.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
 	if fake.requestStopCall.Load() == 0 {
-		t.Fatalf("expected RequestStop to be called")
+		t.Fatalf("expected asynchronous RequestStop to be called")
 	}
 }
 

@@ -1214,6 +1214,7 @@
 - [x] 同步 package/Cargo/Tauri 版本到 `0.1.24`。
 - [x] 将 ad-hoc/未签名 macOS 例外限定为 `v0.1.24`，并保留 updater 签名门禁。
 - [x] 完成必要本地 gate 与 Windows NSIS/MSI 构建。
+- [x] 修复 main CI 在 macOS 暴露的 stop endpoint 异步测试竞态。
 - [ ] 推送 `main` 和 `v0.1.24`，确认 GitHub Release 工作流与资产。
 - [ ] 用户在 Windows 安装包和 Apple Silicon Mac 上完成 G3 手工验证。
 

@@ -11,7 +11,7 @@ function groups(): UnifiedRailGroup[] {
       id: "pages",
       label: "页面",
       items: [
-        { id: "settings", label: "小助手设置", active: true, onSelect: vi.fn() },
+        { id: "settings", label: "KickSide 设置", active: true, onSelect: vi.fn() },
         { id: "skills", label: "Skill 中心", onSelect: vi.fn() },
       ],
     },
@@ -35,7 +35,7 @@ describe("ControlCenterUnifiedRail", () => {
       />,
     );
 
-    const settings = screen.getByRole("button", { name: "小助手设置" });
+    const settings = screen.getByRole("button", { name: "KickSide 设置" });
     const skills = screen.getByRole("button", { name: "Skill 中心" });
     const workspaceGroup = screen.getByRole("button", { name: /工作区/ });
     const workspace = screen.getByRole("button", { name: "Demo Workspace" });
@@ -62,7 +62,7 @@ describe("ControlCenterUnifiedRail", () => {
       />,
     );
 
-    const settings = screen.getByRole("button", { name: "小助手设置" });
+    const settings = screen.getByRole("button", { name: "KickSide 设置" });
     const workspaceGroup = screen.getByRole("button", { name: /工作区/ });
     const workspace = screen.getByRole("button", { name: "Demo Workspace" });
     settings.focus();

@@ -20,6 +20,7 @@ mod install_manager;
 mod kimi_locator;
 mod log_manager;
 mod menu_manager;
+mod nodejs_locator;
 mod onboarding_http;
 mod open_request;
 mod platform;
@@ -1073,6 +1074,7 @@ pub fn run() {
             open_request::apply_startup_cli_request(app.handle());
             window_manager::enter_local_boot(app.handle(), "setup_bootstrap");
             backend_manager::start_backend(app.handle().clone());
+            dsh_manager::start_default_workspace_if_enabled(app.handle().clone());
 
             {
                 let app_handle = app.handle().clone();
@@ -1953,8 +1955,10 @@ mod tests {
     #[test]
     fn redact_workspace_url_hides_token_fragment() {
         assert_eq!(
-            redact_workspace_url(Some("http://127.0.0.1:55000/#token=secret")),
-            Some("http://127.0.0.1:55000/#token=[REDACTED]".to_string())
+            redact_workspace_url(Some(
+                "http://127.0.0.1:55000/?kimi_onboarded=1#token=secret",
+            )),
+            Some("http://127.0.0.1:55000/?kimi_onboarded=1#token=[REDACTED]".to_string())
         );
         assert_eq!(
             redact_workspace_url(Some("http://127.0.0.1:55000")),

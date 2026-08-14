@@ -1,12 +1,27 @@
-import { SESSION_BRIDGE_SOURCE, SESSION_SYNC_SOURCE } from "@/app/theme";
+import {
+  DSH_WORKSPACE_BRIDGE_SOURCE,
+  DSH_WORKSPACE_SYNC_SOURCE,
+  SESSION_BRIDGE_SOURCE,
+  SESSION_SYNC_SOURCE,
+} from "@/app/theme";
 
 const MAX_SESSION_ID_LENGTH = 512;
+const MAX_WORK_DIR_LENGTH = 32_768;
 const SESSION_QUERY_TIMEOUT_MS = 2_000;
 
 export type WorkspaceFrameSessionMessage = {
   action: "pane_session_changed" | "current_session_response";
   requestId?: string;
   sessionId: string | null;
+  applied: boolean;
+  reason?: string;
+};
+
+export type DshFrameWorkspaceMessage = {
+  action: "dsh_workspace_changed" | "current_workspace_response";
+  requestId?: string;
+  sessionId: string | null;
+  workDir: string | null;
   applied: boolean;
   reason?: string;
 };
@@ -129,6 +144,128 @@ export function queryWorkspaceFrameSessionId(
       reject(error);
     }
   });
+}
+
+export function parseDshFrameWorkspaceMessage(
+  event: MessageEvent,
+  frame: HTMLIFrameElement | null,
+  expectedOrigin: string,
+): DshFrameWorkspaceMessage | null {
+  if (
+    !expectedOrigin ||
+    event.origin !== expectedOrigin ||
+    !isTrustedWorkspaceIframeSource(event.source, frame)
+  ) {
+    return null;
+  }
+
+  const data = event.data as Record<string, unknown> | null;
+  if (
+    !data ||
+    data.source !== DSH_WORKSPACE_BRIDGE_SOURCE ||
+    (data.action !== "dsh_workspace_changed" &&
+      data.action !== "current_workspace_response")
+  ) {
+    return null;
+  }
+
+  const sessionId = normalizeSessionId(data.sessionId);
+  const workDir = normalizeAbsoluteWorkDir(data.workDir);
+  const applied = data.applied === true;
+  if (applied && (!sessionId || !workDir)) {
+    return null;
+  }
+
+  return {
+    action: data.action,
+    requestId: typeof data.requestId === "string" ? data.requestId : undefined,
+    sessionId,
+    workDir,
+    applied,
+    reason: typeof data.reason === "string" ? data.reason : undefined,
+  };
+}
+
+export function queryDshFrameWorkspace(
+  frame: HTMLIFrameElement | null,
+  expectedOrigin: string,
+): Promise<DshFrameWorkspaceMessage> {
+  const frameWindow = frame?.contentWindow;
+  if (!frame || !frame.isConnected || !frameWindow || !expectedOrigin) {
+    return Promise.reject(new Error("DeepSeek Harness 窗格尚未加载。"));
+  }
+
+  const requestId = createWorkspaceBridgeNonce();
+  return new Promise((resolve, reject) => {
+    let timer = 0;
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      window.clearTimeout(timer);
+    };
+    const onMessage = (event: MessageEvent) => {
+      const message = parseDshFrameWorkspaceMessage(
+        event,
+        frame,
+        expectedOrigin,
+      );
+      if (
+        !message ||
+        message.action !== "current_workspace_response" ||
+        message.requestId !== requestId
+      ) {
+        return;
+      }
+      cleanup();
+      resolve(message);
+    };
+
+    window.addEventListener("message", onMessage);
+    timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("读取 DeepSeek Harness 当前会话目录超时。"));
+    }, SESSION_QUERY_TIMEOUT_MS);
+    try {
+      frameWindow.postMessage(
+        {
+          source: DSH_WORKSPACE_SYNC_SOURCE,
+          action: "report_current_workspace",
+          requestId,
+        },
+        expectedOrigin,
+      );
+    } catch (error) {
+      cleanup();
+      reject(error);
+    }
+  });
+}
+
+function normalizeSessionId(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= MAX_SESSION_ID_LENGTH ? trimmed : null;
+}
+
+function normalizeAbsoluteWorkDir(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    trimmed.length > MAX_WORK_DIR_LENGTH ||
+    trimmed.includes("\0") ||
+    !(
+      trimmed.startsWith("/") ||
+      /^[A-Za-z]:[\\/]/.test(trimmed) ||
+      /^\\\\[^\\]/.test(trimmed)
+    )
+  ) {
+    return null;
+  }
+  return trimmed;
 }
 
 export function normalizeExternalOpenUrl(raw: string): string | null {

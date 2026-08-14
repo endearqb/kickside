@@ -26,7 +26,7 @@
 ## 当前注入覆盖状态（第三阶段）
 
 - 在第二阶段基础上继续由注入覆盖：
-  - `components/kimi-cli-brand.tsx` 中左上角品牌标题 `Kimi Code`，仅替换可见标题为 `Kimi 小助手`
+  - `components/kimi-cli-brand.tsx` 中左上角品牌标题 `Kimi Code`，仅替换可见标题为 `KickSide 启伴`
   - `components/ai-elements/reasoning.tsx` 中的 `Thought`、`Thinking...`、`Thought for {n}s`
   - `components/ai-elements/tool.tsx` 中的 `Edit`、`Read`、`Search` 及同类固定工具标签
   - `features/chat/components/activity-status-indicator.tsx` 中的固定状态文案，如 `Awaiting input`、`Waiting for approval...`

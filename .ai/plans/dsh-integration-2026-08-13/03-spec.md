@@ -1,18 +1,18 @@
-# Spec · DSH Provider for kimi-app
+# Spec · DSH Provider for KickSide
 
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-08-13 |
-| 状态 | Reviewed；P0 契约已定，标注【M0/G3】的双平台证据仍待回填 |
+| 状态 | Reviewed；P0 代码与 macOS 本机证据已完成，Windows G3 仍待回填 |
 | 对应需求 | `02-prd.md` FR-1 ~ FR-11、NFR-1 ~ NFR-5 |
 | 事实依据 | `01-research.md` 第 2/4 节；A-x / R-x 编号同该文档 |
-| 壳侧快照 | kimi-app · 2026-08-14 · 0.1.23（pane/bridge/install 事实以 `05-review-alignment.md` 为准） |
+| 壳侧快照 | KickSide · 2026-08-14 · 0.2.0（pane/bridge/install 事实以 `05-review-alignment.md` 与 `06-completion-audit.md` 为准） |
 
 ## 1. 架构位置与命名
 
 **命名约定（R-7）**：壳内 "provider" 已指模型 API 供应商（`provider_api`），"Harness" 已指壳内任务模板系统（`harness.rs`）。DeepSeek Harness 一律缩写 **DSH**。P0 只有一个新增后端，按 Accepted ADR 使用专属 `dsh_manager`，不提前建立通用 AgentBackend 抽象。
 
-DSH 侧全部当黑盒：壳只依赖固定 CLI 参数、私有安装入口与 HTTP readiness；不读写 `$DSH_HOME` 内部结构，不碰 Cordis patch 层。stdout 只写诊断日志，不授予 URL authority。
+DSH 侧按受审外部运行时处理：壳只依赖固定 CLI 参数、私有安装入口、HTTP 状态与固定 pin 的有界启动页身份；不读写 `$DSH_HOME` 内部结构，不碰 Cordis patch 层。stdout 只写诊断日志，不授予 URL authority。
 
 ```
 Workspace Grid（独立 dsh pane）──────▶ dsh_manager
@@ -72,30 +72,30 @@ launcher 参数与 app 参数的边界：`web` 之后的 flag 归 web app 解析
 ### 3.3 就绪判定
 
 1. 启动后立即对壳本次分配的精确 `http://127.0.0.1:<port>` 做 HTTP 轮询；不解析 stdout 取得 URL。
-2. `startTimeout`（默认 60s，经验值由 M0 校准）内首次 health `up` → 状态 running，webview 加载固定 URL。
+2. `startTimeout`（默认 60s，经验值由 M0 校准）内首次响应为 2xx/3xx，且前 512KiB 页面包含固定 pin 的 DSH 启动标记 `__DSH_BOOT__` → 状态 running，webview 加载固定 URL；任意其他 HTTP 200 页面不算 ready。
 3. stdout/stderr 只进入脱敏诊断日志；其中出现的 URL 或重定向目标都不扩大 authority。
 
 ### 3.4 健康检查
 
-`GET http://127.0.0.1:<port>/`，2xx/3xx 视为 up；间隔 5s，连续 3 次失败且进程仍存活 → 状态 degraded 并提示。是否存在更精确的 `/api` 探针【M0，A-6】。
+`GET http://127.0.0.1:<port>/`：启动期每 250ms 按 3.3 节同时验证状态与有界页面身份；首次成功后每 5s 只检查轻量 2xx/3xx 状态，连续 3 次失败且进程仍存活 → 状态 degraded 并提示；探针恢复后自动回到 running。根路径与启动标记已经在 macOS 固定版本真机验证为可用；如未来上游提供稳定专用 health endpoint 或改变页面标记，再在升级 Spike 中审查替换。
 
 ## 4. Pane 集成（Workspace Grid）
 
-壳的 pane 体系（research 4 节第 2 条）：`WorkspacePaneKind = "code" | "chat" | "external" | "agent_room"`，carrier `iframe | local`，带 mountPolicy / loadState / workDir / storageNamespace。DSH 落位：
+壳的当前 pane 体系：`WorkspacePaneKind = "code" | "chat" | "external" | "agent_room" | "dsh"`，carrier `iframe | local`，带 mountPolicy / loadState / workDir / storageNamespace。DSH 落位：
 
 - **DR-5（已定）**：新增 pane kind `"dsh"`，不塞入 `"external"`，也不增加运行时 generic allowlist。DSH iframe 的 src 只取 Rust 当前状态中的精确 loopback URL；URL、PID、端口和运行状态不进入 Grid 持久化状态。
-- **承载**：复用 code pane 同款 iframe 承载与 WebviewWindow fallback；`storageNamespace` 独立（`dsh:<instanceId>`）；mountPolicy 默认与 code pane 一致。iframe 内嵌 `http://127.0.0.1:<p>` 在 WebView2 / WKWebView 下的渲染与 `/api` 调用【M0，A-11】。
+- **承载**：复用 code pane 同款 iframe 承载与 WebviewWindow fallback；每个 pane 由 Grid 按 pane id 生成独立 `storageNamespace`（当前形如 `workspace-grid-pane-<n>`），多个 pane 共享唯一 DSH 后端但不共享壳侧 WebView storage namespace；mountPolicy 默认与 code pane 一致。iframe 内嵌 `http://127.0.0.1:<p>` 已在 WKWebView 真机通过，WebView2 仍列入 Windows G3。
 - **无凭据注入**：`credentialStrategy: "none"`，无 token、无脚本注入、无 cookie 预置；壳必须保证该端口永不离开本机（NFR-5）。
 - **URL 写法**：统一 `127.0.0.1` 字面量，不用 `localhost`——`/api` browser-trust fence 以 authority 为单位受信，`localhost` 是否默认等价【M0，A-9】；确认前不引入第二种写法，也不使用 `--trusted-host`。
-- **pane 状态映射（FR-3）**：DSH 的 starting/running/stopped/crashed 投影到既有 `WorkspacePaneLoadState` 的 loading/ready/empty/blocked；后端保留诊断状态，Grid 不持久化它。
-- **首次引导（FR-6）**：创建该类型 pane 首次叠加引导层：提示在 DSH UI 内 Choose workspace、Settings → Models 填 key（保存即生效，research 2.4/2.6）。壳不自动化这两步（DSH 前端内部结构，rc 期不可依赖）。
+- **pane 状态映射（FR-3）**：DSH 的 starting/running/degraded/stopped/crashed 投影到既有 `WorkspacePaneLoadState`；running/degraded 保持相同 owned iframe，starting 为 loading，stopped/crashed 移除运行 URL并显示恢复入口；后端保留诊断状态，Grid 不持久化它。
+- **首次引导（FR-6）**：启用后壳以当前默认工作区启动 DSH；创建该类型 pane 首次叠加引导层，提示可在 DSH UI 内切换 workspace、在 Settings → Models 填 key（保存即生效，research 2.4/2.6）。壳不自动化内部 UI 操作（DSH 前端结构仍处于 rc 期）。
 
 ## 5. 生命周期与关停（NFR-1）
 
 DSH 的 POSIX 语义：5s drain，SIGTERM→exit 0，SIGINT→130，第二信号强杀（research 2.5）。按平台分支：
 
-- **macOS**：直接 `kill(SIGTERM)` → 等 8s → `SIGKILL`。文档语义原生适用，预期 exit 0；A-3 在 macOS 侧只做对照验证。
-- **Windows**：没有 SIGTERM 等价物，通路待定——方案 A：`CREATE_NEW_PROCESS_GROUP` 生成子进程，停止时发 `CTRL_BREAK_EVENT`，给 8s 窗口等自然退出；方案 B：`taskkill /PID <pid> /T`（不带 /F）软停，超时 `/F /T` 强杀；兜底：Tauri `child.kill()`（硬杀）。A/B 实际效果（是否触发 drain、退出码、会话是否完好落盘）由【M0，A-3】测定，结论写入 DR-1。
+- **macOS**：对本次 spawn 建立的独立 process group 发送 `SIGTERM` → 等 8s → group `SIGKILL`；随后 reap child 并确认 group 消失。固定 pin 的本机对照已证实软停 exit 0、无需强杀且无 group 残留。
+- **Windows（当前代码路径，真机结论待 G3）**：先执行 `taskkill /PID <pid> /T`，等待最多 8s；仍未退出则执行 `taskkill /PID <pid> /T /F`，随后 reap child。Rust Windows-only 测试覆盖父进程与 descendant，但非 `/F` 是否触发 DSH 自身 5s drain、实际退出码和会话落盘完整性仍必须由 `07-windows-g3-checklist.md` 真机回填。在证据取得前不得把该路径描述为已证明的优雅软停。
 
 无论哪条路径：停止流程 = 软停请求 → 等 8s → 强杀 → 校验 pid 消失 → 状态 stopped。
 
@@ -144,7 +144,7 @@ key 必须来自系统凭据库。壳与 Bridge 之间采用单一、版本化 h
 
 现有 `InstallFlowCatalog` 是 Kimi/PowerShell 特化实现且 macOS 会拒绝通用 flow。DSH 使用独立的窄安装器，共享设置页的状态表达与日志安全约束，不伪装复用不成立的目录。
 
-- 分发：把 `@deepseek-ai/dsh@<pinned>` 装到壳私有前缀的临时目录，验证 package version 与固定入口后原子替换。壳直接以 Node 执行该入口；入口损坏时 fail closed，不使用 npx fallback。
+- 分发：把 `@deepseek-ai/dsh@<pinned>` 装到壳私有前缀的临时目录，验证 package version 与固定入口后原子替换。`package.json` 与 `lib/bin.js` 必须 canonicalize 后仍位于当前私有安装根内；符号链接/junction 越界时 fail closed。壳直接以 Node 执行已验证的 canonical 入口；入口损坏时不使用 npx fallback。
 - preflight 检查项：node 存在与版本（最低版【M0，A-1】回填）、npm 可用、私有前缀内 pinned 版本完好、npm registry（含所选镜像）可达（仅安装/升级时要求）。**macOS 注意**：kimi-code 在 macOS 走原生二进制，壳此前对 macOS 用户没有 Node 假设——DSH 是 macOS 侧第一个需要 Node 的组件，缺失时给 Homebrew / nodejs.org LTS 指引，不代装。
 - 升级：设置页展示 pin 与 npm latest → 用户确认 → 装到临时前缀 → 起一次 `web --port <探测口>` 冒烟（能打印 URL 即过）→ 原子替换前缀 → 更新 pin。失败则丢弃临时前缀，pin 不动（FR-9 的自动回退）。已运行实例不受影响，重启实例后用新版。
 - 卸载：删私有前缀与壳侧日志；`$DSH_HOME` 保留并在卸载文案说明（NFR-4）。
@@ -174,16 +174,16 @@ key 存取：P1 阶段 `apiKeyRef` 指向系统凭据库条目（Windows Credent
 | 码 | 场景 | 用户可见文案要点 |
 |---|---|---|
 | E-DSH-001 | preflight：node 缺失/过低 | 给 LTS 下载链接 |
-| E-DSH-002 | preflight：pinned 包缺失且 registry 不可达 | 提示网络/代理 |
+| E-DSH-002 | 私有 pin 安装无法启动、超时或 npm 非零退出（包含 registry/网络/代理故障） | 提示 registry、网络/代理并给日志入口 |
 | E-DSH-003 | 端口区间无空闲 | 提示改 portRange 或关闲置实例 |
-| E-DSH-004 | 启动超时（无 URL、health 不通） | 附日志尾部 20 行 |
+| E-DSH-004 | 启动超时（HTTP 状态不通，或响应不是固定 pin 的 DSH 页面身份） | 明确提示“HTTP 状态或 DSH 页面身份未通过”，附脱敏日志尾部 20 行 |
 | E-DSH-005 | 运行中崩溃 | 退出码 + 日志入口 + "重试"按钮 |
 | E-DSH-006 | headless 超时/取消 | 标明已终止，附耗时 |
 | E-DSH-007 | 升级冒烟失败 | 已回退到 <旧版>，附失败日志 |
 
 ## 11. 可观测性
 
-P0 Web 实例写 `logs/dsh.log`，达到 10 MiB 时保留一个 `dsh.log.1`；未来 headless 每任务独立文件并采用有界输出。不设 `DSH_TELEMETRY_MODE`（NFR-3）。壳埋点仅记事件（启动成功/失败、时长、退出码分布），不采内容。
+P0 Web 实例写 `logs/dsh.log`；每次写入前检查 projected size，超过 10 MiB 时原子式串行轮转并只保留一个 `dsh.log.1`，单行最多 64 KiB，stdout/stderr 与壳消息共用同一日志锁。未来 headless 每任务独立文件并采用有界输出。不设 `DSH_TELEMETRY_MODE`（NFR-3）。壳埋点仅记事件（启动成功/失败、时长、退出码分布），不采内容。
 
 ## 12. 决策记录（M0 后填写）
 
@@ -192,6 +192,6 @@ P0 Web 实例写 `logs/dsh.log`，达到 10 MiB 时保留一个 `dsh.log.1`；�
 | DR-1 | Windows 软停通路（macOS 已定：SIGTERM） | taskkill tree / 直接硬杀 | 待 A-3 真机；发布硬门槛 |
 | DR-2 | 就绪信号 | HTTP 纯轮询；stdout 只诊断 | 已定 |
 | DR-3 | headless 冷环境前提 | 纯 env 即可 / 需先 UI 配置一次 | 待 A-8 |
-| DR-4 | 首发 pin | 0.1.0-rc.6 / M0 时点最新 rc | 待 M0 收口 |
+| DR-4 | 首发 pin | 0.1.0-rc.6 | 已定；latest 只作 breaking canary，不自动推进生产 pin |
 | DR-5 | pane 落位 | 独立 kind `"dsh"`；不扩 generic allowlist | 已定；A-11 仍是发布 G3 |
 | DR-6 | headless 审批策略应对 | 默认 workspace-write 下 fail-closed；禁止 danger-full-access | 上游已核验，待 A-10 真机复核 |

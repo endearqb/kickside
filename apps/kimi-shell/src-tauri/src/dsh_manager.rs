@@ -15,16 +15,25 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState},
-    backend_manager, command_utils, settings_store,
+    backend_manager, command_utils, nodejs_locator, settings_store,
     types::DshSettings,
 };
 
 pub const DSH_PINNED_VERSION: &str = "0.1.0-rc.6";
 const DSH_PACKAGE: &str = "@deepseek-ai/dsh";
 const DSH_ENTRY_RELATIVE: &str = "node_modules/@deepseek-ai/dsh/lib/bin.js";
+const DSH_MIN_NODE_VERSION: &str = "20.12.0";
+const DSH_NODE_FEATURE_PROBE: &str =
+    "const {parseEnv}=require('node:util');if(typeof parseEnv!=='function')process.exit(1);parseEnv('DSH=1')";
 const DSH_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const DSH_LOG_LINE_MAX_BYTES: usize = 64 * 1024;
+const DSH_HTTP_BODY_MAX_BYTES: u64 = 512 * 1024;
+const DSH_BOOT_MARKER: &str = "__DSH_BOOT__";
+const DSH_READINESS_TIMEOUT_PREFIX: &str = "E-DSH-004：启动超时，HTTP 状态或 DSH 页面身份未通过";
 const STOP_TIMEOUT: Duration = Duration::from_secs(8);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
+const HEALTH_FAILURE_THRESHOLD: u8 = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +41,7 @@ pub enum DshRuntimeState {
     Stopped,
     Starting,
     Running,
+    Degraded,
     Crashed,
     Stopping,
 }
@@ -108,7 +118,13 @@ pub(crate) fn dsh_save_settings(
         start_timeout_sec: input.start_timeout_sec,
     };
     settings_store::save(&app, &settings).map_err(|error| error.to_string())?;
-    Ok(settings_view(&settings.agent_backends.dsh))
+    let view = settings_view(&settings.agent_backends.dsh);
+    if input.enabled {
+        if let Err(error) = start_default_workspace(&app) {
+            append_log(&app, format!("DSH 默认工作区启动失败：{error:#}"));
+        }
+    }
+    Ok(view)
 }
 
 #[tauri::command]
@@ -118,10 +134,17 @@ pub(crate) fn dsh_get_preflight(app: AppHandle) -> Result<DshPreflight, String> 
 
 #[tauri::command]
 pub(crate) async fn dsh_install(app: AppHandle) -> Result<DshPreflight, String> {
-    tauri::async_runtime::spawn_blocking(move || install(&app))
+    let install_app = app.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || install(&install_app))
         .await
         .map_err(|error| format!("DSH 安装任务异常结束：{error}"))?
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if report.ready {
+        if let Err(error) = start_default_workspace(&app) {
+            append_log(&app, format!("DSH 安装后自动启动失败：{error:#}"));
+        }
+    }
+    Ok(report)
 }
 
 #[tauri::command]
@@ -146,19 +169,8 @@ pub(crate) fn dsh_get_log_tail(
     app: AppHandle,
     max_lines: Option<usize>,
 ) -> Result<Vec<String>, String> {
-    let state = app.state::<AppState>();
     let count = max_lines.unwrap_or(80).clamp(1, 500);
-    let raw = match fs::read_to_string(&state.dsh_log_path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("读取 DSH 日志失败：{error}")),
-    };
-    let lines = raw.lines().rev().take(count).collect::<Vec<_>>();
-    Ok(lines
-        .into_iter()
-        .rev()
-        .map(backend_manager::redact_backend_text)
-        .collect())
+    read_log_tail(&app, count).map_err(|error| error.to_string())
 }
 
 fn settings_view(settings: &DshSettings) -> DshSettingsView {
@@ -181,16 +193,47 @@ fn validate_settings(input: &DshSettingsInput) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub(crate) fn start_default_workspace_if_enabled(app: AppHandle) {
+    thread::spawn(move || {
+        if let Err(error) = start_default_workspace(&app) {
+            append_log(&app, format!("DSH 默认工作区自动启动失败：{error:#}"));
+        }
+    });
+}
+
+fn start_default_workspace(app: &AppHandle) -> anyhow::Result<()> {
+    let settings = settings_store::load_or_default(app)?;
+    if !settings.agent_backends.dsh.enabled {
+        return Ok(());
+    }
+    let workspace = backend_manager::resolve_working_directory(&settings, None)?;
+    start(app, workspace.to_string_lossy().as_ref())?;
+    Ok(())
+}
+
 fn install_dir(app: &AppHandle) -> PathBuf {
     app.state::<AppState>().dsh_root_dir.join("current")
 }
 
-fn entry_path(app: &AppHandle) -> PathBuf {
-    install_dir(app).join(DSH_ENTRY_RELATIVE)
+fn verified_file_within(prefix: &Path, relative: &str) -> anyhow::Result<PathBuf> {
+    let root = fs::canonicalize(prefix)
+        .with_context(|| format!("DSH 私有安装目录无效：{}", prefix.display()))?;
+    let candidate = prefix.join(relative);
+    let file = fs::canonicalize(&candidate)
+        .with_context(|| format!("DSH 安装文件不存在：{}", candidate.display()))?;
+    if !file.is_file() || !file.starts_with(&root) {
+        bail!("DSH 安装文件越出私有目录：{}", candidate.display());
+    }
+    Ok(file)
+}
+
+fn verified_entry_at(prefix: &Path) -> anyhow::Result<PathBuf> {
+    verified_file_within(prefix, DSH_ENTRY_RELATIVE)
 }
 
 fn installed_version_at(prefix: &Path) -> Option<String> {
-    let package_json = prefix.join("node_modules/@deepseek-ai/dsh/package.json");
+    let package_json =
+        verified_file_within(prefix, "node_modules/@deepseek-ai/dsh/package.json").ok()?;
     let raw = fs::read_to_string(package_json).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
     value.get("version")?.as_str().map(str::to_string)
@@ -211,26 +254,71 @@ fn command_version(path: &Path) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn node_supports_dsh(path: &Path) -> bool {
+    let mut command = Command::new(path);
+    command_utils::configure_system_command(&mut command);
+    command
+        .args(["-e", DSH_NODE_FEATURE_PROBE])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn selected_node_runtime() -> Option<(nodejs_locator::NodejsToolchain, String, bool)> {
+    let mut fallback = None;
+    for runtime in nodejs_locator::candidates() {
+        let Some(version) = command_version(&runtime.node_path) else {
+            continue;
+        };
+        let supported = node_supports_dsh(&runtime.node_path);
+        if supported {
+            return Some((runtime, version, true));
+        }
+        fallback.get_or_insert((runtime, version, false));
+    }
+    fallback
+}
+
 fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
-    let node = which::which("node").ok();
-    let npm = which::which(if cfg!(windows) { "npm.cmd" } else { "npm" }).ok();
+    let runtime = selected_node_runtime();
+    let node_supported = runtime
+        .as_ref()
+        .map(|(_, _, supported)| *supported)
+        .unwrap_or(false);
+    let node = runtime
+        .as_ref()
+        .map(|(runtime, _, _)| runtime.node_path.clone());
+    let node_version = runtime.as_ref().map(|(_, version, _)| version.clone());
+    let npm = runtime
+        .as_ref()
+        .and_then(|(runtime, _, _)| runtime.npm_path.clone());
     let prefix = install_dir(app);
     let installed_version = installed_version_at(&prefix);
+    let install_valid = verify_install(&prefix).is_ok();
     let mut issues = Vec::new();
     if node.is_none() {
-        issues.push("未找到 Node.js；请安装 Node.js LTS 后重试。".to_string());
+        issues.push(
+            "E-DSH-001：未找到 Node.js；请从 nodejs.org 或 Homebrew 安装 Node.js LTS 后重试。"
+                .to_string(),
+        );
+    } else if !node_supported {
+        issues.push(format!(
+            "E-DSH-001：DSH {DSH_PINNED_VERSION} 需要 Node.js {DSH_MIN_NODE_VERSION}+ 的 parseEnv 运行时能力；当前为 {}。请升级 Node.js LTS。",
+            node_version.as_deref().unwrap_or("未知版本")
+        ));
     }
     if npm.is_none() {
         issues.push("未找到 npm；安装或升级 DSH 前需要 npm。".to_string());
     }
-    if installed_version.as_deref() != Some(DSH_PINNED_VERSION) || !entry_path(app).is_file() {
+    if !install_valid {
         issues.push(format!("尚未安装受支持的 DSH {DSH_PINNED_VERSION}。"));
     }
     Ok(DshPreflight {
-        ready: node.is_some()
-            && installed_version.as_deref() == Some(DSH_PINNED_VERSION)
-            && entry_path(app).is_file(),
-        node_version: node.as_deref().and_then(command_version),
+        ready: node_supported && install_valid,
+        node_version,
         node_path: node.map(|path| path.to_string_lossy().into_owned()),
         npm_path: npm.map(|path| path.to_string_lossy().into_owned()),
         installed_version,
@@ -253,8 +341,16 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         .generation;
     stop_generation(app, generation, false).context("安装 DSH 前停止现有实例失败")?;
     shared.dsh_cancel_requested.store(false, Ordering::Release);
-    let npm = which::which(if cfg!(windows) { "npm.cmd" } else { "npm" })
-        .context("未找到 npm；请先安装 Node.js LTS")?;
+    let (runtime, node_version, node_supported) = selected_node_runtime()
+        .context("E-DSH-001：未找到可用的 Node.js；请从 nodejs.org 或 Homebrew 安装 Node.js LTS")?;
+    if !node_supported {
+        bail!(
+            "E-DSH-001：DSH {DSH_PINNED_VERSION} 需要 Node.js {DSH_MIN_NODE_VERSION}+ 的 parseEnv 运行时能力；当前为 {node_version}。请升级 Node.js LTS"
+        );
+    }
+    let npm = runtime
+        .npm_path
+        .context("E-DSH-001：未找到 npm；请先安装完整的 Node.js LTS")?;
     let state = app.state::<AppState>();
     fs::create_dir_all(&state.dsh_root_dir).context("创建 DSH 私有目录失败")?;
     let nonce = unix_time_millis();
@@ -277,7 +373,7 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    retain_safe_environment(&mut command);
+    retain_safe_environment(&mut command, Some(&runtime.node_path));
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -293,7 +389,7 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         Ok(child) => child,
         Err(error) => {
             let _ = fs::remove_dir_all(&temporary);
-            return Err(error).context("启动 npm 安装失败");
+            return Err(error).context("E-DSH-002：启动 npm 安装失败，请检查 npm 与网络/代理设置");
         }
     };
     let install_group = owned_process_group_id(child.id());
@@ -320,12 +416,12 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         if shared.dsh_cancel_requested.swap(false, Ordering::AcqRel) {
             bail!("DSH 安装已取消");
         }
-        bail!("DSH 安装超过 10 分钟，已终止安装进程树");
+        bail!("E-DSH-002：DSH 安装超过 10 分钟；请检查 npm registry 与网络/代理设置，安装进程树已终止");
     };
     if !result.success() {
         let _ = fs::remove_dir_all(&temporary);
         bail!(
-            "npm 安装 DSH 失败（exit={:?}），请查看 DSH 日志",
+            "E-DSH-002：npm 安装 DSH 失败（exit={:?}），请检查 registry、网络/代理并查看 DSH 日志",
             result.code()
         );
     }
@@ -355,10 +451,7 @@ fn verify_install(prefix: &Path) -> anyhow::Result<()> {
     if version != DSH_PINNED_VERSION {
         bail!("DSH 安装版本不匹配：期望 {DSH_PINNED_VERSION}，实际 {version}");
     }
-    let entry = prefix.join(DSH_ENTRY_RELATIVE);
-    if !entry.is_file() {
-        bail!("DSH 固定入口不存在：{}", entry.display());
-    }
+    verified_entry_at(prefix).context("DSH 固定入口无效")?;
     Ok(())
 }
 
@@ -387,14 +480,18 @@ fn start(app: &AppHandle, workspace: &str) -> anyhow::Result<DshStatus> {
             .lock()
             .map_err(|_| anyhow::anyhow!("DSH 状态锁已损坏"))?;
         if runtime.child.is_some() {
+            if runtime.workspace_dir.as_deref() == Some(workspace.as_path()) {
+                drop(runtime);
+                return status(app);
+            }
             bail!("已有 DSH 实例正在运行；P0 仅支持单实例");
         }
     }
     let port = allocate_port(settings.agent_backends.dsh.port_range)?;
-    rotate_log(&shared.dsh_log_path)?;
+    prepare_log(app)?;
     let node = PathBuf::from(report.node_path.context("Node.js 路径缺失")?);
-    let entry = entry_path(app);
-    let mut command = Command::new(node);
+    let entry = verified_entry_at(&install_dir(app)).context("DSH 固定入口无效")?;
+    let mut command = Command::new(&node);
     command_utils::configure_background_command(&mut command);
     let args = dsh_web_args(port);
     command
@@ -404,7 +501,7 @@ fn start(app: &AppHandle, workspace: &str) -> anyhow::Result<DshStatus> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    retain_safe_environment(&mut command);
+    retain_safe_environment(&mut command, Some(&node));
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -492,7 +589,7 @@ fn wait_for_exit(
     }
 }
 
-fn retain_safe_environment(command: &mut Command) {
+fn retain_safe_environment(command: &mut Command, node_path: Option<&Path>) {
     const ALLOWED: &[&str] = &[
         "PATH",
         "HOME",
@@ -524,17 +621,35 @@ fn retain_safe_environment(command: &mut Command) {
     ];
     let values = ALLOWED
         .iter()
+        .filter(|name| **name != "PATH")
         .filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
         .collect::<Vec<_>>();
+    let mut path_entries = node_path
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(path) = std::env::var_os("PATH") {
+        path_entries.extend(std::env::split_paths(&path));
+    }
     command.env_clear();
     command.envs(values);
+    if let Ok(path) = std::env::join_paths(path_entries) {
+        command.env("PATH", path);
+    }
 }
 
 fn spawn_monitor(app: AppHandle, generation: u64, url: String, timeout_sec: u64) {
     thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(timeout_sec);
+        let mut health_failures = 0_u8;
+        let mut ready = false;
         loop {
-            thread::sleep(Duration::from_millis(250));
+            thread::sleep(if ready {
+                HEALTH_INTERVAL
+            } else {
+                Duration::from_millis(250)
+            });
             if refresh_exit_state(&app).is_err() {
                 return;
             }
@@ -551,26 +666,61 @@ fn spawn_monitor(app: AppHandle, generation: u64, url: String, timeout_sec: u64)
             if !same_generation {
                 return;
             }
-            if health_up(&url) {
+            let http_up = if ready {
+                health_up(&url)
+            } else {
+                readiness_up(&url)
+            };
+            if http_up {
+                health_failures = 0;
                 if let Ok(mut runtime) = app.state::<AppState>().dsh_runtime.lock() {
-                    if runtime.generation == generation
-                        && runtime.state == DshRuntimeState::Starting
+                    if runtime.generation == generation && !ready {
+                        runtime.state = DshRuntimeState::Running;
+                        runtime.last_error = None;
+                        append_log(&app, format!("DSH 已就绪 {url}"));
+                    } else if runtime.generation == generation
+                        && runtime.state == DshRuntimeState::Degraded
                     {
                         runtime.state = DshRuntimeState::Running;
-                        append_log(&app, format!("DSH 已就绪 {url}"));
+                        runtime.last_error = None;
+                        append_log(&app, format!("DSH HTTP 健康检查已恢复 {url}"));
                     }
                 }
-                return;
+                ready = true;
+                continue;
             }
-            if Instant::now() >= deadline {
+            if !ready && Instant::now() >= deadline {
+                let tail = read_log_tail(&app, 20).unwrap_or_default();
+                let detail = if tail.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n最近日志：\n{}", tail.join("\n"))
+                };
                 if let Ok(mut runtime) = app.state::<AppState>().dsh_runtime.lock() {
                     if runtime.generation == generation {
                         runtime.last_error =
-                            Some("E-DSH-004：启动超时，HTTP readiness 未通过".to_string());
+                            Some(format!("{DSH_READINESS_TIMEOUT_PREFIX}{detail}"));
                     }
                 }
                 let _ = stop_monitored_generation(&app, generation);
                 return;
+            }
+            if ready {
+                health_failures = health_failures.saturating_add(1);
+                if health_failures >= HEALTH_FAILURE_THRESHOLD {
+                    if let Ok(mut runtime) = app.state::<AppState>().dsh_runtime.lock() {
+                        if runtime.generation == generation
+                            && runtime.state == DshRuntimeState::Running
+                        {
+                            runtime.state = DshRuntimeState::Degraded;
+                            runtime.last_error = Some(
+                                "DSH 进程仍在运行，但 HTTP 健康检查连续 3 次失败；可等待自动恢复或重试后端。"
+                                    .to_string(),
+                            );
+                            append_log(&app, format!("DSH HTTP 健康检查降级 {url}"));
+                        }
+                    }
+                }
             }
         }
     });
@@ -584,6 +734,30 @@ fn health_up(url: &str) -> bool {
     client
         .and_then(|client| client.get(url).send())
         .map(|response| response.status().is_success() || response.status().is_redirection())
+        .unwrap_or(false)
+}
+
+fn readiness_up(url: &str) -> bool {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .redirect(reqwest::redirect::Policy::none())
+        .build();
+    client
+        .and_then(|client| client.get(url).send())
+        .map(|response| {
+            (response.status().is_success() || response.status().is_redirection())
+                && body_contains_dsh_boot_marker(response)
+        })
+        .unwrap_or(false)
+}
+
+fn body_contains_dsh_boot_marker(reader: impl Read) -> bool {
+    let marker = DSH_BOOT_MARKER.as_bytes();
+    let mut body = Vec::new();
+    reader
+        .take(DSH_HTTP_BODY_MAX_BYTES)
+        .read_to_end(&mut body)
+        .map(|_| body.windows(marker.len()).any(|window| window == marker))
         .unwrap_or(false)
 }
 
@@ -605,11 +779,18 @@ fn refresh_exit_state(app: &AppHandle) -> anyhow::Result<()> {
     runtime.port = None;
     runtime.url = None;
     runtime.exit_code = exit.code();
-    if runtime.state == DshRuntimeState::Stopping {
+    let crash_message = if runtime.state == DshRuntimeState::Stopping {
         runtime.state = DshRuntimeState::Stopped;
+        None
     } else {
         runtime.state = DshRuntimeState::Crashed;
-        runtime.last_error = Some(format!("E-DSH-005：DSH 异常退出（exit={:?}）", exit.code()));
+        let message = format!("E-DSH-005：DSH 异常退出（exit={:?}）", exit.code());
+        runtime.last_error = Some(message.clone());
+        Some(message)
+    };
+    drop(runtime);
+    if let Some(message) = crash_message {
+        append_log(app, message);
     }
     Ok(())
 }
@@ -709,35 +890,98 @@ fn status(app: &AppHandle) -> anyhow::Result<DshStatus> {
 fn pipe_child_logs(app: &AppHandle, child: &mut Child) -> anyhow::Result<()> {
     let stdout = child.stdout.take().context("DSH stdout pipe 不可用")?;
     let stderr = child.stderr.take().context("DSH stderr pipe 不可用")?;
-    let path = app.state::<AppState>().dsh_log_path.clone();
-    spawn_log_reader(stdout, path.clone());
-    spawn_log_reader(stderr, path);
+    spawn_log_reader(stdout, app.clone());
+    spawn_log_reader(stderr, app.clone());
     Ok(())
 }
 
-fn spawn_log_reader(stream: impl Read + Send + 'static, path: PathBuf) {
+fn spawn_log_reader(stream: impl Read + Send + 'static, app: AppHandle) {
     thread::spawn(move || {
         for line in BufReader::new(stream).lines().map_while(Result::ok) {
-            let safe = backend_manager::redact_backend_text(&line);
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-                let _ = writeln!(file, "{safe}");
-            }
+            append_log_line(&app, &line, false);
         }
     });
 }
 
 fn append_log(app: &AppHandle, message: impl AsRef<str>) {
-    let path = app.state::<AppState>().dsh_log_path.clone();
-    let safe = backend_manager::redact_backend_text(message.as_ref());
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-        let _ = writeln!(file, "{} {safe}", unix_time_millis());
+    append_log_line(app, message.as_ref(), true);
+}
+
+fn prepare_log(app: &AppHandle) -> anyhow::Result<()> {
+    let shared = app.state::<AppState>();
+    let _operation = shared
+        .dsh_log_operation
+        .lock()
+        .map_err(|_| anyhow::anyhow!("DSH 日志锁已损坏"))?;
+    rotate_log_for_write(&shared.dsh_log_path, 0)
+}
+
+fn append_log_line(app: &AppHandle, message: &str, timestamped: bool) {
+    let shared = app.state::<AppState>();
+    let Ok(_operation) = shared.dsh_log_operation.lock() else {
+        return;
+    };
+    let safe = backend_manager::redact_backend_text(message);
+    let line = bounded_log_line(&safe, timestamped);
+    if rotate_log_for_write(&shared.dsh_log_path, line.len() as u64).is_err() {
+        return;
+    }
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&shared.dsh_log_path)
+    {
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
-fn rotate_log(path: &Path) -> anyhow::Result<()> {
+fn bounded_log_line(message: &str, timestamped: bool) -> String {
+    const TRUNCATED_MARKER: &str = " …[line truncated]";
+    let prefix = if timestamped {
+        format!("{} ", unix_time_millis())
+    } else {
+        String::new()
+    };
+    let content_budget = DSH_LOG_LINE_MAX_BYTES.saturating_sub(prefix.len() + 1);
+    let mut content = message.to_string();
+    if content.len() > content_budget {
+        let truncated_budget = content_budget.saturating_sub(TRUNCATED_MARKER.len());
+        truncate_utf8(&mut content, truncated_budget);
+        content.push_str(TRUNCATED_MARKER);
+    }
+    format!("{prefix}{content}\n")
+}
+
+fn truncate_utf8(value: &mut String, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        return;
+    }
+    let mut boundary = max_bytes.min(value.len());
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+}
+
+fn read_log_tail(app: &AppHandle, count: usize) -> anyhow::Result<Vec<String>> {
+    let state = app.state::<AppState>();
+    let raw = match fs::read_to_string(&state.dsh_log_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("读取 DSH 日志失败"),
+    };
+    let lines = raw.lines().rev().take(count).collect::<Vec<_>>();
+    Ok(lines
+        .into_iter()
+        .rev()
+        .map(backend_manager::redact_backend_text)
+        .collect())
+}
+
+fn rotate_log_for_write(path: &Path, incoming_bytes: u64) -> anyhow::Result<()> {
     if path
         .metadata()
-        .map(|meta| meta.len() >= DSH_LOG_MAX_BYTES)
+        .map(|meta| meta.len().saturating_add(incoming_bytes) > DSH_LOG_MAX_BYTES)
         .unwrap_or(false)
     {
         let rotated = path.with_extension("log.1");
@@ -883,6 +1127,33 @@ mod tests {
     }
 
     #[test]
+    fn readiness_requires_the_bounded_dsh_boot_marker() {
+        let valid = format!("<html><script>window.{DSH_BOOT_MARKER}={{}}</script></html>");
+        assert!(body_contains_dsh_boot_marker(valid.as_bytes()));
+        assert!(!body_contains_dsh_boot_marker(
+            b"<html><title>unrelated service</title></html>".as_slice()
+        ));
+
+        let marker_after_limit = format!(
+            "{}{}",
+            "x".repeat(DSH_HTTP_BODY_MAX_BYTES as usize),
+            DSH_BOOT_MARKER
+        );
+        assert!(!body_contains_dsh_boot_marker(
+            marker_after_limit.as_bytes()
+        ));
+        assert!(DSH_READINESS_TIMEOUT_PREFIX.contains("页面身份"));
+    }
+
+    #[test]
+    fn reports_the_structured_error_when_the_port_range_is_full() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("occupy loopback port");
+        let port = listener.local_addr().expect("local address").port();
+        let error = allocate_port([port, port]).expect_err("port range must be exhausted");
+        assert!(error.to_string().contains("E-DSH-003"));
+    }
+
+    #[test]
     fn verifies_only_exact_pinned_package_and_entry() {
         let root = std::env::temp_dir().join(format!(
             "dsh-verify-{}-{}",
@@ -900,6 +1171,68 @@ mod tests {
         assert!(verify_install(&root).is_ok());
         fs::write(package.join("package.json"), r#"{"version":"0.0.0"}"#).expect("wrong version");
         assert!(verify_install(&root).is_err());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let outside_package_json = root.with_extension("outside-package.json");
+            fs::write(
+                &outside_package_json,
+                format!(r#"{{"version":"{DSH_PINNED_VERSION}"}}"#),
+            )
+            .expect("outside package json");
+            fs::remove_file(package.join("package.json")).expect("remove private package json");
+            symlink(&outside_package_json, package.join("package.json"))
+                .expect("symlink outside package json");
+            let error = verify_install(&root).expect_err("package symlink escape must fail closed");
+            assert!(error.to_string().contains("package.json"));
+            fs::remove_file(package.join("package.json")).expect("remove package json symlink");
+            fs::write(
+                package.join("package.json"),
+                format!(r#"{{"version":"{DSH_PINNED_VERSION}"}}"#),
+            )
+            .expect("restore package json");
+            let outside_entry = root.with_extension("outside-entry.js");
+            fs::write(&outside_entry, "#!/usr/bin/env node").expect("outside entry");
+            fs::remove_file(package.join("lib/bin.js")).expect("remove private entry");
+            symlink(&outside_entry, package.join("lib/bin.js")).expect("symlink outside entry");
+            let error = verify_install(&root).expect_err("symlink escape must fail closed");
+            assert!(error.to_string().contains("固定入口无效"));
+            let _ = fs::remove_file(outside_package_json);
+            let _ = fs::remove_file(outside_entry);
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn truncates_log_lines_on_utf8_boundaries() {
+        let value = format!("{}tail", "鲸".repeat(30_000));
+        let line = bounded_log_line(&value, true);
+        assert!(line.len() <= DSH_LOG_LINE_MAX_BYTES);
+        assert!(line.ends_with(" …[line truncated]\n"));
+        assert!(line.is_char_boundary(line.len()));
+    }
+
+    #[test]
+    fn rotates_before_a_write_would_exceed_the_cap() {
+        let root = std::env::temp_dir().join(format!(
+            "dsh-log-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        fs::create_dir_all(&root).expect("mkdir");
+        let path = root.join("dsh.log");
+        let file = File::create(&path).expect("log");
+        file.set_len(DSH_LOG_MAX_BYTES - 1).expect("size log");
+        rotate_log_for_write(&path, 2).expect("rotate");
+        assert_eq!(fs::metadata(&path).expect("new log").len(), 0);
+        assert_eq!(
+            fs::metadata(path.with_extension("log.1"))
+                .expect("rotated log")
+                .len(),
+            DSH_LOG_MAX_BYTES - 1
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -926,5 +1259,63 @@ mod tests {
             Duration::from_millis(250)
         ));
         assert!(!process_group_alive(group));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminates_owned_windows_process_tree_with_descendant() {
+        let root = std::env::temp_dir().join(format!(
+            "dsh-windows-tree-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        fs::create_dir_all(&root).expect("mkdir");
+        let child_pid_path = root.join("child.pid");
+        let script = "$child = Start-Process -FilePath $env:ComSpec -ArgumentList '/C','ping -n 30 127.0.0.1 >NUL' -PassThru; [IO.File]::WriteAllText($env:KICKSIDE_DSH_TEST_CHILD_PID, [string]$child.Id); Wait-Process -Id $child.Id";
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ])
+            .env("KICKSIDE_DSH_TEST_CHILD_PID", &child_pid_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("spawn process tree");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !child_pid_path.is_file() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        let descendant_pid = fs::read_to_string(&child_pid_path)
+            .expect("descendant pid file")
+            .trim()
+            .parse::<u32>()
+            .expect("descendant pid");
+
+        assert!(terminate_process_tree(
+            &mut child,
+            None,
+            Duration::from_millis(500)
+        ));
+        let output = Command::new("tasklist")
+            .args([
+                "/FI",
+                &format!("PID eq {descendant_pid}"),
+                "/FO",
+                "CSV",
+                "/NH",
+            ])
+            .output()
+            .expect("query descendant");
+        let listing = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !listing.contains(&format!("\"{descendant_pid}\"")),
+            "descendant process still exists: {listing}"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

@@ -1,12 +1,15 @@
-# Kimi Sidekick
+# KickSide
 
 [中文说明](README_zh.md)
 
-Kimi Sidekick is an MIT-licensed desktop shell around Kimi Code Web for Windows and
+KickSide is an MIT-licensed desktop workspace around Kimi Code Web for Windows and
 Apple Silicon macOS (macOS 13+).
 The main deliverable is `apps/kimi-shell`, a `Tauri v2 + React` desktop application that
 combines startup handoff, install and upgrade flows, a multi-tab control center, IM Bridge
 operations, diagnostics, and platform-specific packaging into one workspace-oriented app.
+
+The repository is `endearqb/kickside`. Compatibility identifiers such as `com.kimi.shell`, existing
+data keys, internal package names, and the current app icon intentionally remain unchanged.
 
 ## Repository Layout
 
@@ -40,19 +43,19 @@ operations, diagnostics, and platform-specific packaging into one workspace-orie
 
 Workspace Grid keeps Kimi Code, Kimi Chat, and active sessions visible in one resizable desktop workspace:
 
-![Kimi Sidekick six-pane Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
+![KickSide six-pane Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
 
 Assistant Settings brings app updates, Kimi Code upgrades, work directories, IM channels, and diagnostics into one control surface:
 
-![Kimi Sidekick assistant settings](apps/kimi-shell/public/assistant-settings.png)
+![KickSide assistant settings](apps/kimi-shell/public/assistant-settings.png)
 
 Skill Center provides a searchable catalog for built-in and workspace skills:
 
-![Kimi Sidekick Skill Center](apps/kimi-shell/public/skill-center.png)
+![KickSide Skill Center](apps/kimi-shell/public/skill-center.png)
 
 Session settings and parallel panes keep model, thinking, permissions, Swarm mode, and long-running tasks close to the conversation:
 
-![Kimi Sidekick session settings and parallel panes](apps/kimi-shell/public/workspace-session-settings.png)
+![KickSide session settings and parallel panes](apps/kimi-shell/public/workspace-session-settings.png)
 
 ## Local Development
 

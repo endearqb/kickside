@@ -41,6 +41,7 @@ mod workspace_injection;
 #[allow(dead_code)]
 mod workspace_proxy;
 
+pub(crate) use config::resolve_working_directory;
 #[cfg(test)]
 pub(crate) use config::KIMI_CODING_PLAN_PROVIDER_ID;
 pub use config::{

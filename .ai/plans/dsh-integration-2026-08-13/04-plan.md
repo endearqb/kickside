@@ -1,4 +1,4 @@
-# Plan · DSH 接入 kimi-app 实施计划
+# Plan · DSH 接入 KickSide 实施计划
 
 | 项 | 值 |
 |---|---|
@@ -34,30 +34,47 @@
 
 ## M1 · P0：DSH web pane（约 2 周）
 
-| 任务 | 内容 | 对应 |
-|---|---|---|
-| T-1 | 专属薄 `dsh_manager`；设置 schema 12 + `agentBackends.dsh`，不建立预测性 registry | spec 1/2，ADR |
-| T-2 | preflight 实现与设置页展示 | FR-1, spec 8 |
-| T-3 | 独立 DSH 私有前缀安装：临时目录 `npm install`、版本/入口完整性校验、替换；生产禁用 npx fallback | spec 8 |
-| T-4 | 启动器：端口分配、argv 构造、固定 URL 的 HTTP health 轮询、状态机；stdout 只作诊断 | FR-2/3, spec 3 |
-| T-5 | 关停：macOS process-group SIGTERM→强杀；Windows 整树终止兜底；只终止当前持有进程，不按持久化 PID 回收 | NFR-1, spec 5/6 |
-| T-6 | 日志落盘与 pane 内查看入口 | FR-4, spec 11 |
-| T-7 | 新增独立 pane kind `"dsh"`；Rust 活状态提供精确 URL，Grid 不持久化 URL/PID/状态；接入 Grid + 首次引导层 | FR-6, spec 4 |
-| T-8 | feature flag 与实验性徽标 | FR-5 |
-| T-9 | 错误码 E-DSH-001~005 文案与展示 | spec 10 |
+| 任务 | 内容 | 对应 | 代码状态 |
+|---|---|---|---|
+| T-1 | 专属薄 `dsh_manager`；设置 schema 12 + `agentBackends.dsh`，不建立预测性 registry | spec 1/2，ADR | 完成 |
+| T-2 | preflight 实现与设置页展示 | FR-1, spec 8 | 完成 |
+| T-3 | 独立 DSH 私有前缀安装：临时目录 `npm install`、版本/入口完整性校验、替换；生产禁用 npx fallback | spec 8 | 完成 |
+| T-4 | 启动器：端口分配、argv 构造、固定 URL 的 HTTP 状态 + 有界页面身份 readiness、持续轻量 health、状态机；stdout 只作诊断 | FR-2/3, spec 3 | 完成 |
+| T-5 | 关停：macOS process-group SIGTERM→强杀；Windows 整树终止兜底；只终止当前持有进程，不按持久化 PID 回收 | NFR-1, spec 5/6 | 代码完成；macOS 已证，Windows G3 待证 |
+| T-6 | 有界日志落盘、轮转与 pane/控制中心查看入口 | FR-4, spec 11 | 完成 |
+| T-7 | 新增独立 pane kind `"dsh"`；Rust 活状态提供精确 URL，Grid 不持久化 URL/PID/状态；接入 Grid + 首次引导层 | FR-6, spec 4 | 完成 |
+| T-8 | feature flag 与实验性徽标 | FR-5 | 完成 |
+| T-9 | 错误码 E-DSH-001~005 文案与展示 | spec 10 | 完成 |
 
 **M1 验收**（全部满足才进 M2）：
-- [ ] flag 开启后可创建 DSH pane，选目录 → running → UI 内可交互；热启动 ≤ S-10 中位数 ×1.5；Windows 与 macOS 双平台各过一遍
+- [ ] flag 开启后以 Shell 当前默认工作区启动 DSH；每次菜单动作新增 pane，pane 内可切换会话/工作区且标题随之更新；running 后 UI 内可交互；热启动 ≤ S-10 中位数 ×1.5；Windows 与 macOS 双平台各过一遍
 - [ ] 停止后 8s 内当前实例整棵进程树消失；重启壳不恢复陈旧运行状态，也不按旧 PID 杀未知进程
 - [ ] 拔掉 Node / 占满端口区间 / 杀掉进程三种故障注入，均落到对应 E-DSH 错误码而非白屏
-- [ ] flag 关闭状态下全壳无任何 DSH 进程与 UI 痕迹
+- [ ] flag 关闭状态下不启动 DSH 进程、不自动创建 DSH pane，也不向 pane 提供运行 URL；控制中心的检测/固定版本安装入口继续可发现，标题栏 DSH 新建/浏览器入口仅在启用后出现
 - [ ] 与 Kimi pane 并排运行 2h 无相互干扰
+
+### 2026-08-14 证据回填
+
+| 范围 | 结果 | 证据 |
+|---|---|---|
+| macOS 私有 pin | 通过 | 本机 `com.kimi.shell/dsh/current` 为 `@deepseek-ai/dsh@0.1.0-rc.6`，固定 `lib/bin.js` 存在 |
+| macOS 启动/readiness | 通过 | 隔离 `DSH_HOME`、固定入口、3179 端口探针 805ms HTTP ready；收紧页面身份后隔离 production App 在 33080 于 767ms 同时通过 2xx/3xx 与前 512KiB `__DSH_BOOT__` 判定 |
+| macOS 关停/残留 | 通过 | 独立 process group SIGTERM，60ms exit 0，剩余 group member = 0 |
+| macOS App Quit | 通过（隔离 bundle id） | 临时 `com.kimi.shell.soak` production App 同时启动 owned Kimi 0.36.0 与 DSH rc.6；标准 macOS Quit 触发后约 0.5s App 退出，DSH/Kimi PID 均消失，33080/58235 端口均释放；未读取用户凭据或修改正式 App 配置 |
+| macOS S-10 启动基线 | 通过（Node 24.19.0 / arm64） | 固定 pin 连续 5 次隔离 `DSH_HOME` 冷启动中位数 361ms；预热后复用同一 `DSH_HOME` 的 5 次热启动中位数 320ms；10 次均为 SIGTERM 软停且端口释放 |
+| macOS WKWebView | 通过（当前 pin） | 用户真机截图已证明 DSH 在 KickSide 窗格内完成加载与会话交互；当前多窗格/目录桥截图也证明壳层与 DSH 同屏工作 |
+| 手动停止/崩溃恢复 | 代码完成，macOS 包已构建 | 控制中心在 enabled + stopped/crashed 时提供启动/重试；pane 恢复使用该 pane 最后观测的会话目录，不再把 status refresh 误作 restart；生命周期动作保持单飞 |
+| 自动化 | 通过 | argv、pin/入口、端口耗尽 E-DSH-003、日志 10MiB 轮转/UTF-8 截断、Unix descendant kill、loopback URL、pane 生命周期与 UI 投影测试 |
+| Windows G3 | 待完成 | 仍需 Windows 11 原生 npm、WebView2、taskkill 软/强停、更新/退出/关开关与子孙残留矩阵 |
+| Windows 自动化前置 | 已入库，待 Actions 首跑 | Rust Windows parent+descendant `taskkill /T` 测试；每周/手动真实 npm pin 与 latest 双平台 runtime canary；固定 pin 每个 OS/Node job 在一次安装后连续启动/停止 5 次并输出中位数 |
+| P1 headless | No-Go | A-8/A-10、系统凭据库、双平台 descendant-kill、connector authz/取消语义未完成；不得提前实现 |
 
 ## M1.5 · P0 发布证据（双平台 G3）
 
 - Windows：真实 npm 私有前缀安装、WebView2 完整交互、端口占用、退出/更新/关开关三条停止路径、Node 子孙进程残留检查。
 - macOS：相同矩阵，并验证 WKWebView loopback iframe 与 process-group SIGTERM/强杀。
 - 未完成任一平台 G3 时，只能报告“代码实现完成/该平台待验证”，不能宣称双平台发布完成。
+- Windows 人工回填使用 `07-windows-g3-checklist.md`；自动化 canary 不能替代 WebView2 与应用级退出/更新交互。
 
 ## M2 · P1：headless × IM Bridge（安全前置通过后，约 2 周）
 

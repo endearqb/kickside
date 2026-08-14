@@ -15,7 +15,7 @@ use encoding_rs::GBK;
 use tauri::{ipc::Channel, AppHandle};
 
 use crate::{
-    backend_manager, command_utils, kimi_locator, log_manager, settings_store,
+    backend_manager, command_utils, kimi_locator, log_manager, nodejs_locator, settings_store,
     types::{
         AppSettings, InstallCustomMirrorConfig, InstallFlowCatalog, InstallLogChunk,
         InstallLogStream, InstallMirrorHealthCategory, InstallMirrorHealthEntry,
@@ -1922,10 +1922,9 @@ fn uv_ready() -> bool {
 }
 
 fn node_ready() -> bool {
-    command_node_version_at_least("node")
-        || node_candidate_paths()
-            .iter()
-            .any(|path| command_node_version_at_least_path(path))
+    nodejs_locator::candidates()
+        .iter()
+        .any(|runtime| command_node_version_at_least_path(&runtime.node_path))
 }
 
 fn python313_ready() -> bool {
@@ -2005,23 +2004,6 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
     command
         .status()
         .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn command_node_version_at_least(program: &str) -> bool {
-    let mut command = Command::new(program);
-    command_utils::configure_system_command(&mut command);
-    command
-        .args(["-v"])
-        .stderr(Stdio::null())
-        .stdin(Stdio::null());
-    command
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| decode_stream_bytes(&output.stdout))
-        .and_then(|stdout| parse_node_version(stdout.trim()))
-        .map(|version| version >= MIN_NODE_VERSION)
         .unwrap_or(false)
 }
 
@@ -2110,13 +2092,6 @@ fn uv_candidate_paths() -> Vec<PathBuf> {
         candidates.push(home_dir.join(".cargo").join("bin").join("uv.exe"));
     }
     candidates
-}
-
-fn node_candidate_paths() -> Vec<PathBuf> {
-    program_files_dirs()
-        .into_iter()
-        .map(|base| base.join("nodejs").join("node.exe"))
-        .collect()
 }
 
 fn python_candidate_paths() -> Vec<PathBuf> {

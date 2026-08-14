@@ -74,7 +74,7 @@ try {
 - Source strategy: upstream snapshot plus local patch/overlay
 - Synced at: {2}
 
-This directory stores the upstream Web source snapshot used by the Kimi App local enhanced Web experience. The current runtime still uses workspace-proxy same-origin injection; this synced snapshot exists to support future source-level i18n and patch review. Local changes should live in `patches/kimi-web/` or in explicit overlay files, not directly inside the upstream snapshot.
+This directory stores the upstream Web source snapshot used by the KickSide local enhanced Web experience. The current runtime still uses workspace-proxy same-origin injection; this synced snapshot exists to support future source-level i18n and patch review. Local changes should live in `patches/kimi-web/` or in explicit overlay files, not directly inside the upstream snapshot.
 '@ -f $Repository, $Commit, (Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz")
   Write-Utf8NoBomFile -Path (Join-Path $vendorRoot "SOURCE.md") -Value $sourceMd
 

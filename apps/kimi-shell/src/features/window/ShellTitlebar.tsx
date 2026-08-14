@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
-  Code2,
   Copy,
   ExternalLink,
-  MessageCircle,
   Minus,
   Monitor,
   Plus,
   RefreshCcw,
   Settings,
-  TerminalSquare,
   Square,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KimiAssistantBrand } from "@/components/kimi-code-brand";
+import { BackendBrandIcon } from "@/components/BackendBrandIcon";
 import { IconButton } from "@/components/common/IconButton";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { PaneShelf } from "@/features/workspace-grid/PaneShelf";
@@ -60,6 +58,7 @@ type ShellTitlebarProps = {
   onTitlebarDoubleClick: () => void;
   dshEnabled?: boolean;
   dshBusy?: boolean;
+  dshRemoteUrl?: string | null;
   onCreateDshPane?: () => Promise<void>;
 };
 
@@ -89,6 +88,7 @@ export function ShellTitlebar({
   onTitlebarDoubleClick,
   dshEnabled = false,
   dshBusy = false,
+  dshRemoteUrl = null,
   onCreateDshPane = async () => undefined,
 }: ShellTitlebarProps) {
   const panes = useWorkspaceGridStore((state) => state.panes);
@@ -195,8 +195,8 @@ export function ShellTitlebar({
                   role="menuitem"
                   onClick={() => createPane("code")}
                 >
-                  <Code2 size={14} aria-hidden />
-                  <span>Code</span>
+                  <BackendBrandIcon brand="kimi" size={15} />
+                  <span>KimiCode</span>
                 </button>
                 <button
                   type="button"
@@ -204,8 +204,8 @@ export function ShellTitlebar({
                   role="menuitem"
                   onClick={() => createPane("chat")}
                 >
-                  <MessageCircle size={14} aria-hidden />
-                  <span>Chat</span>
+                  <BackendBrandIcon brand="kimi" size={15} />
+                  <span>KimiChat</span>
                 </button>
                 {dshEnabled ? (
                   <button
@@ -218,8 +218,8 @@ export function ShellTitlebar({
                       void onCreateDshPane().catch(() => undefined);
                     }}
                   >
-                    <TerminalSquare size={14} aria-hidden />
-                    <span>DeepSeek Harness · 实验性</span>
+                    <BackendBrandIcon brand="dsh" size={15} />
+                    <span>DeepSeek Harness</span>
                   </button>
                 ) : null}
               </div>
@@ -253,8 +253,8 @@ export function ShellTitlebar({
                     setBrowserMenuOpen(false);
                   }}
                 >
-                  <Code2 size={14} aria-hidden />
-                  <span>Code</span>
+                  <BackendBrandIcon brand="kimi" size={15} />
+                  <span>KimiCode</span>
                 </button>
                 <button
                   type="button"
@@ -265,9 +265,27 @@ export function ShellTitlebar({
                     setBrowserMenuOpen(false);
                   }}
                 >
-                  <MessageCircle size={14} aria-hidden />
-                  <span>Chat</span>
+                  <BackendBrandIcon brand="kimi" size={15} />
+                  <span>KimiChat</span>
                 </button>
+                {dshEnabled ? (
+                  <button
+                    type="button"
+                    className="titlebar-browser-option"
+                    role="menuitem"
+                    disabled={!dshRemoteUrl}
+                    onClick={() => {
+                      if (!dshRemoteUrl) {
+                        return;
+                      }
+                      onOpenExternalUrl(dshRemoteUrl);
+                      setBrowserMenuOpen(false);
+                    }}
+                  >
+                    <BackendBrandIcon brand="dsh" size={15} />
+                    <span>DeepSeek Harness</span>
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

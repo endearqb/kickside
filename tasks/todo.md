@@ -18,16 +18,27 @@
 - [x] 接入独立 dsh pane、控制中心实验开关、目录选择和首次使用引导。
 - [x] 接入 main-only command ACL、退出与更新停止路径。
 - [x] 完成 TypeScript、定向/全量前端、Rust 与 command registry 验证。
+- [x] 补齐持续 health/degraded、控制中心 1s 状态投影和 degraded iframe 存活回归。
+- [x] 统一 DSH 控制中心动作互斥：停止纳入 busy 流程，安装/停止使用独立进行中文案并阻止重复停止 IPC。
+- [x] 完成 macOS 私有 pin 安装、HTTP readiness、WKWebView 对话、SIGTERM 与 process-group 无残留证据。
+- [x] 完成 macOS S-10 冷/热启动各 5 次基线：中位数 361ms / 320ms，10 次均软停且端口释放。
+- [x] 将真实 runtime smoke 扩展为一次安装后 `--samples 1..10` 多轮采样；本机 3 次复验 ready 中位数 507ms、stop 中位数 252ms、无强杀且端口全部关闭。
+- [x] 重建包含 canary/停止交互修复的 macOS arm64 测试包，完成 deep ad-hoc 签名及 zip 解包复验。
 - [ ] Windows WebView2/私有安装/进程树真机 G3。
-- [ ] macOS WKWebView/私有安装完整真机 G3（固定 npm 包本次 >2min 未完成，已停止）。
+- [ ] 以 0.2.0 RC 在 macOS/Windows 各复跑 Kimi + DSH 2h 长稳与完整故障注入矩阵。
 - [ ] headless A-8/A-10、系统凭据库和双平台 descendant-kill gate；未完成前保持 No-Go。
 
 ## Review
 
 - P0 采用专属薄 manager，符合“抽象由重复证明”；Kimi runtime 没有被强行迁移。
 - DSH URL/PID/状态只存在 Rust 活状态，Grid 只持久化稳定的 pane kind/workDir；generic external 安全边界未扩大。
+- degraded 仍绑定当前 owned Child/port/URL，因此保留同一 iframe；stopped/crashed/starting 仍 fail closed，不获得运行 URL。控制中心独立轮询已与 Grid 的 1s 投影对齐。
 - headless 不是现有 Kimi RuntimeAdapter 的第四实现；三条 connector 也不共享完整取消/心跳/轮询语义，因此计划改为 one-shot router、飞书先行、逐通道验收。
-- 自动化可证明契约、回归和 Unix 整树终止；双平台发布级完成仍依赖明确列出的 G3，不以 CI 代替真机。
+- 自动化可证明契约、回归和 Unix 整树终止；macOS 当前 pin 已完成基础真机证据，双平台发布级完成仍依赖 Windows G3 与两端 RC 长稳/故障矩阵，不以 CI 代替真机。
+- 本机只有 Node 24.19.0，因此没有伪造 Node 18/20/22 的本地结果；这些版本继续由原生 Windows/macOS runtime canary 验证。S-10 的 M4 Pro 数据用于建立基线，不据此缩短尚未取得 Windows 数据的 60 秒生产默认启动超时；runtime smoke 的 90 秒只用于 CI 容错。
+- 关闭实验开关的安全语义是“不启动进程、不自动建 pane、不提供运行 URL”；控制中心检测/安装入口仍可发现，标题栏 DSH 新建/浏览器入口则仅在启用后出现。
+- DSH 安装、开关和停止共享同一动作互斥边界，但使用明确的 `安装中` / `停止中` 文案；这避免快速双击重复停止，也避免无关的安装按钮被错误标成正在停止。
+- 最新 Mac 测试基线为 `KickSide_0.2.0_macos_arm64_dsh-p0-canary-ui.zip`（SHA-256 `6b4b8c8a4a102b591da8647c77b74314bc512465a4ea10f4a2a8a39b2e1607e9`）；旧包不再用于回填新交互结果。
 
 # 工作区 Skill 连续列表与目标选择稳定化
 
@@ -1258,3 +1269,55 @@
 - main CI 八个 jobs 全部通过；macOS Go stop endpoint 竞态修复已由 runner 复核。
 - Release workflow 四个 jobs 全部通过并正式发布；线上包含 NSIS、MSI、Windows updater `.sig`、macOS app updater、macOS updater `.sig`、DMG 与唯一 `latest.json`。
 - `latest.json` 版本为 `0.1.24`，包含 `windows-x86_64` 和 `darwin-aarch64`；Release 顶部显示“⚠️ macOS 版本未签名”。
+
+# DSH 主题同步与浏览器打开
+
+## 任务契约
+
+- 用户目标：DSH Web 跟随壳应用切换明暗主题，并出现在标题栏“在浏览器打开”菜单。
+- 直接交付物：DSH 主题契约适配、可信运行 URL 复用、标题栏菜单项、回归测试与文档记录。
+- 影响范围：Workspace Grid frame bridge、DSH service、ShellTitlebar、App wiring、相关测试和 DSH 当前事实文档。
+- 非目标：不修改 DSH 自身持久化主题设置，不扩 generic external allowlist，不新增 Tauri command 或 DSH 多实例。
+- 验收：明暗切换向 DSH frame 发出精确 origin 消息并切换其 dark selector；仅 running 精确 loopback URL 可由菜单打开；G0/G1、安全 gate 和生产构建通过。
+- 保守假设：壳内 DSH 不使用历史 pane 独立主题；“在浏览器打开”是用户显式动作，不是加载失败自动 fallback。
+
+## Checklist
+
+- [x] 定位 DSH rc.6 的 `body[data-ds-dark-theme]` 权威契约。
+- [x] 扩展现有 all-frames 主题 bridge 并让 DSH pane 跟随壳全局主题。
+- [x] 提取 running 精确 loopback URL 校验并加入标题栏浏览器菜单。
+- [x] 增加主题 bridge、DSH pane、URL fail-closed 与菜单回归测试。
+- [x] 更新 README、架构事实和变更记录。
+- [x] 完成 TypeScript、235 项前端测试、安全 gate、生产构建、Rust fmt/277 项测试和 diff 检查。
+- [ ] 在 macOS WKWebView 与 Windows WebView2 真机确认视觉切换和系统浏览器启动。
+
+## Review
+
+- 根因是通用 frame bridge 已接收主题消息，但只应用 Kimi 的主题字段；补充 DSH 自身 selector 后无需改第三方 CSS 或 settings.yaml。
+- 浏览器菜单只消费 Rust 当前 running 状态的精确 `127.0.0.1:<port>`，启动中、停止、崩溃或带路径/非 loopback URL 均禁用或拒绝。
+- 技能 T3“采用平台能力”落实为复用系统浏览器 opener，并只精确覆盖 WebView 中不匹配的 DSH 主题默认。
+
+# DSH 手动停止与崩溃恢复
+
+## 任务契约
+
+- 用户目标：DSH 只在关闭应用或控制中心显式关闭/停止时结束，同时停止或崩溃后无需切换开关即可恢复。
+- 直接交付物：控制中心启动/重试动作、pane 按当前会话目录恢复、动作单飞、回归测试和新 macOS 测试包。
+- 影响范围：DSH 设置面板、Workspace Grid 回调边界、App wiring、测试与完成度记录。
+- 非目标：不把关闭 pane 重新绑定为停止后端，不自动重启 crashed 进程，不修改 Rust ownership 或持久化 schema。
+- 验收：enabled + stopped/crashed 时出现可用恢复动作；pane 的“重试后端启动”实际调用 start 并携带该 pane 的最后工作区；重复点击不重复提交；G0/G1、安全 gate 与 macOS production build 通过。
+
+## Checklist
+
+- [x] 区分只读状态刷新与显式恢复启动回调。
+- [x] 控制中心为 stopped/crashed 增加启动/重试，并复用生命周期互斥动作状态。
+- [x] pane 恢复携带最后观测的会话工作区，缺失时回退默认工作区。
+- [x] 增加控制中心启动单飞与 pane 工作区传递回归测试。
+- [x] 完成 TypeScript、54 文件/256 项前端测试、182-command 安全 gate、生产构建与 macOS arm64 测试包复验。
+- [ ] Windows 行为由用户按 G3 清单手测，不在本机结论中代填。
+
+## Review
+
+- 根因是旧 pane 按钮标为“重试后端启动”，实际只调用 `get settings/status`；控制中心停止后也没有启动入口，用户只能切换开关或新建 pane。
+- 现在 toolbar 刷新仍是只读状态动作，空白/失败覆盖层才调用恢复启动；二者不再共用含义错误的回调。
+- 新包为 `KickSide_0.2.0_macos_arm64_dsh-p0-recovery.zip`，SHA-256 `988bebd335bcaf11348cdb80c126ff564dcf809a27a2611c365a85015734781d`；已包含按原始字节有界校验的 production 页面身份 readiness、canonical 私有入口约束及 E-DSH-005 崩溃日志，同名旧包移到 `/tmp`，不会与当前测试基线混淆。

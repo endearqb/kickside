@@ -17,7 +17,7 @@ describe("requestKimiUpgradeConfirmation", () => {
     await expect(requestKimiUpgradeConfirmation()).resolves.toBe(true);
     expect(ask).toHaveBeenCalledOnce();
     const [message, options] = ask.mock.calls[0];
-    expect(message).toContain("停止小助手管理的 Kimi 后端");
+    expect(message).toContain("停止 KickSide 管理的 Kimi 后端");
     expect(message).toContain("重新检测");
     expect(message).toContain("自动重启");
     expect(options).toMatchObject({

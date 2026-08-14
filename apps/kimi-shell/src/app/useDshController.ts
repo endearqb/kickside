@@ -3,7 +3,6 @@ import {
   getDshSettings,
   getDshStatus,
   startDsh,
-  stopDsh,
   type DshSettings,
   type DshStatus,
 } from "@/services/dshService";
@@ -23,6 +22,7 @@ export function useDshController(tauriRuntime: boolean) {
       ]);
       setSettings(nextSettings);
       setStatus(nextStatus);
+      setError(nextStatus.lastError ?? null);
       return nextStatus;
     } catch (cause) {
       setError(formatError(cause));
@@ -50,29 +50,13 @@ export function useDshController(tauriRuntime: boolean) {
     } catch (cause) {
       const message = formatError(cause);
       setError(message);
-      throw new Error(message);
+      return null;
     } finally {
       setBusy(false);
     }
   }, []);
 
-  const stop = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const next = await stopDsh();
-      setStatus(next);
-      return next;
-    } catch (cause) {
-      const message = formatError(cause);
-      setError(message);
-      throw new Error(message);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  return { settings, status, error, busy, refresh, start, stop };
+  return { settings, status, error, busy, refresh, start };
 }
 
 function formatError(error: unknown) {

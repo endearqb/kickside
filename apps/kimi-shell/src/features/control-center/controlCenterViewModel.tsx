@@ -362,7 +362,7 @@ export const controlSections: Array<{
 }> = [
   {
     id: "onboarding",
-    label: "小助手设置",
+    label: "KickSide 设置",
     group: "setup",
     icon: <SlidersHorizontal size={15} />,
   },

@@ -1,10 +1,12 @@
-# Kimi 小助手
+# KickSide 启伴
 
 [English README](README.md)
 
-Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Code Web 的 Windows / Apple Silicon macOS 桌面壳。
+KickSide 启伴是一个基于 MIT 协议发布的仓库，核心产物是面向 Kimi Code Web 与 DeepSeek Harness 的 Windows / Apple Silicon macOS 桌面工作台。
 当前主应用位于 `apps/kimi-shell`，技术栈为 `Tauri v2 + React`，把启动接管、安装与升级、
 多标签控制中心、IM Bridge 运维、诊断日志和跨平台安装包输出整合进同一个面向工作区的桌面应用。
+
+仓库名为 `endearqb/kickside`。`com.kimi.shell`、已有数据 key、内部包名与当前应用图标作为兼容身份继续保留。
 
 ## 仓库结构
 
@@ -36,19 +38,19 @@ Kimi 小助手是一个基于 MIT 协议发布的仓库，核心产物是面向 
 
 Workspace Grid：在一个可调整布局的桌面工作区中同时展示 Kimi Code、Kimi Chat 与多个活跃会话。
 
-![Kimi 小助手六窗格 Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
+![KickSide 启伴六窗格 Workspace Grid](apps/kimi-shell/public/workspace-grid.png)
 
-小助手设置：集中管理应用更新、Kimi Code 升级、工作目录、外部 IM 通道与诊断日志。
+KickSide 设置：集中管理应用更新、Kimi Code 升级、工作目录、外部 IM 通道与诊断日志。
 
-![Kimi 小助手设置](apps/kimi-shell/public/assistant-settings.png)
+![KickSide 启伴设置](apps/kimi-shell/public/assistant-settings.png)
 
 Skill 中心：以可搜索目录统一查看内置 Skill 和工作区 Skill。
 
-![Kimi 小助手 Skill 中心](apps/kimi-shell/public/skill-center.png)
+![KickSide 启伴 Skill 中心](apps/kimi-shell/public/skill-center.png)
 
 会话设置与并行工作：在对话旁直接调整模型、思考强度、权限和 Swarm 模式，并同时跟踪多个任务。
 
-![Kimi 小助手会话设置与并行工作](apps/kimi-shell/public/workspace-session-settings.png)
+![KickSide 启伴会话设置与并行工作](apps/kimi-shell/public/workspace-session-settings.png)
 
 ## 本地开发
 

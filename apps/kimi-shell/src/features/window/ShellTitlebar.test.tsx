@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDefaultWorkspaceGridState } from "@/features/workspace-grid/gridMigration";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
@@ -42,8 +42,8 @@ describe("ShellTitlebar", () => {
     cleanup();
   });
 
-  it("creates Code and Chat panes from the titlebar menu", () => {
-    render(<ShellTitlebar {...titlebarProps} />);
+  it("creates KimiCode and KimiChat panes from the vertical branded menu", () => {
+    const { container } = render(<ShellTitlebar {...titlebarProps} />);
 
     expect(screen.queryByRole("button", { name: /选择工作区布局/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
@@ -51,7 +51,8 @@ describe("ShellTitlebar", () => {
     expect(screen.getByRole("menu", { name: "新建窗格" })).toBeTruthy();
     expect(screen.getAllByRole("menuitem")).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Code" }));
+    expect(container.querySelectorAll('.titlebar-pane-popover [data-backend-brand="kimi"]')).toHaveLength(2);
+    fireEvent.click(screen.getByRole("menuitem", { name: "KimiCode" }));
 
     const state = useWorkspaceGridStore.getState();
     const firstPane = state.panes.find(
@@ -62,7 +63,7 @@ describe("ShellTitlebar", () => {
     expect(screen.queryByRole("menu", { name: "新建窗格" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "KimiChat" }));
     const nextState = useWorkspaceGridStore.getState();
     expect(
       nextState.panes.find((pane) => pane.id === nextState.slots[0]?.paneId)?.kind,
@@ -84,12 +85,15 @@ describe("ShellTitlebar", () => {
     );
     fireEvent.click(screen.getByRole("menuitem", { name: /DeepSeek Harness/ }));
     expect(onCreateDshPane).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "新建窗格" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /DeepSeek Harness/ }));
+    expect(onCreateDshPane).toHaveBeenCalledTimes(2);
     expect(useWorkspaceGridStore.getState().panes.some((pane) => pane.kind === "dsh")).toBe(false);
   });
 
-  it("opens Code and Chat from the titlebar browser menu", () => {
+  it("opens Code, Chat, and the live DSH runtime from the titlebar browser menu", () => {
     const onOpenExternalUrl = vi.fn();
-    render(
+    const { rerender } = render(
       <ShellTitlebar
         {...titlebarProps}
         onOpenExternalUrl={onOpenExternalUrl}
@@ -97,14 +101,41 @@ describe("ShellTitlebar", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "在浏览器打开" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Code" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "KimiCode" }));
     expect(onOpenExternalUrl).toHaveBeenCalledWith(
       "http://127.0.0.1:1234/#token=secret",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "在浏览器打开" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "KimiChat" }));
     expect(onOpenExternalUrl).toHaveBeenCalledWith("https://www.kimi.com/");
+
+    fireEvent.click(screen.getByRole("button", { name: "在浏览器打开" }));
+    expect(screen.queryByRole("menuitem", { name: "DeepSeek Harness" })).toBeNull();
+
+    rerender(
+      <ShellTitlebar
+        {...titlebarProps}
+        dshEnabled
+        onOpenExternalUrl={onOpenExternalUrl}
+      />,
+    );
+    const unavailableDsh = screen.getByRole("menuitem", {
+      name: "DeepSeek Harness",
+    }) as HTMLButtonElement;
+    expect(unavailableDsh.disabled).toBe(true);
+
+    rerender(
+      <ShellTitlebar
+        {...titlebarProps}
+        dshEnabled
+        dshRemoteUrl="http://127.0.0.1:3080"
+        onOpenExternalUrl={onOpenExternalUrl}
+      />,
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: "DeepSeek Harness" }));
+    expect(onOpenExternalUrl).toHaveBeenLastCalledWith("http://127.0.0.1:3080");
+    expect(screen.queryByRole("menu", { name: "在浏览器打开" })).toBeNull();
   });
 
   it("closes each titlebar menu when clicking elsewhere in the app", () => {
@@ -140,7 +171,7 @@ describe("ShellTitlebar", () => {
     expect(button.disabled).toBe(true);
   });
 
-  it("shows only the current session directory name in the pane shelf", () => {
+  it("shows only the current session directory name with its backend icon in the pane shelf", () => {
     const state = useWorkspaceGridStore.getState();
     const paneId = state.slots.find((slot) => slot.paneId)?.paneId;
     useWorkspaceGridStore.setState({
@@ -155,6 +186,37 @@ describe("ShellTitlebar", () => {
     expect(screen.getByText("current-session")).toBeTruthy();
     expect(screen.queryByText("D:\\projects\\client\\current-session")).toBeNull();
     expect(screen.getByRole("button", { name: "D:\\projects\\client\\current-session" })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "D:\\projects\\client\\current-session" })
+        .querySelector('[data-backend-brand="kimi"]'),
+    ).toBeTruthy();
+  });
+
+  it("updates a DSH pane shelf title when its observed session directory changes", () => {
+    const state = useWorkspaceGridStore.getState();
+    const paneId = state.slots.find((slot) => slot.paneId)?.paneId;
+    useWorkspaceGridStore.getState().configurePane(paneId!, {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "/Users/test/Skill-workspace",
+    });
+    render(<ShellTitlebar {...titlebarProps} />);
+
+    act(() => {
+      useWorkspaceGridStore.getState().setPaneWorkDir(
+        paneId!,
+        "/Users/test/MyProjects",
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: /打开窗格库/ }));
+
+    const paneButton = screen.getByRole("button", {
+      name: "/Users/test/MyProjects",
+    });
+    expect(screen.getByText("MyProjects")).toBeTruthy();
+    expect(paneButton.querySelector('[data-backend-brand="dsh"]')).toBeTruthy();
+    expect(screen.queryByText("Skill-workspace")).toBeNull();
   });
 
   it("hides workspace title chrome and exposes control center instead of skills", () => {

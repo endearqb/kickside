@@ -109,18 +109,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/kimi sidekick.app"
+          app_path="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/KickSide.app"
           test -d "$app_path"
           plutil -lint "$app_path/Contents/Info.plist"
           lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
           lipo "$app_path/Contents/MacOS/kimi-im-bridge" -verify_arch arm64
           ditto -c -k --sequesterRsrc --keepParent \
             "$app_path" \
-            kimi-sidekick-macos-arm64.zip
+            kickside-macos-arm64.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: kimi-sidekick-macos-arm64-app
-          path: kimi-sidekick-macos-arm64.zip
+          name: kickside-macos-arm64-app
+          path: kickside-macos-arm64.zip
           if-no-files-found: error
 
   shell-frontend:

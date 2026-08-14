@@ -4,6 +4,7 @@ export type DshRuntimeState =
   | "stopped"
   | "starting"
   | "running"
+  | "degraded"
   | "crashed"
   | "stopping";
 
@@ -35,6 +36,25 @@ export interface DshPreflight {
   pinnedVersion: string;
   installPath: string;
   issues: string[];
+}
+
+export function getTrustedDshRuntimeUrl(
+  status: DshStatus | null | undefined,
+): string | null {
+  if (
+    (status?.state !== "running" && status?.state !== "degraded") ||
+    !status.url
+  ) {
+    return null;
+  }
+
+  const match = /^http:\/\/127\.0\.0\.1:([1-9]\d{0,4})$/.exec(status.url);
+  if (!match) {
+    return null;
+  }
+
+  const port = Number(match[1]);
+  return port <= 65_535 && status.port === port ? status.url : null;
 }
 
 export function getDshSettings() {

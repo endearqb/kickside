@@ -14,11 +14,11 @@ DSH 是 rc 阶段的独立 Node CLI/Web 服务。仓库当前只有 Kimi 专属 
 
 1. P0 使用专属、薄的 `dsh_manager`；不建立 `AgentBackendRegistry`，也不迁移既有 Kimi runtime。
 2. 唯一持久设置键为 `agentBackends.dsh`，设置 schema 升至 12；只持久化用户意图和稳定配置，不持久化 PID、端口、URL、状态或凭据。
-3. DSH 以固定源码常量 pin。安装到壳私有前缀的临时目录，完成版本与入口校验后再替换；生产启动不使用运行时 `npx` fallback。
+3. DSH 以固定源码常量 pin。安装到壳私有前缀的临时目录，完成版本与入口校验后再替换；`package.json` 与入口 canonicalize 后必须仍在当前私有安装根内，符号链接/junction 越界时 fail closed；生产直接执行已验证 canonical 入口，不使用运行时 `npx` fallback。
 4. Rust→TS 只暴露 main-window 命令：preflight、安装、读/写设置、start、status、stop、log tail。所有字段使用一个 serde/TypeScript 契约，状态词保持项目既有中文 UI 词汇。
 5. 终止权限只来自当前运行期持有的 `Child` / process group。应用退出、更新和开关关闭都先执行有界停止；停止失败则阻止把状态宣称为已关闭。不得依据持久化旧 PID 杀进程。
-6. 运行 URL 必须精确等于本次分配的 `http://127.0.0.1:<port>`；HTTP readiness 是权威信号，stdout 和重定向目标都不能扩大 origin 权限。
-7. Grid 使用独立 `dsh` pane kind。运行 URL/状态由 Rust 活状态投影；不扩宽 generic `external` 白名单。首期只允许一个 DSH 实例，关闭 pane 即停止该实例。
+6. 运行 URL 必须精确等于本次分配的 `http://127.0.0.1:<port>`；首次 HTTP readiness 必须同时满足 2xx/3xx 与固定 pin 的有界页面身份 `__DSH_BOOT__`，任意其他 200 页面不能取得 ready authority；进入 running 后使用轻量状态健康检查，持续失败进入可恢复的 degraded 状态。stdout 和重定向目标都不能扩大 origin 权限。
+7. Grid 使用独立 `dsh` pane kind。运行 URL/状态由 Rust 活状态投影；不扩宽 generic `external` 白名单。首期只允许一个 DSH 后端实例，但可创建多个共享该实例的 pane；关闭任意 pane（包括最后一个）只移除视图，不停止后端。后端只在应用退出/更新退出，或用户在控制中心显式关闭时停止。
 8. headless 不实现为 Kimi `RuntimeAdapter`。后续采用 one-shot task executor + 显式 backend router，并以系统凭据库、默认 `workspace-write` fail-closed、整树终止和逐 connector 验收为硬门槛。
 
 ## Consequences

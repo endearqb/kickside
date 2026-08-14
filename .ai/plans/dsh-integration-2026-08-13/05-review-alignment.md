@@ -1,9 +1,9 @@
-# DSH 接入代码库对齐审查
+# DSH 接入 KickSide 代码库对齐审查
 
 | 项 | 值 |
 |---|---|
 | 日期 | 2026-08-14 |
-| 审查基线 | kimi-app `0.1.23`；`@deepseek-ai/dsh@0.1.0-rc.6` |
+| 审查基线 | KickSide `0.2.0`（兼容目录 `apps/kimi-shell`）；`@deepseek-ai/dsh@0.1.0-rc.6` |
 | 上游快照 | `deepseek-ai/DeepSeek-Harness` commit `47f943859bef60e4160492346772ded9b24f765a` |
 | 结论 | Web pane P0 可按独立生命周期实现；headless 必须改为独立 one-shot 执行面并通过安全 Spike 后再开发 |
 
@@ -37,7 +37,7 @@
 
 ### P0 Web pane
 
-- 主流程：preflight → 私有前缀安装 → 选择目录 → 分配 loopback 端口 → 直接 Node 启动固定入口 → HTTP readiness → 独立 pane。
+- 当前主流程：preflight → 私有前缀安装 → 以 Shell 默认工作区分配 loopback 端口 → 直接 Node 启动固定入口 → HTTP 状态与有界页面身份 readiness → 独立 pane；pane 内后续工作区切换由 DSH UI 完成并经只读桥更新壳标题/目录动作。
 - 必须在 Windows 与 macOS 各完成真实安装、WebView2/WKWebView 交互、停止后整棵进程树消失的 G3 证据，才能称为双平台发布完成。
 - 未取得 Windows 软停证据时，代码可提供有界强制终止作为安全兜底，但发布清单必须保留未完成项。
 

@@ -4,7 +4,7 @@
     "windows": [
       {
         "label": "prefill",
-        "title": "kimi sidekick",
+        "title": "KickSide",
         "url": "prefill.html",
         "create": false,
         "visible": false,
@@ -21,7 +21,7 @@
       },
       {
         "label": "main",
-        "title": "kimi sidekick",
+        "title": "KickSide",
         "url": "index.html#/loading",
         "create": false,
         "visible": false,

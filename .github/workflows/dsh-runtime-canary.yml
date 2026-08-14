@@ -1,0 +1,52 @@
+name: DSH Runtime Canary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 2"
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-runtime:
+    name: Pinned DSH (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
+        node:
+          - 18
+          - 20
+          - 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install, start, probe, and stop pinned DSH
+        working-directory: apps/kimi-shell
+        run: node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5
+
+  latest-canary:
+    name: Latest DSH alert (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Detect upstream runtime breakage without changing the app pin
+        working-directory: apps/kimi-shell
+        run: node scripts/dsh_runtime_smoke.mjs --version latest

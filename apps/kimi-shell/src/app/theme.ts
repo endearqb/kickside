@@ -16,6 +16,8 @@ export const CHAT_EXTERNAL_LINK_BRIDGE_SOURCE =
   "kimi-shell-chat-external-link-bridge";
 export const SESSION_SYNC_SOURCE = "kimi-shell-session-sync";
 export const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
+export const DSH_WORKSPACE_SYNC_SOURCE = "kimi-shell-dsh-workspace-sync";
+export const DSH_WORKSPACE_BRIDGE_SOURCE = "kimi-shell-dsh-workspace-bridge";
 export const WORKSPACE_ACTIVE_VIEW_STORAGE_KEY = "kimi-workspace-active-view";
 export const WORKSPACE_LAYOUT_MODE_STORAGE_KEY = "kimi-workspace-layout-mode";
 export const WORKSPACE_SPLIT_ORDER_STORAGE_KEY = "kimi-workspace-split-order";

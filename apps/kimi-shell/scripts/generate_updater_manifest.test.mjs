@@ -19,9 +19,9 @@ test("builds one deterministic manifest for Windows and Apple Silicon macOS", as
     ["tag", "v0.2.0-beta.1"],
     ["pub-date", "2026-08-10T00:00:00Z"],
     ["notes", "macOS beta"],
-    ["windows-url", "https://github.com/endearqb/kimi-app/releases/download/v0.2.0-beta.1/Kimi.exe"],
+    ["windows-url", "https://github.com/endearqb/kickside/releases/download/v0.2.0-beta.1/KickSide.exe"],
     ["windows-signature-file", windowsSignature],
-    ["macos-url", "https://github.com/endearqb/kimi-app/releases/download/v0.2.0-beta.1/Kimi.app.tar.gz"],
+    ["macos-url", "https://github.com/endearqb/kickside/releases/download/v0.2.0-beta.1/KickSide.app.tar.gz"],
     ["macos-signature-file", macosSignature],
   ]));
 

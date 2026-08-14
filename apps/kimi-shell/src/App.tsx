@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useShellController } from "@/app/useShellController";
 import { useDshController } from "@/app/useDshController";
 import { Button } from "@/components/ui/button";
@@ -14,8 +13,9 @@ import {
 } from "@/features/workspace-import/WorkspaceImportModal";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
-import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
+import { addDshPaneToWorkspaceGrid } from "@/features/workspace-grid/gridStore";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
+import { getTrustedDshRuntimeUrl } from "@/services/dshService";
 import "./App.css";
 import "./components/control-center/control-center.css";
 import "./features/directory/directory.css";
@@ -319,30 +319,22 @@ function App() {
   };
 
   async function handleCreateDshPane() {
-    const existing = useWorkspaceGridStore
-      .getState()
-      .panes.find((pane) => pane.kind === "dsh");
-    if (existing) {
-      useWorkspaceGridStore.getState().showPane(existing.id);
-      if (
-        dsh.status?.state !== "running" &&
-        dsh.status?.state !== "starting" &&
-        existing.workDir
-      ) {
-        await dsh.start(existing.workDir);
-      }
-      return;
-    }
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected !== "string") return;
-    const paneId = useWorkspaceGridStore.getState().addPane({
-      kind: "dsh",
-      title: "DeepSeek Harness",
-      workDir: selected,
-      storageNamespace: "workspace-grid-pane-dsh",
-    });
+    const defaultWorkDir = shell.status?.effectiveWorkDir?.trim();
+    if (!defaultWorkDir) return;
+    const paneId = addDshPaneToWorkspaceGrid(defaultWorkDir);
     if (!paneId) return;
-    await dsh.start(selected);
+    if (
+      dsh.status?.state !== "running" &&
+      dsh.status?.state !== "starting"
+    ) {
+      await dsh.start(defaultWorkDir);
+    }
+  }
+
+  async function handleRecoverDsh(workspaceDir?: string) {
+    const targetWorkDir = workspaceDir?.trim() || shell.status?.effectiveWorkDir?.trim();
+    if (!targetWorkDir) return null;
+    return dsh.start(targetWorkDir);
   }
 
   return (
@@ -375,6 +367,7 @@ function App() {
         onTitlebarDoubleClick={shell.handleTitlebarDoubleClick}
         dshEnabled={dsh.settings?.enabled === true}
         dshBusy={dsh.busy}
+        dshRemoteUrl={getTrustedDshRuntimeUrl(dsh.status)}
         onCreateDshPane={handleCreateDshPane}
       />
 
@@ -407,6 +400,7 @@ function App() {
             actionBusy={shell.actionBusy}
             onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
+            onOpenFolder={shell.handleOpenFolder}
             onOpenPaneFolder={shell.handleOpenPaneFolder}
             onPaneSessionObserved={shell.handlePaneSessionObserved}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
@@ -418,8 +412,9 @@ function App() {
             onChatFrameError={shell.handleChatFrameError}
             dshStatus={dsh.status}
             dshError={dsh.error}
-            onStopDsh={dsh.stop}
+            dshBusy={dsh.busy}
             onRefreshDsh={dsh.refresh}
+            onRecoverDsh={handleRecoverDsh}
           />
         </div>
 

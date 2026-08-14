@@ -91,7 +91,7 @@ html.kimi-shell-enhanced-local [data-kimi-enhanced-sidebar="true"] {
   const READY_SOURCE = "kimi-app-enhanced-web-ready";
   const translationGroups = {
     brand_identity: [
-      ["Kimi Code", "kimi小助手"]
+      ["Kimi Code", "KickSide 启伴"]
     ],
     sessions_sidebar: [
       ["Create a session to begin", "创建会话后开始"],
@@ -421,8 +421,8 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   const SESSION_BRIDGE_SOURCE = "{session_bridge_source}";
   const QUERY = "(prefers-color-scheme: dark)";
   const UPSTREAM_WS_ORIGIN = "{upstream_ws_origin}";
-  const APP_BRAND_ZH = "kimi小助手";
-  const APP_BRAND_EN = "kimi sidekick";
+  const APP_BRAND_ZH = "KickSide 启伴";
+  const APP_BRAND_EN = "KickSide";
   const UPSTREAM_WS_HOST = (function () {{
     try {{
       return new URL(UPSTREAM_WS_ORIGIN).host;
@@ -1127,8 +1127,8 @@ mod tests {
     #[test]
     fn theme_bridge_script_rebrands_workspace_code_label() {
         let script = theme_bridge_script_tag(57999);
-        assert!(script.contains(r#"APP_BRAND_ZH = "kimi小助手""#));
-        assert!(script.contains(r#"APP_BRAND_EN = "kimi sidekick""#));
+        assert!(script.contains(r#"APP_BRAND_ZH = "KickSide 启伴""#));
+        assert!(script.contains(r#"APP_BRAND_EN = "KickSide""#));
         assert!(script.contains(r#"normalized === "Kimi Code""#));
         assert!(script.contains("applyWorkspaceBrand"));
     }

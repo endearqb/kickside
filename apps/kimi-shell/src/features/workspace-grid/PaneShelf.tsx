@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers3, X } from "lucide-react";
 import { IconButton } from "@/components/common/IconButton";
+import { BackendBrandIcon } from "@/components/BackendBrandIcon";
 import {
   WORKSPACE_GRID_MAX_TOTAL_PANES,
   useWorkspaceGridStore,
@@ -98,7 +99,14 @@ function PaneList({ title, panes, activePaneId, onOpen, onRemove }: PaneListProp
             title={pane.workDir || pane.title}
             aria-label={pane.workDir || pane.title}
           >
-            <strong>{pane.workDir ? getDirectoryName(pane.workDir) : pane.title}</strong>
+            <span className="pane-shelf-item-label">
+              {pane.kind === "dsh" ? (
+                <BackendBrandIcon brand="dsh" size={16} />
+              ) : pane.kind === "code" || pane.kind === "chat" ? (
+                <BackendBrandIcon brand="kimi" size={16} />
+              ) : null}
+              <strong>{pane.workDir ? getDirectoryName(pane.workDir) : pane.title}</strong>
+            </span>
           </button>
           <button type="button" onClick={() => onRemove(pane.id)} aria-label={`关闭 ${pane.title}`}>
             <X size={13} aria-hidden />

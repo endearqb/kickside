@@ -25,7 +25,7 @@
 - 当前第二阶段采用“全注入策略”覆盖固定 UI 文案，但边界只到文本节点、`placeholder`、`aria-label`、`title`、toast 标题和固定错误页框架，不处理动态 payload 文本。
 - 当前第三阶段继续沿用全注入策略，新增覆盖聊天区工具标签、状态标签、输入区提示、会话右键菜单和上下文占用指示。
 - 第三阶段允许的变量句式只有 `Thought for {n}s`、`{percent}% context`、`{n} selected` 三类；文件路径、URL、工具参数本体和后端 payload 文本仍不得通过注入拼接翻译。
-- 当前品牌标题 `Kimi Code` 已纳入注入覆盖，但仅替换左上角可见标题为 `Kimi 小助手`；`/logo.png`、版本号、外链和 `alt`/`title`/`aria-label` 仍保持原样。
+- 当前品牌标题 `Kimi Code` 已纳入注入覆盖，但仅替换左上角可见标题为 `KickSide 启伴`；`/logo.png`、版本号、外链和 `alt`/`title`/`aria-label` 仍保持原样。
 - 一旦注入开始依赖大量变量句子、复杂上下文判断或结构特判，应停止继续扩注入，改回源码 patch。
 
 ## 迁移建议

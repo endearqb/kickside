@@ -4,6 +4,6 @@
     "upstreamPath":  "web/",
     "upstreamCommit":  "e32568cf2db0e95ad76878a4e6482986c8ecb180",
     "license":  "Apache-2.0",
-    "maintainer":  "Kimi App",
+    "maintainer":  "KickSide",
     "disclaimer":  "本地增强版基于 MoonshotAI/kimi-cli 开源 Web 构建，由本应用维护；不代表 MoonshotAI 官方背书。"
 }

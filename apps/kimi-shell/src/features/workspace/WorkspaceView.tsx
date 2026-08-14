@@ -28,6 +28,7 @@ export type WorkspaceViewProps = {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => Promise<void>;
   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
   onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
   onOpenExternalUrl: (url: string) => void;
@@ -39,8 +40,9 @@ export type WorkspaceViewProps = {
   onChatFrameError: () => void;
   dshStatus?: DshStatus | null;
   dshError?: string | null;
-  onStopDsh?: () => Promise<DshStatus>;
+  dshBusy?: boolean;
   onRefreshDsh?: () => Promise<DshStatus | null>;
+  onRecoverDsh?: (workspaceDir?: string) => Promise<DshStatus | null>;
 };
 
 export function WorkspaceView(props: WorkspaceViewProps) {

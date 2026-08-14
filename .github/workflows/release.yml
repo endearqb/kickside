@@ -51,7 +51,7 @@ jobs:
               --verify-tag \
               --generate-notes \
               --notes $'⚠️ **macOS 版本未签名**\n\n此版本的 macOS 安装包未进行 Apple Developer ID 签名或公证，首次打开时可能需要在“系统设置 → 隐私与安全性”中手动允许。Windows/macOS 自动更新产物仍保留 Tauri updater 签名校验。' \
-              --title "Kimi Sidekick $GITHUB_REF_NAME"
+              --title "KickSide $GITHUB_REF_NAME"
           fi
 
   build:
@@ -119,7 +119,7 @@ jobs:
           set -euo pipefail
           test "$(uname -m)" = "arm64"
           bundle_root="apps/kimi-shell/src-tauri/target/aarch64-apple-darwin/release/bundle"
-          app_path="$bundle_root/macos/kimi sidekick.app"
+          app_path="$bundle_root/macos/KickSide.app"
           test -d "$app_path"
           plutil -lint "$app_path/Contents/Info.plist"
           lipo "$app_path/Contents/MacOS/appskimi-shell" -verify_arch arm64
@@ -195,7 +195,7 @@ jobs:
             --version "$version" \
             --tag "$GITHUB_REF_NAME" \
             --pub-date "$(git show -s --format=%cI "$GITHUB_REF_NAME")" \
-            --notes "Kimi Sidekick $version" \
+            --notes "KickSide $version" \
             --windows-url "$base_url/$(basename "$windows_bundle")" \
             --windows-signature-file "$windows_bundle.sig" \
             --macos-url "$base_url/$(basename "$macos_bundle")" \

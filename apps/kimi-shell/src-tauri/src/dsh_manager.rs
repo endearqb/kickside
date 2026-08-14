@@ -351,6 +351,8 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     let npm = runtime
         .npm_path
         .context("E-DSH-001：未找到 npm；请先安装完整的 Node.js LTS")?;
+    let mut command = npm_install_command(&runtime.node_path, &npm)?;
+    command_utils::configure_background_command(&mut command);
     let state = app.state::<AppState>();
     fs::create_dir_all(&state.dsh_root_dir).context("创建 DSH 私有目录失败")?;
     let nonce = unix_time_millis();
@@ -364,8 +366,6 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     fs::create_dir(&temporary).context("创建 DSH 临时安装目录失败")?;
     append_log(app, format!("开始安装 {DSH_PACKAGE}@{DSH_PINNED_VERSION}"));
 
-    let mut command = Command::new(npm);
-    command_utils::configure_background_command(&mut command);
     command
         .args(["install", "--no-audit", "--no-fund", "--prefix"])
         .arg(&temporary)
@@ -389,7 +389,10 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         Ok(child) => child,
         Err(error) => {
             let _ = fs::remove_dir_all(&temporary);
-            return Err(error).context("E-DSH-002：启动 npm 安装失败，请检查 npm 与网络/代理设置");
+            append_log(app, format!("npm 安装进程启动失败：{error}"));
+            return Err(error).context(
+                "E-DSH-002：无法启动 Node/npm 安装进程；请修复 Node.js/npm 安装或检查执行权限，并查看 DSH 日志",
+            );
         }
     };
     let install_group = owned_process_group_id(child.id());
@@ -444,6 +447,69 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     }
     append_log(app, format!("DSH {DSH_PINNED_VERSION} 安装完成"));
     preflight(app)
+}
+
+fn npm_install_command(node_path: &Path, npm_path: &Path) -> anyhow::Result<Command> {
+    match resolve_npm_launcher(node_path, npm_path, cfg!(windows))? {
+        NpmLauncher::Direct(path) => Ok(Command::new(path)),
+        NpmLauncher::NodeCli { node, npm_cli } => {
+            let mut command = Command::new(node);
+            command.arg(npm_cli);
+            Ok(command)
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NpmLauncher {
+    Direct(PathBuf),
+    NodeCli { node: PathBuf, npm_cli: PathBuf },
+}
+
+fn resolve_npm_launcher(
+    node_path: &Path,
+    npm_path: &Path,
+    windows: bool,
+) -> anyhow::Result<NpmLauncher> {
+    if windows && is_windows_command_script(npm_path) {
+        let npm_cli = npm_cli_candidates(node_path, npm_path)
+            .into_iter()
+            .find(|path| path.is_file())
+            .with_context(|| {
+                format!(
+                    "E-DSH-001：检测到 {}，但未找到对应的 npm-cli.js；请修复或重新安装完整的 Node.js LTS",
+                    npm_path.display()
+                )
+            })?;
+        return Ok(NpmLauncher::NodeCli {
+            node: node_path.to_path_buf(),
+            npm_cli,
+        });
+    }
+    Ok(NpmLauncher::Direct(npm_path.to_path_buf()))
+}
+
+fn is_windows_command_script(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+        })
+        .unwrap_or(false)
+}
+
+fn npm_cli_candidates(node_path: &Path, npm_path: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    for directory in [npm_path.parent(), node_path.parent()]
+        .into_iter()
+        .flatten()
+    {
+        let candidate = directory.join("node_modules/npm/bin/npm-cli.js");
+        if !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
 }
 
 fn verify_install(prefix: &Path) -> anyhow::Result<()> {
@@ -1124,6 +1190,37 @@ mod tests {
     #[test]
     fn web_args_keep_port_as_a_distinct_argv_element() {
         assert_eq!(dsh_web_args(3_080), ["web", "--port", "3080"]);
+    }
+
+    #[test]
+    fn windows_npm_cmd_maps_to_the_node_owned_cli_without_a_shell() {
+        let root = std::env::temp_dir().join(format!(
+            "kickside-npm-launcher-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        let node = root.join("node.exe");
+        let npm = root.join("npm.CMD");
+        let npm_cli = root.join("node_modules/npm/bin/npm-cli.js");
+        fs::create_dir_all(npm_cli.parent().expect("npm cli parent")).expect("create npm tree");
+        fs::write(&node, "node").expect("write node");
+        fs::write(&npm, "npm wrapper").expect("write npm wrapper");
+        fs::write(&npm_cli, "npm cli").expect("write npm cli");
+
+        assert!(is_windows_command_script(&npm));
+        assert_eq!(
+            resolve_npm_launcher(&node, &npm, true).expect("resolve Windows npm wrapper"),
+            NpmLauncher::NodeCli {
+                node: node.clone(),
+                npm_cli: npm_cli.clone()
+            }
+        );
+        let native_npm = root.join("npm.exe");
+        assert_eq!(
+            resolve_npm_launcher(&node, &native_npm, true).expect("resolve native npm"),
+            NpmLauncher::Direct(native_npm)
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

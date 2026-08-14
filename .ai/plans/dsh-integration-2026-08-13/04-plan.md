@@ -13,7 +13,7 @@
 
 | 任务 | 验证 | 产出 |
 |---|---|---|
-| S-1 | A-1：Node 18/20/22 三档启动 | Node 18.20.8 因 `util.parseEnv` 缺失失败；Node 20.20.2 通过，Node 22 实测进行中；preflight 以官方引入边界 20.12.0 + 能力探针 fail closed |
+| S-1 | A-1：Node 18/20/22 三档启动 | Node 18.20.8 因 `util.parseEnv` 缺失失败；Node 20.20.2 与 22.23.2 均通过真实安装/readiness/软停；preflight 以官方引入边界 20.12.0 + 能力探针 fail closed |
 | S-2 | A-2：PowerShell 下 npx 与私有前缀两种方式起 `web` | 分发路线确认 |
 | S-3 | A-5：完整启动日志存档，确认 URL 行格式与出现时机 | DR-2；就绪正则修订 |
 | S-4 | A-4：占用 3080 后启动，记录行为与退出码 | 端口策略确认 |
@@ -51,7 +51,8 @@
 - [ ] 停止后 8s 内当前实例整棵进程树消失；重启壳不恢复陈旧运行状态，也不按旧 PID 杀未知进程
 - [ ] 拔掉 Node / 占满端口区间 / 杀掉进程三种故障注入，均落到对应 E-DSH 错误码而非白屏
 - [ ] flag 关闭状态下不启动 DSH 进程、不自动创建 DSH pane，也不向 pane 提供运行 URL；控制中心的检测/固定版本安装入口继续可发现，标题栏 DSH 新建/浏览器入口仅在启用后出现
-- [ ] 与 Kimi pane 并排运行 2h 无相互干扰
+- [x] Kimi + DSH 后端在 macOS 共存至少 70min 无相互干扰（2026-08-14 产品负责人接受的本轮门槛）；实际运行 4754s / 950 次采样 / 0 次失败
+- [ ] 真实 KimiCode / DSH pane 在 release candidate 中做长时交互人工复核；后端探针不替代 WebView 输入、会话切换与目录投影检查
 
 ### 2026-08-14 证据回填
 
@@ -61,11 +62,14 @@
 | macOS 启动/readiness | 通过 | 隔离 `DSH_HOME`、固定入口、3179 端口探针 805ms HTTP ready；收紧页面身份后隔离 production App 在 33080 于 767ms 同时通过 2xx/3xx 与前 512KiB `__DSH_BOOT__` 判定 |
 | macOS 关停/残留 | 通过 | 独立 process group SIGTERM，60ms exit 0，剩余 group member = 0 |
 | macOS App Quit | 通过（隔离 bundle id） | 临时 `com.kimi.shell.soak` production App 同时启动 owned Kimi 0.36.0 与 DSH rc.6；标准 macOS Quit 触发后约 0.5s App 退出，DSH/Kimi PID 均消失，33080/58235 端口均释放；未读取用户凭据或修改正式 App 配置 |
+| macOS updater 真版本差退出 | 通过（隔离 bundle id / 一次性签名） | 临时 `com.kimi.shell.updater-e2e` 0.2.0 从本地签名源发现并安装 0.2.1；首轮暴露“安装完成但 App 未退出”缺陷，修复后复跑约 1.25s 内 App/Kimi/DSH PID 全部消失、34080/59661 端口关闭，安装目录为 0.2.1；更新后 App 可启动并显示 `v0.2.1 · 已是最新版本` |
 | macOS S-10 启动基线 | 通过（Node 24.19.0 / arm64） | 固定 pin 连续 5 次隔离 `DSH_HOME` 冷启动中位数 361ms；预热后复用同一 `DSH_HOME` 的 5 次热启动中位数 320ms；10 次均为 SIGTERM 软停且端口释放 |
+| macOS Kimi + DSH 后端共存 | 通过（产品门槛 ≥70min） | 实际 4754s（79m14s）、每 5s 探测一次、950 次采样、0 次失败；Kimi/DSH HTTP p95 均 2ms，结束时两端均软停、进程组消失且端口关闭。结果文件仍保留原 7200s 目标，因此 `aborted=true` / `completed=false` 仅表示按新门槛主动停止，不表示失败 |
 | macOS WKWebView | 通过（当前 pin） | 用户真机截图已证明 DSH 在 KickSide 窗格内完成加载与会话交互；当前多窗格/目录桥截图也证明壳层与 DSH 同屏工作 |
 | 手动停止/崩溃恢复 | 代码完成，macOS 包已构建 | 控制中心在 enabled + stopped/crashed 时提供启动/重试；pane 恢复使用该 pane 最后观测的会话目录，不再把 status refresh 误作 restart；生命周期动作保持单飞 |
 | 自动化 | 通过 | argv、pin/入口、端口耗尽 E-DSH-003、日志 10MiB 轮转/UTF-8 截断、Unix descendant kill、loopback URL、pane 生命周期与 UI 投影测试 |
 | Windows G3 | 待完成 | 仍需 Windows 11 原生 npm、WebView2、taskkill 软/强停、更新/退出/关开关与子孙残留矩阵 |
+| Windows 首轮私有安装 | 失败已定位，修复待复测 | 开始菜单启动可识别 Node/npm，但 `Command::new(npm.cmd)` 在网络请求前报 E-DSH-002；现改为 paired `node.exe + npm-cli.js`，并新增旧 `kimi sidekick` 安装提示/迁移 hook及显式 MSI UpgradeCode；须用修复后的 Windows 包复跑 |
 | Windows 自动化前置 | 已入库，待 Actions 首跑 | Rust Windows parent+descendant `taskkill /T` 测试；每周/手动真实 npm pin 与 latest 双平台 runtime canary；固定 pin 每个 OS/Node job 在一次安装后连续启动/停止 5 次并输出中位数 |
 | P1 headless | No-Go | A-8/A-10、系统凭据库、双平台 descendant-kill、connector authz/取消语义未完成；不得提前实现 |
 
@@ -105,7 +109,7 @@
 - 单测：argv 构造（含含空格/引号的任务文本）、退出码→状态映射、URL 正则、端口分配、输出截断。
 - 集成（CI，真实进程）：起 web → health → 软停 → 断言 exit 0；headless echo → 断言 stdout 与 exit 0。
 - **金丝雀（CI 定时，每周）**：对 npm latest（非 pin）跑上述集成集；红了只报警不阻塞，用于提前发现 breaking（R-1，PRD 成功指标 3）。
-- 手测清单（M3 出口）：首次安装无 Node、断网启动、休眠唤醒后 pane 状态、飞书取消进行中任务、双 pane（Kimi + DSH）各开 2h、卸载后残留检查等 12 项（Windows 与 macOS 各跑一遍），随 M1/M2 验收项固化成 checklist 文件。
+- 手测清单（M3 出口）：首次安装无 Node、断网启动、休眠唤醒后 pane 状态、飞书取消进行中任务、双 pane（Kimi + DSH）长时交互、卸载后残留检查等 12 项（Windows 与 macOS 各跑一遍），随 M1/M2 验收项固化成 checklist 文件。macOS 后端共存自动探针门槛为产品负责人接受的 70min；真实 pane 仍需人工覆盖交互语义，但不再要求后端探针等待 2h。
 
 ## 风险应对（对应 research R-x）
 

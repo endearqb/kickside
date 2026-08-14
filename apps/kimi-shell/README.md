@@ -20,7 +20,7 @@ KickSide 启伴是基于 `Tauri v2 + React` 的 Windows / macOS 桌面工作台�
 - Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器；Windows 安装版下载使用原生“另存为”。macOS 13 使用 WKWebView 共享 data store，不传仅 Windows 支持的 `dataDirectory`。
 - 平台原生体验：macOS 使用原生 traffic lights、App/Edit/View/Window 菜单、关闭主窗口隐藏、Dock reopen 恢复与 Cmd+Q graceful exit；Windows 保持自定义标题栏和 close-to-tray。
 - Windows 右键菜单集成：支持目录空白处、文件、文件夹入口，默认使用“KickSide 启伴”名称并可编辑；macOS 不渲染 Explorer 设置项。
-- 安装边界：Windows 保留受管安装任务；macOS 首次安装继续展示/复制官方 native install 命令并可调用系统打开 Terminal.app，但不会自动粘贴或执行远程 pipe；已安装后的升级由原生确认对话框授权，小助手停止 owned `kimi web` 后读取官方 manifest、下载匹配架构的 native binary、校验 SHA-256 并原子替换已验证的 executable，成功复检目标版本后自动重启后端；外部复用实例保持 never-kill。
+- 安装边界：Windows 保留受管安装任务；KickSide NSIS 安装器会精确识别历史 `kimi sidekick` / `Kimi Sidekick` / `kimi小助手` / `Kimi Desktop Shell` 的 NSIS 或 MSI 注册项，交互安装先提示、确认后以保留应用数据的方式卸载旧产品，静默/更新安装自动迁移，失败则停止安装而不产生双份应用；MSI UpgradeCode 显式固定为改名前 `kimi sidekick` 的身份，避免品牌改名让 MSI 被 Windows 识别为第二个产品。macOS 首次安装继续展示/复制官方 native install 命令并可调用系统打开 Terminal.app，但不会自动粘贴或执行远程 pipe；已安装后的升级由原生确认对话框授权，小助手停止 owned `kimi web` 后读取官方 manifest、下载匹配架构的 native binary、校验 SHA-256 并原子替换已验证的 executable，成功复检目标版本后自动重启后端；外部复用实例保持 never-kill。
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
 - 认证与 API 诊断：控制中心只读展示当前认证模式、Kimi 登录和 Provider API 健康状态；API、模型与 Search / Fetch 服务编辑由 Kimi Code Web 内置设置负责
 - 安全退出流程：退出读秒窗 + 状态反馈
@@ -82,7 +82,7 @@ pnpm check:nfr:reliability
 - `scripts/dsh_runtime_smoke.mjs` 使用隔离临时前缀与 `DSH_HOME` 验证真实 npm 包、固定入口、精确 loopback HTTP 状态与 DSH 启动页标记 `__DSH_BOOT__`、有界响应/输出、整树停止和端口释放；`--samples 1..10` 可在同一次安装后连续采样并输出 ready/stop 中位数。固定 pin 的依赖使用 Node `util.parseEnv`，Shell preflight 因此要求 Node 20.12.0+ 对应能力；`.github/workflows/dsh-runtime-canary.yml` 每周/手动在 Windows/macOS × Node 20.12/22/24 对固定 pin 连续采样 5 次，并对 latest 做 breaking 告警。它不替代 WebView2/WKWebView 人工发布门禁。
 - `src/platform/` 只负责加载 additive `PlatformCapabilities` 并提供 fail-closed 平台状态；产品组件不得自行解析 user agent 决定原生能力。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`；更新与运行等折叠设置行统一复用 `src/components/control-center/ControlCenterSettingsRow.tsx`，业务动作作为独立 trailing control 注入，避免点击更新或开关时误触发展开。
-- `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`；`src-tauri/src/macos_kimi_upgrade.sh` 只负责按 Rust 传入的固定官方 origin、目标版本和已验证路径下载/校验/原子替换 macOS native binary，不执行远程脚本。
+- `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`；`src-tauri/src/macos_kimi_upgrade.sh` 只负责按 Rust 传入的固定官方 origin、目标版本和已验证路径下载/校验/原子替换 macOS native binary，不执行远程脚本。`src-tauri/windows/nsis-hooks.nsh` 是品牌迁移兼容层，只能匹配已登记的历史产品名并调用其正式卸载器，不得递归删除安装目录或用户数据；`tauri.windows.conf.json` 中的 WiX UpgradeCode 是发布兼容常量，不得随公开品牌名修改。
 - `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/agent_room.rs`、`bridge.rs`、`install.rs`、`skills.rs`、`workspace_grid.rs`、`context_menu.rs` 和 `workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
 - Agent Room 已下线并冻结：无设置、标题栏入口、独立窗口、Grid Pane 或可启用 Bridge 路径。旧 command/type 和 V2 输入解析仅作为一个发布周期的兼容墓碑，不得新增功能。
 - `src-tauri/src/workspaces.rs` 管理已注册工作区，并通过 `workspace_list_file_entries` / `workspace_read_file` 提供受根目录约束的只读文件预览；前端复用 Skill/Harness 的 `SkillFileEntry` 与 `SkillFileContent` 契约。

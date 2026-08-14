@@ -5,10 +5,14 @@
 ## A. 环境与安装
 
 - [ ] Windows 11 x86_64，系统 WebView2 可用；记录系统版本与 KickSide `0.2.0`。
+- [ ] 若机器仍装有 `Kimi Sidekick`，运行修复后的 KickSide NSIS：必须先出现“检测到旧版”提示；取消应停止安装，确认应调用旧卸载器、保留设置/应用数据，安装完成后“已安装的应用”中不再有两份产品。若旧版已被手动卸载，请注明本项无法复测，不要伪填通过。
+- [ ] 若旧版和新包都使用 MSI，确认安装后只剩 KickSide 一项且设置仍在；新 MSI 必须显示/记录沿用 UpgradeCode `dfa197f9-0e61-5393-a612-7e4ca38701cc`，不得使用随 KickSide 名称新派生的 GUID。
 - [ ] 从开始菜单直接启动 KickSide（不是从 PowerShell 启动），进入“KickSide 设置 → DeepSeek Harness”。
 - [ ] 能识别本机 Node/npm；记录界面显示的 Node 版本。若未识别，点击“重新检测”后仍应给 E-DSH-001 与 Node.js LTS 指引，不应只显示不可点击按钮。
 - [ ] 点击“安装固定版本”，最终显示 `DSH 0.1.0-rc.6` 已就绪；安装期间 UI 不假死，可查看日志尾部。
 - [ ] 打开 DSH 开关后自动以默认工作目录启动，状态变为“运行中”，无需再点 pane 才启动后端。
+
+> 2026-08-14 首轮结果：开始菜单启动已能识别 Node/npm，但固定版本安装在真正访问 registry 前因 `npm.cmd` 被直接交给 CreateProcess 而报 E-DSH-002；同一安装包也未跨产品名提示旧 Kimi Sidekick。源码已改为 `node.exe + npm-cli.js` 并加入品牌迁移 hook，本节所有勾选必须来自修复后新包。
 
 ## B. WebView2 与窗格体验
 

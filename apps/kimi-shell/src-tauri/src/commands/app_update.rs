@@ -108,7 +108,10 @@ pub(crate) async fn install_app_update(
         .map_err(|error| error.to_string())?;
 
     prepare_for_update_exit(&app).map_err(|error| error.to_string())?;
-    update.install(bytes).map_err(|error| error.to_string())
+    update.install(bytes).map_err(|error| error.to_string())?;
+    log_manager::append_line(&app, "app update installed; exiting current process");
+    app.exit(0);
+    Ok(())
 }
 
 fn prepare_for_update_exit(app: &AppHandle) -> anyhow::Result<()> {

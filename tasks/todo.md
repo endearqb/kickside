@@ -24,8 +24,13 @@
 - [x] 完成 macOS S-10 冷/热启动各 5 次基线：中位数 361ms / 320ms，10 次均软停且端口释放。
 - [x] 将真实 runtime smoke 扩展为一次安装后 `--samples 1..10` 多轮采样；本机 3 次复验 ready 中位数 507ms、stop 中位数 252ms、无强杀且端口全部关闭。
 - [x] 重建包含 canary/停止交互修复的 macOS arm64 测试包，完成 deep ad-hoc 签名及 zip 解包复验。
+- [x] 完成 macOS Kimi + DSH 后端 ≥70min 共存探针：实际 79m14s、950 次采样、0 失败，两端软停且进程组/端口清零。
+- [x] 完成隔离签名 updater 真版本差 0.2.0→0.2.1：修复安装后 App 未退出，复跑 App/Kimi/DSH PID 与端口清零，更新后 0.2.1 可启动。
+- [x] 定位 Windows E-DSH-002 首轮阻断：官方 `npm.cmd` 被当作原生 executable 直接交给 CreateProcess；改为 paired `node.exe + npm-cli.js`，补 launcher 回归与启动失败诊断日志。
+- [x] 为 KickSide NSIS 增加旧 `kimi sidekick` / `Kimi Sidekick` / `kimi小助手` / `Kimi Desktop Shell` 的 NSIS/MSI 精确检测、交互提示与保留数据迁移 hook；显式固定改名前 MSI UpgradeCode，静态安全 gate 与隔离 NSIS 编译通过。
+- [ ] 生成包含上述两项修复的 Windows NSIS/MSI 测试包，由用户重跑私有 pin 安装与旧品牌迁移。
 - [ ] Windows WebView2/私有安装/进程树真机 G3。
-- [ ] 以 0.2.0 RC 在 macOS/Windows 各复跑 Kimi + DSH 2h 长稳与完整故障注入矩阵。
+- [ ] 以 0.2.0 RC 补 Windows 长稳/故障注入，以及 macOS 真实 KimiCode/DSH pane 长时交互人工复核；macOS 后端探针不再要求 2h，updater 真版本差退出已完成。
 - [ ] headless A-8/A-10、系统凭据库和双平台 descendant-kill gate；未完成前保持 No-Go。
 
 ## Review
@@ -34,11 +39,12 @@
 - DSH URL/PID/状态只存在 Rust 活状态，Grid 只持久化稳定的 pane kind/workDir；generic external 安全边界未扩大。
 - degraded 仍绑定当前 owned Child/port/URL，因此保留同一 iframe；stopped/crashed/starting 仍 fail closed，不获得运行 URL。控制中心独立轮询已与 Grid 的 1s 投影对齐。
 - headless 不是现有 Kimi RuntimeAdapter 的第四实现；三条 connector 也不共享完整取消/心跳/轮询语义，因此计划改为 one-shot router、飞书先行、逐通道验收。
-- 自动化可证明契约、回归和 Unix 整树终止；macOS 当前 pin 已完成基础真机证据，双平台发布级完成仍依赖 Windows G3 与两端 RC 长稳/故障矩阵，不以 CI 代替真机。
-- 本机只有 Node 24.19.0，因此没有伪造 Node 18/20/22 的本地结果；这些版本继续由原生 Windows/macOS runtime canary 验证。S-10 的 M4 Pro 数据用于建立基线，不据此缩短尚未取得 Windows 数据的 60 秒生产默认启动超时；runtime smoke 的 90 秒只用于 CI 容错。
+- 自动化可证明契约、回归和 Unix 整树终止；macOS 当前 pin 的后端共存已按接受的 ≥70min 门槛通过，隔离 updater 真版本差也已验证；双平台发布级完成仍依赖 Windows G3 与 release candidate 的真实 pane 人工复核，不以 CI 代替真机。
+- Node 18.20.8 已真实证明因缺少 `util.parseEnv` 不兼容；Node 20.20.2、22.23.2 与本机 24.19.0 均已通过真实 pin 安装/readiness/软停。S-10 的 M4 Pro 数据用于建立 macOS 基线，不据此缩短尚未取得 Windows 数据的 60 秒生产默认启动超时；runtime smoke 的 90 秒只用于 CI 容错。
+- Windows 首轮错误发生在 npm 子进程 spawn 前，所以不能按网络/代理问题处理；修复后只有 npm 真正返回非零或超时才进入 E-DSH-002 registry/网络分支。旧产品迁移使用正式卸载器，绝不递归删除旧安装目录或共享 `com.kimi.shell` 应用数据。
 - 关闭实验开关的安全语义是“不启动进程、不自动建 pane、不提供运行 URL”；控制中心检测/安装入口仍可发现，标题栏 DSH 新建/浏览器入口则仅在启用后出现。
 - DSH 安装、开关和停止共享同一动作互斥边界，但使用明确的 `安装中` / `停止中` 文案；这避免快速双击重复停止，也避免无关的安装按钮被错误标成正在停止。
-- 最新 Mac 测试基线为 `KickSide_0.2.0_macos_arm64_dsh-p0-canary-ui.zip`（SHA-256 `6b4b8c8a4a102b591da8647c77b74314bc512465a4ea10f4a2a8a39b2e1607e9`）；旧包不再用于回填新交互结果。
+- 最新 Mac 测试基线为 `KickSide_0.2.0_macos_arm64_dsh-p0-updater-exit.zip`（SHA-256 `ef8fd3a27f9b345260f88b272adb8cc5dd9205ea578b26bad2670f49955befb0`）；旧包不再用于回填新交互结果。
 
 # 工作区 Skill 连续列表与目标选择稳定化
 
@@ -1320,4 +1326,4 @@
 
 - 根因是旧 pane 按钮标为“重试后端启动”，实际只调用 `get settings/status`；控制中心停止后也没有启动入口，用户只能切换开关或新建 pane。
 - 现在 toolbar 刷新仍是只读状态动作，空白/失败覆盖层才调用恢复启动；二者不再共用含义错误的回调。
-- 新包为 `KickSide_0.2.0_macos_arm64_dsh-p0-recovery.zip`，SHA-256 `988bebd335bcaf11348cdb80c126ff564dcf809a27a2611c365a85015734781d`；已包含按原始字节有界校验的 production 页面身份 readiness、canonical 私有入口约束及 E-DSH-005 崩溃日志，同名旧包移到 `/tmp`，不会与当前测试基线混淆。
+- 新包为 `KickSide_0.2.0_macos_arm64_dsh-p0-recovery.zip`，SHA-256 `cc9219a061dd4b7b889a61daef5eaa1e1a759d23ae64e0e301a164ff3f7fef0e`；已包含 Node 20.12 最低能力 preflight、按原始字节有界校验的 production 页面身份 readiness、canonical 私有入口约束及 E-DSH-005 崩溃日志，同名旧包移到 `/tmp`，不会与当前测试基线混淆。

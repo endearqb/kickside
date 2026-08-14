@@ -28,7 +28,7 @@
 
 ## 3. 上游核验结论
 
-- npm 当前 pin 为 `0.1.0-rc.6`，包未声明 Node `engines`；最低 Node 版本必须由双平台 Spike 或壳自身支持基线决定，不能伪造上游约束。
+- npm 当前 pin 为 `0.1.0-rc.6`，包未声明 Node `engines`；真实 Node 18.20.8 启动已证明其依赖 `@deepseek-ai/dsh-app-boot` 需要 Node 20.12.0 才引入的 `util.parseEnv`，Node 20.20.2 通过完整 smoke。Shell 不伪造 `engines`，而是以 20.12.0 用户提示加固定能力探针 fail closed；自动 canary 覆盖 20.12/22/24。
 - DSH 默认权限是 `workspace-write + ask`。headless 没有浏览器审批回答器，触发审批时会 fail-closed 为 `unavailable`；它不是自动放行，也不是无限挂起。
 - `DSH_PERMISSION_MODE=danger-full-access` 会关闭审批并扩大权限，IM 路径不得使用。
 - 隔离环境实测运行时 `npx --yes` 超过 90 秒仍未形成监听或可用就绪信号，证明它不适合作为生产启动 fallback；生产只执行已验证私有前缀中的固定入口。

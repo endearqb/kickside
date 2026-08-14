@@ -13,7 +13,7 @@
 
 | 需求 | 状态 | 代码/证据 |
 |---|---|---|
-| FR-1 环境检测 | 完成 | `nodejs_locator` 覆盖 GUI 冷环境常见 Node 管理器；控制中心显示 Node/npm/pin；缺 Node 为 E-DSH-001 |
+| FR-1 环境检测 | 完成 | `nodejs_locator` 覆盖 GUI 冷环境常见 Node 管理器；固定 `util.parseEnv` 能力探针拒绝 Node 18/过旧运行时，提示最低 Node 20.12.0；控制中心显示 Node/npm/pin；缺失或过旧均为 E-DSH-001 |
 | FR-2 启停与 pane | 代码完成，macOS 已证 | 私有固定入口、argv、canonical cwd、精确 loopback port；首次 readiness 同时校验 2xx/3xx 与前 512KiB `__DSH_BOOT__` 页面身份；控制中心可显式恢复 stopped/crashed，pane 恢复使用最后观测工作区；隔离 production App 新判定 767ms ready |
 | FR-3 状态 | 完成 | stopped/starting/running/degraded/crashed/stopping；Grid 与控制中心均为 1s 投影；运行期 5s health、3 次失败降级与自动恢复；degraded 保留原 owned iframe，不因瞬态抖动丢失页面状态 |
 | FR-4 日志 | 完成 | stdout/stderr 落 `dsh.log`，写前脱敏，10MiB projected-size 轮转，仅保留 `.1`，单行 64KiB；控制中心 tail 与 pane 日志入口 |

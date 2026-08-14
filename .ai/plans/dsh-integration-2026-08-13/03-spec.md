@@ -145,7 +145,7 @@ key 必须来自系统凭据库。壳与 Bridge 之间采用单一、版本化 h
 现有 `InstallFlowCatalog` 是 Kimi/PowerShell 特化实现且 macOS 会拒绝通用 flow。DSH 使用独立的窄安装器，共享设置页的状态表达与日志安全约束，不伪装复用不成立的目录。
 
 - 分发：把 `@deepseek-ai/dsh@<pinned>` 装到壳私有前缀的临时目录，验证 package version 与固定入口后原子替换。`package.json` 与 `lib/bin.js` 必须 canonicalize 后仍位于当前私有安装根内；符号链接/junction 越界时 fail closed。壳直接以 Node 执行已验证的 canonical 入口；入口损坏时不使用 npx fallback。
-- preflight 检查项：node 存在与版本（最低版【M0，A-1】回填）、npm 可用、私有前缀内 pinned 版本完好、npm registry（含所选镜像）可达（仅安装/升级时要求）。**macOS 注意**：kimi-code 在 macOS 走原生二进制，壳此前对 macOS 用户没有 Node 假设——DSH 是 macOS 侧第一个需要 Node 的组件，缺失时给 Homebrew / nodejs.org LTS 指引，不代装。
+- preflight 检查项：Node 存在且通过固定的 `util.parseEnv` 能力探针（当前 pin 的实测最低边界为 Node 20.12.0）、npm 可用、私有前缀内 pinned 版本完好、npm registry（含所选镜像）可达（仅安装/升级时要求）。Node 18.20.8 的真实固定 pin 启动因该导出缺失而失败；Node 20.20.2 已通过安装/readiness/软停，20.12.0 是 Node 官方引入该 API 的版本。**macOS 注意**：kimi-code 在 macOS 走原生二进制，壳此前对 macOS 用户没有 Node 假设——DSH 是 macOS 侧第一个需要 Node 的组件，缺失或过旧时给 Homebrew / nodejs.org LTS 指引，不代装。
 - 升级：设置页展示 pin 与 npm latest → 用户确认 → 装到临时前缀 → 起一次 `web --port <探测口>` 冒烟（能打印 URL 即过）→ 原子替换前缀 → 更新 pin。失败则丢弃临时前缀，pin 不动（FR-9 的自动回退）。已运行实例不受影响，重启实例后用新版。
 - 卸载：删私有前缀与壳侧日志；`$DSH_HOME` 保留并在卸载文案说明（NFR-4）。
 

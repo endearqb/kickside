@@ -24,12 +24,21 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./apps/kimi-shell/package.json').version")"
+          notes_path="apps/kimi-shell/docs/release-notes-$version.md"
           test "$GITHUB_REF_NAME" = "v$version" || {
             echo "Tag $GITHUB_REF_NAME does not match package version v$version." >&2
             exit 1
           }
-          test "$GITHUB_REF_NAME" = "v0.1.24" || {
-            echo "The unsigned macOS release exception is restricted to v0.1.24. Restore the signed release workflow before publishing another version." >&2
+          test "$GITHUB_REF_NAME" = "v0.2.0" || {
+            echo "The unsigned macOS release exception is restricted to v0.2.0. Restore the signed release workflow before publishing another version." >&2
+            exit 1
+          }
+          test -f "$notes_path" || {
+            echo "Release notes are missing: $notes_path" >&2
+            exit 1
+          }
+          test "$(head -n 1 "$notes_path")" = '⚠️ **macOS 版本未签名、未公证**' || {
+            echo "Release notes must start with the unsigned macOS warning." >&2
             exit 1
           }
           for name in \
@@ -45,12 +54,14 @@ jobs:
               echo "Release $GITHUB_REF_NAME already exists and is not a draft." >&2
               exit 1
             }
+            gh release edit "$GITHUB_REF_NAME" \
+              --notes-file "$notes_path" \
+              --title "KickSide $GITHUB_REF_NAME"
           else
             gh release create "$GITHUB_REF_NAME" \
               --draft \
               --verify-tag \
-              --generate-notes \
-              --notes $'⚠️ **macOS 版本未签名**\n\n此版本的 macOS 安装包未进行 Apple Developer ID 签名或公证，首次打开时可能需要在“系统设置 → 隐私与安全性”中手动允许。Windows/macOS 自动更新产物仍保留 Tauri updater 签名校验。' \
+              --notes-file "$notes_path" \
               --title "KickSide $GITHUB_REF_NAME"
           fi
 
@@ -195,7 +206,7 @@ jobs:
             --version "$version" \
             --tag "$GITHUB_REF_NAME" \
             --pub-date "$(git show -s --format=%cI "$GITHUB_REF_NAME")" \
-            --notes "KickSide $version" \
+            --notes "KickSide $version：新增 DeepSeek Harness、多窗格工作台与 Kimi Code 消息 TOC。macOS 安装包未签名、未公证。" \
             --windows-url "$base_url/$(basename "$windows_bundle")" \
             --windows-signature-file "$windows_bundle.sig" \
             --macos-url "$base_url/$(basename "$macos_bundle")" \

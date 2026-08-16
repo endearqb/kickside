@@ -1453,3 +1453,24 @@
 - [x] 完成文档链接、隐私与完整工程门禁。
 - [x] 提交并推送当前完整工作区。
 - [ ] 更新 PR，等待 GitHub checks 并合并至 `main`。
+
+# v0.2.0 未签名 macOS 预览发布
+
+## 任务契约
+
+- 用户目标：发布 `v0.2.0` GitHub Release 与中文更新说明；macOS 继续采用未 Developer ID 签名、未公证的 Apple Silicon 安装包。
+- 直接交付物：精确 tag 发布例外、accepted ADR、`release-notes-0.2.0.md`、Windows NSIS/MSI、macOS app/DMG、两端 updater 签名和唯一 `latest.json`。
+- 影响范围：Release workflow、发布说明、macOS 发布决策与架构/验证文档、GitHub tag/Release。
+- 非目标：不伪造 Apple Developer ID、notarization、stapling、Gatekeeper 或 Windows Authenticode 结论；不扩展 Intel Mac/Linux；不把未签名例外永久化。
+- 验收：`main` CI 全绿后推送精确 `v0.2.0`；Release 顶部明确未签名/未公证；两平台构建成功且资产完整；失败时保持 draft；发布后核对 `latest.json` 双平台条目。
+
+## Checklist
+
+- [x] 核对版本、现有 Release workflow、签名 Secrets、远端 tag/Release 与 main CI。
+- [x] 为精确 `v0.2.0` 建立 accepted 未签名预览例外，并保持 updater 签名 fail-closed。
+- [x] 编写中文更新说明并接入 Release 创建流程。
+- [x] 完成本地发布配置验证。
+- [ ] 提交发布准备并推送 `main`。
+- [ ] 等待 `main` CI 全绿后创建并推送 `v0.2.0` tag。
+- [ ] 等待 Release Actions 完成，核验安装包、签名、`latest.json` 与更新说明。
+- [ ] Windows/macOS 最终安装包 G3 由真实平台继续补验；在此之前仅称预览发布。

@@ -4,6 +4,8 @@ import process from "node:process";
 
 const configPath = path.resolve(process.cwd(), "src-tauri", "tauri.conf.json");
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const windowsConfigPath = path.resolve(process.cwd(), "src-tauri", "tauri.windows.conf.json");
+const windowsConfig = JSON.parse(fs.readFileSync(windowsConfigPath, "utf8"));
 const resources = config.bundle?.resources;
 const errors = [];
 
@@ -28,6 +30,38 @@ if (!resources || typeof resources !== "object" || Array.isArray(resources)) {
     const resolved = path.resolve(process.cwd(), "src-tauri", source);
     if (!fs.existsSync(resolved)) {
       errors.push(`resource source does not exist: ${source}`);
+    }
+  }
+}
+
+const installerHooks = windowsConfig.bundle?.windows?.nsis?.installerHooks;
+const wixUpgradeCode = windowsConfig.bundle?.windows?.wix?.upgradeCode;
+const legacyKimiSidekickUpgradeCode = "dfa197f9-0e61-5393-a612-7e4ca38701cc";
+if (wixUpgradeCode !== legacyKimiSidekickUpgradeCode) {
+  errors.push(
+    `Windows MSI upgradeCode must preserve the pre-KickSide kimi sidekick identity: ${legacyKimiSidekickUpgradeCode}`,
+  );
+}
+
+if (typeof installerHooks !== "string" || installerHooks.length === 0) {
+  errors.push("Windows NSIS installerHooks must be configured for legacy brand migration");
+} else {
+  const hooksPath = path.resolve(process.cwd(), "src-tauri", installerHooks);
+  if (!fs.existsSync(hooksPath)) {
+    errors.push(`Windows NSIS installerHooks file does not exist: ${installerHooks}`);
+  } else {
+    const hooks = fs.readFileSync(hooksPath, "utf8");
+    for (const marker of [
+      "NSIS_HOOK_PREINSTALL",
+      "Uninstall\\Kimi Sidekick",
+      '$R8 == "kimi sidekick"',
+      "ExecWait '$R0 /P'",
+      'msiexec.exe" /x',
+      "kickside_legacy_failed",
+    ]) {
+      if (!hooks.includes(marker)) {
+        errors.push(`Windows NSIS legacy migration hook is missing marker: ${marker}`);
+      }
     }
   }
 }

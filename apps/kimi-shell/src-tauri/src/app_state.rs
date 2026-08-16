@@ -160,6 +160,39 @@ pub struct BridgeProcessState {
     pub pending_approvals: usize,
 }
 
+#[derive(Debug)]
+pub struct DshProcessState {
+    pub generation: u64,
+    pub state: crate::dsh_manager::DshRuntimeState,
+    pub child: Option<Child>,
+    pub process_group_id: Option<i32>,
+    pub pid: Option<u32>,
+    pub port: Option<u16>,
+    pub url: Option<String>,
+    pub workspace_dir: Option<PathBuf>,
+    pub started_at_ms: Option<u64>,
+    pub exit_code: Option<i32>,
+    pub last_error: Option<String>,
+}
+
+impl Default for DshProcessState {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            state: crate::dsh_manager::DshRuntimeState::Stopped,
+            child: None,
+            process_group_id: None,
+            pid: None,
+            port: None,
+            url: None,
+            workspace_dir: None,
+            started_at_ms: None,
+            exit_code: None,
+            last_error: None,
+        }
+    }
+}
+
 impl BridgeProcessState {
     pub fn new(admin_token: String) -> Self {
         Self {
@@ -227,6 +260,10 @@ pub struct AppState {
     pub backend_lifecycle_operation: Mutex<()>,
     pub runtime_locator_write: Mutex<()>,
     pub graceful_exit_started: AtomicBool,
+    pub dsh_runtime: Mutex<DshProcessState>,
+    pub dsh_lifecycle_operation: Mutex<()>,
+    pub dsh_log_operation: Mutex<()>,
+    pub dsh_cancel_requested: AtomicBool,
     pub bridge_runtime: Mutex<BridgeProcessState>,
     pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
     pub weixin_onboarding: Mutex<Option<WeixinOnboardingRuntimeState>>,
@@ -238,6 +275,8 @@ pub struct AppState {
     pub runtime_locator_path: PathBuf,
     pub logs_dir: PathBuf,
     pub bridge_log_path: PathBuf,
+    pub dsh_root_dir: PathBuf,
+    pub dsh_log_path: PathBuf,
     pub instance_id: String,
     pub pid: u32,
     pub started_at: String,
@@ -282,6 +321,10 @@ impl AppState {
             backend_lifecycle_operation: Mutex::new(()),
             runtime_locator_write: Mutex::new(()),
             graceful_exit_started: AtomicBool::new(false),
+            dsh_runtime: Mutex::new(DshProcessState::default()),
+            dsh_lifecycle_operation: Mutex::new(()),
+            dsh_log_operation: Mutex::new(()),
+            dsh_cancel_requested: AtomicBool::new(false),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
             feishu_onboarding: Mutex::new(None),
             weixin_onboarding: Mutex::new(None),
@@ -293,6 +336,8 @@ impl AppState {
             runtime_locator_path: config_dir.join("kimi_runtime_locator.json"),
             logs_dir: logs_dir.clone(),
             bridge_log_path: logs_dir.join("bridge.log"),
+            dsh_root_dir: config_dir.join("dsh"),
+            dsh_log_path: logs_dir.join("dsh.log"),
             instance_id,
             pid,
             started_at,

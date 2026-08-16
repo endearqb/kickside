@@ -42,7 +42,7 @@ pub fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
     let mut tray_builder = TrayIconBuilder::with_id("kimi-shell-tray")
         .menu(&menu)
-        .tooltip("Kimi Shell");
+        .tooltip("KickSide");
 
     if let Some(icon) = app.default_window_icon().cloned() {
         tray_builder = tray_builder.icon(icon);

@@ -8,12 +8,11 @@
 - 许可证：Apache-2.0
 - 本地记录：`third_party/kimi-cli-web/`
 
-本应用提供的“本地增强版”基于 MoonshotAI/kimi-cli 开源 Web 的公开许可边界进行产品化集成，由本应用维护；不代表 MoonshotAI 官方背书，也不授予 MoonshotAI 或 Kimi 相关商标权。
+本应用保留 MoonshotAI/kimi-cli Web 的上游源码审查快照，并在官方 Kimi runtime 页面外提供本地桌面壳集成；这些本地集成由本应用维护，不代表 MoonshotAI 官方背书，也不授予 MoonshotAI 或 Kimi 相关商标权。
 
 ## 本地修改摘要
 
-- 新增官方 Web / 本地增强版切换。
-- 新增本地增强版静态入口、中文体验说明、主题转发与 session/prefill 消息转发。
-- 新增增强版健康状态、失败回退、来源 commit 与发布前合规检查。
-- 当前阶段保留 workspace proxy 同源注入作为运行时方案；同步下来的 `upstream-web/` 仅作为后续源码级 i18n / patch 基线。
+- 历史版本曾提供官方 Web / 本地增强版切换、静态 wrapper 与 workspace proxy 注入；这些路径已退出当前产品主链。
+- 当前生产直接加载官方 Kimi runtime URL，桌面主题、session、外链和有界响应式适配由 all-frame bridge 承担。
+- 同步下来的 `upstream-web/` 仅作为源码级 i18n / patch 审查基线，不作为运行时页面或 DOM 事实权威。
 - 不修改官方认证、服务端 API、模型、计费、权限或安全语义。

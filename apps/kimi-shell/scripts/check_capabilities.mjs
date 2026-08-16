@@ -128,6 +128,13 @@ if (tauriConfig.app?.windows?.some((item) => item.label === "agent-room")) {
   errors.push("retired agent-room window must not be configured");
 }
 
+const mainWindowConfig = tauriConfig.app?.windows?.find((item) => item.label === "main");
+if (mainWindowConfig?.dragDropEnabled !== false) {
+  errors.push(
+    "main window must disable Tauri native drag/drop so Kimi Code receives HTML5 file drops",
+  );
+}
+
 for (const item of capabilityList) {
   if (item?.local !== true) {
     errors.push(`capability ${item?.identifier ?? "<unknown>"} must set local=true`);

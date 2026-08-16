@@ -5,11 +5,11 @@ import {
   WORKSPACE_SPLIT_ORDER_STORAGE_KEY,
   WORKSPACE_SPLIT_RATIO_STORAGE_KEY,
 } from "@/app/theme";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { GRID_PRESETS, getGridTrackCounts, resizeGridTrackSizes } from "./gridPresets";
 import { buildCodePaneUrl } from "./paneUrl";
 import { migrateLegacyWorkspaceGridState } from "./gridMigration";
 import {
+  addDshPaneToWorkspaceGrid,
   WORKSPACE_GRID_MAX_PANES,
   WORKSPACE_GRID_MAX_TOTAL_PANES,
   WORKSPACE_GRID_STATE_STORAGE_KEY,
@@ -249,7 +249,7 @@ describe("workspace grid store", () => {
     const pane = store.getState().panes.find((item) => item.id === "pane-chat");
     expect(pane).toMatchObject({
       kind: "code",
-      title: getKimiAssistantDisplayName(),
+      title: "KimiCode",
       sessionId: undefined,
       workDir: "D:/work",
     });
@@ -421,6 +421,40 @@ describe("workspace grid store", () => {
     );
   });
 
+  it("never persists a DSH runtime URL", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+    const paneId = store.getState().addPane({
+      kind: "dsh",
+      url: "http://127.0.0.1:3080",
+      workDir: "D:/repo",
+    });
+    const runtimePane = store.getState().panes.find((pane) => pane.id === paneId);
+    expect(runtimePane?.url).toBeUndefined();
+
+    const persisted = toPersistedWorkspaceGridState(store.getState());
+    const persistedPane = persisted.panes.find((pane) => pane.id === paneId);
+    expect(persistedPane).toMatchObject({ kind: "dsh", workDir: "D:/repo" });
+    expect(persistedPane?.url).toBeUndefined();
+  });
+
+  it("creates a new pane for every DSH menu action while sharing one backend", () => {
+    const store = createWorkspaceGridStore(undefined, null);
+
+    const firstPaneId = addDshPaneToWorkspaceGrid(" D:/repo ", store);
+    const secondPaneId = addDshPaneToWorkspaceGrid("D:/repo", store);
+
+    expect(firstPaneId).not.toBeNull();
+    expect(secondPaneId).not.toBeNull();
+    expect(secondPaneId).not.toBe(firstPaneId);
+    const dshPanes = store.getState().panes.filter((pane) => pane.kind === "dsh");
+    expect(dshPanes).toHaveLength(2);
+    expect(dshPanes.map((pane) => pane.workDir)).toEqual(["D:/repo", "D:/repo"]);
+    expect(new Set(dshPanes.map((pane) => pane.storageNamespace)).size).toBe(2);
+    expect(
+      store.getState().slots.filter((slot) => dshPanes.some((pane) => pane.id === slot.paneId)),
+    ).toHaveLength(2);
+  });
+
   it("keeps pane workDir/theme optional while loading persisted panes", () => {
     const state = loadWorkspaceGridState(
       writableStorage({
@@ -452,7 +486,7 @@ describe("workspace grid store", () => {
     const persisted = toPersistedWorkspaceGridState(state);
 
     expect(persisted.panes[0]?.storageNamespace).toBe("workspace-grid-pane-code");
-    expect(persisted.panes[0]?.title).toBe(getKimiAssistantDisplayName());
+    expect(persisted.panes[0]?.title).toBe("KimiCode");
     expect(persisted.panes[0]?.workDir).toBe("D:/work");
     expect(persisted.panes[0]?.theme).toBe("dark");
   });
@@ -745,8 +779,13 @@ describe("workspace grid track resizing", () => {
 describe("pane URL helpers", () => {
   it("builds session URLs from the origin and server session id", () => {
     expect(
-      buildCodePaneUrl("http://127.0.0.1:1234/#token=secret", "a/b c"),
-    ).toBe("http://127.0.0.1:1234/sessions/a%2Fb%20c#token=secret");
+      buildCodePaneUrl(
+        "http://127.0.0.1:1234/?kimi_onboarded=1#token=secret",
+        "a/b c",
+      ),
+    ).toBe(
+      "http://127.0.0.1:1234/sessions/a%2Fb%20c?kimi_onboarded=1#token=secret",
+    );
   });
 });
 

@@ -19,14 +19,16 @@ import {
   RefreshCcw,
   Trash2,
 } from "lucide-react";
+import { BackendBrandIcon } from "@/components/BackendBrandIcon";
 import { THEME_SYNC_SOURCE } from "@/app/theme";
 import {
+  parseDshFrameWorkspaceMessage,
   parseWorkspaceFrameSessionMessage,
+  queryDshFrameWorkspace,
   queryWorkspaceFrameSessionId,
 } from "@/app/linkBridge";
 import type { Theme, WorkspacePaneState } from "@/app/types";
 import { Button } from "@/components/ui/button";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   type EmbeddedExternalWebviewBounds,
@@ -34,8 +36,13 @@ import {
 } from "@/services/externalWebviewService";
 import { buildCodePaneUrl } from "./paneUrl";
 import type { WorkspacePane, WorkspacePaneKind } from "./gridTypes";
+import {
+  getTrustedDshRuntimeUrl,
+  type DshStatus,
+} from "@/services/dshService";
 
 const EXTERNAL_FRAME_TIMEOUT_MS = 8_000;
+const DSH_GUIDE_ACK_KEY = "kimi-dsh-first-use-guide-v1";
 
 interface PaneFrameProps {
   pane: WorkspacePane | null;
@@ -51,11 +58,19 @@ interface PaneFrameProps {
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
+  dshStatus: DshStatus | null;
+  dshError: string | null;
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => Promise<void>;
   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
   onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
+  onPaneDshWorkspaceObserved: (
+    paneId: string,
+    sessionId: string | null,
+    workDir: string | null,
+  ) => void;
   onOpenExternalUrl: (url: string) => void;
   onOpenTauriWebviewUrl: (
     url: string,
@@ -72,6 +87,8 @@ interface PaneFrameProps {
   onResumePane: () => void;
   onPaneDragStart: (event: ReactPointerEvent<HTMLElement>) => void;
   onToggleMaximize: () => void;
+  onRefreshDsh: () => Promise<DshStatus | null>;
+  onRecoverDsh: (workspaceDir?: string) => Promise<DshStatus | null>;
 }
 
 export function PaneFrame({
@@ -88,11 +105,15 @@ export function PaneFrame({
   chatIframeRef,
   codePaneState,
   chatPaneState,
+  dshStatus,
+  dshError,
   actionBusy,
   onRetry,
   onOpenLogs,
+  onOpenFolder,
   onOpenPaneFolder,
   onPaneSessionObserved,
+  onPaneDshWorkspaceObserved,
   onOpenExternalUrl,
   onOpenTauriWebviewUrl,
   onCodeFrameLoad,
@@ -105,22 +126,38 @@ export function PaneFrame({
   onResumePane,
   onPaneDragStart,
   onToggleMaximize,
+  onRefreshDsh,
+  onRecoverDsh,
 }: PaneFrameProps) {
   const paneIframeRef = useRef<HTMLIFrameElement | null>(null);
   const sessionObservationGenerationRef = useRef(0);
+  const dshWorkspaceObservationGenerationRef = useRef(0);
   const folderBusyRef = useRef(false);
   const [observedSessionId, setObservedSessionId] = useState<string | null>();
+  const [observedDshWorkspace, setObservedDshWorkspace] = useState<
+    { sessionId: string; workDir: string } | null | undefined
+  >();
   const [folderBusy, setFolderBusy] = useState(false);
   const paneId = pane?.id ?? null;
   const codeOrigin = pane?.kind === "code" ? urlOrigin(codeRemoteUrl) : "";
+  const dshRuntimeUrl = pane?.kind === "dsh" ? getTrustedDshRuntimeUrl(dshStatus) : null;
+  const dshOrigin = urlOrigin(dshRuntimeUrl);
   const codeFrameMounted = Boolean(
     pane?.kind === "code" && codeRemoteUrl && isPaneContentMounted(pane, active),
+  );
+  const dshFrameMounted = Boolean(
+    pane?.kind === "dsh" && dshRuntimeUrl && isPaneContentMounted(pane, active),
   );
 
   useLayoutEffect(() => {
     sessionObservationGenerationRef.current += 1;
     setObservedSessionId(undefined);
   }, [codeFrameKey, codeFrameMounted, codeOrigin]);
+
+  useLayoutEffect(() => {
+    dshWorkspaceObservationGenerationRef.current += 1;
+    setObservedDshWorkspace(undefined);
+  }, [dshFrameMounted, dshOrigin, paneId]);
 
   useEffect(() => {
     if (!codeFrameMounted || !codeOrigin || !paneId) {
@@ -142,6 +179,35 @@ export function PaneFrame({
     return () => window.removeEventListener("message", handleMessage);
   }, [codeFrameMounted, codeOrigin, onPaneSessionObserved, paneId]);
 
+  useEffect(() => {
+    if (!dshFrameMounted || !dshOrigin || !paneId) {
+      return;
+    }
+    const handleMessage = (event: MessageEvent) => {
+      const message = parseDshFrameWorkspaceMessage(
+        event,
+        paneIframeRef.current,
+        dshOrigin,
+      );
+      if (message?.action !== "dsh_workspace_changed") {
+        return;
+      }
+      dshWorkspaceObservationGenerationRef.current += 1;
+      const workspace =
+        message.applied && message.sessionId && message.workDir
+          ? { sessionId: message.sessionId, workDir: message.workDir }
+          : null;
+      setObservedDshWorkspace(workspace);
+      onPaneDshWorkspaceObserved(
+        paneId,
+        workspace?.sessionId ?? null,
+        workspace?.workDir ?? null,
+      );
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [dshFrameMounted, dshOrigin, onPaneDshWorkspaceObserved, paneId]);
+
   if (!pane) {
     return (
       <div className="workspace-grid-pane workspace-grid-pane-empty">
@@ -162,12 +228,13 @@ export function PaneFrame({
     chatIframeRef,
     codePaneState,
     chatPaneState,
+    dshStatus,
     onCodeFrameLoad,
     onCodeFrameError,
     onChatFrameLoad,
     onChatFrameError,
   }) : null;
-  const paneTheme = pane.theme ?? themeMode;
+  const paneTheme = pane.kind === "dsh" ? themeMode : pane.theme ?? themeMode;
   const folderActionLabel = folderBusy
     ? "正在解析当前会话目录"
     : observedSessionId === undefined
@@ -175,24 +242,31 @@ export function PaneFrame({
       : observedSessionId === null
         ? "当前窗格尚未进入会话"
         : "打开当前会话目录";
+  const dshFolderActionLabel = folderBusy
+    ? "正在打开当前会话目录"
+    : observedDshWorkspace === undefined
+      ? "正在识别 DeepSeek Harness 当前会话"
+      : observedDshWorkspace === null
+        ? "DeepSeek Harness 当前窗格尚未进入会话"
+        : "打开 DeepSeek Harness 当前会话目录";
   const viewToggle =
     pane.kind === "code"
       ? {
           target: "chat" as const,
-          label: "当前 Code，切换为 Chat",
+          label: "当前 KimiCode，切换为 KimiChat",
           icon: <Code2 size={14} aria-hidden />,
           active: true,
         }
       : pane.kind === "chat"
         ? {
             target: "code" as const,
-            label: "当前 Chat，切换为 Code",
+            label: "当前 KimiChat，切换为 KimiCode",
             icon: <MessageCircle size={14} aria-hidden />,
             active: true,
           }
         : {
             target: "code" as const,
-            label: "切换为 Code",
+            label: "切换为 KimiCode",
             icon: <Code2 size={14} aria-hidden />,
             active: false,
           };
@@ -217,9 +291,11 @@ export function PaneFrame({
         }}
       >
         <div className="workspace-grid-pane-title">
-          {pane.kind === "code" ? <Code2 size={14} aria-hidden /> : null}
-          {pane.kind === "chat" ? <MessageCircle size={14} aria-hidden /> : null}
+          {pane.kind === "code" || pane.kind === "chat" ? (
+            <BackendBrandIcon brand="kimi" size={15} />
+          ) : null}
           {pane.kind === "external" ? <Globe2 size={14} aria-hidden /> : null}
+          {pane.kind === "dsh" ? <BackendBrandIcon brand="dsh" size={15} /> : null}
           <span>{pane.title}</span>
         </div>
         <div className="workspace-grid-pane-actions">
@@ -244,13 +320,41 @@ export function PaneFrame({
               <FolderOpen size={14} aria-hidden />
             </IconButton>
           ) : null}
-          {pane.kind !== "agent_room" ? (
+          {pane.kind === "dsh" ? (
+            <IconButton
+              label={dshFolderActionLabel}
+              onClick={() => {
+                const workDir = observedDshWorkspace?.workDir;
+                if (!workDir || folderBusyRef.current) {
+                  return;
+                }
+                folderBusyRef.current = true;
+                setFolderBusy(true);
+                void onOpenFolder(workDir).finally(() => {
+                  folderBusyRef.current = false;
+                  setFolderBusy(false);
+                });
+              }}
+              disabled={!dshFrameMounted || !observedDshWorkspace || folderBusy}
+            >
+              <FolderOpen size={14} aria-hidden />
+            </IconButton>
+          ) : null}
+          {pane.kind !== "agent_room" && pane.kind !== "dsh" ? (
             <IconButton
               label={viewToggle.label}
               onClick={() => onConfigurePane(viewToggle.target)}
               active={viewToggle.active}
             >
               {viewToggle.icon}
+            </IconButton>
+          ) : null}
+          {pane.kind === "dsh" ? (
+            <IconButton
+              label="刷新 DeepSeek Harness"
+              onClick={() => void onRefreshDsh()}
+            >
+              <RefreshCcw size={14} aria-hidden />
             </IconButton>
           ) : null}
           <IconButton
@@ -282,7 +386,34 @@ export function PaneFrame({
         onResumePane={onResumePane}
         iframeRef={paneIframeRef}
         onIframeLoad={() => {
-          if (!codeOrigin) {
+          if (dshOrigin && pane.kind === "dsh") {
+            const generation = dshWorkspaceObservationGenerationRef.current + 1;
+            dshWorkspaceObservationGenerationRef.current = generation;
+            setObservedDshWorkspace(undefined);
+            void queryDshFrameWorkspace(paneIframeRef.current, dshOrigin)
+              .then((message) => {
+                if (dshWorkspaceObservationGenerationRef.current !== generation) {
+                  return;
+                }
+                const workspace =
+                  message.applied && message.sessionId && message.workDir
+                    ? { sessionId: message.sessionId, workDir: message.workDir }
+                    : null;
+                setObservedDshWorkspace(workspace);
+                onPaneDshWorkspaceObserved(
+                  pane.id,
+                  workspace?.sessionId ?? null,
+                  workspace?.workDir ?? null,
+                );
+              })
+              .catch(() => {
+                if (dshWorkspaceObservationGenerationRef.current === generation) {
+                  setObservedDshWorkspace(null);
+                }
+              });
+            return;
+          }
+          if (!codeOrigin || pane.kind !== "code") {
             return;
           }
           const generation = sessionObservationGenerationRef.current + 1;
@@ -300,6 +431,8 @@ export function PaneFrame({
               }
             });
         }}
+        dshError={dshError}
+        onRecoverDsh={onRecoverDsh}
       /> : null}
     </article>
   );
@@ -358,6 +491,8 @@ interface PaneContentProps {
   onResumePane: () => void;
   iframeRef: MutableRefObject<HTMLIFrameElement | null>;
   onIframeLoad: () => void;
+  dshError: string | null;
+  onRecoverDsh: (workspaceDir?: string) => Promise<DshStatus | null>;
 }
 
 function PaneContent({
@@ -374,6 +509,8 @@ function PaneContent({
   onResumePane,
   iframeRef,
   onIframeLoad,
+  dshError,
+  onRecoverDsh,
 }: PaneContentProps) {
   const embedHostRef = useRef<HTMLDivElement | null>(null);
   const embeddedControllerRef =
@@ -385,11 +522,19 @@ function PaneContent({
     "idle" | "opening" | "active" | "failed"
   >("idle");
   const [embeddedError, setEmbeddedError] = useState("");
+  const [showDshGuide, setShowDshGuide] = useState(
+    () => pane.kind === "dsh" && window.localStorage.getItem(DSH_GUIDE_ACK_KEY) !== "1",
+  );
   const sourceUrl = source.url ?? "";
 
   useEffect(() => {
-    postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
-  }, [paneTheme, sourceUrl, themeSignal]);
+    postThemeToFrame(
+      iframeRef.current,
+      sourceUrl,
+      paneTheme,
+      pane.kind === "code" ? { surface: "kimi-code", layoutEnhancement: "v2" } : undefined,
+    );
+  }, [pane.kind, paneTheme, sourceUrl, themeSignal]);
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -547,15 +692,15 @@ function PaneContent({
     return (
       <div className="workspace-empty">
         <div className="workspace-empty-copy">
-          <h3>窗格尚未准备完成</h3>
-          <p>当前窗格没有可用地址。优先重试后端；如果依然没有恢复，再打开日志目录继续排查。</p>
+          <h3>{pane.kind === "dsh" ? "DeepSeek Harness 尚未就绪" : "窗格尚未准备完成"}</h3>
+          <p>{pane.kind === "dsh" ? (dshError ?? "正在等待本地 DSH 服务；可刷新状态或查看日志。") : "当前窗格没有可用地址。优先重试后端；如果依然没有恢复，再打开日志目录继续排查。"}</p>
         </div>
         <div className="workspace-empty-actions">
           <Button
             type="button"
             icon={<RefreshCcw size={14} />}
             className="cc-action-btn"
-            onClick={onRetry}
+            onClick={() => pane.kind === "dsh" ? void onRecoverDsh(pane.workDir) : onRetry()}
             disabled={actionBusy}
           >
             重试后端启动
@@ -594,15 +739,17 @@ function PaneContent({
           >
             恢复窗格
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            icon={<ExternalLink size={14} />}
-            className="cc-action-btn cc-doc-btn"
-            onClick={() => onOpenExternalUrl(sourceUrl)}
-          >
-            在浏览器打开
-          </Button>
+          {pane.kind !== "dsh" ? (
+            <Button
+              type="button"
+              variant="outline"
+              icon={<ExternalLink size={14} />}
+              className="cc-action-btn cc-doc-btn"
+              onClick={() => onOpenExternalUrl(sourceUrl)}
+            >
+              在浏览器打开
+            </Button>
+          ) : null}
           {pane.kind === "external" ? (
             <Button
               type="button"
@@ -661,7 +808,14 @@ function PaneContent({
             }
             referrerPolicy={pane.kind === "external" ? "no-referrer" : undefined}
             onLoad={() => {
-              postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
+              postThemeToFrame(
+                iframeRef.current,
+                sourceUrl,
+                paneTheme,
+                pane.kind === "code"
+                  ? { surface: "kimi-code", layoutEnhancement: "v2" }
+                  : undefined,
+              );
               if (pane.kind === "external") {
                 setExternalState("ready");
                 return;
@@ -679,6 +833,38 @@ function PaneContent({
             </div>
           )}
 
+          {pane.kind === "dsh" && showDshGuide && loadState === "ready" ? (
+            <div className="workspace-overlay">
+              <div className="workspace-fallback">
+                <h3>DeepSeek Harness 已在本机运行</h3>
+                <p>
+                  在 DSH 界面中确认工作区，并在 Settings → Models 完成 DeepSeek API key 设置。凭据由 DSH 自己保存，KickSide 不会读取。
+                </p>
+                <div className="workspace-fallback-actions">
+                  <Button
+                    type="button"
+                    className="cc-action-btn"
+                    onClick={() => {
+                      window.localStorage.setItem(DSH_GUIDE_ACK_KEY, "1");
+                      setShowDshGuide(false);
+                    }}
+                  >
+                    我知道了
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    icon={<ExternalLink size={14} />}
+                    className="cc-action-btn cc-doc-btn"
+                    onClick={() => onOpenExternalUrl("https://platform.deepseek.com/")}
+                  >
+                    打开 DeepSeek 开放平台
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {loadState === "blocked" && (
             <div className="workspace-overlay">
               <div className="workspace-fallback">
@@ -691,20 +877,22 @@ function PaneContent({
                     type="button"
                     icon={<RefreshCcw size={14} />}
                     className="cc-action-btn"
-                    onClick={onRetry}
+                    onClick={() => pane.kind === "dsh" ? void onRecoverDsh(pane.workDir) : onRetry()}
                     disabled={actionBusy}
                   >
                     重试加载
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    icon={<ExternalLink size={14} />}
-                    className="cc-action-btn cc-doc-btn"
-                    onClick={() => onOpenExternalUrl(sourceUrl)}
-                  >
-                    在浏览器打开
-                  </Button>
+                  {pane.kind !== "dsh" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      icon={<ExternalLink size={14} />}
+                      className="cc-action-btn cc-doc-btn"
+                      onClick={() => onOpenExternalUrl(sourceUrl)}
+                    >
+                      在浏览器打开
+                    </Button>
+                  ) : null}
                   {pane.kind === "external" ? (
                     <>
                       <Button
@@ -800,18 +988,50 @@ export function postThemeToFrame(
   frame: HTMLIFrameElement | null,
   sourceUrl: string,
   theme: Theme,
+  options?: {
+    surface: "kimi-code";
+    layoutEnhancement: "v2";
+  },
 ): void {
   if (!frame?.contentWindow || !sourceUrl) {
     return;
   }
 
   try {
+    const payload: {
+      source: typeof THEME_SYNC_SOURCE;
+      theme: Theme;
+      accent?: string;
+      surface?: "kimi-code";
+      layoutEnhancement?: "v2";
+    } = { source: THEME_SYNC_SOURCE, theme };
+    if (options && isKimiLayoutEnhancementEnabled()) {
+      payload.accent = readHostAccentColor();
+      payload.surface = options.surface;
+      payload.layoutEnhancement = options.layoutEnhancement;
+    }
     frame.contentWindow.postMessage(
-      { source: THEME_SYNC_SOURCE, theme },
+      payload,
       new URL(sourceUrl).origin,
     );
   } catch {
     // The iframe may still be navigating or temporarily at about:blank.
+  }
+}
+
+function isKimiLayoutEnhancementEnabled(): boolean {
+  try {
+    return window.localStorage.getItem("kimi-web-layout-v2") !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function readHostAccentColor(): string {
+  try {
+    return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  } catch {
+    return "";
   }
 }
 
@@ -825,6 +1045,7 @@ interface PaneSourceInput {
   chatIframeRef: RefObject<HTMLIFrameElement | null>;
   codePaneState: WorkspacePaneState;
   chatPaneState: WorkspacePaneState;
+  dshStatus: DshStatus | null;
   onCodeFrameLoad: () => void;
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
@@ -852,11 +1073,30 @@ function resolvePaneSource({
   chatIframeRef,
   codePaneState,
   chatPaneState,
+  dshStatus,
   onCodeFrameLoad,
   onCodeFrameError,
   onChatFrameLoad,
   onChatFrameError,
 }: PaneSourceInput): PaneSource {
+  if (pane.kind === "dsh") {
+    const trusted = getTrustedDshRuntimeUrl(dshStatus);
+    return {
+      url: trusted,
+      title: "DeepSeek Harness",
+      frameKey: `${pane.id}:${trusted ?? dshStatus?.state ?? "stopped"}`,
+      loadState:
+        dshStatus?.state === "running" || dshStatus?.state === "degraded"
+          ? "ready"
+          : dshStatus?.state === "crashed"
+            ? "blocked"
+            : dshStatus?.state === "stopped"
+              ? "blocked"
+              : "loading",
+      onLoad: () => undefined,
+      onError: () => undefined,
+    };
+  }
   if (pane.kind === "code") {
     const sessionUrl =
       pane.sessionId && codeRemoteUrl
@@ -864,7 +1104,7 @@ function resolvePaneSource({
         : null;
     return {
       url: sessionUrl ?? codeRemoteUrl,
-      title: getKimiAssistantDisplayName(),
+      title: "KimiCode",
       frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
       frameName: pane.id === "pane-code" ? workspaceBridgeNonce : undefined,
       iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
@@ -877,7 +1117,7 @@ function resolvePaneSource({
   if (pane.kind === "chat") {
     return {
       url: chatRemoteUrl,
-      title: "Kimi Chat",
+      title: "KimiChat",
       frameKey: `${pane.id}:${chatRemoteUrl}`,
       iframeRef: pane.id === "pane-chat" ? chatIframeRef : undefined,
       loadState: chatPaneState,

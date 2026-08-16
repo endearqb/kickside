@@ -7,6 +7,7 @@ import type {
   WorkspaceViewKind,
 } from "@/app/types";
 import { WorkspaceGridView } from "@/features/workspace-grid/WorkspaceGridView";
+import type { DshStatus } from "@/services/dshService";
 
 export type WorkspaceViewProps = {
   activeWorkspaceView: WorkspaceViewKind;
@@ -27,6 +28,7 @@ export type WorkspaceViewProps = {
   actionBusy: boolean;
   onRetry: () => void;
   onOpenLogs: () => void;
+  onOpenFolder: (path: string) => Promise<void>;
   onOpenPaneFolder: (frame: HTMLIFrameElement | null) => Promise<void>;
   onPaneSessionObserved: (paneId: string, sessionId: string | null) => void;
   onOpenExternalUrl: (url: string) => void;
@@ -36,6 +38,11 @@ export type WorkspaceViewProps = {
   onCodeFrameError: () => void;
   onChatFrameLoad: () => void;
   onChatFrameError: () => void;
+  dshStatus?: DshStatus | null;
+  dshError?: string | null;
+  dshBusy?: boolean;
+  onRefreshDsh?: () => Promise<DshStatus | null>;
+  onRecoverDsh?: (workspaceDir?: string) => Promise<DshStatus | null>;
 };
 
 export function WorkspaceView(props: WorkspaceViewProps) {

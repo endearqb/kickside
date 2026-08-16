@@ -20,6 +20,30 @@ function declarationBlocks(selectorPattern: RegExp) {
 }
 
 describe("control-center layout contracts", () => {
+  it("keeps the full control center on theme tokens in dark mode", () => {
+    expect(appCss).not.toContain("background: rgba(248, 248, 246, 0.92)");
+    expect(appCss).not.toContain("background: rgba(248, 248, 246, 0.96)");
+    expect(appCss).not.toContain("background: rgba(248, 248, 246, 0.9)");
+    expect(appCss).toMatch(
+      /\.theme-dark \.control-center-shell\s*\{[^}]*--primary-foreground:\s*#171a1c[^}]*color-scheme:\s*dark/s,
+    );
+    expect(appCss).toMatch(
+      /\.theme-dark \.control-center-shell \.cc-unified-rail-footer[^}]*background:\s*var\(--cc-rail\)/s,
+    );
+  });
+
+  it("aligns runtime actions without changing their business control", () => {
+    const action = declarationBlock(/\.cc-settings-row-action/);
+    const runtimeButton = declarationBlock(
+      /\.cc-runtime-settings-row \.cc-settings-row-action \.cc-action-btn/,
+    );
+    const runtimeSwitch = declarationBlock(/\.cc-runtime-settings-row \.cc-dsh-toggle/);
+
+    expect(action).toContain("min-width: 126px");
+    expect(runtimeButton).toContain("min-width: 126px");
+    expect(runtimeSwitch).toContain("width: 126px");
+  });
+
   it("keeps the active preserved page as a definite-height grid item", () => {
     expect(appCss.length).toBeGreaterThan(10_000);
     expect(appCss).toContain(".control-center-shell .cc-main");

@@ -10,7 +10,6 @@ import {
   migrateLegacyWorkspaceGridState,
   migrateWorkspaceGridStateV1,
 } from "./gridMigration";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { normalizeEmbeddableUrl } from "./urlSafety";
 import type {
   WorkspaceGridPersistedState,
@@ -250,6 +249,19 @@ export function createWorkspaceGridStore(
 export const useWorkspaceGridStore = create<WorkspaceGridStore>()(
   createWorkspaceGridSlice(loadWorkspaceGridState()),
 );
+
+export function addDshPaneToWorkspaceGrid(
+  workDir: string,
+  store: Pick<StoreApi<WorkspaceGridStore>, "getState"> = useWorkspaceGridStore,
+): string | null {
+  const normalizedWorkDir = workDir.trim();
+  if (!normalizedWorkDir) return null;
+  return store.getState().addPane({
+    kind: "dsh",
+    title: "DeepSeek Harness",
+    workDir: normalizedWorkDir,
+  });
+}
 
 function createWorkspaceGridSlice(
   initialState: WorkspaceGridStateV2,
@@ -952,7 +964,8 @@ function isPaneKind(value: unknown): value is WorkspacePaneKind {
     value === "code" ||
     value === "chat" ||
     value === "external" ||
-    value === "agent_room"
+    value === "agent_room" ||
+    value === "dsh"
   );
 }
 
@@ -995,6 +1008,22 @@ function sanitizePane(pane: WorkspacePane): WorkspacePane {
       theme: isPaneTheme(pane.theme) ? pane.theme : undefined,
     };
   }
+  if (pane.kind === "dsh") {
+    return {
+      ...pane,
+      carrier: "iframe",
+      title: normalizePaneTitle(pane.kind, pane.title),
+      sessionId: undefined,
+      activeSessionId: undefined,
+      roomId: undefined,
+      // Runtime authority comes exclusively from Rust status.
+      url: undefined,
+      workDir: sanitizeWorkDir(pane.workDir),
+      storageNamespace:
+        sanitizeStorageNamespace(pane.storageNamespace) ??
+        createPaneStorageNamespace(pane.id),
+    };
+  }
   return {
     ...pane,
     carrier: "iframe",
@@ -1013,7 +1042,21 @@ function sanitizePane(pane: WorkspacePane): WorkspacePane {
 
 function normalizePaneTitle(kind: WorkspacePaneKind, title: string): string {
   const trimmed = title.trim();
-  if (kind === "code" && (trimmed === "Kimi Code" || trimmed === "Kimi Code Web")) {
+  if (
+    kind === "code" &&
+    [
+      "Code",
+      "Kimi Code",
+      "Kimi Code Web",
+      "kimi小助手",
+      "kimi sidekick",
+      "KickSide 启伴",
+      "KickSide",
+    ].includes(trimmed)
+  ) {
+    return defaultPaneTitle(kind);
+  }
+  if (kind === "chat" && (trimmed === "Chat" || trimmed === "Kimi Chat")) {
     return defaultPaneTitle(kind);
   }
   return trimmed || defaultPaneTitle(kind);
@@ -1081,9 +1124,10 @@ function sanitizeWorkDir(workDir?: string): string | undefined {
 }
 
 function defaultPaneTitle(kind: WorkspacePaneKind): string {
-  if (kind === "code") return getKimiAssistantDisplayName();
-  if (kind === "chat") return "Kimi Chat";
+  if (kind === "code") return "KimiCode";
+  if (kind === "chat") return "KimiChat";
   if (kind === "agent_room") return "Agent Room";
+  if (kind === "dsh") return "DeepSeek Harness";
   return "外部网页";
 }
 

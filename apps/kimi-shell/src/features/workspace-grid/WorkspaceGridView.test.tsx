@@ -3,7 +3,6 @@ import { createRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   createEmbeddedExternalWebview,
   openExternalWebviewWindow,
@@ -85,6 +84,7 @@ const props: WorkspaceViewProps = {
   actionBusy: false,
   onRetry: vi.fn(),
   onOpenLogs: vi.fn(),
+  onOpenFolder: vi.fn(async () => undefined),
   onOpenPaneFolder: vi.fn(async () => undefined),
   onPaneSessionObserved: vi.fn(),
   onOpenExternalUrl: vi.fn(),
@@ -94,6 +94,7 @@ const props: WorkspaceViewProps = {
   onCodeFrameError: vi.fn(),
   onChatFrameLoad: vi.fn(),
   onChatFrameError: vi.fn(),
+  onRecoverDsh: vi.fn(async () => null),
 };
 
 describe("WorkspaceGridView", () => {
@@ -169,7 +170,7 @@ describe("WorkspaceGridView", () => {
     render(<WorkspaceGridView {...props} />);
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "当前 Chat，切换为 Code" }));
+      fireEvent.click(screen.getByRole("button", { name: "当前 KimiChat，切换为 KimiCode" }));
     });
 
     const pane = useWorkspaceGridStore
@@ -179,7 +180,7 @@ describe("WorkspaceGridView", () => {
     expect(pane).toMatchObject({
       kind: "code",
       sessionId: undefined,
-      title: getKimiAssistantDisplayName(),
+      title: "KimiCode",
       workDir: "D:/work",
     });
   });
@@ -307,6 +308,259 @@ describe("WorkspaceGridView", () => {
       { source: "kimi-shell-theme-sync", theme: "dark" },
       "https://example.com",
     );
+  });
+
+  it("adds the Kimi layout contract without weakening the exact origin", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "http://127.0.0.1:1234/";
+    document.body.append(frame);
+    document.documentElement.style.setProperty("--accent", "#34c284");
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, frame.src, "light", {
+      surface: "kimi-code",
+      layoutEnhancement: "v2",
+    });
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      {
+        source: "kimi-shell-theme-sync",
+        theme: "light",
+        accent: "#34c284",
+        surface: "kimi-code",
+        layoutEnhancement: "v2",
+      },
+      "http://127.0.0.1:1234",
+    );
+    document.documentElement.style.removeProperty("--accent");
+  });
+
+  it("keeps theme sync but omits the Kimi layout request when the host kill switch is off", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "http://127.0.0.1:1234/";
+    document.body.append(frame);
+    window.localStorage.setItem("kimi-web-layout-v2", "off");
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, frame.src, "dark", {
+      surface: "kimi-code",
+      layoutEnhancement: "v2",
+    });
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "dark" },
+      "http://127.0.0.1:1234",
+    );
+    window.localStorage.removeItem("kimi-web-layout-v2");
+  });
+
+  it("forces DSH theme messages to follow the shell theme", () => {
+    useWorkspaceGridStore.getState().setPreset("single");
+    useWorkspaceGridStore.getState().configurePane("pane-code", {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "D:/work",
+      theme: "light",
+    });
+    const dshStatus = {
+      state: "running" as const,
+      port: 3080,
+      url: "http://127.0.0.1:3080",
+      pinnedVersion: "0.1.0-rc.6",
+    };
+    const { rerender } = render(
+      <WorkspaceGridView
+        {...props}
+        themeMode="dark"
+        dshStatus={dshStatus}
+      />,
+    );
+
+    const frame = document.querySelector(
+      'iframe[title="DeepSeek Harness"]',
+    ) as HTMLIFrameElement;
+    expect(frame).toBeTruthy();
+    const postMessage = vi.spyOn(frame.contentWindow!, "postMessage");
+    fireEvent.load(frame);
+    expect(postMessage).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "dark" },
+      "http://127.0.0.1:3080",
+    );
+
+    rerender(
+      <WorkspaceGridView
+        {...props}
+        themeMode="light"
+        dshStatus={dshStatus}
+      />,
+    );
+    expect(postMessage).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "light" },
+      "http://127.0.0.1:3080",
+    );
+  });
+
+  it("keeps the owned DSH frame mounted while HTTP health is degraded", () => {
+    useWorkspaceGridStore.getState().setPreset("single");
+    useWorkspaceGridStore.getState().configurePane("pane-code", {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "/Users/test/work",
+    });
+    const { rerender } = render(
+      <WorkspaceGridView
+        {...props}
+        dshStatus={{
+          state: "running",
+          port: 3080,
+          url: "http://127.0.0.1:3080",
+          pinnedVersion: "0.1.0-rc.6",
+        }}
+      />,
+    );
+    const runningFrame = document.querySelector<HTMLIFrameElement>(
+      'iframe[title="DeepSeek Harness"]',
+    );
+    expect(runningFrame?.src).toBe("http://127.0.0.1:3080/");
+
+    rerender(
+      <WorkspaceGridView
+        {...props}
+        dshStatus={{
+          state: "degraded",
+          port: 3080,
+          url: "http://127.0.0.1:3080",
+          lastError: "HTTP 健康检查连续失败",
+          pinnedVersion: "0.1.0-rc.6",
+        }}
+      />,
+    );
+
+    expect(document.querySelector('iframe[title="DeepSeek Harness"]')).toBe(runningFrame);
+    expect(screen.queryByText("DeepSeek Harness 暂时无法在应用内显示")).toBeNull();
+  });
+
+  it("restarts an unavailable DSH pane with that pane's current workspace", () => {
+    useWorkspaceGridStore.getState().setPreset("single");
+    useWorkspaceGridStore.getState().configurePane("pane-code", {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "/Users/test/CurrentWorkspace",
+    });
+    render(
+      <WorkspaceGridView
+        {...props}
+        dshStatus={{
+          state: "stopped",
+          pinnedVersion: "0.1.0-rc.6",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试后端启动" }));
+
+    expect(props.onRecoverDsh).toHaveBeenCalledOnce();
+    expect(props.onRecoverDsh).toHaveBeenCalledWith("/Users/test/CurrentWorkspace");
+  });
+
+  it("tracks the current DSH session directory and opens it from the pane header", async () => {
+    useWorkspaceGridStore.getState().setPreset("single");
+    useWorkspaceGridStore.getState().configurePane("pane-code", {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "/Users/test/OldWorkspace",
+    });
+    render(
+      <WorkspaceGridView
+        {...props}
+        dshStatus={{
+          state: "running",
+          port: 3080,
+          url: "http://127.0.0.1:3080",
+          pinnedVersion: "0.1.0-rc.6",
+        }}
+      />,
+    );
+
+    const frame = document.querySelector<HTMLIFrameElement>(
+      'iframe[title="DeepSeek Harness"]',
+    );
+    expect(frame).toBeTruthy();
+    expect(
+      (screen.getByRole("button", {
+        name: "正在识别 DeepSeek Harness 当前会话",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: "http://127.0.0.1:3080",
+          source: frame?.contentWindow,
+          data: {
+            source: "kimi-shell-dsh-workspace-bridge",
+            action: "dsh_workspace_changed",
+            sessionId: "session-dsh",
+            workDir: "/Users/test/MyProjects",
+            applied: true,
+          },
+        }),
+      );
+    });
+
+    expect(
+      useWorkspaceGridStore.getState().panes.find((pane) => pane.id === "pane-code")?.workDir,
+    ).toBe("/Users/test/MyProjects");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "打开 DeepSeek Harness 当前会话目录",
+      }),
+    );
+    await act(async () => Promise.resolve());
+    expect(props.onOpenFolder).toHaveBeenCalledWith("/Users/test/MyProjects");
+  });
+
+  it("closes every DSH pane without exposing or invoking a backend stop action", () => {
+    const store = useWorkspaceGridStore.getState();
+    store.configurePane("pane-code", {
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "D:/work",
+    });
+    store.addPane({
+      kind: "dsh",
+      title: "DeepSeek Harness",
+      workDir: "D:/work",
+    });
+    render(
+      <WorkspaceGridView
+        {...props}
+        dshStatus={{
+          state: "running",
+          port: 3080,
+          url: "http://127.0.0.1:3080",
+          pinnedVersion: "0.1.0-rc.6",
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "停止 DeepSeek Harness" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "刷新 DeepSeek Harness" })).toHaveLength(2);
+
+    const dshCloseButtons = () =>
+      Array.from(document.querySelectorAll<HTMLElement>(".workspace-grid-pane"))
+        .filter((pane) => pane.querySelector(".workspace-grid-pane-title")?.textContent?.includes("DeepSeek Harness"))
+        .map((pane) => pane.querySelector<HTMLButtonElement>('button[aria-label="关闭窗格"]'))
+        .filter((button): button is HTMLButtonElement => Boolean(button));
+
+    fireEvent.click(dshCloseButtons()[0]!);
+    expect(useWorkspaceGridStore.getState().panes.filter((pane) => pane.kind === "dsh")).toHaveLength(1);
+    fireEvent.click(dshCloseButtons()[0]!);
+    expect(useWorkspaceGridStore.getState().panes.filter((pane) => pane.kind === "dsh")).toHaveLength(0);
   });
 
   it("swaps panes by pointer-dragging one pane header onto another slot", () => {

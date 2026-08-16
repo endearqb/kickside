@@ -24,7 +24,7 @@ const INSTALL_PROBE_INTERVAL_MS = 1500;
 
 export function requestKimiUpgradeConfirmation() {
   return ask(
-    "升级会先停止小助手管理的 Kimi 后端，并暂时中断正在使用它的连接。升级完成后小助手会重新检测并自动重启后端。",
+    "升级会先停止 KickSide 管理的 Kimi 后端，并暂时中断正在使用它的连接。升级完成后 KickSide 会重新检测并自动重启后端。",
     {
       title: "升级 Kimi Code",
       kind: "warning",

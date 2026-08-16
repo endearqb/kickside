@@ -28,6 +28,8 @@ import type {
   RuntimePanelId,
 } from "@/app/types";
 import { Button } from "@/components/ui/button";
+import { BackendBrandIcon } from "@/components/BackendBrandIcon";
+import { ControlCenterSettingsRow } from "@/components/control-center/ControlCenterSettingsRow";
 import { Input } from "@/components/ui/input";
 import { ControlCenterActionMenu } from "@/components/control-center/ControlCenterActionMenu";
 import { ControlCenterStatusBadge } from "@/components/control-center/ControlCenterStatusBadge";
@@ -39,6 +41,7 @@ import {
   KimiCodeAccessTaskContent,
 } from "@/features/control-center/KimiCodeAccessPanel";
 import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
+import { DshSettingsPanel } from "@/features/control-center/DshSettingsPanel";
 import {
   InstallFlowTaskContent,
 } from "@/features/control-center/InstallFlowModal";
@@ -87,16 +90,17 @@ import {
 } from "@/features/control-center/controlCenterViewModel";
 
 const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
-  openDirBackground: "在此处打开 Kimi 小助手",
-  openDir: "在 Kimi 小助手中打开",
-  openFile: "复制到工作区并用 Kimi 小助手打开",
-  openFilesystemObject: "在 Kimi 小助手中打开",
-  moveToWorkspace: "复制到 Kimi 小助手工作区",
+  openDirBackground: "在此处打开 KickSide 启伴",
+  openDir: "在 KickSide 启伴中打开",
+  openFile: "复制到工作区并用 KickSide 启伴打开",
+  openFilesystemObject: "在 KickSide 启伴中打开",
+  moveToWorkspace: "复制到 KickSide 启伴工作区",
   importToDefaultWorkspace: "导入到默认工作区",
   importWithWorkspacePicker: "选择其他工作区",
 };
 
 type PreservedControlPage = "settings" | "skill_center" | "workspace_hub" | "schedule";
+type SettingsDisclosureId = OnboardingCardId | "dsh";
 
 export function ControlCenterPreservedPage({
   active,
@@ -223,6 +227,7 @@ export function ControlCenterView({
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
+  onRefreshDshState,
   onRefreshDiagnostics,
   onRunKimiDoctor,
   onRefreshContextMenuStatus,
@@ -324,7 +329,7 @@ export function ControlCenterView({
   const [bridgeDeleteConfirm, setBridgeDeleteConfirm] =
     useState<BridgeDeleteConfirmState | null>(null);
   const [expandedOnboardingCard, setExpandedOnboardingCard] =
-    useState<OnboardingCardId | null>(null);
+    useState<SettingsDisclosureId | null>(null);
   const [contextMenuLabelsDraft, setContextMenuLabelsDraft] =
     useState<ContextMenuLabelsInput>(DEFAULT_CONTEXT_MENU_LABELS);
   const [expandedUnifiedRailGroups, setExpandedUnifiedRailGroups] = useState<Set<string>>(
@@ -704,8 +709,9 @@ export function ControlCenterView({
   const installPrimaryAction = (
     <Button
       type="button"
+      variant={installReady && kimiCodeUpdatePresentation.disabled ? "outline" : "default"}
       icon={installReady ? <RefreshCcw size={15} /> : <Plus size={15} />}
-      className="cc-action-btn"
+      className="cc-action-btn cc-runtime-primary-action"
       onClick={() => {
         if (externalGuidedInstall && !installReady) {
           setExpandedOnboardingCard("install");
@@ -1334,12 +1340,13 @@ export function ControlCenterView({
     statusTone: "neutral" | "success" | "warning" | "danger";
     complete: boolean;
     primaryAction: ReactNode;
+    icon?: ReactNode;
   };
   const onboardingSteps: OnboardingStepView[] = [
     {
       id: "app_update",
       index: "01",
-      title: "小助手更新",
+      title: "KickSide 更新",
       actionLabel: appUpdateActionLabel,
       statusTone: appUpdateStatusTone,
       complete: appUpdateStatus === "up_to_date",
@@ -1348,11 +1355,12 @@ export function ControlCenterView({
     {
       id: "install",
       index: "02",
-      title: "安装 / 升级 Kimi Code",
+      title: "KimiCode",
       actionLabel: installBarActionLabel,
       statusTone: installStatusTone,
       complete: installReady,
       primaryAction: installPrimaryAction,
+      icon: <BackendBrandIcon brand="kimi" size={18} />,
     },
     ...createExplorerContextMenuSteps<OnboardingStepView>(
       supportsExplorerContextMenu,
@@ -1450,12 +1458,12 @@ export function ControlCenterView({
     const settingsGroups: Array<{
       id: string;
       title: string;
-      stepIds: OnboardingCardId[];
+      stepIds: Array<OnboardingCardId | "dsh">;
     }> = [
       {
         id: "updates",
         title: "更新与运行",
-        stepIds: ["app_update", "install", "auth"],
+        stepIds: ["app_update", "install", "dsh", "auth"],
       },
       {
         id: "workspace",
@@ -1496,7 +1504,7 @@ export function ControlCenterView({
               <pre className="cc-app-update-notes">{appUpdateInfo.body}</pre>
             ) : null}
             {appUpdateError ? <p className="cc-config-error">{appUpdateError}</p> : null}
-            <p className="hint">安装时小助手将退出，下载或校验失败不会改变当前安装。</p>
+            <p className="hint">安装时 KickSide 将退出，下载或校验失败不会改变当前安装。</p>
             <div className="cc-step-secondary-actions">
               <Button
                 type="button"
@@ -1701,7 +1709,7 @@ export function ControlCenterView({
       >
         <header className="cc-image-detail-top cc-settings-page-head">
           <div>
-            <h1>小助手设置</h1>
+            <h1>KickSide 设置</h1>
           </div>
         </header>
         <section className="cc-onboarding-steps cc-settings-bars">
@@ -1711,61 +1719,53 @@ export function ControlCenterView({
                 <h2>{group.title}</h2>
               </div>
               <ul className="cc-image-row-list cc-settings-group-list">
-                {group.stepIds
-                  .map((stepId) => onboardingSteps.find((item) => item.id === stepId))
-                  .filter((step): step is OnboardingStepView => Boolean(step))
-                  .map((step) => {
-                    const expanded = expandedOnboardingCard === step.id;
+                {group.stepIds.map((stepId) => {
+                  if (stepId === "dsh") {
                     return (
-                      <li
-                        key={step.id}
-                        id={focusDomId(`onboarding:${step.id}`)}
-                        className={`cc-image-row cc-settings-bar ${expanded ? "is-expanded" : ""} ${activeFocusId === `onboarding:${step.id}` ? "is-focus" : ""}`}
-                      >
-                        <div className="cc-settings-bar-head">
-                          <button
-                            type="button"
-                            className="cc-settings-bar-toggle"
-                            onClick={() => {
-                              const next = expanded ? null : step.id;
-                              setExpandedOnboardingCard(next);
-                              if (next === "auth") void onRefreshOnboarding();
-                              if (next === "doctor") void onRefreshDiagnostics();
-                              if (next === "logs") {
-                                void Promise.all([
-                                  onRefreshDiagnostics(),
-                                  onRefreshBridgeLogTail(),
-                                ]);
-                              }
-                            }}
-                            aria-expanded={expanded}
-                            aria-controls={`cc-settings-detail-${step.id}`}
-                          >
-                            <div>
-                              <div className="cc-image-row-title">
-                                <span className={`cc-dot ${step.statusTone}`} />
-                                {step.title}
-                              </div>
-                              <div className="cc-image-row-desc">{step.actionLabel}</div>
-                            </div>
-                            <ChevronRight
-                              size={16}
-                              className={`cc-settings-bar-chevron ${expanded ? "is-expanded" : ""}`}
-                            />
-                          </button>
-                          <div className="cc-image-row-actions">{step.primaryAction}</div>
-                        </div>
-                        {expanded ? (
-                          <div
-                            id={`cc-settings-detail-${step.id}`}
-                            className="cc-settings-bar-detail"
-                          >
-                            {renderStepDetail(step.id)}
-                          </div>
-                        ) : null}
-                      </li>
+                      <DshSettingsPanel
+                        key="dsh"
+                        expanded={expandedOnboardingCard === "dsh"}
+                        defaultWorkspaceDir={status?.effectiveWorkDir}
+                        onRuntimeChanged={onRefreshDshState}
+                        onExpandedChange={(expanded) =>
+                          setExpandedOnboardingCard(expanded ? "dsh" : null)
+                        }
+                      />
                     );
-                  })}
+                  }
+                  const step = onboardingSteps.find((item) => item.id === stepId);
+                  if (!step) return null;
+                  const expanded = expandedOnboardingCard === step.id;
+                  return (
+                    <ControlCenterSettingsRow
+                      key={step.id}
+                      id={step.id}
+                      domId={focusDomId(`onboarding:${step.id}`)}
+                      title={step.title}
+                      summary={step.actionLabel}
+                      statusTone={step.statusTone}
+                      icon={step.icon}
+                      action={step.primaryAction}
+                      expanded={expanded}
+                      focused={activeFocusId === `onboarding:${step.id}`}
+                      className={step.id === "install" ? "cc-runtime-settings-row" : undefined}
+                      onExpandedChange={(nextExpanded) => {
+                        const next = nextExpanded ? step.id : null;
+                        setExpandedOnboardingCard(next);
+                        if (next === "auth") void onRefreshOnboarding();
+                        if (next === "doctor") void onRefreshDiagnostics();
+                        if (next === "logs") {
+                          void Promise.all([
+                            onRefreshDiagnostics(),
+                            onRefreshBridgeLogTail(),
+                          ]);
+                        }
+                      }}
+                    >
+                      {renderStepDetail(step.id)}
+                    </ControlCenterSettingsRow>
+                  );
+                })}
               </ul>
             </section>
           ))}

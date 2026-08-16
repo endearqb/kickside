@@ -57,6 +57,16 @@ const commandRegistry = {
     "app_update::check_app_update",
     "app_update::install_app_update",
   ],
+  dsh: [
+    "dsh_manager::dsh_get_settings",
+    "dsh_manager::dsh_save_settings",
+    "dsh_manager::dsh_get_preflight",
+    "dsh_manager::dsh_install",
+    "dsh_manager::dsh_start",
+    "dsh_manager::dsh_get_status",
+    "dsh_manager::dsh_stop",
+    "dsh_manager::dsh_get_log_tail",
+  ],
   workspace_grid: [
     "workspace_grid::grid_list_sessions",
     "workspace_grid::grid_get_session",
@@ -291,6 +301,11 @@ const commandDomainMetadata = {
     owner: "desktop-release",
     windowCapability: "main",
     purpose: "signed desktop update checks, download progress, and installer handoff",
+  },
+  dsh: {
+    owner: "dsh-manager",
+    windowCapability: "main",
+    purpose: "DeepSeek Harness settings, private installation, owned local lifecycle, status, and redacted logs",
   },
   install_compat: {
     owner: "install-center",

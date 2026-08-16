@@ -1,7 +1,7 @@
 ---
 version: alpha
-name: Kimi Control Center Image Style
-description: "A quiet two-pane desktop control center for Kimi App, based on the provided Settings/Skills reference image: a merged navigation/object rail, dense object lists, clear detail pages, compact metadata, and carded markdown/code content."
+name: KickSide Control Center Image Style
+description: "A quiet two-pane desktop control center for KickSide, based on the provided Settings/Skills reference image: a merged navigation/object rail, dense object lists, clear detail pages, compact metadata, and carded markdown/code content."
 colors:
   background: "#f4f4f2"
   background-subtle: "#f8f8f6"
@@ -136,13 +136,13 @@ components:
     padding: "16px"
 ---
 
-# Kimi Control Center Image Style
+# KickSide Control Center Image Style
 
 ## Overview
 
-Kimi App 的控制中心采用“桌面设置面板 + Skill 文件浏览器”的视觉模型。界面不是展示页，也不是营销页，而是一个长期打开的本地工作台：左侧是合并后的导航与对象列表，右侧是当前对象的详情、配置和可执行操作。
+KickSide 的控制中心采用“桌面设置面板 + Skill 文件浏览器”的视觉模型。界面不是展示页，也不是营销页，而是一个长期打开的本地工作台：左侧是合并后的导航与对象列表，右侧是当前对象的详情、配置和可执行操作。
 
-参考图的原型核心是密集信息架构：一级导航、对象列表、详情页。Kimi App 的当前控制中心不保留最左侧独立 sidebar，而是把一级视图与对象列表合并成一个左侧 rail：
+参考图的原型核心是密集信息架构：一级导航、对象列表、详情页。KickSide 的当前控制中心不保留最左侧独立 sidebar，而是把一级视图与对象列表合并成一个左侧 rail：
 
 ```txt
 Unified Rail                         Detail Panel

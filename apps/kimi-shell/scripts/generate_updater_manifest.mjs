@@ -80,7 +80,7 @@ export async function buildManifest(values) {
 
   return {
     version,
-    notes: values.get("notes")?.trim() || `Kimi Sidekick ${version}`,
+    notes: values.get("notes")?.trim() || `KickSide ${version}`,
     pub_date: new Date(publishedAt).toISOString(),
     platforms,
   };

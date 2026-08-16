@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
+import { useDshController } from "@/app/useDshController";
 import { Button } from "@/components/ui/button";
 import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
@@ -12,13 +13,16 @@ import {
 } from "@/features/workspace-import/WorkspaceImportModal";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
+import { addDshPaneToWorkspaceGrid } from "@/features/workspace-grid/gridStore";
 import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
+import { getTrustedDshRuntimeUrl } from "@/services/dshService";
 import "./App.css";
 import "./components/control-center/control-center.css";
 import "./features/directory/directory.css";
 
 function App() {
   const shell = useShellController();
+  const dsh = useDshController(shell.tauriRuntime);
   const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
@@ -214,6 +218,7 @@ function App() {
     installMessage: shell.installMessage,
     onClose: shell.dismissControlCenter,
     onRefreshCoreState: shell.refreshCoreState,
+    onRefreshDshState: dsh.refresh,
     onRefreshDiagnostics: shell.refreshDiagnostics,
     onRunKimiDoctor: shell.handleRunKimiDoctor,
     onRefreshContextMenuStatus: shell.refreshContextMenuStatus,
@@ -314,6 +319,25 @@ function App() {
     onOpenSystemTerminal: shell.handleOpenSystemTerminal,
   };
 
+  async function handleCreateDshPane() {
+    const defaultWorkDir = shell.status?.effectiveWorkDir?.trim();
+    if (!defaultWorkDir) return;
+    const paneId = addDshPaneToWorkspaceGrid(defaultWorkDir);
+    if (!paneId) return;
+    if (
+      dsh.status?.state !== "running" &&
+      dsh.status?.state !== "starting"
+    ) {
+      await dsh.start(defaultWorkDir);
+    }
+  }
+
+  async function handleRecoverDsh(workspaceDir?: string) {
+    const targetWorkDir = workspaceDir?.trim() || shell.status?.effectiveWorkDir?.trim();
+    if (!targetWorkDir) return null;
+    return dsh.start(targetWorkDir);
+  }
+
   return (
     <main
       className={`shell-root theme-${shell.themeMode} platform-${shell.platformCapabilities?.os ?? "loading"} ${shell.screen === "workspace" ? "workspace-shell" : ""}`}
@@ -342,6 +366,10 @@ function App() {
         onToggleMaximizeWindow={shell.handleToggleMaximizeWindow}
         onCloseWindow={shell.handleCloseWindow}
         onTitlebarDoubleClick={shell.handleTitlebarDoubleClick}
+        dshEnabled={dsh.settings?.enabled === true}
+        dshBusy={dsh.busy}
+        dshRemoteUrl={getTrustedDshRuntimeUrl(dsh.status)}
+        onCreateDshPane={handleCreateDshPane}
       />
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}
@@ -373,6 +401,7 @@ function App() {
             actionBusy={shell.actionBusy}
             onRetry={shell.handleRuntimeOnlyRetry}
             onOpenLogs={shell.handleOpenLogs}
+            onOpenFolder={shell.handleOpenFolder}
             onOpenPaneFolder={shell.handleOpenPaneFolder}
             onPaneSessionObserved={shell.handlePaneSessionObserved}
             onOpenExternalUrl={shell.handleOpenExternalUrl}
@@ -382,6 +411,11 @@ function App() {
             onCodeFrameError={shell.handleWorkspaceFrameError}
             onChatFrameLoad={shell.handleChatFrameLoad}
             onChatFrameError={shell.handleChatFrameError}
+            dshStatus={dsh.status}
+            dshError={dsh.error}
+            dshBusy={dsh.busy}
+            onRefreshDsh={dsh.refresh}
+            onRecoverDsh={handleRecoverDsh}
           />
         </div>
 

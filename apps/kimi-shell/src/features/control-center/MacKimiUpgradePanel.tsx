@@ -71,7 +71,7 @@ export function MacKimiUpgradePanel({
       </dl>
 
       <p className="hint">
-        小助手只停止自己管理的 Kimi 后端；其他终端启动的 Kimi 实例不会被终止。
+        KickSide 只停止自己管理的 Kimi 后端；其他终端启动的 Kimi 实例不会被终止。
       </p>
 
       <div className="cc-step-secondary-actions">

@@ -19,16 +19,10 @@ pub(crate) fn setup_app_menu(app: &AppHandle) -> tauri::Result<()> {
     let hide = PredefinedMenuItem::hide(app, None)?;
     let hide_others = PredefinedMenuItem::hide_others(app, None)?;
     let show_all = PredefinedMenuItem::show_all(app, None)?;
-    let quit = MenuItem::with_id(
-        app,
-        MENU_QUIT,
-        "Quit kimi sidekick",
-        true,
-        Some("CmdOrCtrl+Q"),
-    )?;
+    let quit = MenuItem::with_id(app, MENU_QUIT, "Quit KickSide", true, Some("CmdOrCtrl+Q"))?;
     let app_menu = Submenu::with_items(
         app,
-        "kimi sidekick",
+        "KickSide",
         true,
         &[
             &about,

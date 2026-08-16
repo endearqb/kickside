@@ -12,7 +12,7 @@ export function KimiAssistantBrand({
   className,
   compact = false,
   withSubtitle = false,
-  subtitle = "kimi sidekick",
+  subtitle = "KickSide",
 }: KimiBrandProps) {
   const displayName = getKimiAssistantDisplayName();
 

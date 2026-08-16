@@ -9,6 +9,10 @@ const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 const CREATE_NEW_PROCESS_GROUP_FLAG: u32 = 0x00000200;
 
 pub fn configure_kimi_background_command(_command: &mut Command) {
+    configure_background_command(_command);
+}
+
+pub fn configure_background_command(_command: &mut Command) {
     #[cfg(windows)]
     {
         _command.creation_flags(CREATE_NO_WINDOW_FLAG | CREATE_NEW_PROCESS_GROUP_FLAG);

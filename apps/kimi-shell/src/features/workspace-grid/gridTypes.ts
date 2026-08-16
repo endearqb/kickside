@@ -1,5 +1,5 @@
-export type WorkspacePaneKind = "code" | "chat" | "external" | "agent_room";
-export type WorkspacePaneKindV1 = Exclude<WorkspacePaneKind, "agent_room">;
+export type WorkspacePaneKind = "code" | "chat" | "external" | "agent_room" | "dsh";
+export type WorkspacePaneKindV1 = Exclude<WorkspacePaneKind, "agent_room" | "dsh">;
 export type WorkspacePaneTheme = "light" | "dark";
 
 export type WorkspacePaneCarrier = "iframe" | "local";

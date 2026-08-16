@@ -40,7 +40,7 @@ export function MacKimiInstallGuidance({
   return (
     <div className="cc-config-grid">
       <p className="hint">
-        小助手不会自动执行远程脚本。复制官方命令，在 Terminal 中确认执行，完成后回到这里重新检测。
+        KickSide 不会自动执行远程脚本。复制官方命令，在 Terminal 中确认执行，完成后回到这里重新检测。
       </p>
       <pre className="cc-install-command-code">{MAC_KIMI_INSTALL_COMMAND}</pre>
       <div className="cc-step-secondary-actions">

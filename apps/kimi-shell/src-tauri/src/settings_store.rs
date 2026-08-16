@@ -37,6 +37,11 @@ pub fn load_or_default(app: &AppHandle) -> anyhow::Result<AppSettings> {
         changed = true;
     }
 
+    if settings.schema_version < 13 {
+        migrate_context_menu_brand_labels(&mut settings);
+        changed = true;
+    }
+
     if settings.schema_version < CURRENT_SETTINGS_SCHEMA_VERSION {
         settings.schema_version = CURRENT_SETTINGS_SCHEMA_VERSION;
         changed = true;
@@ -76,6 +81,25 @@ fn migrate_context_menu_labels(settings: &mut AppSettings) {
 fn migrate_context_menu_copy_label(settings: &mut AppSettings) {
     if settings.context_menu_labels.move_to_workspace == "移动到 Kimi 小助手工作区" {
         settings.context_menu_labels.move_to_workspace = "复制到 Kimi 小助手工作区".to_string();
+    }
+}
+
+fn migrate_context_menu_brand_labels(settings: &mut AppSettings) {
+    let labels = &mut settings.context_menu_labels;
+    if labels.open_dir_background == "在此处打开 Kimi 小助手" {
+        labels.open_dir_background = "在此处打开 KickSide 启伴".to_string();
+    }
+    if labels.open_dir == "在 Kimi 小助手中打开" {
+        labels.open_dir = "在 KickSide 启伴中打开".to_string();
+    }
+    if labels.open_file == "复制到工作区并用 Kimi 小助手打开" {
+        labels.open_file = "复制到工作区并用 KickSide 启伴打开".to_string();
+    }
+    if labels.open_filesystem_object == "在 Kimi 小助手中打开" {
+        labels.open_filesystem_object = "在 KickSide 启伴中打开".to_string();
+    }
+    if labels.move_to_workspace == "复制到 Kimi 小助手工作区" {
+        labels.move_to_workspace = "复制到 KickSide 启伴工作区".to_string();
     }
 }
 
@@ -147,6 +171,39 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_brand_migration_replaces_only_old_builtin_labels() {
+        let mut settings = AppSettings::default();
+        settings.context_menu_labels.open_dir_background = "在此处打开 Kimi 小助手".into();
+        settings.context_menu_labels.open_dir = "我的自定义文件夹菜单".into();
+        settings.context_menu_labels.open_file = "复制到工作区并用 Kimi 小助手打开".into();
+        settings.context_menu_labels.open_filesystem_object = "在 Kimi 小助手中打开".into();
+        settings.context_menu_labels.move_to_workspace = "复制到 Kimi 小助手工作区".into();
+
+        migrate_context_menu_brand_labels(&mut settings);
+
+        assert_eq!(
+            settings.context_menu_labels.open_dir_background,
+            "在此处打开 KickSide 启伴"
+        );
+        assert_eq!(
+            settings.context_menu_labels.open_dir,
+            "我的自定义文件夹菜单"
+        );
+        assert_eq!(
+            settings.context_menu_labels.open_file,
+            "复制到工作区并用 KickSide 启伴打开"
+        );
+        assert_eq!(
+            settings.context_menu_labels.open_filesystem_object,
+            "在 KickSide 启伴中打开"
+        );
+        assert_eq!(
+            settings.context_menu_labels.move_to_workspace,
+            "复制到 KickSide 启伴工作区"
+        );
+    }
+
+    #[test]
     fn agent_room_setting_defaults_off_and_round_trips_when_enabled() {
         let legacy = serde_json::to_value(AppSettings::default()).expect("serialize settings");
         let mut legacy = legacy.as_object().expect("settings object").clone();
@@ -163,5 +220,19 @@ mod tests {
         )
         .expect("deserialize enabled settings");
         assert!(round_trip.agent_room_enabled);
+    }
+
+    #[test]
+    fn dsh_settings_default_off_and_round_trip_under_agent_backends() {
+        let legacy = serde_json::json!({"schemaVersion": 11});
+        let restored: AppSettings = serde_json::from_value(legacy).expect("legacy settings");
+        assert!(!restored.agent_backends.dsh.enabled);
+        assert_eq!(restored.agent_backends.dsh.port_range, [3_080, 3_179]);
+
+        let mut enabled = restored;
+        enabled.agent_backends.dsh.enabled = true;
+        let value = serde_json::to_value(&enabled).expect("serialize settings");
+        assert_eq!(value["agentBackends"]["dsh"]["enabled"], true);
+        assert!(value.get("providers").is_none());
     }
 }

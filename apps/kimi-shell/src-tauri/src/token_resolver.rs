@@ -7,6 +7,7 @@ use std::{
 
 const KIMI_CODE_HOME_ENV: &str = "KIMI_CODE_HOME";
 const SERVER_TOKEN_FILE_NAME: &str = "server.token";
+const KIMI_ONBOARDED_QUERY: &str = "kimi_onboarded=1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerToken {
@@ -53,12 +54,13 @@ fn resolve_kimi_code_home_with(
 
 pub fn build_workspace_url(origin: &str, token: Option<&str>) -> String {
     let origin = origin.trim_end_matches('/');
+    let workspace_root = format!("{origin}/?{KIMI_ONBOARDED_QUERY}");
     match token.map(str::trim).filter(|value| !value.is_empty()) {
         Some(token) => {
             let encoded = percent_encode_fragment_value(token);
-            format!("{origin}/#token={encoded}")
+            format!("{workspace_root}#token={encoded}")
         }
-        None => origin.to_string(),
+        None => workspace_root,
     }
 }
 
@@ -133,7 +135,16 @@ mod tests {
     #[test]
     fn workspace_url_includes_encoded_token_fragment() {
         let url = build_workspace_url("http://127.0.0.1:55000/", Some("tok en/#"));
-        assert_eq!(url, "http://127.0.0.1:55000/#token=tok%20en%2F%23");
+        assert_eq!(
+            url,
+            "http://127.0.0.1:55000/?kimi_onboarded=1#token=tok%20en%2F%23"
+        );
+    }
+
+    #[test]
+    fn workspace_url_skips_repeated_kimi_web_onboarding_without_a_token() {
+        let url = build_workspace_url("http://127.0.0.1:55000/", None);
+        assert_eq!(url, "http://127.0.0.1:55000/?kimi_onboarded=1");
     }
 
     #[test]

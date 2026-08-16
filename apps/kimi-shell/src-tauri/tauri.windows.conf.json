@@ -1,7 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
-    "targets": ["nsis", "msi"]
+    "targets": ["nsis", "msi"],
+    "windows": {
+      "wix": {
+        "upgradeCode": "dfa197f9-0e61-5393-a612-7e4ca38701cc"
+      },
+      "nsis": {
+        "installerHooks": "./windows/nsis-hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "updater": {

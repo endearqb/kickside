@@ -112,8 +112,7 @@ pub fn load_kimi_code_access_config(app: &AppHandle) -> Result<KimiCodeAccessCon
                             || models.get(LEGACY_KIMI_CODING_PLAN_MODEL_ID).is_some()
                     })
             {
-                warnings
-                    .push("发现旧版 Kimi 小助手 API 配置；下次成功保存时会自动迁移。".to_string());
+                warnings.push("发现旧版壳层 API 配置；下次成功保存时会自动迁移。".to_string());
             }
             if provider_table(root, KIMI_CODING_PLAN_PROVIDER_ID).is_some_and(provider_has_oauth) {
                 warnings.push(
@@ -1153,7 +1152,7 @@ pub(super) fn normalize_optional_string(value: &Option<String>) -> Option<String
         .filter(|value| !value.is_empty())
 }
 
-pub(super) fn resolve_working_directory(
+pub(crate) fn resolve_working_directory(
     settings: &AppSettings,
     session_work_dir: Option<&PathBuf>,
 ) -> anyhow::Result<PathBuf> {

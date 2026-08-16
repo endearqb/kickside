@@ -235,6 +235,7 @@ export type ControlCenterViewProps = {
   setActiveRuntimePanel: (panel: RuntimePanelId) => void;
   onWorkDirInputChange: (value: string) => void;
   onRefreshCoreState: () => Promise<void>;
+  onRefreshDshState: () => Promise<unknown>;
   onRefreshDiagnostics: () => Promise<void>;
   onRunKimiDoctor: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;
@@ -362,7 +363,7 @@ export const controlSections: Array<{
 }> = [
   {
     id: "onboarding",
-    label: "小助手设置",
+    label: "KickSide 设置",
     group: "setup",
     icon: <SlidersHorizontal size={15} />,
   },

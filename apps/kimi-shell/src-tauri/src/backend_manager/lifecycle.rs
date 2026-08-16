@@ -1763,15 +1763,18 @@ mod tests {
         let (root, mut process) = spawn_test_backend("quit-starting", script);
         let descendant_path = root.join("descendant.pid");
         let deadline = Instant::now() + Duration::from_secs(2);
-        while !descendant_path.exists() && Instant::now() < deadline {
+        let descendant_pid = loop {
+            if let Ok(value) = fs::read_to_string(&descendant_path) {
+                if let Ok(pid) = value.trim().parse::<u32>() {
+                    break pid;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "descendant pid was not written before timeout"
+            );
             thread::sleep(Duration::from_millis(10));
-        }
-        assert!(descendant_path.exists());
-        let descendant_pid = fs::read_to_string(&descendant_path)
-            .unwrap()
-            .trim()
-            .parse::<u32>()
-            .unwrap();
+        };
 
         assert_eq!(
             terminate_owned_process_with_timeout(&mut process, Duration::from_millis(250)).reason,

@@ -57,7 +57,7 @@ pub struct PlatformCapabilities {
 }
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 13;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -497,6 +497,7 @@ pub struct AppSettings {
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
     pub kimi_runtime_launch: KimiRuntimeLaunchSettings,
+    pub agent_backends: AgentBackendSettings,
     pub context_menu_desired_enabled: bool,
     pub context_menu_labels: ContextMenuLabelsInput,
 }
@@ -526,8 +527,33 @@ impl Default for AppSettings {
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),
             kimi_runtime_launch: KimiRuntimeLaunchSettings::default(),
+            agent_backends: AgentBackendSettings::default(),
             context_menu_desired_enabled: true,
             context_menu_labels: ContextMenuLabelsInput::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentBackendSettings {
+    pub dsh: DshSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DshSettings {
+    pub enabled: bool,
+    pub port_range: [u16; 2],
+    pub start_timeout_sec: u64,
+}
+
+impl Default for DshSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port_range: [3_080, 3_179],
+            start_timeout_sec: 60,
         }
     }
 }
@@ -1953,11 +1979,11 @@ pub struct ContextMenuLabelsInput {
 impl Default for ContextMenuLabelsInput {
     fn default() -> Self {
         Self {
-            open_dir_background: "在此处打开 Kimi 小助手".to_string(),
-            open_dir: "在 Kimi 小助手中打开".to_string(),
-            open_file: "复制到工作区并用 Kimi 小助手打开".to_string(),
-            open_filesystem_object: "在 Kimi 小助手中打开".to_string(),
-            move_to_workspace: "复制到 Kimi 小助手工作区".to_string(),
+            open_dir_background: "在此处打开 KickSide 启伴".to_string(),
+            open_dir: "在 KickSide 启伴中打开".to_string(),
+            open_file: "复制到工作区并用 KickSide 启伴打开".to_string(),
+            open_filesystem_object: "在 KickSide 启伴中打开".to_string(),
+            move_to_workspace: "复制到 KickSide 启伴工作区".to_string(),
             import_to_default_workspace: "导入到默认工作区".to_string(),
             import_with_workspace_picker: "选择其他工作区".to_string(),
         }

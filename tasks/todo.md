@@ -1,3 +1,159 @@
+# DSH 菜单状态同步与 Kimi 后端控制评估
+
+## 任务契约
+
+- 用户目标：修复控制中心开启 DSH 后，新建窗格与浏览器打开菜单仍不显示 DSH；评估 KimiCode 是否也应增加后端开关。
+- 直接交付物：DSH 控制中心动作成功后刷新 App 级运行时投影；补回归测试；给出 Kimi 生命周期结论。
+- 影响范围：App DSH controller 透传、控制中心 DSH 面板、标题栏菜单状态、定向测试。
+- 非目标：本轮不改变 Kimi 主启动门，不增加可能误杀 external Kimi 实例的无差别开关，不实现 DSH-only Shell。
+- 验收：DSH 从关闭切到开启后无需刷新 App 即重渲染两个菜单；浏览器入口在 URL 就绪前保持禁用、就绪后可用；G0/G1 通过。
+- 架构事实入口：`.ai/architecture/current-state.md`；Kimi owned/external 生命周期源码；`DESIGN.md`。
+- 关键假设：KimiCode 后端控制属于独立产品决策，本轮先修复与它无关的 DSH 状态同步 Bug。
+
+## Checklist
+
+- [x] 确认控制中心 Panel 与 App controller 存在两份不同步的 DSH settings/status。
+- [x] 在启用、安装、启动、停止成功后刷新 App 级 DSH 投影。
+- [x] 补充关闭→开启会通知外层刷新且不触发展开行为的测试。
+- [x] 核对 Kimi owned 与 reused_external 的停止边界及主启动门依赖。
+- [ ] 若未来支持 Kimi 停止态，先保证控制中心不依赖 Kimi ready 且外部实例永不被终止。
+
+## Review
+
+- DSH 菜单缺失不是 Rust 启动失败或菜单 memo，而是顶层 `dsh.settings.enabled` 一直停留在 false；刷新后顶层会开始既有的 1 秒运行态轮询。
+- 不建议照搬 DSH 的持久化 enabled switch 给 Kimi。Kimi 是 Workspace、Explorer 请求与 IM locator 的主 runtime；更安全的后续方案是 ownership-aware 的“停止/断开”和“启动/重新连接”。
+
+# Kimi Code App 内文件拖放
+
+## 任务契约
+
+- 用户目标：让拖入 Tauri App 的文件事件直接进入 Kimi Code Web，使聊天框能够接收附件。
+- 直接交付物：关闭主 WebView 的 Tauri 原生拖放拦截，并加入配置回归约束。
+- 影响范围：`main` 窗口 Tauri 配置、capability/config gate、变更记录。
+- 非目标：不改变 prefill/import picker，不新增 Shell 原生文件导入，不修改 Kimi Code 上游附件逻辑。
+- 验收：`main.dragDropEnabled=false`；安全配置 gate、前端测试与构建通过；真实 WKWebView/WebView2 拖放留作 G3。
+- 关键取舍：主窗口不再接收 Tauri 原生 drag/drop event，文件由 WebView 的 HTML5 `dragover/drop` 链路处理。
+
+## Checklist
+
+- [x] 确认 Tauri 默认原生 handler 会阻止 WebView 默认文件拖放。
+- [x] 仅对承载 Kimi Code iframe 的 `main` 窗口关闭原生拖放。
+- [x] 在配置 gate 中锁定该行为，防止未来回退到默认值。
+- [ ] 在 macOS WKWebView 与 Windows WebView2 实机拖文件到 Kimi 聊天框完成 G3。
+
+## Review
+
+- Kimi Code 已有标准 HTML5 文件拖放监听，Shell 不需要读取文件或跨 IPC 重建 `File` 对象；把事件所有权交还 WebView 是最小修复。
+- 独立嵌入式 WebView 原本已使用相同配置；本次补齐主窗口路径。
+
+# Kimi Code Web 响应式布局增强
+
+## 任务契约
+
+- 用户目标：完成 `.ai/plans/kimi-code-web-ui-development-plan.md`，保持左侧 Sessions sidebar 与 Header 原样，并实现红框消息 TOC 在所有 pane 宽度下左侧短条常驻、hover/focus 向右展开，同时修正无-sidebar 窄 pane 的输入区底距与默认蓝色图标。
+- 直接交付物：生产 all-frame bridge 响应式增强、精确宿主消息扩展、常驻 TOC rail、DOM contract、单元与视觉回归、治理记录。
+- 影响范围：Workspace Grid Kimi pane、`frame_workspace_bridge.js`、定向测试、视觉 fixture、Kimi Web 维护与架构文档。
+- 非目标：不恢复 retired EnhancedLocal/workspace proxy，不修改只读上游源码快照，不复制上游已有移动 session switcher，不弱化 postMessage origin。
+- 验收：真实 Kimi 0.36.1 DOM 审计完成；480/800/959/960/1179/1180/1280/1440 断点与明暗主题有自动化基线；TOC 折叠/展开可访问且 fail-open；G0/G1、视觉 gate 和生产构建通过。
+- 保守假设：计划中的“会话目录”指 Kimi 0.36.1 原生 `ConversationToc`；左侧 `aside.side` 仅用于识别 pane 形态且不得修改。真实 WKWebView/WebView2 与显示缩放属于发布前 G3。
+
+## Checklist
+
+- [x] 以真实 Kimi Code 0.36.1 页面审计生产路径、DOM、断点、计算样式和主题变量。
+- [x] 在现有精确 origin 主题 envelope 上 additive 增加 Kimi surface/layout/accent，不创建平行消息协议。
+- [x] 在生产 all-frame bridge 实现 Kimi-only、可关闭、fail-open 的布局状态机与 rAF 合并观察器。
+- [x] 保持 Header 原生高度；只在无-sidebar 的 compact/narrow pane 应用 12px + safe-area composer 底距和 Kimi 原生蓝色工作区图标。
+- [x] 保持 Sessions sidebar DOM/布局原样；所有宽度将原生 ConversationToc 作为正文左侧短条，label 默认折叠并在 hover/focus 时向右展开，mobile 缺失时从 user turn anchors 生成有界 projection。
+- [x] 增加精确消息、DOM 失败、功能关闭、断点、主题、折叠/展开和 projection 回归测试。
+- [x] 增加 10 张脱敏 Chrome 视觉基线及本地回归命令。
+- [x] 更新 README、Kimi Web 维护文档、DOM contract、current state 与 verification gates。
+- [ ] macOS WKWebView 与 Windows WebView2 完成 3:2、125%/150% 缩放、IME、触控和屏幕阅读器 G3。
+
+## Review
+
+- 原计划引用的 workspace proxy/injection 已退出生产路径，实现按事实落在 `frame_workspace_bridge.js`。2026-08-16 重新审计生产二进制确认右侧 `nav.conversation-toc` 确实存在；此前把它误判为左侧 Sessions sidebar 的实现、fixture 与文档均已纠正。
+- 消息仍发送到 iframe 精确 origin；布局启动还要求 parent source、`surface=kimi-code` 与 `layoutEnhancement=v2`，DSH/external frame 行为不变。
+- 功能可在 Shell origin 通过 `localStorage["kimi-web-layout-v2"]="off"` 稳定关闭，frame 同名 key 作为 origin 级紧急关闭；hook 缺失只输出无 DOM/URL/token 的有界诊断并保留原生页面。
+
+# DSH Windows 合并前核查优化
+
+## 任务契约
+
+- 用户目标：根据 Windows 安装、安装反馈、Node 预检与 Explorer 右键菜单核查结论，完成可安全验证的优化与开发。
+- 直接交付物：收紧 DSH Node 支持矩阵、分离运行/安装就绪与工具链选择、补 Windows npm shim 安全回退、实时安装阶段/日志、PR runtime gate、测试和治理记录。
+- 影响范围：DSH Rust manager、Node locator、Rust→TS 安装事件契约、控制中心、runtime workflow、DSH ADR/架构事实与验证入口。
+- 非目标：不把日志伪装成交互终端；不从 CI 声称 Windows 安装包 G3；不在 rc.6 缺少稳定外部 UI 选中契约时用 DOM/localStorage 自动化冒充 Explorer→DSH workspace 聚焦。
+- 验收：Node 20.12/22.18/23 拒绝，22.19/24 接受且能力探针通过；裸 Node 可运行已安装 DSH，但只有完整同工具链 Node/npm 可安装；Windows shim 有受信任 cmd fallback 与特殊字符测试；安装阶段/脱敏日志实时可见；PR canary 有稳定汇总检查；G0/G1 与安全 gate 通过。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、Accepted DSH P0 ADR。
+- 保守假设：rc.6 npm 元数据没有 `engines`，22.19/24 是 KickSide 自有支持矩阵；Node 20 既有成功记录保留为观察事实，不再取得产品支持权限。
+
+## Checklist
+
+- [x] 核对固定 rc.6 npm 元数据、当前 Rust/TS/CI/Explorer 实现与既有验证记录。
+- [x] 将 Node 版本矩阵与 `parseEnv` 能力探针改为 AND，并补边界测试。
+- [x] 分离 runtime/install toolchain 选择，禁止跨来源 PATH npm 配对，additive 扩展 preflight。
+- [x] 增加 Windows `npm-cli.js` 主路径与受信任 System32 `cmd.exe` shim 回退，补 fail-closed 和特殊字符 argv 测试。
+- [x] 通过 Tauri Channel 实时推送安装阶段与脱敏输出，控制中心显示可访问的安装进度/日志。
+- [x] 将 Windows/macOS × Node 22.19/24 runtime smoke 接入 PR，并提供稳定 `DSH runtime gate` 汇总；Node 20/latest 留作观察。
+- [x] 核验 rc.6 `workspace.create`；确认缺少稳定的外部 UI workspace/session 选中 seam，本轮不实施误导性的 DSH Explorer 打开。
+- [ ] 在 GitHub ruleset/branch protection 将 `DSH runtime gate` 设为 required。
+- [ ] 用 Windows 安装包完成官方 Node 22.19、Node 24、nvm-windows、Volta、中文/空格目录、代理 registry、WebView2 与整树停止 G3。
+
+## Review
+
+- T6“有意跨越边界”落实为 typed Channel；日志在发往 WebView 前已经过与落盘相同的 redactor 和长度限制，Channel 断开不改变安装结果。
+- npm shell fallback 不是通用命令执行器：命令处理器必须 canonical 到 System32 `cmd.exe`，AutoRun/延迟展开关闭，包名、版本与 flags 固定，动态路径只经专用环境变量进入引号上下文。
+- `ready` 继续等价于 `runtimeReady` 以保持旧序列化语义；`installReady` 独立表达完整工具链可用性，因此 npm 丢失不会让已安装 DSH 无法启动。
+- Explorer P1 的后端路由和 `workspace.create` 可以实现，但 rc.6 没有可靠的外部 UI 选中契约；在官方 seam 或 pin-protected contract 出现前，继续保持 KimiCode 专用菜单比“菜单看似成功、实际未打开目标 workspace”更诚实。
+
+# DSH 接入评审与 P0 Web pane
+
+## 任务契约
+
+- 用户目标：基于 DSH research/PRD/spec/plan 审查并对齐真实代码库，优化计划后实现安全、可验证的开发目标。
+- 直接交付物：对齐评审、Accepted ADR、修订后的 PRD/spec/plan、DSH P0 Web pane、测试和架构/变更记录。
+- 影响范围：Shell 设置、Rust 生命周期/安装/权限、Workspace Grid、控制中心、退出/更新；Bridge headless 只收敛设计，不在安全前置未完成时实现。
+- 非目标：不建立预测性 AgentBackendRegistry；不扩 external allowlist；不持久化 DSH PID/URL/凭据；不把 DSH one-shot 伪装成 Kimi RuntimeAdapter。
+- 验收：默认关闭；固定 pin 私有安装；单实例显式启停；精确 loopback URL；关闭/退出收口；日志脱敏；前端/Rust/ACL gate 通过；发布级双平台缺口如实记录。
+
+## Checklist
+
+- [x] 阅读治理、架构、设计系统、计划文档和相关目录 README。
+- [x] 核验 DSH 上游 pin、启动入口与 headless approval fail-closed 行为。
+- [x] 完成 Shell/Grid/Bridge 三条代码链审计并修正计划误判。
+- [x] 新增对齐审查和 Accepted ADR，修订 PRD/spec/plan。
+- [x] 实现 schema 12、专属 dsh_manager、私有安装、preflight、生命周期、状态与脱敏日志。
+- [x] 接入独立 dsh pane、控制中心实验开关、目录选择和首次使用引导。
+- [x] 接入 main-only command ACL、退出与更新停止路径。
+- [x] 完成 TypeScript、定向/全量前端、Rust 与 command registry 验证。
+- [x] 补齐持续 health/degraded、控制中心 1s 状态投影和 degraded iframe 存活回归。
+- [x] 统一 DSH 控制中心动作互斥：停止纳入 busy 流程，安装/停止使用独立进行中文案并阻止重复停止 IPC。
+- [x] 完成 macOS 私有 pin 安装、HTTP readiness、WKWebView 对话、SIGTERM 与 process-group 无残留证据。
+- [x] 完成 macOS S-10 冷/热启动各 5 次基线：中位数 361ms / 320ms，10 次均软停且端口释放。
+- [x] 将真实 runtime smoke 扩展为一次安装后 `--samples 1..10` 多轮采样；本机 3 次复验 ready 中位数 507ms、stop 中位数 252ms、无强杀且端口全部关闭。
+- [x] 重建包含 canary/停止交互修复的 macOS arm64 测试包，完成 deep ad-hoc 签名及 zip 解包复验。
+- [x] 完成 macOS Kimi + DSH 后端 ≥70min 共存探针：实际 79m14s、950 次采样、0 失败，两端软停且进程组/端口清零。
+- [x] 完成隔离签名 updater 真版本差 0.2.0→0.2.1：修复安装后 App 未退出，复跑 App/Kimi/DSH PID 与端口清零，更新后 0.2.1 可启动。
+- [x] 定位 Windows E-DSH-002 首轮阻断：官方 `npm.cmd` 被当作原生 executable 直接交给 CreateProcess；改为 paired `node.exe + npm-cli.js`，补 launcher 回归与启动失败诊断日志。
+- [x] 为 KickSide NSIS 增加旧 `kimi sidekick` / `Kimi Sidekick` / `kimi小助手` / `Kimi Desktop Shell` 的 NSIS/MSI 精确检测、交互提示与保留数据迁移 hook；显式固定改名前 MSI UpgradeCode，静态安全 gate 与隔离 NSIS 编译通过。
+- [ ] 生成包含上述两项修复的 Windows NSIS/MSI 测试包，由用户重跑私有 pin 安装与旧品牌迁移。
+- [ ] Windows WebView2/私有安装/进程树真机 G3。
+- [ ] 以 0.2.0 RC 补 Windows 长稳/故障注入，以及 macOS 真实 KimiCode/DSH pane 长时交互人工复核；macOS 后端探针不再要求 2h，updater 真版本差退出已完成。
+- [ ] headless A-8/A-10、系统凭据库和双平台 descendant-kill gate；未完成前保持 No-Go。
+
+## Review
+
+- P0 采用专属薄 manager，符合“抽象由重复证明”；Kimi runtime 没有被强行迁移。
+- DSH URL/PID/状态只存在 Rust 活状态，Grid 只持久化稳定的 pane kind/workDir；generic external 安全边界未扩大。
+- degraded 仍绑定当前 owned Child/port/URL，因此保留同一 iframe；stopped/crashed/starting 仍 fail closed，不获得运行 URL。控制中心独立轮询已与 Grid 的 1s 投影对齐。
+- headless 不是现有 Kimi RuntimeAdapter 的第四实现；三条 connector 也不共享完整取消/心跳/轮询语义，因此计划改为 one-shot router、飞书先行、逐通道验收。
+- 自动化可证明契约、回归和 Unix 整树终止；macOS 当前 pin 的后端共存已按接受的 ≥70min 门槛通过，隔离 updater 真版本差也已验证；双平台发布级完成仍依赖 Windows G3 与 release candidate 的真实 pane 人工复核，不以 CI 代替真机。
+- Node 18.20.8 已真实证明因缺少 `util.parseEnv` 不兼容；Node 20.20.2、22.23.2 与本机 24.19.0 均已通过真实 pin 安装/readiness/软停。S-10 的 M4 Pro 数据用于建立 macOS 基线，不据此缩短尚未取得 Windows 数据的 60 秒生产默认启动超时；runtime smoke 的 90 秒只用于 CI 容错。
+- Windows 首轮错误发生在 npm 子进程 spawn 前，所以不能按网络/代理问题处理；修复后只有 npm 真正返回非零或超时才进入 E-DSH-002 registry/网络分支。旧产品迁移使用正式卸载器，绝不递归删除旧安装目录或共享 `com.kimi.shell` 应用数据。
+- 关闭实验开关的安全语义是“不启动进程、不自动建 pane、不提供运行 URL”；控制中心检测/安装入口仍可发现，标题栏 DSH 新建/浏览器入口则仅在启用后出现。
+- DSH 安装、开关和停止共享同一动作互斥边界，但使用明确的 `安装中` / `停止中` 文案；这避免快速双击重复停止，也避免无关的安装按钮被错误标成正在停止。
+- 最新 Mac 测试基线为 `KickSide_0.2.0_macos_arm64_dsh-p0-updater-exit.zip`（SHA-256 `ef8fd3a27f9b345260f88b272adb8cc5dd9205ea578b26bad2670f49955befb0`）；旧包不再用于回填新交互结果。
+
 # 工作区 Skill 连续列表与目标选择稳定化
 
 ## 任务契约
@@ -1227,3 +1383,73 @@
 - main CI 八个 jobs 全部通过；macOS Go stop endpoint 竞态修复已由 runner 复核。
 - Release workflow 四个 jobs 全部通过并正式发布；线上包含 NSIS、MSI、Windows updater `.sig`、macOS app updater、macOS updater `.sig`、DMG 与唯一 `latest.json`。
 - `latest.json` 版本为 `0.1.24`，包含 `windows-x86_64` 和 `darwin-aarch64`；Release 顶部显示“⚠️ macOS 版本未签名”。
+
+# DSH 主题同步与浏览器打开
+
+## 任务契约
+
+- 用户目标：DSH Web 跟随壳应用切换明暗主题，并出现在标题栏“在浏览器打开”菜单。
+- 直接交付物：DSH 主题契约适配、可信运行 URL 复用、标题栏菜单项、回归测试与文档记录。
+- 影响范围：Workspace Grid frame bridge、DSH service、ShellTitlebar、App wiring、相关测试和 DSH 当前事实文档。
+- 非目标：不修改 DSH 自身持久化主题设置，不扩 generic external allowlist，不新增 Tauri command 或 DSH 多实例。
+- 验收：明暗切换向 DSH frame 发出精确 origin 消息并切换其 dark selector；仅 running 精确 loopback URL 可由菜单打开；G0/G1、安全 gate 和生产构建通过。
+- 保守假设：壳内 DSH 不使用历史 pane 独立主题；“在浏览器打开”是用户显式动作，不是加载失败自动 fallback。
+
+## Checklist
+
+- [x] 定位 DSH rc.6 的 `body[data-ds-dark-theme]` 权威契约。
+- [x] 扩展现有 all-frames 主题 bridge 并让 DSH pane 跟随壳全局主题。
+- [x] 提取 running 精确 loopback URL 校验并加入标题栏浏览器菜单。
+- [x] 增加主题 bridge、DSH pane、URL fail-closed 与菜单回归测试。
+- [x] 更新 README、架构事实和变更记录。
+- [x] 完成 TypeScript、235 项前端测试、安全 gate、生产构建、Rust fmt/277 项测试和 diff 检查。
+- [ ] 在 macOS WKWebView 与 Windows WebView2 真机确认视觉切换和系统浏览器启动。
+
+## Review
+
+- 根因是通用 frame bridge 已接收主题消息，但只应用 Kimi 的主题字段；补充 DSH 自身 selector 后无需改第三方 CSS 或 settings.yaml。
+- 浏览器菜单只消费 Rust 当前 running 状态的精确 `127.0.0.1:<port>`，启动中、停止、崩溃或带路径/非 loopback URL 均禁用或拒绝。
+- 技能 T3“采用平台能力”落实为复用系统浏览器 opener，并只精确覆盖 WebView 中不匹配的 DSH 主题默认。
+
+# DSH 手动停止与崩溃恢复
+
+## 任务契约
+
+- 用户目标：DSH 只在关闭应用或控制中心显式关闭/停止时结束，同时停止或崩溃后无需切换开关即可恢复。
+- 直接交付物：控制中心启动/重试动作、pane 按当前会话目录恢复、动作单飞、回归测试和新 macOS 测试包。
+- 影响范围：DSH 设置面板、Workspace Grid 回调边界、App wiring、测试与完成度记录。
+- 非目标：不把关闭 pane 重新绑定为停止后端，不自动重启 crashed 进程，不修改 Rust ownership 或持久化 schema。
+- 验收：enabled + stopped/crashed 时出现可用恢复动作；pane 的“重试后端启动”实际调用 start 并携带该 pane 的最后工作区；重复点击不重复提交；G0/G1、安全 gate 与 macOS production build 通过。
+
+## Checklist
+
+- [x] 区分只读状态刷新与显式恢复启动回调。
+- [x] 控制中心为 stopped/crashed 增加启动/重试，并复用生命周期互斥动作状态。
+- [x] pane 恢复携带最后观测的会话工作区，缺失时回退默认工作区。
+- [x] 增加控制中心启动单飞与 pane 工作区传递回归测试。
+- [x] 完成 TypeScript、54 文件/256 项前端测试、182-command 安全 gate、生产构建与 macOS arm64 测试包复验。
+- [ ] Windows 行为由用户按 G3 清单手测，不在本机结论中代填。
+
+## Review
+
+- 根因是旧 pane 按钮标为“重试后端启动”，实际只调用 `get settings/status`；控制中心停止后也没有启动入口，用户只能切换开关或新建 pane。
+- 现在 toolbar 刷新仍是只读状态动作，空白/失败覆盖层才调用恢复启动；二者不再共用含义错误的回调。
+- 新包为 `KickSide_0.2.0_macos_arm64_dsh-p0-recovery.zip`，SHA-256 `cc9219a061dd4b7b889a61daef5eaa1e1a759d23ae64e0e301a164ff3f7fef0e`；已包含 Node 20.12 最低能力 preflight、按原始字节有界校验的 production 页面身份 readiness、canonical 私有入口约束及 E-DSH-005 崩溃日志，同名旧包移到 `/tmp`，不会与当前测试基线混淆。
+
+# README 双语重写与 GitHub 合并
+
+## 任务契约
+
+- 用户目标：以视频和四张实测图重写产品 README，中文为默认入口、英文可跳转，并把当前工作区发布并合并到 `main`。
+- 直接交付物：中文 `README.md`、英文 `README_EN.md`、兼容跳转、稳定媒体资源、提交、现有 PR 更新与 `main` 合并。
+- 影响范围：仓库入口文档、README 媒体、当前分支中已核对但尚未提交的 DSH/Kimi Web/桌面体验改动及其测试文档。
+- 非目标：不创建新 Release 或 tag，不改应用版本，不把 README 重新设计成独立营销站点。
+- 验收：双语入口和相对链接有效；README 与当前代码事实一致；本地完整门禁及新一轮 GitHub checks 通过；PR 合并到 `main`。
+
+## Checklist
+
+- [x] 核对视频、四张截图与当前产品事实。
+- [x] 整理稳定媒体文件并完成中英文 README。
+- [x] 完成文档链接、隐私与完整工程门禁。
+- [x] 提交并推送当前完整工作区。
+- [ ] 更新 PR，等待 GitHub checks 并合并至 `main`。

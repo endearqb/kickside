@@ -8,7 +8,6 @@ import {
   parseWorkspaceSplitRatio,
   parseWorkspaceViewKind,
 } from "@/app/theme";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import { materializeGridSlots } from "./gridPresets";
 import type {
   WorkspaceGridStateV1,
@@ -96,7 +95,7 @@ function createLegacyPanes(now: number): WorkspacePane[] {
       id: "pane-code",
       kind: "code",
       carrier: "iframe",
-      title: getKimiAssistantDisplayName(),
+      title: "KimiCode",
       storageNamespace: "workspace-grid-pane-code",
       mountPolicy: "eager",
       loadState: "idle",
@@ -107,7 +106,7 @@ function createLegacyPanes(now: number): WorkspacePane[] {
       id: "pane-chat",
       kind: "chat",
       carrier: "iframe",
-      title: "Kimi Chat",
+      title: "KimiChat",
       storageNamespace: "workspace-grid-pane-chat",
       mountPolicy: "eager",
       loadState: "idle",

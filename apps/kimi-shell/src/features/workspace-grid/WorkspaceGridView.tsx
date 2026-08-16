@@ -7,7 +7,6 @@ import {
 } from "react";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
 import { openExternalWebviewWindow } from "@/services/externalWebviewService";
-import { getKimiAssistantDisplayName } from "@/lib/appBrand";
 import {
   GRID_PRESETS,
   createEqualTrackSizes,
@@ -60,6 +59,7 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const setPaneMountPolicy = useWorkspaceGridStore(
     (state) => state.setPaneMountPolicy,
   );
+  const setPaneWorkDir = useWorkspaceGridStore((state) => state.setPaneWorkDir);
   const configurePane = useWorkspaceGridStore((state) => state.configurePane);
   const setGridTrackSizes = useWorkspaceGridStore(
     (state) => state.setGridTrackSizes,
@@ -356,11 +356,26 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                 chatIframeRef={props.chatIframeRef}
                 codePaneState={props.codePaneState}
                 chatPaneState={props.chatPaneState}
-                actionBusy={props.actionBusy}
+                dshStatus={props.dshStatus ?? null}
+                dshError={props.dshError ?? null}
+                actionBusy={props.actionBusy || (pane?.kind === "dsh" && props.dshBusy === true)}
                 onRetry={props.onRetry}
                 onOpenLogs={props.onOpenLogs}
+                onOpenFolder={props.onOpenFolder}
                 onOpenPaneFolder={props.onOpenPaneFolder}
                 onPaneSessionObserved={props.onPaneSessionObserved}
+                onPaneDshWorkspaceObserved={(paneId, _sessionId, workDir) => {
+                  const current = useWorkspaceGridStore
+                    .getState()
+                    .panes.find((candidate) => candidate.id === paneId);
+                  if (
+                    workDir &&
+                    current?.kind === "dsh" &&
+                    current.workDir !== workDir
+                  ) {
+                    setPaneWorkDir(paneId, workDir);
+                  }
+                }}
                 onOpenExternalUrl={props.onOpenExternalUrl}
                 onOpenTauriWebviewUrl={(url, title, storageNamespace) => {
                   void handleOpenTauriWebviewUrl(url, title, storageNamespace);
@@ -380,6 +395,8 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
                     removePane(pane.id);
                   }
                 }}
+                onRefreshDsh={props.onRefreshDsh ?? (async () => null)}
+                onRecoverDsh={props.onRecoverDsh ?? (async () => null)}
                 onResumePane={() => {
                   if (pane) {
                     setPaneMountPolicy(pane.id, "eager");
@@ -489,10 +506,10 @@ function defaultPaneInput(
   effectiveWorkDir?: string,
 ): AddWorkspacePaneInput {
   if (kind === "code") {
-    return { kind, title: getKimiAssistantDisplayName(), workDir: effectiveWorkDir };
+    return { kind, title: "KimiCode", workDir: effectiveWorkDir };
   }
   if (kind === "chat") {
-    return { kind, title: "Kimi Chat" };
+    return { kind, title: "KimiChat" };
   }
   if (kind === "agent_room") {
     return { kind, title: "Agent Room" };

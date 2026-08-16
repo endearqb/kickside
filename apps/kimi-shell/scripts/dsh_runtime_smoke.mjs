@@ -182,6 +182,30 @@ function safeRuntimeEnvironment(dshHome) {
   return env;
 }
 
+async function resolveSiblingNpmCli() {
+  const executableDirectory = path.dirname(process.execPath);
+  const candidates = [
+    path.join(executableDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
+    path.join(
+      path.dirname(executableDirectory),
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    ),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await readFile(candidate);
+      return candidate;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  throw new Error("npm-cli.js was not found next to the active Node runtime");
+}
+
 async function stopTree(child) {
   const pid = child.pid;
   if (!Number.isInteger(pid) || pid <= 1) throw new Error(`refusing to stop invalid pid ${pid}`);
@@ -290,9 +314,10 @@ async function main() {
 
   let child;
   try {
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    const npmCli = await resolveSiblingNpmCli();
     const installStartedAt = Date.now();
-    const install = await run(npm, [
+    const install = await run(process.execPath, [
+      npmCli,
       "install",
       "--no-audit",
       "--no-fund",

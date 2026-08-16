@@ -1789,32 +1789,30 @@ pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
     thread::spawn(move || {
         let started = Instant::now();
         emit_shutdown_progress(&app, "stopping_backend", Some("正在关闭后端服务…"), Some(0));
-        if let Err(error) = dsh_manager::stop(&app) {
+        let dsh_app = app.clone();
+        let backend_app = app.clone();
+        let dsh_stop = thread::spawn(move || dsh_manager::stop(&dsh_app));
+        let backend_stop = thread::spawn(move || backend_manager::stop_backend(&backend_app));
+        let dsh_result = join_shutdown_worker("DSH", dsh_stop);
+        let backend_result = join_shutdown_worker("Kimi", backend_stop);
+
+        if let Err(error) = &dsh_result {
             log_manager::append_line(
                 &app,
                 format!("shutdown dsh stop failed (source={source}): {error:#}"),
             );
-            emit_shutdown_progress(
-                &app,
-                "shutdown_blocked",
-                Some("DSH 进程尚未确认关闭；应用将保持运行以便重试。"),
-                Some(duration_to_u64_ms(started.elapsed().as_millis())),
-            );
-            app.state::<AppState>()
-                .graceful_exit_started
-                .store(false, Ordering::Release);
-            window_manager::revoke_process_exit(&app, "dsh_shutdown_blocked");
-            return;
         }
-        if let Err(error) = backend_manager::stop_backend(&app) {
+        if let Err(error) = &backend_result {
             log_manager::append_line(
                 &app,
                 format!("shutdown stop_backend failed (source={source}): {error:#}"),
             );
+        }
+        if dsh_result.is_err() || backend_result.is_err() {
             emit_shutdown_progress(
                 &app,
                 "shutdown_blocked",
-                Some("后台进程尚未确认关闭；应用将保持运行以便重试。"),
+                Some("一个或多个后台进程尚未确认关闭；应用将保持运行以便重试。"),
                 Some(duration_to_u64_ms(started.elapsed().as_millis())),
             );
             app.state::<AppState>()
@@ -1831,6 +1829,15 @@ pub(crate) fn start_graceful_exit(app: AppHandle, source: &str) {
         );
         app.exit(0);
     });
+}
+
+fn join_shutdown_worker(
+    label: &str,
+    worker: thread::JoinHandle<anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    worker
+        .join()
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("{label} shutdown worker panicked")))
 }
 
 fn emit_shutdown_progress(
@@ -1951,6 +1958,16 @@ fn auto_repair_context_menu(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shutdown_worker_join_preserves_success_and_failure() {
+        let success = thread::spawn(|| Ok(()));
+        assert!(join_shutdown_worker("success", success).is_ok());
+
+        let failure = thread::spawn(|| anyhow::bail!("stop failed"));
+        let error = join_shutdown_worker("failure", failure).expect_err("preserve stop failure");
+        assert_eq!(error.to_string(), "stop failed");
+    }
 
     #[test]
     fn redact_workspace_url_hides_token_fragment() {

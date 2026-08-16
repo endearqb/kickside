@@ -14,7 +14,6 @@ import {
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
 import { addDshPaneToWorkspaceGrid } from "@/features/workspace-grid/gridStore";
-import { pickRandomAgentTip, type AgentTip } from "@/lib/agentTips";
 import { getTrustedDshRuntimeUrl } from "@/services/dshService";
 import "./App.css";
 import "./components/control-center/control-center.css";
@@ -23,7 +22,6 @@ import "./features/directory/directory.css";
 function App() {
   const shell = useShellController();
   const dsh = useDshController(shell.tauriRuntime);
-  const [shutdownTip, setShutdownTip] = useState<AgentTip | null>(null);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
   const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
@@ -71,15 +69,6 @@ function App() {
       });
     };
   }, [controlCenterDialogRef, shell.controlCenterModalOpen, shell.screen]);
-
-  useEffect(() => {
-    if (shell.shutdownProgress) {
-      setShutdownTip((current) => current ?? pickRandomAgentTip());
-      return;
-    }
-
-    setShutdownTip(null);
-  }, [shell.shutdownProgress]);
 
   useEffect(() => {
     if (!shell.mainWindowCloseDecisionRequest) {
@@ -554,16 +543,6 @@ function App() {
               )}
             </div>
 
-            {shutdownTip ? (
-              <div className="shutdown-tip-card">
-                <div className="shutdown-tip-meta">
-                  <span className="shutdown-tip-badge">随机提示</span>
-                  <span className="shutdown-tip-number">{shutdownTip.numberLabel}</span>
-                </div>
-                <strong className="shutdown-tip-title">{shutdownTip.title}</strong>
-                <p className="shutdown-tip-body">{shutdownTip.body}</p>
-              </div>
-            ) : null}
           </div>
         </div>
       )}

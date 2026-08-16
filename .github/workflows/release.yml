@@ -29,8 +29,8 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package version v$version." >&2
             exit 1
           }
-          test "$GITHUB_REF_NAME" = "v0.2.0" || {
-            echo "The unsigned macOS release exception is restricted to v0.2.0. Restore the signed release workflow before publishing another version." >&2
+          test "$GITHUB_REF_NAME" = "v0.2.1" || {
+            echo "The unsigned macOS release exception is restricted to v0.2.1. Restore the signed release workflow before publishing another version." >&2
             exit 1
           }
           test -f "$notes_path" || {
@@ -206,7 +206,7 @@ jobs:
             --version "$version" \
             --tag "$GITHUB_REF_NAME" \
             --pub-date "$(git show -s --format=%cI "$GITHUB_REF_NAME")" \
-            --notes "KickSide $version：新增 DeepSeek Harness、多窗格工作台与 Kimi Code 消息 TOC。macOS 安装包未签名、未公证。" \
+            --notes "KickSide $version：修复 Windows DSH 安装与启动，并优化应用退出体验。macOS 安装包未签名、未公证。" \
             --windows-url "$base_url/$(basename "$windows_bundle")" \
             --windows-signature-file "$windows_bundle.sig" \
             --macos-url "$base_url/$(basename "$macos_bundle")" \

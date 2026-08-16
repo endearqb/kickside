@@ -82,8 +82,13 @@ fn push_existing(paths: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: Op
 
 fn sibling_npm(node_path: &Path) -> Option<PathBuf> {
     let directory = node_path.parent()?;
-    ["npm", "npm.cmd"]
-        .into_iter()
+    let names: &[&str] = if cfg!(windows) {
+        &["npm.cmd", "npm.exe"]
+    } else {
+        &["npm"]
+    };
+    names
+        .iter()
         .map(|name| directory.join(name))
         .find(|path| path.is_file())
 }
@@ -254,6 +259,20 @@ mod tests {
                 .and_then(|runtime| runtime.npm_path.as_deref()),
             Some(path_bin.join(npm_binary_name()).as_path())
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn prefers_windows_npm_cmd_over_extensionless_posix_shim() {
+        let root = temp_root("windows-npm-cmd");
+        fs::create_dir_all(&root).expect("create node bin");
+        let node = root.join("node.exe");
+        fs::write(&node, "node").expect("write node");
+        fs::write(root.join("npm"), "posix shim").expect("write posix npm shim");
+        fs::write(root.join("npm.cmd"), "windows shim").expect("write npm.cmd");
+
+        assert_eq!(sibling_npm(&node), Some(root.join("npm.cmd")));
         let _ = fs::remove_dir_all(root);
     }
 

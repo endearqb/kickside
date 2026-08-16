@@ -4147,58 +4147,6 @@ input:focus {
   font-size: 11px;
 }
 
-.shutdown-tip-card {
-  width: 100%;
-  display: grid;
-  gap: 10px;
-  padding: 14px 15px;
-  border: 1px solid color-mix(in srgb, var(--chrome-border) 72%, transparent);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-muted) 72%, transparent);
-  text-align: left;
-}
-
-.shutdown-tip-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.shutdown-tip-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--text-secondary);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-}
-
-.shutdown-tip-number {
-  color: var(--text-secondary);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
-
-.shutdown-tip-title {
-  color: var(--text-primary);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.shutdown-card .shutdown-tip-body {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 .kimi-brand {
   display: inline-flex;
   align-items: center;

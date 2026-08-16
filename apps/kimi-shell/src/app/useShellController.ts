@@ -414,6 +414,7 @@ export function useShellController() {
   const shutdownElapsedBaseRef = useRef<number>(0);
   const shutdownElapsedStartedAtRef = useRef<number>(0);
   const shutdownElapsedTimerRef = useRef<number | null>(null);
+  const shutdownActiveRef = useRef(false);
   const frontendReadyHandshakeSentRef = useRef(false);
   const workspaceFrameLoadIdentityRef = useRef<string | null>(null);
   const {
@@ -1097,7 +1098,7 @@ export function useShellController() {
       setStatus(data);
       setBootHint(null);
       void refreshWorkspaceEmbedUrlForStatus(data);
-      if (data.state !== "stopping") {
+      if (!shutdownActiveRef.current && data.state !== "stopping") {
         setShutdownProgress(null);
         clearShutdownElapsedTimer(true);
       }
@@ -1402,6 +1403,7 @@ export function useShellController() {
           currentWebviewWindow.listen<ShutdownProgressPayload>(
             SHUTDOWN_PROGRESS_EVENT,
             (event) => {
+              shutdownActiveRef.current = event.payload.stage !== "shutdown_blocked";
               setShutdownProgress(event.payload);
               startShutdownElapsedTimer(event.payload?.elapsedMs);
             },

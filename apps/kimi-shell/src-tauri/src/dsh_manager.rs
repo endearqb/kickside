@@ -307,6 +307,20 @@ fn verified_entry_at(prefix: &Path) -> anyhow::Result<PathBuf> {
     verified_file_within(prefix, DSH_ENTRY_RELATIVE)
 }
 
+fn node_main_module_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let value = path.to_string_lossy();
+        if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{stripped}"));
+        }
+        if let Some(stripped) = value.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 fn installed_version_at(prefix: &Path) -> Option<String> {
     let package_json =
         verified_file_within(prefix, "node_modules/@deepseek-ai/dsh/package.json").ok()?;
@@ -793,7 +807,8 @@ fn start(app: &AppHandle, workspace: &str) -> anyhow::Result<DshStatus> {
     let port = allocate_port(settings.agent_backends.dsh.port_range)?;
     prepare_log(app)?;
     let node = PathBuf::from(report.node_path.context("Node.js 路径缺失")?);
-    let entry = verified_entry_at(&install_dir(app)).context("DSH 固定入口无效")?;
+    let verified_entry = verified_entry_at(&install_dir(app)).context("DSH 固定入口无效")?;
+    let entry = node_main_module_path(&verified_entry);
     let mut command = Command::new(&node);
     command_utils::configure_background_command(&mut command);
     let args = dsh_web_args(port);
@@ -1514,6 +1529,19 @@ mod tests {
         assert!(node_version_supported("v25.1.0"));
         assert!(!node_version_supported("v24.0.0-nightly"));
         assert!(!node_version_supported("not-node"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn strips_windows_verbatim_prefix_before_passing_the_main_module_to_node() {
+        assert_eq!(
+            node_main_module_path(Path::new(r"\\?\C:\KickSide\dsh\lib\bin.js")),
+            PathBuf::from(r"C:\KickSide\dsh\lib\bin.js")
+        );
+        assert_eq!(
+            node_main_module_path(Path::new(r"\\?\UNC\server\share\dsh\lib\bin.js")),
+            PathBuf::from(r"\\server\share\dsh\lib\bin.js")
+        );
     }
 
     #[test]

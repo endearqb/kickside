@@ -1482,3 +1482,100 @@
 - Release 正文首行是未签名/未公证警告；8 个资产全部 uploaded 且带 GitHub SHA-256 digest，包括 Windows NSIS/MSI 及 `.sig`、macOS app updater/DMG 及 `.sig`、唯一 `latest.json`。
 - `latest.json` 版本为 `0.2.0`，同时包含 `windows-x86_64` 与 `darwin-aarch64`，URL 均指向 `v0.2.0` 且签名非空。
 - 当前完成状态是“未签名 macOS 预览版已发布”；最终安装器生命周期、真实 WebView 与辅助功能 G3 仍待用户在目标平台验证，不称生产就绪。
+
+# Windows DSH npm 启动错误 193
+
+## 任务契约
+
+- 用户目标：修复 Windows 安装 DeepSeek Harness 时 npm 安装进程无法启动并返回 os error 193。
+- 直接交付物：修正 Windows Node/npm 同工具链入口选择，补回归测试和工程记录。
+- 影响范围：`nodejs_locator.rs`、Rust 测试、变更与经验记录。
+- 非目标：不修改 DSH 固定版本、npm registry、安装目录、Tauri command 契约或跨平台架构。
+- 验收：Windows 官方 Node 目录同时存在 `npm` 与 `npm.cmd` 时选择 `npm.cmd`；Rust G0/G1 通过。
+
+## Checklist
+
+- [x] 用用户日志锁定 npm spawn 阶段，并追踪 DSH install launcher 全链路。
+- [x] 在本机官方 Node 目录复现无扩展名 `npm` 被优先发现。
+- [x] Windows 候选收敛为 `npm.cmd`/`npm.exe`，保留非 Windows `npm` 行为。
+- [x] 增加 `npm` 与 `npm.cmd` 共存的 Windows 回归测试。
+- [x] 完成 Rust fmt、check、针对性测试与 285 项完整测试。
+- [x] 使用包含修复的 Windows 打包版完成一次真实 DSH npm registry 安装验证。
+
+## Review
+
+- 根因不在 DSH 包或 registry，而在 sibling npm 的跨平台候选顺序：Windows 先命中 POSIX shim，绕过了既有 `npm.cmd` 安全 launcher。
+- 修复只触及共享定位器和一个测试；已有 `node.exe + npm-cli.js`、canonical `cmd.exe` fallback 与私有 prefix 契约均保持不变。
+- 完成状态：代码已验证到 G1，打包版真实下载与固定版本安装已通过；首次启动另暴露 Node verbatim 主模块路径问题并进入后续修复。
+
+# Windows DSH Node verbatim 入口启动失败
+
+## 任务契约
+
+- 用户目标：修复 DSH 安装成功后在 Windows 以 `EISDIR: lstat 'C:'` 立即异常退出。
+- 直接交付物：保持 canonical 越界校验，转换 Node 主模块 argv，增加回归测试并重建测试安装包。
+- 影响范围：`dsh_manager.rs`、Rust 测试、Windows 本地测试包与工程记录。
+- 非目标：不放宽私有安装根校验，不修改 DSH pin、持久化 schema、端口或生命周期契约。
+- 验收：verbatim 入口不再传给 Node；286 项 Rust 测试通过；真实 DSH Web 返回 HTTP 200 与 `__DSH_BOOT__`；生产打包链最终复验。
+
+## Checklist
+
+- [x] 复现普通路径成功、`\\?\` 路径稳定触发同一 `EISDIR`。
+- [x] 安全校验后转换本地盘与 UNC 的 Node argv 表示。
+- [x] 增加 Windows 路径回归测试并通过 286 项 Rust 测试。
+- [x] 用真实安装入口启动 DSH Web，确认 HTTP 200 和页面身份标记后完整停止。
+- [x] 重新构建包含路径修复的 Windows NSIS/MSI 测试安装包。
+- [ ] 安装新测试包并通过 Tauri 生产启动链复验。
+
+## Review
+
+- 根因是 Node 26 主模块解析与 Windows verbatim 路径不兼容，不是工作目录、DSH 配置或安装完整性问题。
+- 修复只改变 Node argv 表示；canonical target 仍是唯一安全权威，未引入 fallback 或扩大信任边界。
+
+# Windows 退出界面稳定与后端并行停止
+
+## 任务契约
+
+- 用户目标：退出时只保留关闭遮罩，删除随机提示、保留毫秒计时，并并行停止 DSH/Kimi。
+- 直接交付物：退出锁、精简关闭卡片、并行停止 worker、回归测试与工程记录。
+- 影响范围：React 主壳退出展示、Rust graceful exit、相关测试与变更记录。
+- 非目标：不改变启动 prefill 提示、托盘策略、退出确认或 fail-closed 进程所有权规则。
+- 验收：后端状态轮询不能在退出期间清空遮罩；关闭卡片无随机提示且持续计时；DSH/Kimi 同时开始停止；自动化通过并由 Windows 安装版复验。
+
+## Checklist
+
+- [x] 用代码与日志确认三段闪屏和串行耗时根因。
+- [x] 锁定关闭遮罩并删除退出随机提示。
+- [x] 并行停止 DSH 与 Kimi，统一处理两个结果。
+- [x] 完成前端、Rust、安全门禁与生产安装包验证。
+- [ ] Windows 安装版人工确认退出只显示一个遮罩。
+
+## Review
+
+- 关闭遮罩消失的直接原因是普通状态轮询在 DSH 停止、Kimi 仍 running 的窗口期清空 `shutdownProgress`；显式退出锁现已把关闭 lifecycle 设为唯一状态权威。
+- DSH 与 Kimi 通过独立 worker 同时停止，两个结果均回收后才退出；任一失败仍撤销退出许可并保持应用运行。
+- Node 24.19 下前端 54 文件/281 项、Rust 287 项、严格 clippy、安全门禁和 NSIS 构建均通过；Node 26.4 的 jsdom 全量测试会因实验性 global localStorage 覆盖失败，不属于产品代码回归。
+- 新 NSIS 为 `KickSide_0.2.0_x64-setup.exe`，SHA-256 `676624F218CC5B7426EE7ED4F9A1A1EAAEB05B9E233E9600454E93289D1256BD`；仅剩 Windows 安装版真实退出视觉与耗时复验。
+
+# v0.2.1 未签名 macOS 预览发布
+
+## 任务契约
+
+- 用户目标：版本提升至 `0.2.1`，推送 `main`，创建 GitHub Release tag 并触发跨平台 Actions 构建。
+- 直接交付物：版本元数据、精确未签名例外、发布说明、main 提交、`v0.2.1` tag、Windows/macOS Release 资产与 `latest.json`。
+- 影响范围：Release workflow、版本文件、发布文档、GitHub main/tag/Actions/Release。
+- 非目标：不伪造 Apple Developer ID、公证、Gatekeeper、Windows Authenticode 或生产就绪结论。
+- 验收：本地门禁和 main CI 通过后才推 tag；Release workflow 全绿并公开包含 NSIS/MSI、macOS app/DMG、两端 `.sig` 和双平台 `latest.json`。
+
+## Checklist
+
+- [x] 用户明确批准 `v0.2.1` macOS 未签名、未公证预览例外。
+- [x] 同步三处版本号，新增 ADR/发布说明并迁移精确 tag 门禁。
+- [x] 完成本地发布前门禁。
+- [ ] 提交并推送 `main`，等待 main CI 全绿。
+- [ ] 创建并推送 `v0.2.1` tag。
+- [ ] 等待 Release workflow 并核验公开资产和 `latest.json`。
+
+## Review
+
+- 待 GitHub 发布完成后补充。

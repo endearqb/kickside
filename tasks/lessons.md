@@ -66,3 +66,6 @@
 - 当 Skill Center 的“工作区洞察”从只读发现页演变成真实目录管理页时，不要继续复用 discovery-only 的状态和动作；应尽快拆成“技能管理中的发现上下文切换”与“工作区目录 inventory 管理”两套明确模型。
 - “本地增强版 Web”不能只在官方 Web 外层套 wrapper；用户期待的是官方 Web 主体界面的 i18n/体验变化。真实增强必须运行在官方 Web DOM 同源上下文（proxy 注入）或本地源码构建内，否则只会出现一条额外标题栏而主体毫无差别。
 - 当本地增强通过同一个 workspace proxy URL 做模式感知注入时，切换模式不能只保存设置并把状态设为 loading；必须强制 iframe 重新挂载或重新导航，否则 URL 不变不会触发新的 HTML 请求，proxy 也就没有机会按新模式注入或移除增强脚本。
+- Windows 官方 Node 目录会同时包含无扩展名 POSIX `npm` shim 与 `npm.cmd`；同目录工具链发现必须优先并限定为 Windows 可启动的 `npm.cmd`/`npm.exe`，否则把 `npm` 直接交给 CreateProcess 会得到 os error 193。
+- Windows 的 `fs::canonicalize` 会产生 `\\?\` verbatim 路径；它适合做包含关系和越界校验，但 Node 26 不能把该形式作为 CommonJS 主模块入口。安全校验后应只为 Node argv 转成等价普通 Win32/UNC 表示。
+- 退出遮罩不能由普通后端轮询状态清理：多个独立 runtime 并行或串行停止时，任一服务仍为 running 都不代表退出已取消；只接受显式 shutdown lifecycle 事件作为遮罩的状态权威。

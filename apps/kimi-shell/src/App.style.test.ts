@@ -4,6 +4,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const appCss = readFileSync(new URL("./App.css", import.meta.url), "utf8") as string;
+const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8") as string;
+const shellControllerSource = readFileSync(
+  new URL("./app/useShellController.ts", import.meta.url),
+  "utf8",
+) as string;
 
 function declarationBlock(selectorPattern: RegExp) {
   const match = appCss.match(new RegExp(`${selectorPattern.source}\\s*\\{([^}]*)\\}`));
@@ -106,5 +111,21 @@ describe("control-center layout contracts", () => {
     expect(item).toContain("border-radius: 0");
     expect(item).toContain("background: transparent");
     expect(divider).toContain("border-top: 1px solid var(--cc-border)");
+  });
+});
+
+describe("shutdown view contracts", () => {
+  it("keeps one elapsed-time shutdown overlay without random tips", () => {
+    expect(appSource).toContain('className="shutdown-overlay"');
+    expect(appSource).toContain("shell.shutdownElapsedMs");
+    expect(appSource).not.toContain("shutdown-tip-card");
+    expect(appCss).not.toContain(".shutdown-tip-card");
+  });
+
+  it("does not clear the overlay while graceful shutdown is active", () => {
+    expect(shellControllerSource).toContain("shutdownActiveRef.current =");
+    expect(shellControllerSource).toContain(
+      '!shutdownActiveRef.current && data.state !== "stopping"',
+    );
   });
 });

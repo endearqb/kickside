@@ -528,8 +528,13 @@ function PaneContent({
   const sourceUrl = source.url ?? "";
 
   useEffect(() => {
-    postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
-  }, [paneTheme, sourceUrl, themeSignal]);
+    postThemeToFrame(
+      iframeRef.current,
+      sourceUrl,
+      paneTheme,
+      pane.kind === "code" ? { surface: "kimi-code", layoutEnhancement: "v2" } : undefined,
+    );
+  }, [pane.kind, paneTheme, sourceUrl, themeSignal]);
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -803,7 +808,14 @@ function PaneContent({
             }
             referrerPolicy={pane.kind === "external" ? "no-referrer" : undefined}
             onLoad={() => {
-              postThemeToFrame(iframeRef.current, sourceUrl, paneTheme);
+              postThemeToFrame(
+                iframeRef.current,
+                sourceUrl,
+                paneTheme,
+                pane.kind === "code"
+                  ? { surface: "kimi-code", layoutEnhancement: "v2" }
+                  : undefined,
+              );
               if (pane.kind === "external") {
                 setExternalState("ready");
                 return;
@@ -976,18 +988,50 @@ export function postThemeToFrame(
   frame: HTMLIFrameElement | null,
   sourceUrl: string,
   theme: Theme,
+  options?: {
+    surface: "kimi-code";
+    layoutEnhancement: "v2";
+  },
 ): void {
   if (!frame?.contentWindow || !sourceUrl) {
     return;
   }
 
   try {
+    const payload: {
+      source: typeof THEME_SYNC_SOURCE;
+      theme: Theme;
+      accent?: string;
+      surface?: "kimi-code";
+      layoutEnhancement?: "v2";
+    } = { source: THEME_SYNC_SOURCE, theme };
+    if (options && isKimiLayoutEnhancementEnabled()) {
+      payload.accent = readHostAccentColor();
+      payload.surface = options.surface;
+      payload.layoutEnhancement = options.layoutEnhancement;
+    }
     frame.contentWindow.postMessage(
-      { source: THEME_SYNC_SOURCE, theme },
+      payload,
       new URL(sourceUrl).origin,
     );
   } catch {
     // The iframe may still be navigating or temporarily at about:blank.
+  }
+}
+
+function isKimiLayoutEnhancementEnabled(): boolean {
+  try {
+    return window.localStorage.getItem("kimi-web-layout-v2") !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function readHostAccentColor(): string {
+  try {
+    return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+  } catch {
+    return "";
   }
 }
 

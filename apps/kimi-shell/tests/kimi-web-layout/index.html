@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kimi Web layout visual fixture</title>
+    <style>
+      html,
+      body,
+      iframe {
+        border: 0;
+        height: 100%;
+        margin: 0;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe id="kimi-frame" title="Kimi Web layout fixture"></iframe>
+    <script>
+      const frame = document.getElementById("kimi-frame");
+      const parameters = new URLSearchParams(window.location.search);
+      const frameUrl = new URL("./frame.html", window.location.href);
+      if (parameters.get("expected") !== "wide" && parameters.get("sidebar") !== "on") {
+        frameUrl.searchParams.set("sidebar", "off");
+      }
+      if (parameters.get("mobile") === "true") {
+        frameUrl.searchParams.set("mobile", "true");
+      }
+      frame.src = frameUrl.href;
+      frame.addEventListener("load", () => {
+        frame.contentWindow.dispatchEvent(
+          new frame.contentWindow.MessageEvent("message", {
+            source: window,
+            data: {
+              source: "kimi-shell-theme-sync",
+              theme: parameters.get("theme") === "dark" ? "dark" : "light",
+              accent: "#34c284",
+              surface: "kimi-code",
+              layoutEnhancement: "v2",
+            },
+          }),
+        );
+        if (parameters.get("expanded") === "true") {
+          frame.contentDocument
+            .querySelector('[data-kimi-enhanced-conversation-outline="true"] .toc-row')
+            ?.focus({ preventScroll: true });
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -13,6 +13,11 @@
   const MAX_SESSION_ID_LENGTH = 512;
   const MAX_DSH_WORK_DIR_LENGTH = 32768;
   const THEME_STYLE_ID = "kimi-sidekick-pane-theme";
+  const KIMI_LAYOUT_STYLE_ID = "kickside-kimi-layout-v2";
+  const KIMI_LAYOUT_STORAGE_KEY = "kimi-web-layout-v2";
+  const KIMI_LAYOUT_ATTR = "data-kimi-shell-layout";
+  const KIMI_LAYOUT_WIDE_MIN = 1180;
+  const KIMI_LAYOUT_COMPACT_MIN = 960;
   const THEME_PALETTES = {
     light: {
       background: "#ffffff",
@@ -82,6 +87,600 @@
       "; }\n";
   }
 
+  let kimiLayoutRequested = false;
+  let kimiLayoutHostAccent = "";
+  let kimiLayoutInitialized = false;
+  let kimiLayoutRefreshPending = false;
+  let kimiLayoutObserver = null;
+  let kimiLayoutMutationObserver = null;
+  let kimiLayoutProjectionSignature = "";
+  let kimiLayoutMissingContractWarned = false;
+
+  function isKimiLayoutEnabledByUser() {
+    try {
+      return localStorage.getItem(KIMI_LAYOUT_STORAGE_KEY) !== "off";
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function normalizeCssColor(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+    const color = value.trim();
+    if (!color) {
+      return "";
+    }
+    try {
+      return window.CSS && window.CSS.supports("color", color) ? color : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function resolveKimiAccent() {
+    try {
+      const styles = window.getComputedStyle(document.documentElement);
+      for (const name of ["--logo", "--blue", "--sidebar-accent", "--color-primary"]) {
+        const value = normalizeCssColor(styles.getPropertyValue(name));
+        if (value) {
+          return value;
+        }
+      }
+    } catch (_) {
+      // Fall through to the host color and the Kimi blue compatibility value.
+    }
+    return normalizeCssColor(kimiLayoutHostAccent) || "#1783ff";
+  }
+
+  function applyKimiAccent() {
+    document.documentElement.style.setProperty(
+      "--kimi-enhanced-accent",
+      resolveKimiAccent(),
+      "important",
+    );
+  }
+
+  function kimiViewportWidth() {
+    return Math.round(
+      (document.documentElement && document.documentElement.clientWidth) ||
+        window.innerWidth ||
+        0,
+    );
+  }
+
+  function setKimiLayoutMode() {
+    const width = kimiViewportWidth();
+    const mode =
+      width >= KIMI_LAYOUT_WIDE_MIN
+        ? "wide"
+        : width >= KIMI_LAYOUT_COMPACT_MIN
+          ? "compact"
+          : "narrow";
+    const root = document.documentElement;
+    root.setAttribute(KIMI_LAYOUT_ATTR, mode);
+    root.style.setProperty("--kimi-shell-viewport-width", width + "px");
+    scheduleKimiLayoutRefresh();
+  }
+
+  function findKimiHeader() {
+    const desktop = document.querySelector("header.chat-header");
+    if (desktop instanceof HTMLElement) {
+      return desktop;
+    }
+    const switcher = document.querySelector(
+      'button[aria-label="切换会话 / 工作区"],button[aria-label="Switch session / workspace"]',
+    );
+    const mobile = switcher && switcher.closest(".topbar");
+    return mobile instanceof HTMLElement ? mobile : null;
+  }
+
+  function findKimiComposer() {
+    const input = document.querySelector(
+      'textarea[placeholder*="消息"],textarea[placeholder*="message" i],textarea[role="combobox"]',
+    );
+    if (!(input instanceof HTMLElement)) {
+      return null;
+    }
+    const explicit = input.closest(".composer");
+    if (explicit instanceof HTMLElement) {
+      return explicit;
+    }
+    const form = input.closest("form");
+    return form instanceof HTMLElement ? form : null;
+  }
+
+  function findKimiSessionSidebar() {
+    const explicit = document.querySelector("aside.side");
+    if (explicit instanceof HTMLElement) {
+      return explicit;
+    }
+    const toggle = document.querySelector(
+      'button[aria-label="收起侧边栏"],button[aria-label="展开侧边栏"],' +
+        'button[aria-label="关闭会话侧栏"],button[aria-label="打开会话侧栏"],' +
+        'button[aria-label="Close sidebar"],button[aria-label="Open sidebar"],' +
+        'button[aria-label="Close sessions sidebar"],button[aria-label="Open sessions sidebar"]',
+    );
+    const fallback = toggle && toggle.closest("aside");
+    return fallback instanceof HTMLElement ? fallback : null;
+  }
+
+  function isKimiConversationOutline(element) {
+    if (
+      !(element instanceof HTMLElement) ||
+      element.matches("aside.side") ||
+      element.dataset.kimiEnhancedOutlineProjection === "true"
+    ) {
+      return false;
+    }
+    const scroll = element.querySelector(":scope > .toc-scroll");
+    return Boolean(
+      element.matches("nav.conversation-toc") &&
+        scroll &&
+        scroll.querySelector("button.toc-row > .toc-bar + .toc-label"),
+    );
+  }
+
+  function findNativeKimiConversationOutline() {
+    const candidates = document.querySelectorAll(
+      'nav.conversation-toc[aria-label="对话目录"],' +
+        'nav.conversation-toc[aria-label="Conversation outline"],' +
+        "section.con > nav.conversation-toc",
+    );
+    for (const candidate of candidates) {
+      if (isKimiConversationOutline(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function normalizedKimiTurnLabel(anchor) {
+    const source =
+      anchor.querySelector(".u-bub,[data-role='user-message'],[data-message-role='user']") ||
+      anchor;
+    const value = (source.textContent || "").replace(/\s+/g, " ").trim();
+    return value ? value.slice(0, 96) : "消息";
+  }
+
+  function kimiTurnAnchors() {
+    const seen = new Set();
+    return Array.from(document.querySelectorAll(".u-bub.turn-anchor[data-turn-id]"))
+      .filter(function (anchor) {
+        if (!(anchor instanceof HTMLElement)) {
+          return false;
+        }
+        const turnId = anchor.dataset.turnId;
+        if (!turnId || seen.has(turnId)) {
+          return false;
+        }
+        seen.add(turnId);
+        return true;
+      });
+  }
+
+  function removeKimiOutlineProjection(nextOutline) {
+    const projections = document.querySelectorAll(
+      '[data-kimi-enhanced-outline-projection="true"]',
+    );
+    if (projections.length) {
+      const projectionHadFocus = Array.from(projections).some(function (node) {
+        return node instanceof HTMLElement && node.contains(document.activeElement);
+      });
+      projections.forEach(function (node) {
+        node.remove();
+      });
+      if (projectionHadFocus && nextOutline instanceof HTMLElement) {
+        window.requestAnimationFrame(function () {
+          const target = nextOutline.querySelector("button.toc-row");
+          target instanceof HTMLElement && target.focus({ preventScroll: true });
+        });
+      }
+    }
+    kimiLayoutProjectionSignature = "";
+  }
+
+  function ensureKimiOutlineProjection() {
+    if (findKimiSessionSidebar() instanceof HTMLElement) {
+      removeKimiOutlineProjection();
+      return null;
+    }
+    const anchors = kimiTurnAnchors();
+    if (anchors.length < 2) {
+      removeKimiOutlineProjection();
+      return null;
+    }
+    let outline = document.querySelector('[data-kimi-enhanced-outline-projection="true"]');
+    let projectionCreated = false;
+    if (!(outline instanceof HTMLElement)) {
+      outline = document.createElement("nav");
+      outline.className = "conversation-toc kimi-shell-outline-projection";
+      outline.dataset.kimiEnhancedOutlineProjection = "true";
+      outline.setAttribute("aria-label", "对话目录");
+      const scroll = document.createElement("div");
+      scroll.className = "toc-scroll";
+      outline.appendChild(scroll);
+      (document.body || document.documentElement).appendChild(outline);
+      projectionCreated = true;
+    }
+    const signature = anchors
+      .map(function (anchor) {
+        return anchor.dataset.turnId + "\n" + normalizedKimiTurnLabel(anchor);
+      })
+      .join("\n---\n");
+    if (projectionCreated || signature !== kimiLayoutProjectionSignature) {
+      const scroll = outline.querySelector(":scope > .toc-scroll");
+      if (scroll instanceof HTMLElement) {
+        scroll.replaceChildren();
+        anchors.forEach(function (anchor, index) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = index === 0 ? "toc-row active" : "toc-row";
+          button.dataset.turnId = anchor.dataset.turnId || "";
+          button.setAttribute("aria-label", normalizedKimiTurnLabel(anchor));
+          const bar = document.createElement("span");
+          bar.className = "toc-bar";
+          const label = document.createElement("span");
+          label.className = "toc-label";
+          label.textContent = normalizedKimiTurnLabel(anchor);
+          button.append(bar, label);
+          button.addEventListener("click", function () {
+            const target = kimiTurnAnchors().find(function (candidate) {
+              return candidate.dataset.turnId === button.dataset.turnId;
+            });
+            target && target.scrollIntoView({ behavior: "auto", block: "center" });
+            outline.querySelectorAll("button.toc-row.active").forEach(function (row) {
+              row.classList.remove("active");
+            });
+            button.classList.add("active");
+          });
+          scroll.appendChild(button);
+        });
+      }
+      kimiLayoutProjectionSignature = signature;
+    }
+    return outline;
+  }
+
+  function findKimiConversationOutline() {
+    const nativeOutline = findNativeKimiConversationOutline();
+    if (nativeOutline) {
+      removeKimiOutlineProjection(nativeOutline);
+      return nativeOutline;
+    }
+    return ensureKimiOutlineProjection();
+  }
+
+  function findKimiWorkspaceIcon(header) {
+    const explicit = header && header.querySelector(".wsq");
+    if (explicit instanceof HTMLElement) {
+      return explicit;
+    }
+    return null;
+  }
+
+  function ensureKimiLayoutStyle() {
+    if (!document.head || document.getElementById(KIMI_LAYOUT_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = KIMI_LAYOUT_STYLE_ID;
+    style.textContent = `
+:root {
+  --kimi-enhanced-composer-bottom-gap: 12px;
+  --kimi-enhanced-accent: #1783ff;
+  --kimi-outline-glass-background: rgb(255 255 255 / 58%);
+  --kimi-outline-glass-border: rgb(31 31 31 / 10%);
+  --kimi-outline-glass-shadow: 0 8px 24px rgb(31 31 31 / 12%);
+}
+:root.dark {
+  --kimi-outline-glass-background: rgb(28 29 31 / 58%);
+  --kimi-outline-glass-border: rgb(255 255 255 / 12%);
+  --kimi-outline-glass-shadow: 0 8px 28px rgb(0 0 0 / 28%);
+}
+[data-kimi-enhanced-composer="true"] {
+  box-sizing: border-box !important;
+  padding-bottom: calc(
+    var(--kimi-enhanced-composer-bottom-gap) + env(safe-area-inset-bottom, 0px)
+  ) !important;
+}
+[data-kimi-enhanced-workspace-icon="true"] {
+  background: var(--kimi-enhanced-accent) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] {
+  --kimi-outline-inline: 100cqi;
+  --kimi-outline-content-max: min(
+    var(--p-content-max, 760px),
+    calc(var(--kimi-outline-inline) - 40px)
+  );
+  --kimi-outline-rail-left: max(
+    calc(env(safe-area-inset-left, 0px) + 8px),
+    calc(50% - (var(--kimi-outline-content-max) / 2) - 27px)
+  );
+  --kimi-outline-expanded-panel-width: min(
+    220px,
+    calc(var(--kimi-outline-inline) - var(--kimi-outline-rail-left) - 8px)
+  );
+  bottom: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  left: var(--kimi-outline-rail-left) !important;
+  max-height: calc(100% - 160px) !important;
+  max-width: calc(
+    var(--kimi-outline-inline) - var(--kimi-outline-rail-left) - 8px
+  ) !important;
+  overflow: visible !important;
+  opacity: 0.5 !important;
+  pointer-events: auto !important;
+  position: absolute !important;
+  right: auto !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  visibility: visible !important;
+  width: max-content !important;
+  z-index: var(--z-sticky, 100) !important;
+}
+[data-kimi-enhanced-outline-projection="true"] {
+  --kimi-outline-inline: 100vw;
+  --kimi-outline-rail-left: max(
+    calc(env(safe-area-inset-left, 0px) + 8px),
+    calc(50vw - (var(--kimi-outline-content-max) / 2) - 27px)
+  );
+  max-height: calc(100dvh - 160px) !important;
+  position: fixed !important;
+}
+[data-kimi-enhanced-conversation-outline="true"]::before {
+  content: "" !important;
+  inset: 0 -48px 0 -14px !important;
+  position: absolute !important;
+  z-index: 0 !important;
+}
+[data-kimi-enhanced-conversation-outline="true"]::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: var(--kimi-outline-glass-background) !important;
+  border: 1px solid var(--kimi-outline-glass-border) !important;
+  border-radius: 12px !important;
+  box-shadow: var(--kimi-outline-glass-shadow) !important;
+  content: "" !important;
+  box-sizing: border-box !important;
+  inset-block: -10px !important;
+  inset-inline: -14px auto !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  transform: scale(0.98) !important;
+  transform-origin: left center !important;
+  transition: opacity 120ms, transform 120ms !important;
+  visibility: hidden !important;
+  width: var(--kimi-outline-expanded-panel-width) !important;
+  z-index: 0 !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] .toc-scroll {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 7px !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  padding: 8px 0 !important;
+  position: relative !important;
+  scrollbar-width: none !important;
+  z-index: 1 !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] .toc-row {
+  align-items: center !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: inherit !important;
+  cursor: pointer !important;
+  display: flex !important;
+  flex-direction: row !important;
+  gap: 10px !important;
+  height: 18px !important;
+  font: inherit !important;
+  padding: 0 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] .toc-bar {
+  background: var(--color-accent, var(--kimi-enhanced-accent)) !important;
+  border-radius: 9999px !important;
+  flex: none !important;
+  height: 14px !important;
+  opacity: 0.3 !important;
+  transition: opacity 120ms, height 120ms !important;
+  width: 3px !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] .toc-row.active .toc-bar {
+  height: 18px !important;
+  opacity: 1 !important;
+}
+[data-kimi-enhanced-conversation-outline="true"] .toc-label {
+  display: block !important;
+  max-width: 0 !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  text-align: left !important;
+  text-overflow: ellipsis !important;
+  transition: max-width 220ms, opacity 120ms !important;
+}
+[data-kimi-enhanced-conversation-outline="true"]:hover,
+[data-kimi-enhanced-conversation-outline="true"]:focus-within {
+  opacity: 1 !important;
+}
+[data-kimi-enhanced-conversation-outline="true"]:hover::after,
+[data-kimi-enhanced-conversation-outline="true"]:focus-within::after {
+  -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+  backdrop-filter: blur(18px) saturate(140%) !important;
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  visibility: visible !important;
+}
+[data-kimi-enhanced-conversation-outline="true"]:hover .toc-label,
+[data-kimi-enhanced-conversation-outline="true"]:focus-within .toc-label {
+  max-width: max(
+    0px,
+    calc(var(--kimi-outline-expanded-panel-width) - 41px)
+  ) !important;
+  opacity: 1 !important;
+  width: max(
+    0px,
+    calc(var(--kimi-outline-expanded-panel-width) - 41px)
+  ) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-kimi-enhanced-conversation-outline="true"]::after {
+    transition: none !important;
+  }
+}
+`;
+    document.head.appendChild(style);
+  }
+
+  function clearKimiMarker(selector, dataName) {
+    document.querySelectorAll(selector).forEach(function (node) {
+      if (node instanceof HTMLElement) {
+        delete node.dataset[dataName];
+      }
+    });
+  }
+
+  function clearKimiOutlineMarker() {
+    document
+      .querySelectorAll('[data-kimi-enhanced-conversation-outline="true"]')
+      .forEach(function (node) {
+        if (!(node instanceof HTMLElement)) {
+          return;
+        }
+        const previousAriaHidden = node.dataset.kimiEnhancedOriginalAriaHidden;
+        const previousInert = node.dataset.kimiEnhancedOriginalInert;
+        if (previousAriaHidden === "__missing__") {
+          node.removeAttribute("aria-hidden");
+        } else if (typeof previousAriaHidden === "string") {
+          node.setAttribute("aria-hidden", previousAriaHidden);
+        }
+        delete node.dataset.kimiEnhancedOriginalAriaHidden;
+        if (previousInert === "true") {
+          node.setAttribute("inert", "");
+        } else {
+          node.removeAttribute("inert");
+        }
+        delete node.dataset.kimiEnhancedOriginalInert;
+        delete node.dataset.kimiEnhancedConversationOutline;
+        if (node.dataset.kimiEnhancedGeneratedId === "true") {
+          node.removeAttribute("id");
+          delete node.dataset.kimiEnhancedGeneratedId;
+        }
+      });
+  }
+
+  function markKimiLayoutNodes() {
+    const header = findKimiHeader();
+    const composer = findKimiComposer();
+    const sidebar = findKimiSessionSidebar();
+    const mode = document.documentElement.getAttribute(KIMI_LAYOUT_ATTR);
+    const compactSurface = mode !== "wide" && !(sidebar instanceof HTMLElement);
+    const outline = findKimiConversationOutline();
+    clearKimiMarker('[data-kimi-enhanced-composer="true"]', "kimiEnhancedComposer");
+    clearKimiMarker('[data-kimi-enhanced-workspace-icon="true"]', "kimiEnhancedWorkspaceIcon");
+    clearKimiOutlineMarker();
+    if (compactSurface && composer) {
+      composer.dataset.kimiEnhancedComposer = "true";
+    }
+    const icon = findKimiWorkspaceIcon(header);
+    if (compactSurface && icon) {
+      icon.dataset.kimiEnhancedWorkspaceIcon = "true";
+    }
+    const enhanceOutline = Boolean(outline);
+    if (enhanceOutline && outline) {
+      outline.dataset.kimiEnhancedOriginalAriaHidden =
+        outline.getAttribute("aria-hidden") === null
+          ? "__missing__"
+          : outline.getAttribute("aria-hidden") || "";
+      outline.dataset.kimiEnhancedOriginalInert = outline.hasAttribute("inert")
+        ? "true"
+        : "false";
+      outline.dataset.kimiEnhancedConversationOutline = "true";
+      outline.removeAttribute("inert");
+      outline.removeAttribute("aria-hidden");
+    }
+    applyKimiAccent();
+    return Boolean((header && composer) || enhanceOutline);
+  }
+
+  function refreshKimiLayout() {
+    kimiLayoutRefreshPending = false;
+    if (typeof document === "undefined" || !document.documentElement) {
+      kimiLayoutObserver && kimiLayoutObserver.disconnect();
+      kimiLayoutMutationObserver && kimiLayoutMutationObserver.disconnect();
+      return;
+    }
+    markKimiLayoutNodes();
+  }
+
+  function scheduleKimiLayoutRefresh() {
+    if (!kimiLayoutInitialized || kimiLayoutRefreshPending) {
+      return;
+    }
+    kimiLayoutRefreshPending = true;
+    window.requestAnimationFrame(refreshKimiLayout);
+  }
+
+  function initializeKimiLayout() {
+    if (
+      kimiLayoutInitialized ||
+      !kimiLayoutRequested ||
+      !isKimiLayoutEnabledByUser() ||
+      window.top === window
+    ) {
+      return;
+    }
+    kimiLayoutInitialized = true;
+    ensureKimiLayoutStyle();
+    setKimiLayoutMode();
+    markKimiLayoutNodes();
+
+    if (typeof ResizeObserver === "function") {
+      kimiLayoutObserver = new ResizeObserver(setKimiLayoutMode);
+      kimiLayoutObserver.observe(document.documentElement);
+    } else {
+      window.addEventListener("resize", setKimiLayoutMode, { passive: true });
+    }
+
+    if (typeof MutationObserver === "function") {
+      kimiLayoutMutationObserver = new MutationObserver(scheduleKimiLayoutRefresh);
+      kimiLayoutMutationObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    window.addEventListener(
+      "pagehide",
+      function () {
+        kimiLayoutObserver && kimiLayoutObserver.disconnect();
+        kimiLayoutMutationObserver && kimiLayoutMutationObserver.disconnect();
+      },
+      { once: true },
+    );
+
+    window.setTimeout(function () {
+      if (typeof document === "undefined" || !document.documentElement) {
+        return;
+      }
+      if (!markKimiLayoutNodes() && !kimiLayoutMissingContractWarned) {
+        kimiLayoutMissingContractWarned = true;
+        console.warn(
+          "[KickSide] Kimi Web layout enhancement skipped: required semantic hooks were not found.",
+        );
+      }
+    }, 1500);
+  }
+
   window.addEventListener("message", function (event) {
     const data = event && event.data;
     if (!data) {
@@ -89,6 +688,18 @@
     }
     if (data.source === THEME_SYNC_SOURCE) {
       applyPaneTheme(data.theme);
+      if (
+        event.source === window.parent &&
+        data.surface === "kimi-code" &&
+        data.layoutEnhancement === "v2"
+      ) {
+        kimiLayoutRequested = true;
+        kimiLayoutHostAccent = typeof data.accent === "string" ? data.accent : "";
+        initializeKimiLayout();
+        if (kimiLayoutInitialized) {
+          applyKimiAccent();
+        }
+      }
       return;
     }
     if (

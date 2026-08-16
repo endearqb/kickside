@@ -19,6 +19,7 @@
     "clean:public-build-artifacts": "powershell -ExecutionPolicy Bypass -File scripts/clean_public_build_artifacts.ps1",
     "preview": "vite preview",
     "test": "vitest run",
+    "check:kimi-web:visual": "node scripts/check_kimi_web_layout_visual.mjs",
     "verify": "pnpm sync:version && .\\node_modules\\.bin\\tsc.cmd --noEmit && pnpm test && pnpm check:nfr:security",
     "tauri": "pnpm sync:version && tauri",
     "tauri:build:macos:local": "pnpm sync:version && tauri build --target aarch64-apple-darwin --bundles app --config src-tauri/tauri.macos.local.conf.json",

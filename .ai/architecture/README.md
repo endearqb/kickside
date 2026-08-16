@@ -9,6 +9,7 @@
 
 ## 主题入口
 - 当前事实与缺口：`current-state.md`
+- Kimi Web DOM 与响应式注入契约：`kimi-web-dom-contract.md`
 - 验证命令：`verification-gates.md`
 
 ## 已知缺口

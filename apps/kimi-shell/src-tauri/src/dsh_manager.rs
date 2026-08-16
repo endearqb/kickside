@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{ipc::Channel, AppHandle, Manager};
 
 use crate::{
     app_state::{unix_time_millis, AppState},
@@ -22,7 +22,7 @@ use crate::{
 pub const DSH_PINNED_VERSION: &str = "0.1.0-rc.6";
 const DSH_PACKAGE: &str = "@deepseek-ai/dsh";
 const DSH_ENTRY_RELATIVE: &str = "node_modules/@deepseek-ai/dsh/lib/bin.js";
-const DSH_MIN_NODE_VERSION: &str = "20.12.0";
+const DSH_NODE_REQUIREMENT: &str = "22.19+ 的 22.x，或 24+";
 const DSH_NODE_FEATURE_PROBE: &str =
     "const {parseEnv}=require('node:util');if(typeof parseEnv!=='function')process.exit(1);parseEnv('DSH=1')";
 const DSH_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
@@ -63,14 +63,61 @@ pub struct DshStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DshPreflight {
+    /// Compatibility projection retained for existing callers. Equivalent to
+    /// `runtime_ready` and deliberately independent from npm availability.
     pub ready: bool,
+    pub runtime_ready: bool,
+    pub install_ready: bool,
+    pub node_supported: bool,
+    pub npm_available: bool,
+    pub install_valid: bool,
     pub node_path: Option<String>,
     pub node_version: Option<String>,
+    pub install_node_path: Option<String>,
+    pub install_node_version: Option<String>,
     pub npm_path: Option<String>,
     pub installed_version: Option<String>,
     pub pinned_version: String,
     pub install_path: String,
     pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DshInstallStage {
+    Preflight,
+    Prepare,
+    Install,
+    Verify,
+    Activate,
+    Start,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DshInstallStream {
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DshInstallEvent {
+    Stage {
+        stage: DshInstallStage,
+        message: String,
+    },
+    Output {
+        stream: DshInstallStream,
+        line: String,
+    },
+    Completed {
+        version: String,
+    },
+    Failed {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -133,17 +180,46 @@ pub(crate) fn dsh_get_preflight(app: AppHandle) -> Result<DshPreflight, String> 
 }
 
 #[tauri::command]
-pub(crate) async fn dsh_install(app: AppHandle) -> Result<DshPreflight, String> {
+pub(crate) async fn dsh_install(
+    app: AppHandle,
+    progress: Channel<DshInstallEvent>,
+) -> Result<DshPreflight, String> {
+    send_install_stage(
+        Some(&progress),
+        DshInstallStage::Preflight,
+        "正在检测 Node.js 与 npm",
+    );
     let install_app = app.clone();
-    let report = tauri::async_runtime::spawn_blocking(move || install(&install_app))
-        .await
-        .map_err(|error| format!("DSH 安装任务异常结束：{error}"))?
-        .map_err(|error| error.to_string())?;
-    if report.ready {
+    let install_progress = progress.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        install(&install_app, Some(&install_progress))
+    })
+    .await
+    .map_err(|error| format!("DSH 安装任务异常结束：{error}"))?
+    .map_err(|error| error.to_string());
+    let report = match report {
+        Ok(report) => report,
+        Err(message) => {
+            let _ = progress.send(DshInstallEvent::Failed {
+                code: dsh_error_code(&message).to_string(),
+                message: message.clone(),
+            });
+            return Err(message);
+        }
+    };
+    if report.runtime_ready {
+        send_install_stage(
+            Some(&progress),
+            DshInstallStage::Start,
+            "正在启动默认工作区",
+        );
         if let Err(error) = start_default_workspace(&app) {
             append_log(&app, format!("DSH 安装后自动启动失败：{error:#}"));
         }
     }
+    let _ = progress.send(DshInstallEvent::Completed {
+        version: DSH_PINNED_VERSION.to_string(),
+    });
     Ok(report)
 }
 
@@ -254,7 +330,28 @@ fn command_version(path: &Path) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn node_supports_dsh(path: &Path) -> bool {
+fn parse_node_version(raw: &str) -> Option<(u32, u32, u32)> {
+    let normalized = raw.trim().strip_prefix('v').unwrap_or(raw.trim());
+    if normalized.contains(['-', '+']) {
+        return None;
+    }
+    let mut parts = normalized.split('.');
+    let version = (
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+        parts.next()?.parse().ok()?,
+    );
+    parts.next().is_none().then_some(version)
+}
+
+fn node_version_supported(raw: &str) -> bool {
+    matches!(
+        parse_node_version(raw),
+        Some((22, minor, _)) if minor >= 19
+    ) || matches!(parse_node_version(raw), Some((major, _, _)) if major >= 24)
+}
+
+fn node_supports_required_features(path: &Path) -> bool {
     let mut command = Command::new(path);
     command_utils::configure_system_command(&mut command);
     command
@@ -267,13 +364,14 @@ fn node_supports_dsh(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn selected_node_runtime() -> Option<(nodejs_locator::NodejsToolchain, String, bool)> {
+fn select_node_for_runtime() -> Option<(nodejs_locator::NodejsToolchain, String, bool)> {
     let mut fallback = None;
     for runtime in nodejs_locator::candidates() {
         let Some(version) = command_version(&runtime.node_path) else {
             continue;
         };
-        let supported = node_supports_dsh(&runtime.node_path);
+        let supported =
+            node_version_supported(&version) && node_supports_required_features(&runtime.node_path);
         if supported {
             return Some((runtime, version, true));
         }
@@ -282,8 +380,34 @@ fn selected_node_runtime() -> Option<(nodejs_locator::NodejsToolchain, String, b
     fallback
 }
 
+fn select_node_toolchain_for_install(
+) -> Option<(nodejs_locator::NodejsToolchain, String, NpmLauncher)> {
+    for runtime in nodejs_locator::candidates() {
+        let Some(version) = command_version(&runtime.node_path) else {
+            continue;
+        };
+        if !node_version_supported(&version) || !node_supports_required_features(&runtime.node_path)
+        {
+            continue;
+        }
+        let Some(npm_path) = runtime.npm_path.as_deref() else {
+            continue;
+        };
+        let Ok(launcher) = resolve_npm_launcher(
+            &runtime.node_path,
+            npm_path,
+            cfg!(windows),
+            validated_windows_command_processor().ok(),
+        ) else {
+            continue;
+        };
+        return Some((runtime, version, launcher));
+    }
+    None
+}
+
 fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
-    let runtime = selected_node_runtime();
+    let runtime = select_node_for_runtime();
     let node_supported = runtime
         .as_ref()
         .map(|(_, _, supported)| *supported)
@@ -292,9 +416,16 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         .as_ref()
         .map(|(runtime, _, _)| runtime.node_path.clone());
     let node_version = runtime.as_ref().map(|(_, version, _)| version.clone());
-    let npm = runtime
+    let install_toolchain = select_node_toolchain_for_install();
+    let npm = install_toolchain
         .as_ref()
         .and_then(|(runtime, _, _)| runtime.npm_path.clone());
+    let install_node = install_toolchain
+        .as_ref()
+        .map(|(runtime, _, _)| runtime.node_path.clone());
+    let install_node_version = install_toolchain
+        .as_ref()
+        .map(|(_, version, _)| version.clone());
     let prefix = install_dir(app);
     let installed_version = installed_version_at(&prefix);
     let install_valid = verify_install(&prefix).is_ok();
@@ -306,20 +437,32 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         );
     } else if !node_supported {
         issues.push(format!(
-            "E-DSH-001：DSH {DSH_PINNED_VERSION} 需要 Node.js {DSH_MIN_NODE_VERSION}+ 的 parseEnv 运行时能力；当前为 {}。请升级 Node.js LTS。",
+            "E-DSH-001：DSH {DSH_PINNED_VERSION} 支持 Node.js {DSH_NODE_REQUIREMENT}，并要求 parseEnv 运行时能力；当前为 {}。请升级 Node.js LTS。",
             node_version.as_deref().unwrap_or("未知版本")
         ));
     }
     if npm.is_none() {
-        issues.push("未找到 npm；安装或升级 DSH 前需要 npm。".to_string());
+        issues.push(
+            "未找到与受支持 Node.js 同工具链且可启动的 npm；安装或升级 DSH 前需要完整 Node.js LTS。"
+                .to_string(),
+        );
     }
     if !install_valid {
         issues.push(format!("尚未安装受支持的 DSH {DSH_PINNED_VERSION}。"));
     }
+    let runtime_ready = node_supported && install_valid;
+    let install_ready = install_toolchain.is_some();
     Ok(DshPreflight {
-        ready: node_supported && install_valid,
+        ready: runtime_ready,
+        runtime_ready,
+        install_ready,
+        node_supported,
+        npm_available: install_toolchain.is_some(),
+        install_valid,
         node_version,
         node_path: node.map(|path| path.to_string_lossy().into_owned()),
+        install_node_path: install_node.map(|path| path.to_string_lossy().into_owned()),
+        install_node_version,
         npm_path: npm.map(|path| path.to_string_lossy().into_owned()),
         installed_version,
         pinned_version: DSH_PINNED_VERSION.to_string(),
@@ -328,7 +471,10 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     })
 }
 
-fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
+fn install(
+    app: &AppHandle,
+    progress: Option<&Channel<DshInstallEvent>>,
+) -> anyhow::Result<DshPreflight> {
     let shared = app.state::<AppState>();
     let _operation = shared
         .dsh_lifecycle_operation
@@ -341,19 +487,15 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         .generation;
     stop_generation(app, generation, false).context("安装 DSH 前停止现有实例失败")?;
     shared.dsh_cancel_requested.store(false, Ordering::Release);
-    let (runtime, node_version, node_supported) = selected_node_runtime()
-        .context("E-DSH-001：未找到可用的 Node.js；请从 nodejs.org 或 Homebrew 安装 Node.js LTS")?;
-    if !node_supported {
-        bail!(
-            "E-DSH-001：DSH {DSH_PINNED_VERSION} 需要 Node.js {DSH_MIN_NODE_VERSION}+ 的 parseEnv 运行时能力；当前为 {node_version}。请升级 Node.js LTS"
-        );
-    }
-    let npm = runtime
-        .npm_path
-        .context("E-DSH-001：未找到 npm；请先安装完整的 Node.js LTS")?;
-    let mut command = npm_install_command(&runtime.node_path, &npm)?;
+    let (runtime, _node_version, launcher) = select_node_toolchain_for_install().with_context(|| {
+        format!(
+            "E-DSH-001：未找到 Node.js {DSH_NODE_REQUIREMENT} 与同工具链 npm；请安装完整的 Node.js LTS"
+        )
+    })?;
+    let mut command = launcher.command();
     command_utils::configure_background_command(&mut command);
     let state = app.state::<AppState>();
+    send_install_stage(progress, DshInstallStage::Prepare, "正在准备私有安装目录");
     fs::create_dir_all(&state.dsh_root_dir).context("创建 DSH 私有目录失败")?;
     let nonce = unix_time_millis();
     let temporary = state
@@ -365,15 +507,18 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         .join(format!("backup-{}-{nonce}", std::process::id()));
     fs::create_dir(&temporary).context("创建 DSH 临时安装目录失败")?;
     append_log(app, format!("开始安装 {DSH_PACKAGE}@{DSH_PINNED_VERSION}"));
+    send_install_stage(
+        progress,
+        DshInstallStage::Install,
+        "正在连接 npm registry 并安装固定版本",
+    );
 
     command
-        .args(["install", "--no-audit", "--no-fund", "--prefix"])
-        .arg(&temporary)
-        .arg(format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}"))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     retain_safe_environment(&mut command, Some(&runtime.node_path));
+    launcher.configure_install(&mut command, &temporary);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -396,7 +541,7 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         }
     };
     let install_group = owned_process_group_id(child.id());
-    if let Err(error) = pipe_child_logs(app, &mut child) {
+    if let Err(error) = pipe_install_logs(app, &mut child, progress.cloned()) {
         let _ = terminate_process_tree(&mut child, install_group, Duration::from_millis(250));
         let _ = fs::remove_dir_all(&temporary);
         return Err(error);
@@ -428,11 +573,17 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
             result.code()
         );
     }
+    send_install_stage(
+        progress,
+        DshInstallStage::Verify,
+        "正在校验固定版本与私有入口",
+    );
     if let Err(error) = verify_install(&temporary) {
         let _ = fs::remove_dir_all(&temporary);
         return Err(error);
     }
 
+    send_install_stage(progress, DshInstallStage::Activate, "正在启用已校验的安装");
     if active.exists() {
         fs::rename(&active, &backup).context("备份当前 DSH 安装失败")?;
     }
@@ -449,44 +600,117 @@ fn install(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     preflight(app)
 }
 
-fn npm_install_command(node_path: &Path, npm_path: &Path) -> anyhow::Result<Command> {
-    match resolve_npm_launcher(node_path, npm_path, cfg!(windows))? {
-        NpmLauncher::Direct(path) => Ok(Command::new(path)),
-        NpmLauncher::NodeCli { node, npm_cli } => {
-            let mut command = Command::new(node);
-            command.arg(npm_cli);
-            Ok(command)
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NpmLauncher {
+    Direct(PathBuf),
+    NodeCli {
+        node: PathBuf,
+        npm_cli: PathBuf,
+    },
+    CommandScript {
+        command_processor: PathBuf,
+        npm_script: PathBuf,
+    },
+}
+
+impl NpmLauncher {
+    fn command(&self) -> Command {
+        match self {
+            Self::Direct(path) => Command::new(path),
+            Self::NodeCli { node, .. } => Command::new(node),
+            Self::CommandScript {
+                command_processor, ..
+            } => Command::new(command_processor),
+        }
+    }
+
+    fn configure_install(&self, command: &mut Command, prefix: &Path) {
+        match self {
+            Self::Direct(_) => {
+                append_direct_npm_install_args(command, prefix);
+            }
+            Self::NodeCli { npm_cli, .. } => {
+                command.arg(npm_cli);
+                append_direct_npm_install_args(command, prefix);
+            }
+            Self::CommandScript { npm_script, .. } => {
+                // The command string is entirely fixed. Dynamic paths travel
+                // through quoted environment variables, delayed expansion is
+                // disabled, and cmd AutoRun hooks are disabled. This keeps the
+                // compatibility fallback bounded to the already-validated npm
+                // shim instead of exposing a general-purpose shell surface.
+                let command_line = format!(
+                    "\"\"%KICKSIDE_DSH_NPM_SCRIPT%\" install --no-audit --no-fund --prefix \"%KICKSIDE_DSH_INSTALL_PREFIX%\" {DSH_PACKAGE}@{DSH_PINNED_VERSION}\""
+                );
+                command
+                    .args(["/D", "/S", "/V:OFF", "/C"])
+                    .arg(command_line)
+                    .env("KICKSIDE_DSH_NPM_SCRIPT", npm_script)
+                    .env("KICKSIDE_DSH_INSTALL_PREFIX", prefix);
+            }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum NpmLauncher {
-    Direct(PathBuf),
-    NodeCli { node: PathBuf, npm_cli: PathBuf },
+fn append_direct_npm_install_args(command: &mut Command, prefix: &Path) {
+    command
+        .args(["install", "--no-audit", "--no-fund", "--prefix"])
+        .arg(prefix)
+        .arg(format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}"));
 }
 
 fn resolve_npm_launcher(
     node_path: &Path,
     npm_path: &Path,
     windows: bool,
+    command_processor: Option<PathBuf>,
 ) -> anyhow::Result<NpmLauncher> {
     if windows && is_windows_command_script(npm_path) {
-        let npm_cli = npm_cli_candidates(node_path, npm_path)
+        if let Some(npm_cli) = npm_cli_candidates(node_path, npm_path)
             .into_iter()
             .find(|path| path.is_file())
-            .with_context(|| {
-                format!(
-                    "E-DSH-001：检测到 {}，但未找到对应的 npm-cli.js；请修复或重新安装完整的 Node.js LTS",
-                    npm_path.display()
-                )
-            })?;
-        return Ok(NpmLauncher::NodeCli {
-            node: node_path.to_path_buf(),
-            npm_cli,
+        {
+            return Ok(NpmLauncher::NodeCli {
+                node: node_path.to_path_buf(),
+                npm_cli,
+            });
+        }
+        let command_processor = command_processor.with_context(|| {
+            format!(
+                "E-DSH-001：检测到 npm shim {}，但真实 npm-cli.js 与受信任的 Windows 命令处理器均不可用",
+                npm_path.display()
+            )
+        })?;
+        return Ok(NpmLauncher::CommandScript {
+            command_processor,
+            npm_script: npm_path.to_path_buf(),
         });
     }
     Ok(NpmLauncher::Direct(npm_path.to_path_buf()))
+}
+
+#[cfg(windows)]
+fn validated_windows_command_processor() -> anyhow::Result<PathBuf> {
+    let system_root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("SYSTEMROOT"))
+        .context("Windows SystemRoot 未定义")?;
+    let expected = fs::canonicalize(PathBuf::from(system_root).join("System32/cmd.exe"))
+        .context("Windows 系统 cmd.exe 不可用")?;
+    if !expected.is_file() {
+        bail!("Windows 系统 cmd.exe 不是普通文件");
+    }
+    if let Some(comspec) = std::env::var_os("COMSPEC") {
+        let actual = fs::canonicalize(comspec).context("COMSPEC 指向无效路径")?;
+        if actual != expected {
+            bail!("COMSPEC 未指向 Windows 系统 cmd.exe");
+        }
+    }
+    Ok(expected)
+}
+
+#[cfg(not(windows))]
+fn validated_windows_command_processor() -> anyhow::Result<PathBuf> {
+    bail!("Windows 命令处理器只在 Windows 上可用")
 }
 
 fn is_windows_command_script(path: &Path) -> bool {
@@ -953,12 +1177,75 @@ fn status(app: &AppHandle) -> anyhow::Result<DshStatus> {
     })
 }
 
+fn send_install_stage(
+    progress: Option<&Channel<DshInstallEvent>>,
+    stage: DshInstallStage,
+    message: &str,
+) {
+    if let Some(progress) = progress {
+        let _ = progress.send(DshInstallEvent::Stage {
+            stage,
+            message: message.to_string(),
+        });
+    }
+}
+
+fn dsh_error_code(message: &str) -> &str {
+    [
+        "E-DSH-001",
+        "E-DSH-002",
+        "E-DSH-003",
+        "E-DSH-004",
+        "E-DSH-005",
+    ]
+    .into_iter()
+    .find(|code| message.contains(code))
+    .unwrap_or("E-DSH-002")
+}
+
 fn pipe_child_logs(app: &AppHandle, child: &mut Child) -> anyhow::Result<()> {
     let stdout = child.stdout.take().context("DSH stdout pipe 不可用")?;
     let stderr = child.stderr.take().context("DSH stderr pipe 不可用")?;
     spawn_log_reader(stdout, app.clone());
     spawn_log_reader(stderr, app.clone());
     Ok(())
+}
+
+fn pipe_install_logs(
+    app: &AppHandle,
+    child: &mut Child,
+    progress: Option<Channel<DshInstallEvent>>,
+) -> anyhow::Result<()> {
+    let stdout = child.stdout.take().context("DSH stdout pipe 不可用")?;
+    let stderr = child.stderr.take().context("DSH stderr pipe 不可用")?;
+    spawn_install_log_reader(
+        stdout,
+        app.clone(),
+        progress.clone(),
+        DshInstallStream::Stdout,
+    );
+    spawn_install_log_reader(stderr, app.clone(), progress, DshInstallStream::Stderr);
+    Ok(())
+}
+
+fn spawn_install_log_reader(
+    stream: impl Read + Send + 'static,
+    app: AppHandle,
+    progress: Option<Channel<DshInstallEvent>>,
+    stream_kind: DshInstallStream,
+) {
+    thread::spawn(move || {
+        for line in BufReader::new(stream).lines().map_while(Result::ok) {
+            let safe = bounded_redacted_output_line(&line);
+            append_log_line(&app, &safe, false);
+            if let Some(progress) = &progress {
+                let _ = progress.send(DshInstallEvent::Output {
+                    stream: stream_kind,
+                    line: safe,
+                });
+            }
+        }
+    });
 }
 
 fn spawn_log_reader(stream: impl Read + Send + 'static, app: AppHandle) {
@@ -999,6 +1286,17 @@ fn append_log_line(app: &AppHandle, message: &str, timestamped: bool) {
     {
         let _ = file.write_all(line.as_bytes());
     }
+}
+
+fn bounded_redacted_output_line(message: &str) -> String {
+    const TRUNCATED_MARKER: &str = " …[line truncated]";
+    let mut safe = backend_manager::redact_backend_text(message);
+    let content_budget = DSH_LOG_LINE_MAX_BYTES.saturating_sub(TRUNCATED_MARKER.len());
+    if safe.len() > DSH_LOG_LINE_MAX_BYTES {
+        truncate_utf8(&mut safe, content_budget);
+        safe.push_str(TRUNCATED_MARKER);
+    }
+    safe
 }
 
 fn bounded_log_line(message: &str, timestamped: bool) -> String {
@@ -1193,6 +1491,19 @@ mod tests {
     }
 
     #[test]
+    fn node_support_matrix_rejects_unverified_release_lines() {
+        assert!(!node_version_supported("v20.12.0"));
+        assert!(!node_version_supported("22.18.9"));
+        assert!(node_version_supported("v22.19.0"));
+        assert!(node_version_supported("22.99.1"));
+        assert!(!node_version_supported("v23.11.0"));
+        assert!(node_version_supported("v24.0.0"));
+        assert!(node_version_supported("v25.1.0"));
+        assert!(!node_version_supported("v24.0.0-nightly"));
+        assert!(!node_version_supported("not-node"));
+    }
+
+    #[test]
     fn windows_npm_cmd_maps_to_the_node_owned_cli_without_a_shell() {
         let root = std::env::temp_dir().join(format!(
             "kickside-npm-launcher-{}-{}",
@@ -1209,7 +1520,7 @@ mod tests {
 
         assert!(is_windows_command_script(&npm));
         assert_eq!(
-            resolve_npm_launcher(&node, &npm, true).expect("resolve Windows npm wrapper"),
+            resolve_npm_launcher(&node, &npm, true, None).expect("resolve Windows npm wrapper"),
             NpmLauncher::NodeCli {
                 node: node.clone(),
                 npm_cli: npm_cli.clone()
@@ -1217,8 +1528,116 @@ mod tests {
         );
         let native_npm = root.join("npm.exe");
         assert_eq!(
-            resolve_npm_launcher(&node, &native_npm, true).expect("resolve native npm"),
+            resolve_npm_launcher(&node, &native_npm, true, None).expect("resolve native npm"),
             NpmLauncher::Direct(native_npm)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windows_npm_shim_falls_back_to_a_validated_command_processor() {
+        let root = std::env::temp_dir().join(format!(
+            "kickside-npm-shim-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        fs::create_dir_all(&root).expect("create root");
+        let node = root.join("node.exe");
+        let npm = root.join("npm.cmd");
+        let cmd = root.join("cmd.exe");
+        fs::write(&node, "node").expect("write node");
+        fs::write(&npm, "npm shim").expect("write npm shim");
+        fs::write(&cmd, "cmd").expect("write cmd");
+
+        assert_eq!(
+            resolve_npm_launcher(&node, &npm, true, Some(cmd.clone()))
+                .expect("resolve shim fallback"),
+            NpmLauncher::CommandScript {
+                command_processor: cmd,
+                npm_script: npm,
+            }
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn windows_npm_shim_fails_closed_without_cli_or_command_processor() {
+        let root = std::env::temp_dir().join(format!(
+            "kickside-npm-shim-closed-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        fs::create_dir_all(&root).expect("create root");
+        let node = root.join("node.exe");
+        let npm = root.join("npm.cmd");
+        fs::write(&node, "node").expect("write node");
+        fs::write(&npm, "npm shim").expect("write npm shim");
+
+        let error = resolve_npm_launcher(&node, &npm, true, None)
+            .expect_err("missing trusted processor must fail closed");
+        assert!(error.to_string().contains("受信任"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_npm_shim_preserves_fixed_argv_in_special_character_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "KickSide DSH 中文 & percent%-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        fs::create_dir_all(&root).expect("create special root");
+        let node = root.join("node.exe");
+        let npm = root.join("npm.cmd");
+        let prefix = root.join("install prefix & 100%");
+        let args_file = root.join("received args.txt");
+        fs::write(&node, "node").expect("write node placeholder");
+        fs::write(
+            &npm,
+            concat!(
+                "@echo off\r\n",
+                "(\r\n",
+                "echo %~1\r\n",
+                "echo %~2\r\n",
+                "echo %~3\r\n",
+                "echo %~4\r\n",
+                "echo %~5\r\n",
+                "echo %~6\r\n",
+                ") > \"%KICKSIDE_DSH_TEST_ARGS%\"\r\n",
+                "exit /b 0\r\n"
+            ),
+        )
+        .expect("write npm shim");
+        let launcher = resolve_npm_launcher(
+            &node,
+            &npm,
+            true,
+            Some(validated_windows_command_processor().expect("trusted cmd")),
+        )
+        .expect("resolve command shim");
+        let mut command = launcher.command();
+        launcher.configure_install(&mut command, &prefix);
+        let status = command
+            .env("KICKSIDE_DSH_TEST_ARGS", &args_file)
+            .status()
+            .expect("run npm shim");
+        assert!(status.success());
+        let expected_prefix = prefix.to_string_lossy().into_owned();
+        let expected_package = format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}");
+        assert_eq!(
+            fs::read_to_string(&args_file)
+                .expect("read argv")
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "install",
+                "--no-audit",
+                "--no-fund",
+                "--prefix",
+                expected_prefix.as_str(),
+                expected_package.as_str(),
+            ]
         );
         let _ = fs::remove_dir_all(root);
     }

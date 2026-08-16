@@ -73,13 +73,14 @@ pnpm test
 pnpm check:nfr:security
 pnpm check:nfr:port-conflict
 pnpm check:nfr:reliability
+pnpm check:kimi-web:visual
 ```
 
 ## 代码组织
 
 - `src/app/useShellController.ts` 保留窗口、workspace、prefill、Skill 动作 handler 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，轮询放在 `src/app/useShellPollingController.ts`，Bridge 运行态刷新放在 `src/app/useBridgeRuntimeController.ts`，Skill Center 状态和刷新放在 `src/app/useSkillCenterController.ts`，workspace embed URL 与 import picker 状态分别放在 `src/app/useWorkspaceEmbedUrl.ts`、`src/app/useWorkspaceImportController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
-- DSH 前端状态切片位于 `src/app/useDshController.ts`，IPC 契约位于 `src/services/dshService.ts`；Rust `src-tauri/src/dsh_manager.rs` 负责固定 pin、私有安装、精确 loopback URL、owned process group 和日志，不推广为通用 AgentBackend registry。`src-tauri/src/nodejs_locator.rs` 为安装探测与 DSH 共享 Finder/Explorer 冷环境下的 Node/npm 定位，覆盖 PATH、NVM、Volta、asdf、nodenv、mise、fnm 与平台常见安装路径。
-- `scripts/dsh_runtime_smoke.mjs` 使用隔离临时前缀与 `DSH_HOME` 验证真实 npm 包、固定入口、精确 loopback HTTP 状态与 DSH 启动页标记 `__DSH_BOOT__`、有界响应/输出、整树停止和端口释放；`--samples 1..10` 可在同一次安装后连续采样并输出 ready/stop 中位数。固定 pin 的依赖使用 Node `util.parseEnv`，Shell preflight 因此要求 Node 20.12.0+ 对应能力；`.github/workflows/dsh-runtime-canary.yml` 每周/手动在 Windows/macOS × Node 20.12/22/24 对固定 pin 连续采样 5 次，并对 latest 做 breaking 告警。它不替代 WebView2/WKWebView 人工发布门禁。
+- DSH 前端状态切片位于 `src/app/useDshController.ts`，IPC 契约位于 `src/services/dshService.ts`；Rust `src-tauri/src/dsh_manager.rs` 负责固定 pin、私有安装、精确 loopback URL、owned process group 和日志，不推广为通用 AgentBackend registry。preflight 分别投影运行就绪与安装就绪：已安装 DSH 只需受支持 Node 即可启动，安装/重装必须选择 Node 与 npm 同目录、launcher 可验证的完整工具链。Windows 优先用同工具链 `node.exe + npm-cli.js`，shim 布局缺少真实 CLI 时才通过已校验的系统 `cmd.exe` 执行固定 npm 命令。安装 UI 通过 Tauri Channel 实时显示阶段与脱敏日志，不称为交互式终端。`src-tauri/src/nodejs_locator.rs` 覆盖 PATH、NVM、Volta、asdf、nodenv、mise、fnm 与平台常见安装路径，但不会把其他 PATH 来源的 npm 配给当前 Node。
+- `scripts/dsh_runtime_smoke.mjs` 使用隔离临时前缀与 `DSH_HOME` 验证真实 npm 包、固定入口、精确 loopback HTTP 状态与 DSH 启动页标记 `__DSH_BOOT__`、有界响应/输出、整树停止和端口释放；`--samples 1..10` 可在同一次安装后连续采样并输出 ready/stop 中位数。KickSide 的 DSH 支持矩阵为 Node 22.19+ 的 22.x 或 24+，同时要求 `util.parseEnv` 能力；Node 20.12 仅保留观察性兼容采样。`.github/workflows/dsh-runtime-canary.yml` 在 PR 上阻断 Windows/macOS × Node 22.19/24 的固定 pin smoke，每周/手动再运行 Node 20.12 与 latest 告警。它不覆盖 Rust 生产 launcher 或 WebView2/WKWebView 人工发布门禁。
 - `src/platform/` 只负责加载 additive `PlatformCapabilities` 并提供 fail-closed 平台状态；产品组件不得自行解析 user agent 决定原生能力。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`；更新与运行等折叠设置行统一复用 `src/components/control-center/ControlCenterSettingsRow.tsx`，业务动作作为独立 trailing control 注入，避免点击更新或开关时误触发展开。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`；`src-tauri/src/macos_kimi_upgrade.sh` 只负责按 Rust 传入的固定官方 origin、目标版本和已验证路径下载/校验/原子替换 macOS native binary，不执行远程脚本。`src-tauri/windows/nsis-hooks.nsh` 是品牌迁移兼容层，只能匹配已登记的历史产品名并调用其正式卸载器，不得递归删除安装目录或用户数据；`tauri.windows.conf.json` 中的 WiX UpgradeCode 是发布兼容常量，不得随公开品牌名修改。
@@ -87,6 +88,8 @@ pnpm check:nfr:reliability
 - Agent Room 已下线并冻结：无设置、标题栏入口、独立窗口、Grid Pane 或可启用 Bridge 路径。旧 command/type 和 V2 输入解析仅作为一个发布周期的兼容墓碑，不得新增功能。
 - `src-tauri/src/workspaces.rs` 管理已注册工作区，并通过 `workspace_list_file_entries` / `workspace_read_file` 提供受根目录约束的只读文件预览；前端复用 Skill/Harness 的 `SkillFileEntry` 与 `SkillFileContent` 契约。
 - `src-tauri/src/platform.rs`、`menu_manager.rs` 与平台分层 Tauri config 管理原生窗口/菜单能力；`backend_manager/instance_registry.rs` 是 Kimi 新版实例发现入口；`scripts/build_bridge_sidecar.mjs` 生成 Tauri target-triple external binary。
+- `src-tauri/src/frame_workspace_bridge.js` 是 direct Kimi Web / DSH iframe 的唯一 all-frame bridge：在精确宿主消息契约下同步主题与会话，并对 Kimi Code 启用 fail-open 的窄 pane composer/工作区图标适配，以及所有宽度下原生消息 TOC 的左侧短条与 hover/focus 向右展开；Header 与左侧 Sessions sidebar 保持上游原样。旧 workspace proxy 注入不承载新产品行为。
+- `tests/kimi-web-layout/` 是从 Kimi Code `0.36.1` 生产 bundle DOM 契约裁剪的脱敏视觉夹具；`pnpm check:kimi-web:visual` 用本机 Chrome 比较 10 张关键断点截图，不替代 WKWebView/WebView2 的 G3。
 
 ## 安全约定
 

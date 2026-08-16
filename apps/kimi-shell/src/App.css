@@ -11275,6 +11275,39 @@ input:focus {
   padding: 6px;
 }
 
+.cc-dsh-install-progress {
+  color: var(--cc-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.cc-dsh-install-output {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-dsh-install-log-label {
+  color: var(--cc-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.cc-dsh-install-log {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  border-radius: 12px;
+  background: var(--cc-surface-muted);
+  padding: 16px;
+  color: var(--cc-foreground);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
 .cc-settings-group-list .cc-image-row-title {
   font-size: 14px;
   font-weight: 600;

@@ -12,14 +12,12 @@ pub(crate) struct NodejsToolchain {
 
 pub(crate) fn candidates() -> Vec<NodejsToolchain> {
     let path_node = which::which(node_binary_name()).ok();
-    let path_npm = which::which(npm_binary_name()).ok();
     let home = env::var_os("HOME")
         .or_else(|| env::var_os("USERPROFILE"))
         .map(PathBuf::from);
 
     candidates_from(
         path_node,
-        path_npm,
         home.as_deref(),
         env::var_os("NVM_BIN").map(PathBuf::from),
         env::var_os("VOLTA_HOME").map(PathBuf::from),
@@ -29,7 +27,6 @@ pub(crate) fn candidates() -> Vec<NodejsToolchain> {
 
 fn candidates_from(
     path_node: Option<PathBuf>,
-    path_npm: Option<PathBuf>,
     home: Option<&Path>,
     nvm_bin: Option<PathBuf>,
     volta_home: Option<PathBuf>,
@@ -61,8 +58,11 @@ fn candidates_from(
     node_paths
         .into_iter()
         .map(|node_path| {
-            let npm_path =
-                sibling_npm(&node_path).or_else(|| path_npm.clone().filter(|path| path.is_file()));
+            // npm is only safe to treat as part of this toolchain when it is
+            // colocated with the selected Node runtime. Pairing an unrelated
+            // PATH npm with every discovered Node can cross Volta/NVM/portable
+            // installations and execute one toolchain's npm with another Node.
+            let npm_path = sibling_npm(&node_path);
             NodejsToolchain {
                 node_path,
                 npm_path,
@@ -152,12 +152,12 @@ fn node_binary_name() -> &'static str {
     "node"
 }
 
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 fn npm_binary_name() -> &'static str {
     "npm.cmd"
 }
 
-#[cfg(not(windows))]
+#[cfg(all(test, not(windows)))]
 fn npm_binary_name() -> &'static str {
     "npm"
 }
@@ -209,7 +209,7 @@ mod tests {
             fs::write(bin.join(npm_binary_name()), "npm").expect("write npm");
         }
 
-        let found = candidates_from(None, None, Some(&root), None, None, Vec::new());
+        let found = candidates_from(None, Some(&root), None, None, Vec::new());
         let expected_bin = root.join(".nvm/versions/node/v24.19.0/bin");
 
         assert_eq!(
@@ -238,7 +238,6 @@ mod tests {
 
         let found = candidates_from(
             Some(path_bin.join(node_binary_name())),
-            None,
             Some(&root),
             Some(nvm_bin),
             None,
@@ -255,6 +254,29 @@ mod tests {
                 .and_then(|runtime| runtime.npm_path.as_deref()),
             Some(path_bin.join(npm_binary_name()).as_path())
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn never_pairs_a_node_with_an_unrelated_path_npm() {
+        let root = temp_root("no-cross-toolchain-npm");
+        let node_bin = root.join("portable-node");
+        let npm_bin = root.join("other-toolchain");
+        fs::create_dir_all(&node_bin).expect("create node bin");
+        fs::create_dir_all(&npm_bin).expect("create npm bin");
+        fs::write(node_bin.join(node_binary_name()), "node").expect("write node");
+        fs::write(npm_bin.join(npm_binary_name()), "npm").expect("write npm");
+
+        let found = candidates_from(
+            Some(node_bin.join(node_binary_name())),
+            Some(&root),
+            None,
+            None,
+            Vec::new(),
+        );
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].npm_path, None);
         let _ = fs::remove_dir_all(root);
     }
 }

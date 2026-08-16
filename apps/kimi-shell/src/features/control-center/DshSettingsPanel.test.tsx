@@ -15,6 +15,26 @@ vi.mock("@/services/dshService", () => ({
   stopDsh: vi.fn(),
 }));
 
+function readyPreflight(): dshService.DshPreflight {
+  return {
+    ready: true,
+    runtimeReady: true,
+    installReady: true,
+    nodeSupported: true,
+    npmAvailable: true,
+    installValid: true,
+    nodePath: "/opt/homebrew/bin/node",
+    nodeVersion: "v24.19.0",
+    installNodePath: "/opt/homebrew/bin/node",
+    installNodeVersion: "v24.19.0",
+    npmPath: "/opt/homebrew/bin/npm",
+    installedVersion: "0.1.0-rc.6",
+    pinnedVersion: "0.1.0-rc.6",
+    installPath: "/tmp/dsh",
+    issues: [],
+  };
+}
+
 describe("DshSettingsPanel", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -22,23 +42,14 @@ describe("DshSettingsPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("renders as a branded update-list row and explains default-workspace auto start", async () => {
+  it("renders as a branded update-list row and explains app auto start", async () => {
     vi.mocked(dshService.getDshSettings).mockResolvedValue({
       enabled: true,
       portRange: [3080, 3179],
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "running",
       workspaceDir: "/Users/qian/work/demo",
@@ -59,7 +70,7 @@ describe("DshSettingsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /DeepSeek Harness/ }));
     expect(onExpandedChange).toHaveBeenCalledWith(true);
     rerender(<ul><DshSettingsPanel expanded onExpandedChange={onExpandedChange} /></ul>);
-    expect(screen.getByText(/随 KickSide 启动，并自动加载默认工作区/)).toBeTruthy();
+    expect(screen.getByText(/启用后随应用启动默认工作区/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "重新安装固定版本" })).toBeTruthy();
   });
 
@@ -70,16 +81,7 @@ describe("DshSettingsPanel", () => {
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "stopped",
       pinnedVersion: "0.1.0-rc.6",
@@ -92,12 +94,22 @@ describe("DshSettingsPanel", () => {
     });
 
     const onExpandedChange = vi.fn();
-    render(<ul><DshSettingsPanel expanded={false} onExpandedChange={onExpandedChange} /></ul>);
+    const onRuntimeChanged = vi.fn(async () => undefined);
+    render(
+      <ul>
+        <DshSettingsPanel
+          expanded={false}
+          onExpandedChange={onExpandedChange}
+          onRuntimeChanged={onRuntimeChanged}
+        />
+      </ul>,
+    );
 
     const toggle = await screen.findByRole("checkbox", { name: "启用 DeepSeek Harness" });
     fireEvent.click(toggle);
 
     await waitFor(() => expect(dshService.saveDshSettings).toHaveBeenCalled());
+    expect(onRuntimeChanged).toHaveBeenCalledOnce();
     expect(onExpandedChange).not.toHaveBeenCalled();
   });
 
@@ -108,16 +120,7 @@ describe("DshSettingsPanel", () => {
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "degraded",
       lastError: "DSH 进程仍在运行，但 HTTP 健康检查连续 3 次失败。",
@@ -146,6 +149,63 @@ describe("DshSettingsPanel", () => {
     expect(screen.getByRole("button", { name: "停止实例" })).toBeTruthy();
   });
 
+  it("streams installation stages and redacted output into an accessible log", async () => {
+    vi.mocked(dshService.getDshSettings).mockResolvedValue({
+      enabled: false,
+      portRange: [3080, 3179],
+      startTimeoutSec: 60,
+      pinnedVersion: "0.1.0-rc.6",
+    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
+    vi.mocked(dshService.getDshStatus).mockResolvedValue({
+      state: "stopped",
+      pinnedVersion: "0.1.0-rc.6",
+    });
+    let emit!: (event: dshService.DshInstallEvent) => void;
+    let resolveInstall!: (report: dshService.DshPreflight) => void;
+    vi.mocked(dshService.installDsh).mockImplementation(
+      (onEvent) =>
+        new Promise((resolve) => {
+          emit = onEvent ?? (() => undefined);
+          resolveInstall = resolve;
+        }),
+    );
+
+    render(
+      <ul>
+        <DshSettingsPanel expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新安装固定版本" }),
+    );
+    expect(screen.getByRole("status").textContent).toContain("正在检测 Node.js");
+    expect(screen.getByRole("log").textContent).toContain("等待安装输出");
+
+    act(() => {
+      emit({
+        type: "stage",
+        stage: "install",
+        message: "正在连接 npm registry 并安装固定版本",
+      });
+      emit({ type: "output", stream: "stdout", line: "added 120 packages" });
+    });
+
+    expect(screen.getByRole("status").textContent).toContain("正在连接 npm registry");
+    expect(screen.getByRole("log").textContent).toContain("added 120 packages");
+
+    await act(async () => {
+      emit({ type: "completed", version: "0.1.0-rc.6" });
+      resolveInstall(readyPreflight());
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain("安装完成"),
+    );
+    expect(dshService.getDshLogTail).not.toHaveBeenCalled();
+  });
+
   it("serializes stop requests and projects the stopped state", async () => {
     vi.mocked(dshService.getDshSettings).mockResolvedValue({
       enabled: true,
@@ -153,16 +213,7 @@ describe("DshSettingsPanel", () => {
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "running",
       workspaceDir: "/Users/qian/work/demo",
@@ -210,16 +261,7 @@ describe("DshSettingsPanel", () => {
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "stopped",
       pinnedVersion: "0.1.0-rc.6",
@@ -271,16 +313,7 @@ describe("DshSettingsPanel", () => {
       startTimeoutSec: 60,
       pinnedVersion: "0.1.0-rc.6",
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue({
-      ready: true,
-      nodePath: "/opt/homebrew/bin/node",
-      nodeVersion: "v24.19.0",
-      npmPath: "/opt/homebrew/bin/npm",
-      installedVersion: "0.1.0-rc.6",
-      pinnedVersion: "0.1.0-rc.6",
-      installPath: "/tmp/dsh",
-      issues: [],
-    });
+    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
     vi.mocked(dshService.getDshStatus)
       .mockResolvedValueOnce({
         state: "starting",

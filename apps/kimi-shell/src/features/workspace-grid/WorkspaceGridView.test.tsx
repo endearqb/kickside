@@ -310,6 +310,54 @@ describe("WorkspaceGridView", () => {
     );
   });
 
+  it("adds the Kimi layout contract without weakening the exact origin", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "http://127.0.0.1:1234/";
+    document.body.append(frame);
+    document.documentElement.style.setProperty("--accent", "#34c284");
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, frame.src, "light", {
+      surface: "kimi-code",
+      layoutEnhancement: "v2",
+    });
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      {
+        source: "kimi-shell-theme-sync",
+        theme: "light",
+        accent: "#34c284",
+        surface: "kimi-code",
+        layoutEnhancement: "v2",
+      },
+      "http://127.0.0.1:1234",
+    );
+    document.documentElement.style.removeProperty("--accent");
+  });
+
+  it("keeps theme sync but omits the Kimi layout request when the host kill switch is off", () => {
+    const frame = document.createElement("iframe");
+    frame.src = "http://127.0.0.1:1234/";
+    document.body.append(frame);
+    window.localStorage.setItem("kimi-web-layout-v2", "off");
+    const postMessageSpy = vi
+      .spyOn(frame.contentWindow!, "postMessage")
+      .mockImplementation(() => undefined);
+
+    postThemeToFrame(frame, frame.src, "dark", {
+      surface: "kimi-code",
+      layoutEnhancement: "v2",
+    });
+
+    expect(postMessageSpy).toHaveBeenCalledWith(
+      { source: "kimi-shell-theme-sync", theme: "dark" },
+      "http://127.0.0.1:1234",
+    );
+    window.localStorage.removeItem("kimi-web-layout-v2");
+  });
+
   it("forces DSH theme messages to follow the shell theme", () => {
     useWorkspaceGridStore.getState().setPreset("single");
     useWorkspaceGridStore.getState().configurePane("pane-code", {

@@ -218,6 +218,7 @@ function App() {
     installMessage: shell.installMessage,
     onClose: shell.dismissControlCenter,
     onRefreshCoreState: shell.refreshCoreState,
+    onRefreshDshState: dsh.refresh,
     onRefreshDiagnostics: shell.refreshDiagnostics,
     onRunKimiDoctor: shell.handleRunKimiDoctor,
     onRefreshContextMenuStatus: shell.refreshContextMenuStatus,

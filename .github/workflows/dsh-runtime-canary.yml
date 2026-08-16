@@ -1,6 +1,7 @@
 name: DSH Runtime Canary
 
 on:
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 2"
@@ -20,8 +21,7 @@ jobs:
           - windows-latest
           - macos-15
         node:
-          - 20.12.0
-          - 22
+          - 22.19.0
           - 24
     steps:
       - uses: actions/checkout@v4
@@ -30,10 +30,34 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install, start, probe, and stop pinned DSH
         working-directory: apps/kimi-shell
+        run: >-
+          node scripts/dsh_runtime_smoke.mjs
+          --version 0.1.0-rc.6
+          --samples ${{ github.event_name == 'pull_request' && 1 || 5 }}
+
+  node-20-observation:
+    name: Node 20.12 DSH observation (${{ matrix.os }})
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.12.0
+      - name: Observe pinned DSH on the legacy Node baseline
+        working-directory: apps/kimi-shell
         run: node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5
 
   latest-canary:
     name: Latest DSH alert (${{ matrix.os }})
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -49,4 +73,17 @@ jobs:
           node-version: 22
       - name: Detect upstream runtime breakage without changing the app pin
         working-directory: apps/kimi-shell
-        run: node scripts/dsh_runtime_smoke.mjs --version latest
+        run: node scripts/dsh_runtime_smoke.mjs --version latest --samples 5
+
+  dsh-runtime-gate:
+    name: DSH runtime gate
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - pinned-runtime
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every pinned runtime check to pass
+        env:
+          PINNED_RUNTIME_RESULT: ${{ needs.pinned-runtime.result }}
+        shell: bash
+        run: test "$PINNED_RUNTIME_RESULT" = "success"

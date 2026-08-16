@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type DshRuntimeState =
   | "stopped"
@@ -29,14 +29,35 @@ export interface DshSettings {
 
 export interface DshPreflight {
   ready: boolean;
+  runtimeReady: boolean;
+  installReady: boolean;
+  nodeSupported: boolean;
+  npmAvailable: boolean;
+  installValid: boolean;
   nodePath?: string;
   nodeVersion?: string;
+  installNodePath?: string;
+  installNodeVersion?: string;
   npmPath?: string;
   installedVersion?: string;
   pinnedVersion: string;
   installPath: string;
   issues: string[];
 }
+
+export type DshInstallStage =
+  | "preflight"
+  | "prepare"
+  | "install"
+  | "verify"
+  | "activate"
+  | "start";
+
+export type DshInstallEvent =
+  | { type: "stage"; stage: DshInstallStage; message: string }
+  | { type: "output"; stream: "stdout" | "stderr"; line: string }
+  | { type: "completed"; version: string }
+  | { type: "failed"; code: string; message: string };
 
 export function getTrustedDshRuntimeUrl(
   status: DshStatus | null | undefined,
@@ -69,8 +90,10 @@ export function getDshPreflight() {
   return invoke<DshPreflight>("dsh_get_preflight");
 }
 
-export function installDsh() {
-  return invoke<DshPreflight>("dsh_install");
+export function installDsh(onEvent?: (event: DshInstallEvent) => void) {
+  const progress = new Channel<DshInstallEvent>();
+  progress.onmessage = (event) => onEvent?.(event);
+  return invoke<DshPreflight>("dsh_install", { progress });
 }
 
 export function getDshStatus() {

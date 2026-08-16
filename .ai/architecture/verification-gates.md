@@ -17,10 +17,13 @@ cd apps/kimi-shell
 pnpm exec tsc --noEmit
 pnpm test
 pnpm check:nfr:security
+pnpm check:kimi-web:visual
 node --test scripts/generate_updater_manifest.test.mjs
 ```
 
-真实 DSH runtime canary 在 `.github/workflows/dsh-runtime-canary.yml` 每周及手动运行：固定 `0.1.0-rc.6` 覆盖 Windows/macOS × Node 18/20/22，每个 job 在同一次私有安装后连续启动/停止 5 次并输出 ready/stop 中位数；`latest` 只告警上游 breaking、不改变应用 pin。单机可运行 `pnpm check:dsh:runtime`；该命令会使用隔离临时前缀/`DSH_HOME`，验证 npm 安装、固定入口、精确 loopback HTTP 状态与有界读取的 `__DSH_BOOT__` 页面身份、整树停止和端口释放。需要重复采样时直接运行 `node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5`。
+`pnpm check:kimi-web:visual` 使用本机 Chrome 对比脱敏 Kimi 0.36.1 fixture 的 10 张断点/主题/原生 TOC 左侧短条/mobile projection/focus 展开/sidebar 原状截图；Chrome 不在标准路径时设置 `CHROME_PATH`。它是 DOM 注入的本地视觉回归 gate，不替代 WKWebView/WebView2 G3。
+
+真实 DSH runtime canary 在 `.github/workflows/dsh-runtime-canary.yml` 运行：PR 必须通过 Windows/macOS × Node 22.19/24 的固定 `0.1.0-rc.6` smoke 与稳定汇总检查 `DSH runtime gate`；每周/手动运行时每腿连续采样 5 次，并额外观察 Node 20.12 与 latest breaking，但观察项不改变应用支持矩阵或 pin。仓库外仍需在 GitHub ruleset/branch protection 将 `DSH runtime gate` 配为 required，才具备不可绕过的远端合并权限。单机可运行 `pnpm check:dsh:runtime`；该命令使用隔离临时前缀/`DSH_HOME` 验证 npm 安装、固定入口、精确 loopback HTTP 状态、有界 `__DSH_BOOT__` 页面身份、整树停止和端口释放，但不经过 Rust 生产 npm launcher。需要重复采样时运行 `node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5`。
 
 ## IM Bridge
 
@@ -55,5 +58,6 @@ P5 发布前仍需要人工或专用环境验证：
 - `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 只在仓库 Actions Secrets 中配置；发布日志和资产不得泄露密钥内容。
 - macOS arm64 `.app` / DMG 必须在干净账户验证 traffic lights、App/Edit/Window 菜单、关闭隐藏、Dock reopen、Cmd+Q owned runtime 收口、OAuth 跳转、WebSocket、下载、文件选择和中文 IME。
 - DSH 发布前必须在 Windows/macOS 各验证：Node/npm preflight、私有固定版本安装与入口校验、默认工作区启动与 DSH UI 内会话目录切换、精确 loopback iframe 完整交互、端口占用错误、控制中心关闭/停止、应用退出、更新退出三条整树停止路径、最后一个 pane 关闭后进程仍存活、日志脱敏和无陈旧状态恢复；Windows 需 WebView2 + descendant taskkill 证据，macOS 需 WKWebView + process-group 证据。未完成任一平台时不得称为双平台发布完成。
+- Kimi Web 布局发布前必须在 macOS WKWebView 与 Windows WebView2 各验证：480/800/959/960/1179/1180/1280/1440 CSS px、3:2 屏幕、125%/150% 缩放、明暗主题、长对话、空/多会话、中文 IME、触控与键盘/屏幕阅读器；确认 Sessions sidebar 与 Header 原样、所有宽度左侧 TOC 短条常驻且只在 hover/focus 时向右展开、mobile projection、无-sidebar 窄 pane 的 12px±1 composer 底距和蓝色工作区图标。任一真实引擎未完成时只可声明自动化完成，不得声明双平台视觉发布完成。
 - 常规 macOS 公开发布必须针对最终 DMG 内的 app 通过 `codesign --verify --deep --strict`、`spctl --assess`、notarization 与 stapling；Developer ID certificate、Apple ID app-specific password 与 Team ID 只存 Actions Secrets。`0.1.24` 临时未签名例外改为 CI 验证 `.app` 仅含 ad-hoc signature 且无 Apple signing authority，并在 Release 顶部标注“⚠️ macOS 版本未签名”；该例外不授权任何 Gatekeeper 或生产就绪结论。
 - GitHub Release 必须同时包含 Windows updater、macOS `.app.tar.gz`、两端 `.sig`、DMG 及同时含 `windows-x86_64`/`darwin-aarch64` 的唯一 `latest.json`；任一 build job 失败时 draft 不得发布。

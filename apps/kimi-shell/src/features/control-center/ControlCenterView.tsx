@@ -227,6 +227,7 @@ export function ControlCenterView({
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
+  onRefreshDshState,
   onRefreshDiagnostics,
   onRunKimiDoctor,
   onRefreshContextMenuStatus,
@@ -1725,6 +1726,7 @@ export function ControlCenterView({
                         key="dsh"
                         expanded={expandedOnboardingCard === "dsh"}
                         defaultWorkspaceDir={status?.effectiveWorkDir}
+                        onRuntimeChanged={onRefreshDshState}
                         onExpandedChange={(expanded) =>
                           setExpandedOnboardingCard(expanded ? "dsh" : null)
                         }

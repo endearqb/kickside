@@ -235,6 +235,7 @@ export type ControlCenterViewProps = {
   setActiveRuntimePanel: (panel: RuntimePanelId) => void;
   onWorkDirInputChange: (value: string) => void;
   onRefreshCoreState: () => Promise<void>;
+  onRefreshDshState: () => Promise<unknown>;
   onRefreshDiagnostics: () => Promise<void>;
   onRunKimiDoctor: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;

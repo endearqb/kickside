@@ -11,9 +11,9 @@
 
 KickSide is an open-source desktop application for Windows x64 and Apple Silicon macOS 13+. Built with `Tauri v2 + React`, it organizes multiple AI coding sessions, workspaces, and runtimes in one window, with integrated upgrades, diagnostics, skills, IM channels, and desktop lifecycle management.
 
-[Download the latest release](https://github.com/endearqb/kickside/releases) · [Watch the 30-second demo](apps/kimi-shell/public/readme/kickside-demo.mp4) · [Develop locally](#local-development)
+[Download the latest release](https://github.com/endearqb/kickside/releases) · [Watch the 30-second HD demo](apps/kimi-shell/public/readme/kickside-demo.mp4) · [Develop locally](#local-development)
 
-![DeepSeek Harness and multiple Kimi Code sessions running in KickSide](apps/kimi-shell/public/readme/workspace-grid-overview.png)
+![KickSide multi-pane workflow demo](apps/kimi-shell/public/readme/kickside-demo.gif)
 
 ## Why KickSide
 

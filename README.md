@@ -11,9 +11,9 @@
 
 KickSide 是面向 Windows x64 与 Apple Silicon macOS 13+ 的开源桌面应用。它以 `Tauri v2 + React` 构建，在一个窗口中编排多个 AI 编程会话、工作区和运行时，并提供安装升级、诊断、Skill、IM 通道与桌面生命周期管理。
 
-[下载最新版本](https://github.com/endearqb/kickside/releases) · [观看 30 秒演示](apps/kimi-shell/public/readme/kickside-demo.mp4) · [参与开发](#本地开发)
+[下载最新版本](https://github.com/endearqb/kickside/releases) · [观看高清 30 秒演示](apps/kimi-shell/public/readme/kickside-demo.mp4) · [参与开发](#本地开发)
 
-![KickSide 中同时运行 DeepSeek Harness 与多个 Kimi Code 会话](apps/kimi-shell/public/readme/workspace-grid-overview.png)
+![KickSide 多窗格工作流演示](apps/kimi-shell/public/readme/kickside-demo.gif)
 
 ## 为什么使用 KickSide
 

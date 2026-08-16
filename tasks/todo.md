@@ -1572,10 +1572,13 @@
 - [x] 用户明确批准 `v0.2.1` macOS 未签名、未公证预览例外。
 - [x] 同步三处版本号，新增 ADR/发布说明并迁移精确 tag 门禁。
 - [x] 完成本地发布前门禁。
-- [ ] 提交并推送 `main`，等待 main CI 全绿。
-- [ ] 创建并推送 `v0.2.1` tag。
-- [ ] 等待 Release workflow 并核验公开资产和 `latest.json`。
+- [x] 提交并推送 `main`，等待 main CI 全绿。
+- [x] 创建并推送 `v0.2.1` tag。
+- [x] 等待 Release workflow 并核验公开资产和 `latest.json`。
 
 ## Review
 
-- 待 GitHub 发布完成后补充。
+- 发布候选提交 `6ea8bd7` 已推送 `main`，CI `31956793911` 的 8 个 jobs 全部成功；annotated tag `v0.2.1` 精确指向该提交。
+- Release workflow `31957251104` 的校验、Windows、macOS 与 updater manifest 4 个 jobs 全部成功，Release 已公开并成为 Latest。
+- Release 正文首行保留 macOS 未签名、未公证警告；8 个资产全部 uploaded、非零且带 SHA-256 digest。
+- `latest.json` 为 `version=0.2.1`，仅包含 `windows-x86_64` 与 `darwin-aarch64`，下载 URL 精确指向 `v0.2.1`，两端 updater 签名均非空。

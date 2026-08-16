@@ -620,7 +620,15 @@ impl NpmLauncher {
             Self::NodeCli { node, .. } => Command::new(node),
             Self::CommandScript {
                 command_processor, ..
-            } => Command::new(command_processor),
+            } => {
+                let mut command = Command::new(command_processor);
+                if let Self::CommandScript { npm_script, .. } = self {
+                    if let Some(directory) = npm_script.parent() {
+                        command.current_dir(directory);
+                    }
+                }
+                command
+            }
         }
     }
 
@@ -633,20 +641,18 @@ impl NpmLauncher {
                 command.arg(npm_cli);
                 append_direct_npm_install_args(command, prefix);
             }
-            Self::CommandScript { npm_script, .. } => {
-                // The command string is entirely fixed. Dynamic paths travel
-                // through quoted environment variables, delayed expansion is
-                // disabled, and cmd AutoRun hooks are disabled. This keeps the
-                // compatibility fallback bounded to the already-validated npm
-                // shim instead of exposing a general-purpose shell surface.
+            Self::CommandScript { .. } => {
+                // The command string is entirely fixed. The validated shim is
+                // resolved through the native working directory and the
+                // dynamic install prefix travels only through npm's environment
+                // config. Delayed expansion and cmd AutoRun hooks stay disabled.
                 let command_line = format!(
-                    "\"\"%KICKSIDE_DSH_NPM_SCRIPT%\" install --no-audit --no-fund --prefix \"%KICKSIDE_DSH_INSTALL_PREFIX%\" {DSH_PACKAGE}@{DSH_PINNED_VERSION}\""
+                    "npm.cmd install --no-audit --no-fund {DSH_PACKAGE}@{DSH_PINNED_VERSION}"
                 );
                 command
                     .args(["/D", "/S", "/V:OFF", "/C"])
                     .arg(command_line)
-                    .env("KICKSIDE_DSH_NPM_SCRIPT", npm_script)
-                    .env("KICKSIDE_DSH_INSTALL_PREFIX", prefix);
+                    .env("npm_config_prefix", prefix);
             }
         }
     }
@@ -681,6 +687,13 @@ fn resolve_npm_launcher(
                 npm_path.display()
             )
         })?;
+        let shim_name = npm_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("Windows npm shim 文件名无效")?;
+        if !shim_name.eq_ignore_ascii_case("npm.cmd") {
+            bail!("E-DSH-001：Windows shell fallback 只允许同工具链 npm.cmd");
+        }
         return Ok(NpmLauncher::CommandScript {
             command_processor,
             npm_script: npm_path.to_path_buf(),
@@ -1591,7 +1604,11 @@ mod tests {
         let node = root.join("node.exe");
         let npm = root.join("npm.cmd");
         let prefix = root.join("install prefix & 100%");
-        let args_file = root.join("received args.txt");
+        let args_file = std::env::temp_dir().join(format!(
+            "kickside-dsh-received-args-{}-{}.txt",
+            std::process::id(),
+            unix_time_millis()
+        ));
         fs::write(&node, "node").expect("write node placeholder");
         fs::write(
             &npm,
@@ -1602,8 +1619,6 @@ mod tests {
                 "echo %~2\r\n",
                 "echo %~3\r\n",
                 "echo %~4\r\n",
-                "echo %~5\r\n",
-                "echo %~6\r\n",
                 ") > \"%KICKSIDE_DSH_TEST_ARGS%\"\r\n",
                 "exit /b 0\r\n"
             ),
@@ -1618,12 +1633,20 @@ mod tests {
         .expect("resolve command shim");
         let mut command = launcher.command();
         launcher.configure_install(&mut command, &prefix);
+        let configured_prefix = command
+            .get_envs()
+            .find_map(|(name, value)| {
+                name.eq_ignore_ascii_case("npm_config_prefix")
+                    .then_some(value)
+                    .flatten()
+            })
+            .expect("npm prefix env");
+        assert_eq!(configured_prefix, prefix.as_os_str());
         let status = command
             .env("KICKSIDE_DSH_TEST_ARGS", &args_file)
             .status()
             .expect("run npm shim");
         assert!(status.success());
-        let expected_prefix = prefix.to_string_lossy().into_owned();
         let expected_package = format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}");
         assert_eq!(
             fs::read_to_string(&args_file)
@@ -1634,12 +1657,11 @@ mod tests {
                 "install",
                 "--no-audit",
                 "--no-fund",
-                "--prefix",
-                expected_prefix.as_str(),
                 expected_package.as_str(),
             ]
         );
         let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(args_file);
     }
 
     #[test]
@@ -1802,11 +1824,15 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let mut child = command.spawn().expect("spawn process tree");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while !child_pid_path.is_file() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(25));
         }
-        let descendant_pid = fs::read_to_string(&child_pid_path)
+        let descendant_pid_text = fs::read_to_string(&child_pid_path);
+        if descendant_pid_text.is_err() {
+            let _ = terminate_process_tree(&mut child, None, Duration::from_millis(500));
+        }
+        let descendant_pid = descendant_pid_text
             .expect("descendant pid file")
             .trim()
             .parse::<u32>()

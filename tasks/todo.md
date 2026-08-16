@@ -1470,7 +1470,15 @@
 - [x] 为精确 `v0.2.0` 建立 accepted 未签名预览例外，并保持 updater 签名 fail-closed。
 - [x] 编写中文更新说明并接入 Release 创建流程。
 - [x] 完成本地发布配置验证。
-- [ ] 提交发布准备并推送 `main`。
-- [ ] 等待 `main` CI 全绿后创建并推送 `v0.2.0` tag。
-- [ ] 等待 Release Actions 完成，核验安装包、签名、`latest.json` 与更新说明。
+- [x] 提交发布准备并推送 `main`。
+- [x] 等待 `main` CI 全绿后创建并推送 `v0.2.0` tag。
+- [x] 等待 Release Actions 完成，核验安装包、签名、`latest.json` 与更新说明。
 - [ ] Windows/macOS 最终安装包 G3 由真实平台继续补验；在此之前仅称预览发布。
+
+## Review
+
+- 发布准备提交 `ce00e7b` 的 main CI 8 个 jobs 全绿；annotated `v0.2.0` 精确指向该提交。
+- Release workflow `31950715818` 四个 jobs 全绿，Draft 已自动发布为 Latest：`https://github.com/endearqb/kickside/releases/tag/v0.2.0`。
+- Release 正文首行是未签名/未公证警告；8 个资产全部 uploaded 且带 GitHub SHA-256 digest，包括 Windows NSIS/MSI 及 `.sig`、macOS app updater/DMG 及 `.sig`、唯一 `latest.json`。
+- `latest.json` 版本为 `0.2.0`，同时包含 `windows-x86_64` 与 `darwin-aarch64`，URL 均指向 `v0.2.0` 且签名非空。
+- 当前完成状态是“未签名 macOS 预览版已发布”；最终安装器生命周期、真实 WebView 与辅助功能 G3 仍待用户在目标平台验证，不称生产就绪。

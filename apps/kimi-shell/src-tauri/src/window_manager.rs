@@ -11,7 +11,8 @@ use serde::Serialize;
 #[cfg(target_os = "windows")]
 use tauri::WebviewWindow;
 use tauri::{
-    webview::PageLoadEvent, AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindowBuilder,
+    webview::{NewWindowResponse, PageLoadEvent},
+    AppHandle, Emitter, LogicalSize, Manager, Size, WebviewWindowBuilder,
 };
 #[cfg(target_os = "windows")]
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -1597,10 +1598,24 @@ fn run_create_hidden_main_on_main_thread(app: &AppHandle, source: &str) {
 
     advance_startup_phase(app, StartupPhase::MainConfigLoaded, source);
     let app_for_load = app.clone();
+    let app_for_new_window = app.clone();
     let frame_workspace_bridge_script = frame_workspace_bridge_script();
     let builder = match WebviewWindowBuilder::from_config(app, &config) {
         Ok(builder) => builder
             .initialization_script_for_all_frames(frame_workspace_bridge_script)
+            .on_new_window(move |url, _features| {
+                if url.scheme() == "http" || url.scheme() == "https" {
+                    if let Err(error) =
+                        crate::backend_manager::open_external_url(&app_for_new_window, url.as_str())
+                    {
+                        log_manager::append_line(
+                            &app_for_new_window,
+                            format!("failed to open webview new-window URL externally: {error}"),
+                        );
+                    }
+                }
+                NewWindowResponse::Deny
+            })
             .on_page_load(move |_window, payload| {
                 let url = payload.url().to_string();
                 if !is_shell_document_url(&url) {

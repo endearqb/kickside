@@ -2,15 +2,29 @@
 ; name changed from Kimi Sidekick. Tauri's stock NSIS migration page keys off
 ; PRODUCTNAME, so it cannot discover the legacy uninstall registry entries.
 ;
-; This preinstall hook removes only exact historical product identities. The old
-; uninstaller runs in passive mode without the delete-app-data checkbox, which
-; preserves settings while removing the duplicate binary and shortcuts.
+; Tauri includes this file before its language macros. MUI_CUSTOMFUNCTION_GUIINIT
+; therefore runs the legacy migration immediately after NSIS .onInit and before
+; the welcome page is shown. Silent/passive installs do not rely on that GUI
+; callback, so NSIS_HOOK_PREINSTALL remains a guarded fallback.
+;
+; The old uninstaller runs in passive mode without the delete-app-data checkbox,
+; which preserves settings while removing the duplicate binary and shortcuts.
 
-!macro NSIS_HOOK_PREINSTALL
+Var KicksideLegacyPreflightDone
+
+; Run before Tauri's Welcome page without adding a visible setup page.
+!define MUI_CUSTOMFUNCTION_GUIINIT KicksideLegacyPreflight
+
+Function KicksideLegacyPreflight
+  Call KicksideLegacyMigrate
+FunctionEnd
+
+Function KicksideLegacyMigrate
   StrCpy $R9 0
 
   kickside_legacy_scan:
     StrCpy $R0 ""
+    StrCpy $R1 ""
     StrCpy $R3 ""
     StrCpy $R4 ""
     StrCpy $R5 ""
@@ -111,11 +125,18 @@
 
   kickside_legacy_confirmed:
     StrCpy $R9 1
+    HideWindow
+    ClearErrors
     DetailPrint "Removing legacy $R4 installation before installing KickSide"
     ${If} $R5 == "msi"
       ExecWait '"$SYSDIR\msiexec.exe" /x "$R4" /passive /norestart' $R2
     ${Else}
       ExecWait '$R0 /P' $R2
+    ${EndIf}
+    BringToFront
+    ${If} ${Errors}
+      StrCpy $R2 2
+      Goto kickside_legacy_failed
     ${EndIf}
     ${If} $R2 != 0
       Goto kickside_legacy_failed
@@ -123,6 +144,7 @@
 
     ; Fail closed if the legacy uninstaller returned success without removing
     ; its registration. This also prevents an accidental rescan loop.
+    StrCpy $R1 ""
     ${If} $R5 == "msi"
       ${If} $R3 == "HKLM"
         ReadRegStr $R1 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\$R4" "DisplayName"
@@ -140,11 +162,20 @@
     Goto kickside_legacy_scan
 
   kickside_legacy_cancelled:
-    Abort "KickSide installation cancelled because legacy Kimi Sidekick is still installed."
+    Quit
 
   kickside_legacy_failed:
     MessageBox MB_ICONSTOP|MB_OK "无法卸载旧版 Kimi Sidekick（退出码 $R2）。请从 Windows“已安装的应用”中手动卸载后重试；设置和应用数据无需删除。$\r$\n$\r$\nUnable to remove legacy Kimi Sidekick (exit code $R2). Uninstall it from Windows Installed apps, then run KickSide setup again. Keep the settings and app data."
-    Abort "Legacy Kimi Sidekick removal failed."
+    Quit
 
   kickside_legacy_done:
+    StrCpy $KicksideLegacyPreflightDone 1
+FunctionEnd
+
+; GUI installs already ran the migration during MUI GUI initialization. This
+; hook is still needed because silent/passive installs may not invoke GUI init.
+!macro NSIS_HOOK_PREINSTALL
+  ${If} $KicksideLegacyPreflightDone != 1
+    Call KicksideLegacyMigrate
+  ${EndIf}
 !macroend

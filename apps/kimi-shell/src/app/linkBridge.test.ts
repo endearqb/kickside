@@ -250,6 +250,70 @@ describe("link bridge iframe source checks", () => {
     );
   });
 
+  it("externalizes Kimi Code account routes from SPA navigation", () => {
+    const postMessage = vi.fn();
+    const nativePushState = vi.fn();
+    const nativeOpen = vi.fn();
+    const frameWindow = {
+      name: "workspace-bridge-nonce",
+      parent: { postMessage },
+      top: {},
+      location: new URL("http://127.0.0.1:1234/"),
+      history: {
+        pushState: nativePushState,
+        replaceState: vi.fn(),
+      },
+      addEventListener: vi.fn(),
+      open: nativeOpen,
+    };
+    const frameDocument = {
+      head: null,
+      body: null,
+      documentElement: { dataset: {} },
+      addEventListener: vi.fn(),
+      getElementById: vi.fn(),
+    };
+
+    new Function(
+      "window",
+      "document",
+      "Element",
+      "HTMLAnchorElement",
+      "URL",
+      "URLSearchParams",
+      "setTimeout",
+      frameWorkspaceBridgeScript,
+    )(
+      frameWindow,
+      frameDocument,
+      class FrameElement {},
+      class FrameAnchorElement {},
+      URL,
+      URLSearchParams,
+      (callback: () => void) => callback(),
+    );
+
+    frameWindow.history.pushState(null, "", "/membership/pricing?plan=pro");
+    expect(nativePushState).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        source: "kimi-shell-external-link-bridge",
+        url: "https://www.kimi.com/membership/pricing?plan=pro",
+        reason: "history_pushState",
+        bridgeNonce: "workspace-bridge-nonce",
+      },
+      "*",
+    );
+
+    frameWindow.open("/login?from=upgrade", "_blank");
+    expect(nativeOpen).toHaveBeenCalledWith("/login?from=upgrade", "_blank");
+    expect(
+      postMessage.mock.calls.filter(
+        ([payload]) => payload?.source === "kimi-shell-external-link-bridge",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("requires the exact workspace bridge nonce", () => {
     const nonce = createWorkspaceBridgeNonce();
 
@@ -335,6 +399,7 @@ describe("link bridge iframe source checks", () => {
     );
     expect(outline?.hasAttribute("inert")).toBe(false);
     expect(outline?.hasAttribute("aria-hidden")).toBe(false);
+    expect(outline?.style.getPropertyValue("--kimi-outline-rail-left")).toBe("");
     expect(frameDocument.getElementById("kickside-kimi-layout-v2")).toBeTruthy();
     expect(
       frameDocument.documentElement.style.getPropertyValue("--kimi-enhanced-accent"),
@@ -350,6 +415,11 @@ describe("link bridge iframe source checks", () => {
     expect(css).toContain("220px");
     expect(css).toContain("max-width: 0 !important");
     expect(css).toContain("flex-direction: row !important");
+    expect(css).toContain("pointer-events: none !important");
+    expect(css).toContain("inset: -2px auto -2px -2px !important");
+    expect(css).toContain("width: 7px !important");
+    expect(css).toContain("user-select: none !important");
+    expect(css).not.toContain("inset: 0 -48px 0 -14px");
     expect(css).not.toContain("row-reverse");
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-toggle="true"]')).toBeNull();
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-backdrop="true"]')).toBeNull();
@@ -368,6 +438,10 @@ describe("link bridge iframe source checks", () => {
     expect(
       frameDocument.querySelector('[data-kimi-enhanced-conversation-outline="true"]'),
     ).toBeTruthy();
+    const outline = frameDocument.querySelector<HTMLElement>(
+      '[data-kimi-enhanced-conversation-outline="true"]',
+    );
+    expect(outline?.style.getPropertyValue("--kimi-outline-rail-left")).toBe("5px");
     expect(frameDocument.querySelector('[data-kimi-enhanced-chat-header="true"]')).toBeNull();
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-toggle="true"]')).toBeNull();
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-backdrop="true"]')).toBeNull();
@@ -386,6 +460,10 @@ describe("link bridge iframe source checks", () => {
     expect(
       frameDocument.querySelector('[data-kimi-enhanced-conversation-outline="true"]'),
     ).toBeTruthy();
+    const outline = frameDocument.querySelector<HTMLElement>(
+      '[data-kimi-enhanced-conversation-outline="true"]',
+    );
+    expect(outline?.style.getPropertyValue("--kimi-outline-rail-left")).toBe("5px");
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-toggle="true"]')).toBeNull();
     expect(frameDocument.querySelector('[data-kimi-enhanced-outline-backdrop="true"]')).toBeNull();
   });

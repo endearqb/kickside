@@ -1,167 +1,90 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, FileText, Play, RefreshCcw, Square } from "lucide-react";
+import type { DshControllerModel } from "@/app/useDshController";
 import { BackendBrandIcon } from "@/components/BackendBrandIcon";
 import { ControlCenterSettingsRow } from "@/components/control-center/ControlCenterSettingsRow";
 import { Button } from "@/components/ui/button";
 import {
   getDshLogTail,
-  getDshPreflight,
-  getDshSettings,
-  getDshStatus,
-  installDsh,
-  saveDshSettings,
-  startDsh,
-  stopDsh,
-  type DshPreflight,
   type DshInstallStage,
+  type DshPreflight,
   type DshSettings,
   type DshStatus,
 } from "@/services/dshService";
 
 type DshSettingsPanelProps = {
+  dsh: DshControllerModel;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   defaultWorkspaceDir?: string | null;
-  onRuntimeChanged?: () => Promise<unknown>;
 };
 
 export function DshSettingsPanel({
+  dsh,
   expanded,
   onExpandedChange,
   defaultWorkspaceDir,
-  onRuntimeChanged = async () => undefined,
 }: DshSettingsPanelProps) {
-  const [settings, setSettings] = useState<DshSettings | null>(null);
-  const [preflight, setPreflight] = useState<DshPreflight | null>(null);
-  const [status, setStatus] = useState<DshStatus | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [installProgress, setInstallProgress] = useState<{
     stage: DshInstallStage | "completed";
     message: string;
   } | null>(null);
-  const [busyAction, setBusyAction] = useState<
-    "toggle" | "install" | "start" | "stop" | null
-  >(null);
-  const [error, setError] = useState<string | null>(null);
+  const [panelError, setPanelError] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
   const keepLogPinnedRef = useRef(true);
-  const busy = busyAction !== null;
+  const { settings, preflight, status, error, busy, busyAction } = dsh;
+  const displayedError = error ?? panelError;
 
   useEffect(() => {
     if (!keepLogPinnedRef.current || !logRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
-  async function refresh() {
-    setError(null);
-    try {
-      const [nextSettings, nextPreflight, nextStatus] = await Promise.all([
-        getDshSettings(),
-        getDshPreflight(),
-        getDshStatus(),
-      ]);
-      setSettings(nextSettings);
-      setPreflight(nextPreflight);
-      setStatus(nextStatus);
-    } catch (cause) {
-      setError(formatError(cause));
-    }
-  }
-
   useEffect(() => {
-    void refresh();
-  }, []);
-
-  useEffect(() => {
-    if (!settings?.enabled) return;
-    const timer = window.setInterval(() => {
-      void getDshStatus()
-        .then(setStatus)
-        .catch((cause) => setError(formatError(cause)));
-    }, 1_000);
-    return () => window.clearInterval(timer);
-  }, [settings?.enabled]);
+    if (!expanded) return;
+    void dsh.refresh({ preflight: "cached" });
+  }, [dsh.refresh, expanded]);
 
   async function toggle(enabled: boolean) {
-    if (!settings) return;
-    setBusyAction("toggle");
-    setError(null);
-    try {
-      setSettings(
-        await saveDshSettings({
-          enabled,
-          portRange: settings.portRange,
-          startTimeoutSec: settings.startTimeoutSec,
-        }),
-      );
-      setStatus(await getDshStatus());
-      await onRuntimeChanged();
-    } catch (cause) {
-      setError(formatError(cause));
-    } finally {
-      setBusyAction(null);
-    }
+    setPanelError(null);
+    await dsh.toggle(enabled);
   }
 
   async function install() {
-    setBusyAction("install");
-    setError(null);
+    setPanelError(null);
     setLogs([]);
     keepLogPinnedRef.current = true;
     setInstallProgress({ stage: "preflight", message: "正在检测 Node.js 与 npm" });
-    try {
-      setPreflight(
-        await installDsh((event) => {
-          if (event.type === "stage") {
-            setInstallProgress({ stage: event.stage, message: event.message });
-          } else if (event.type === "output") {
-            setLogs((current) => [...current, event.line].slice(-160));
-          } else if (event.type === "completed") {
-            setInstallProgress({
-              stage: "completed",
-              message: `DeepSeek Harness ${event.version} 安装完成`,
-            });
-          } else {
-            setError(event.message);
-          }
-        }),
-      );
-      setStatus(await getDshStatus());
-      await onRuntimeChanged();
-    } catch (cause) {
-      setError(formatError(cause));
+    const nextPreflight = await dsh.install((event) => {
+      if (event.type === "stage") {
+        setInstallProgress({ stage: event.stage, message: event.message });
+      } else if (event.type === "output") {
+        setLogs((current) => [...current, event.line].slice(-160));
+      } else if (event.type === "completed") {
+        setInstallProgress({
+          stage: "completed",
+          message: `DeepSeek Harness ${event.version} 安装完成`,
+        });
+      } else {
+        setPanelError(event.message);
+      }
+    });
+    if (!nextPreflight) {
       setLogs(await getDshLogTail(160).catch(() => []));
-    } finally {
-      setBusyAction(null);
     }
   }
 
   async function stop() {
-    setBusyAction("stop");
-    setError(null);
-    try {
-      setStatus(await stopDsh());
-      await onRuntimeChanged();
-    } catch (cause) {
-      setError(formatError(cause));
-    } finally {
-      setBusyAction(null);
-    }
+    setPanelError(null);
+    await dsh.stop();
   }
 
   async function start() {
     const workspaceDir = defaultWorkspaceDir?.trim();
     if (!workspaceDir) return;
-    setBusyAction("start");
-    setError(null);
-    try {
-      setStatus(await startDsh(workspaceDir));
-      await onRuntimeChanged();
-    } catch (cause) {
-      setError(formatError(cause));
-    } finally {
-      setBusyAction(null);
-    }
+    setPanelError(null);
+    await dsh.start(workspaceDir);
   }
 
   const running =
@@ -217,7 +140,9 @@ export function DshSettingsPanel({
         </div>
         <p className="hint">运行状态：{formatState(status?.state)}。启用后随应用启动默认工作区。</p>
         {status?.lastError ? <p className="cc-config-error">{status.lastError}</p> : null}
-        {error ? <p className="cc-config-error" role="alert">{error}</p> : null}
+        {displayedError ? (
+          <p className="cc-config-error" role="alert">{displayedError}</p>
+        ) : null}
         <div className="cc-step-secondary-actions">
           <Button
             type="button"
@@ -239,7 +164,7 @@ export function DshSettingsPanel({
             icon={<RefreshCcw size={14} />}
             className="cc-action-btn"
             disabled={busy}
-            onClick={() => void refresh()}
+            onClick={() => void dsh.refresh({ preflight: "force" })}
           >
             重新检测
           </Button>
@@ -328,7 +253,7 @@ function formatSummary(
   if (status?.state === "degraded") return "运行异常 · 展开查看详情";
   if (status?.state === "starting") return "正在加载默认工作区";
   if (status?.state === "crashed") return "启动失败 · 展开查看详情";
-  if (!preflight) return "正在检测";
+  if (!preflight) return "展开后检测";
   if (!preflight.runtimeReady) return preflight.issues[0] ?? "尚未安装";
   return settings?.enabled ? "已启用 · 随 KickSide 启动" : "已就绪 · 当前未启用";
 }
@@ -345,8 +270,4 @@ function formatState(state?: DshStatus["state"]) {
   if (state === "stopping") return "正在停止";
   if (state === "crashed") return "异常退出";
   return "已停止";
-}
-
-function formatError(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }

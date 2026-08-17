@@ -224,10 +224,10 @@ export function ControlCenterView({
   installSessionSnapshot,
   activeTask,
   activeTaskPayload,
+  dsh,
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
-  onRefreshDshState,
   onRefreshDiagnostics,
   onRunKimiDoctor,
   onRefreshContextMenuStatus,
@@ -1724,9 +1724,9 @@ export function ControlCenterView({
                     return (
                       <DshSettingsPanel
                         key="dsh"
+                        dsh={dsh}
                         expanded={expandedOnboardingCard === "dsh"}
                         defaultWorkspaceDir={status?.effectiveWorkDir}
-                        onRuntimeChanged={onRefreshDshState}
                         onExpandedChange={(expanded) =>
                           setExpandedOnboardingCard(expanded ? "dsh" : null)
                         }

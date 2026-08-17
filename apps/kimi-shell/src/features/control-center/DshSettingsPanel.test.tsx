@@ -1,18 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DshControllerModel } from "@/app/useDshController";
 import * as dshService from "@/services/dshService";
 import { DshSettingsPanel } from "./DshSettingsPanel";
 
 vi.mock("@/services/dshService", () => ({
   getDshLogTail: vi.fn(async () => []),
-  getDshPreflight: vi.fn(),
-  getDshSettings: vi.fn(),
-  getDshStatus: vi.fn(),
-  installDsh: vi.fn(),
-  saveDshSettings: vi.fn(),
-  startDsh: vi.fn(),
-  stopDsh: vi.fn(),
 }));
 
 function readyPreflight(): dshService.DshPreflight {
@@ -35,101 +29,146 @@ function readyPreflight(): dshService.DshPreflight {
   };
 }
 
+function createDshController(
+  overrides: Partial<DshControllerModel> = {},
+): DshControllerModel {
+  return {
+    settings: null,
+    preflight: null,
+    status: null,
+    error: null,
+    busy: false,
+    busyAction: null,
+    refresh: vi.fn(async () => null),
+    toggle: vi.fn(async () => null),
+    install: vi.fn(async () => null),
+    start: vi.fn(async () => null),
+    stop: vi.fn(async () => null),
+    ...overrides,
+  };
+}
+
+const enabledSettings: dshService.DshSettings = {
+  enabled: true,
+  portRange: [3080, 3179],
+  startTimeoutSec: 60,
+  pinnedVersion: "0.1.0-rc.6",
+};
+
+const disabledSettings: dshService.DshSettings = {
+  ...enabledSettings,
+  enabled: false,
+};
+
 describe("DshSettingsPanel", () => {
   afterEach(() => {
-    vi.useRealTimers();
     cleanup();
     vi.clearAllMocks();
   });
 
-  it("renders as a branded update-list row and explains app auto start", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
+  it("renders shared controller state as a branded update-list row", () => {
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: readyPreflight(),
+      status: {
+        state: "running",
+        workspaceDir: "/Users/qian/work/demo",
+        pinnedVersion: "0.1.0-rc.6",
+      },
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "running",
-      workspaceDir: "/Users/qian/work/demo",
-      pinnedVersion: "0.1.0-rc.6",
-    });
-
     const onExpandedChange = vi.fn();
     const { container, rerender } = render(
-      <ul><DshSettingsPanel expanded={false} onExpandedChange={onExpandedChange} /></ul>,
-    );
-
-    await waitFor(() => expect(screen.getByText("运行中 · demo")).toBeTruthy());
-    expect(container.querySelector("li.cc-settings-bar")).toBeTruthy();
-    expect(container.querySelector('[data-settings-row="dsh"]')).toBeTruthy();
-    expect(container.querySelector('[data-backend-brand="dsh"]')).toBeTruthy();
-    expect((screen.getByRole("checkbox", { name: "启用 DeepSeek Harness" }) as HTMLInputElement).checked).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: /DeepSeek Harness/ }));
-    expect(onExpandedChange).toHaveBeenCalledWith(true);
-    rerender(<ul><DshSettingsPanel expanded onExpandedChange={onExpandedChange} /></ul>);
-    expect(screen.getByText(/启用后随应用启动默认工作区/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新安装固定版本" })).toBeTruthy();
-  });
-
-  it("keeps the enable switch independent from disclosure expansion", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: false,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.saveDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-
-    const onExpandedChange = vi.fn();
-    const onRuntimeChanged = vi.fn(async () => undefined);
-    render(
       <ul>
         <DshSettingsPanel
+          dsh={dsh}
           expanded={false}
           onExpandedChange={onExpandedChange}
-          onRuntimeChanged={onRuntimeChanged}
         />
       </ul>,
     );
 
-    const toggle = await screen.findByRole("checkbox", { name: "启用 DeepSeek Harness" });
-    fireEvent.click(toggle);
+    expect(screen.getByText("运行中 · demo")).toBeTruthy();
+    expect(container.querySelector("li.cc-settings-bar")).toBeTruthy();
+    expect(container.querySelector('[data-settings-row="dsh"]')).toBeTruthy();
+    expect(container.querySelector('[data-backend-brand="dsh"]')).toBeTruthy();
+    expect(
+      (screen.getByRole("checkbox", { name: "启用 DeepSeek Harness" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
 
-    await waitFor(() => expect(dshService.saveDshSettings).toHaveBeenCalled());
-    expect(onRuntimeChanged).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: /DeepSeek Harness/ }));
+    expect(onExpandedChange).toHaveBeenCalledWith(true);
+    rerender(
+      <ul>
+        <DshSettingsPanel
+          dsh={dsh}
+          expanded
+          onExpandedChange={onExpandedChange}
+        />
+      </ul>,
+    );
+    expect(screen.getByText(/启用后随应用启动默认工作区/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新安装固定版本" })).toBeTruthy();
+    expect(dsh.refresh).toHaveBeenCalledWith({ preflight: "cached" });
+  });
+
+  it("delegates the enable switch without changing disclosure state", async () => {
+    const toggle = vi.fn(async () => ({ ...enabledSettings }));
+    const dsh = createDshController({
+      settings: disabledSettings,
+      preflight: readyPreflight(),
+      status: { state: "stopped", pinnedVersion: "0.1.0-rc.6" },
+      toggle,
+    });
+    const onExpandedChange = vi.fn();
+    render(
+      <ul>
+        <DshSettingsPanel
+          dsh={dsh}
+          expanded={false}
+          onExpandedChange={onExpandedChange}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "启用 DeepSeek Harness" }));
+
+    await waitFor(() => expect(toggle).toHaveBeenCalledWith(true));
     expect(onExpandedChange).not.toHaveBeenCalled();
   });
 
-  it("surfaces a degraded runtime and its recovery guidance", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
+  it("requests preflight through the shared controller only when expanded", () => {
+    const refresh = vi.fn(async () => null);
+    const dsh = createDshController({
+      settings: disabledSettings,
+      refresh,
     });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "degraded",
-      lastError: "DSH 进程仍在运行，但 HTTP 健康检查连续 3 次失败。",
-      pinnedVersion: "0.1.0-rc.6",
+
+    render(
+      <ul>
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    expect(refresh).toHaveBeenCalledWith({ preflight: "cached" });
+    expect(dshService.getDshLogTail).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a degraded runtime and its recovery guidance", () => {
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: readyPreflight(),
+      status: {
+        state: "degraded",
+        lastError: "DSH 进程仍在运行，但 HTTP 健康检查连续 3 次失败。",
+        pinnedVersion: "0.1.0-rc.6",
+      },
     });
 
     render(
       <ul>
         <DshSettingsPanel
+          dsh={dsh}
           expanded
           defaultWorkspaceDir="/Users/qian/work/demo"
           onExpandedChange={vi.fn()}
@@ -137,7 +176,7 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    await waitFor(() => expect(screen.getByText("运行异常 · 展开查看详情")).toBeTruthy());
+    expect(screen.getByText("运行异常 · 展开查看详情")).toBeTruthy();
     expect(
       screen.getByText(
         (_, node) =>
@@ -149,39 +188,31 @@ describe("DshSettingsPanel", () => {
     expect(screen.getByRole("button", { name: "停止实例" })).toBeTruthy();
   });
 
-  it("streams installation stages and redacted output into an accessible log", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: false,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
-    });
+  it("streams installation stages and output from the shared controller", async () => {
     let emit!: (event: dshService.DshInstallEvent) => void;
     let resolveInstall!: (report: dshService.DshPreflight) => void;
-    vi.mocked(dshService.installDsh).mockImplementation(
-      (onEvent) =>
-        new Promise((resolve) => {
+    const install = vi.fn(
+      (onEvent?: (event: dshService.DshInstallEvent) => void) =>
+        new Promise<dshService.DshPreflight>((resolve) => {
           emit = onEvent ?? (() => undefined);
           resolveInstall = resolve;
         }),
     );
+    const dsh = createDshController({
+      settings: disabledSettings,
+      preflight: readyPreflight(),
+      status: { state: "stopped", pinnedVersion: "0.1.0-rc.6" },
+      install,
+    });
 
     render(
       <ul>
-        <DshSettingsPanel expanded onExpandedChange={vi.fn()} />
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
       </ul>,
     );
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重新安装固定版本" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "重新安装固定版本" }));
     expect(screen.getByRole("status").textContent).toContain("正在检测 Node.js");
-    expect(screen.getByRole("log").textContent).toContain("等待安装输出");
 
     act(() => {
       emit({
@@ -206,29 +237,28 @@ describe("DshSettingsPanel", () => {
     expect(dshService.getDshLogTail).not.toHaveBeenCalled();
   });
 
-  it("serializes stop requests and projects the stopped state", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "running",
-      workspaceDir: "/Users/qian/work/demo",
-      pinnedVersion: "0.1.0-rc.6",
-    });
+  it("projects stop and start actions through the shared controller", async () => {
     let resolveStop!: (status: dshService.DshStatus) => void;
-    vi.mocked(dshService.stopDsh).mockReturnValue(
-      new Promise((resolve) => {
-        resolveStop = resolve;
-      }),
-    );
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: readyPreflight(),
+      status: {
+        state: "running",
+        workspaceDir: "/Users/qian/work/demo",
+        pinnedVersion: "0.1.0-rc.6",
+      },
+      stop: vi.fn(
+        () =>
+          new Promise<dshService.DshStatus>((resolve) => {
+            resolveStop = resolve;
+          }),
+      ),
+    });
 
-    render(
+    const { rerender } = render(
       <ul>
         <DshSettingsPanel
+          dsh={dsh}
           expanded
           defaultWorkspaceDir="/Users/qian/work/demo"
           onExpandedChange={vi.fn()}
@@ -236,105 +266,41 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    const stop = await screen.findByRole("button", { name: "停止实例" });
-    fireEvent.click(stop);
-    expect(dshService.stopDsh).toHaveBeenCalledOnce();
-    expect((stop as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByRole("button", { name: "停止中" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新安装固定版本" })).toBeTruthy();
-    fireEvent.click(stop);
-    expect(dshService.stopDsh).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "停止实例" }));
+    expect(dsh.stop).toHaveBeenCalledOnce();
 
-    await act(async () => {
-      resolveStop({ state: "stopped", pinnedVersion: "0.1.0-rc.6" });
-    });
-
-    await waitFor(() => expect(screen.getByText("已启用 · 随 KickSide 启动")).toBeTruthy());
-    expect(screen.queryByRole("button", { name: "停止实例" })).toBeNull();
-    expect(screen.getByRole("button", { name: "启动实例" })).toBeTruthy();
-  });
-
-  it("starts an enabled stopped runtime in the effective default workspace", async () => {
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus).mockResolvedValue({
-      state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    let resolveStart!: (status: dshService.DshStatus) => void;
-    vi.mocked(dshService.startDsh).mockReturnValue(
-      new Promise((resolve) => {
-        resolveStart = resolve;
-      }),
-    );
-
-    render(
+    dsh.busy = true;
+    dsh.busyAction = "stop";
+    rerender(
       <ul>
         <DshSettingsPanel
+          dsh={dsh}
           expanded
-          defaultWorkspaceDir=" /Users/qian/work/demo "
+          defaultWorkspaceDir="/Users/qian/work/demo"
           onExpandedChange={vi.fn()}
         />
       </ul>,
     );
-
-    const start = await screen.findByRole("button", { name: "启动实例" });
-    fireEvent.click(start);
-    expect(dshService.startDsh).toHaveBeenCalledOnce();
-    expect(dshService.startDsh).toHaveBeenCalledWith("/Users/qian/work/demo");
-    expect(screen.getByRole("button", { name: "启动中" })).toBeTruthy();
-    fireEvent.click(start);
-    expect(dshService.startDsh).toHaveBeenCalledOnce();
+    expect(
+      (screen.getByRole("button", { name: "停止中" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
 
     await act(async () => {
-      resolveStart({
-        state: "running",
-        workspaceDir: "/Users/qian/work/demo",
-        port: 3080,
-        url: "http://127.0.0.1:3080",
-        pinnedVersion: "0.1.0-rc.6",
-      });
+      resolveStop({ state: "stopped", pinnedVersion: "0.1.0-rc.6" });
     });
-
-    await waitFor(() => expect(screen.getByText("运行中 · demo")).toBeTruthy());
-    expect(screen.getByRole("button", { name: "停止实例" })).toBeTruthy();
-  });
-
-  it("refreshes enabled runtime state while the control center remains open", async () => {
-    vi.useFakeTimers();
-    vi.mocked(dshService.getDshSettings).mockResolvedValue({
-      enabled: true,
-      portRange: [3080, 3179],
-      startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
-    });
-    vi.mocked(dshService.getDshPreflight).mockResolvedValue(readyPreflight());
-    vi.mocked(dshService.getDshStatus)
-      .mockResolvedValueOnce({
-        state: "starting",
-        pinnedVersion: "0.1.0-rc.6",
-      })
-      .mockResolvedValue({
-        state: "running",
-        workspaceDir: "/Users/qian/work/demo",
-        pinnedVersion: "0.1.0-rc.6",
-      });
-
-    render(<ul><DshSettingsPanel expanded={false} onExpandedChange={vi.fn()} /></ul>);
-    await act(async () => Promise.resolve());
-    await act(async () => Promise.resolve());
-    expect(screen.getByText("正在加载默认工作区")).toBeTruthy();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
-    });
-
-    expect(screen.getByText("运行中 · demo")).toBeTruthy();
-    expect(dshService.getDshStatus).toHaveBeenCalledTimes(2);
+    dsh.busy = false;
+    dsh.busyAction = null;
+    dsh.status = { state: "stopped", pinnedVersion: "0.1.0-rc.6" };
+    rerender(
+      <ul>
+        <DshSettingsPanel
+          dsh={dsh}
+          expanded
+          defaultWorkspaceDir="/Users/qian/work/demo"
+          onExpandedChange={vi.fn()}
+        />
+      </ul>,
+    );
+    expect(screen.getByRole("button", { name: "启动实例" })).toBeTruthy();
   });
 });

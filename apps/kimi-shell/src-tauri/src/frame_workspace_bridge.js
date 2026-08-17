@@ -10,6 +10,9 @@
   const DSH_WORKSPACE_BRIDGE_SOURCE = "kimi-shell-dsh-workspace-bridge";
   const DSH_SESSION_STORAGE_KEY = "dsh.sessions.current";
   const CHAT_ORIGIN = "https://www.kimi.com";
+  const KIMI_BROWSER_ORIGIN = "https://www.kimi.com";
+  const KIMI_CODE_ACCOUNT_ROUTE_PATTERN =
+    /^\/(?:login(?:\/|$)|auth(?:\/|$)|oauth(?:\/|$)|membership(?:\/|$)|subscription(?:\/|$))/i;
   const MAX_SESSION_ID_LENGTH = 512;
   const MAX_DSH_WORK_DIR_LENGTH = 32768;
   const THEME_STYLE_ID = "kimi-sidekick-pane-theme";
@@ -415,7 +418,7 @@
   ) !important;
   overflow: visible !important;
   opacity: 0.5 !important;
-  pointer-events: auto !important;
+  pointer-events: none !important;
   position: absolute !important;
   right: auto !important;
   top: 50% !important;
@@ -435,8 +438,10 @@
 }
 [data-kimi-enhanced-conversation-outline="true"]::before {
   content: "" !important;
-  inset: 0 -48px 0 -14px !important;
+  inset: -2px auto -2px -2px !important;
+  pointer-events: auto !important;
   position: absolute !important;
+  width: 7px !important;
   z-index: 0 !important;
 }
 [data-kimi-enhanced-conversation-outline="true"]::after {
@@ -467,6 +472,7 @@
   min-height: 0 !important;
   overflow-y: auto !important;
   padding: 8px 0 !important;
+  pointer-events: none !important;
   position: relative !important;
   scrollbar-width: none !important;
   z-index: 1 !important;
@@ -483,7 +489,9 @@
   height: 18px !important;
   font: inherit !important;
   padding: 0 !important;
+  pointer-events: auto !important;
   text-align: left !important;
+  user-select: none !important;
   white-space: nowrap !important;
 }
 [data-kimi-enhanced-conversation-outline="true"] .toc-bar {
@@ -570,6 +578,7 @@
           node.removeAttribute("inert");
         }
         delete node.dataset.kimiEnhancedOriginalInert;
+        node.style.removeProperty("--kimi-outline-rail-left");
         delete node.dataset.kimiEnhancedConversationOutline;
         if (node.dataset.kimiEnhancedGeneratedId === "true") {
           node.removeAttribute("id");
@@ -597,6 +606,10 @@
     }
     const enhanceOutline = Boolean(outline);
     if (enhanceOutline && outline) {
+      outline.style.removeProperty("--kimi-outline-rail-left");
+      if (sidebar instanceof HTMLElement) {
+        outline.style.setProperty("--kimi-outline-rail-left", "5px");
+      }
       outline.dataset.kimiEnhancedOriginalAriaHidden =
         outline.getAttribute("aria-hidden") === null
           ? "__missing__"
@@ -1005,14 +1018,14 @@
 
   installDshSelectionObserver();
 
-  function isExternalHttpUrl(parsed) {
+  function isHttpUrl(parsed) {
     if (!parsed) {
       return false;
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return false;
     }
-    return parsed.origin !== FRAME_ORIGIN;
+    return true;
   }
 
   function bridgeSource() {
@@ -1027,6 +1040,42 @@
     } catch (_) {
       return "";
     }
+  }
+
+  function isLocalKimiCodeFrame() {
+    if (!getBridgeNonce() || FRAME_ORIGIN === CHAT_ORIGIN) {
+      return false;
+    }
+    try {
+      const origin = new URL(FRAME_ORIGIN);
+      return (
+        origin.protocol === "http:" &&
+        (origin.hostname === "127.0.0.1" ||
+          origin.hostname === "localhost" ||
+          origin.hostname === "::1")
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function resolveBrowserUrl(rawUrl) {
+    const resolved = resolveUrl(rawUrl);
+    if (!isHttpUrl(resolved)) {
+      return null;
+    }
+    if (resolved.origin !== FRAME_ORIGIN) {
+      return resolved;
+    }
+    if (!isLocalKimiCodeFrame() || !KIMI_CODE_ACCOUNT_ROUTE_PATTERN.test(resolved.pathname)) {
+      return null;
+    }
+
+    const browserUrl = new URL(KIMI_BROWSER_ORIGIN);
+    browserUrl.pathname = resolved.pathname;
+    browserUrl.search = resolved.search;
+    browserUrl.hash = resolved.hash;
+    return browserUrl;
   }
 
   function postExternalUrl(url, reason) {
@@ -1076,34 +1125,75 @@
       if (!href || href.startsWith("#")) {
         return;
       }
+      const targetName = (anchor.getAttribute("target") || "").trim().toLowerCase();
+      if (targetName && targetName !== "_self") {
+        return;
+      }
 
-      const resolved = resolveUrl(href);
-      if (!isExternalHttpUrl(resolved)) {
+      const browserUrl = resolveBrowserUrl(href);
+      if (!browserUrl) {
         return;
       }
 
       event.preventDefault();
       event.stopPropagation();
-      postExternalUrl(resolved.toString(), "anchor_click");
+      postExternalUrl(browserUrl.toString(), "anchor_click");
     },
     true,
   );
 
-  try {
-    const nativeWindowOpen = window.open;
-    if (typeof nativeWindowOpen === "function") {
-      window.open = function (url, target, features) {
-        const resolved = resolveUrl(
-          typeof url === "string" ? url : String(url || ""),
-        );
-        if (isExternalHttpUrl(resolved)) {
-          postExternalUrl(resolved.toString(), "window_open");
-          return null;
+  ["pushState", "replaceState"].forEach(function (methodName) {
+    try {
+      const nativeMethod = window.history[methodName];
+      if (typeof nativeMethod !== "function") {
+        return;
+      }
+      window.history[methodName] = function (state, title, url) {
+        const browserUrl = resolveBrowserUrl(url);
+        if (browserUrl) {
+          postExternalUrl(browserUrl.toString(), "history_" + methodName);
+          return undefined;
         }
-        return nativeWindowOpen.call(window, url, target, features);
+        return nativeMethod.apply(this, arguments);
       };
+    } catch (_) {
+      // ignore
+    }
+  });
+
+  ["assign", "replace"].forEach(function (methodName) {
+    try {
+      const nativeMethod = window.location[methodName];
+      if (typeof nativeMethod !== "function") {
+        return;
+      }
+      window.location[methodName] = function (url) {
+        const browserUrl = resolveBrowserUrl(url);
+        if (browserUrl) {
+          postExternalUrl(browserUrl.toString(), "location_" + methodName);
+          return undefined;
+        }
+        return nativeMethod.call(window.location, url);
+      };
+    } catch (_) {
+      // Some WebViews expose location methods as non-writable properties.
+    }
+  });
+
+  try {
+    if (window.navigation && typeof window.navigation.addEventListener === "function") {
+      window.navigation.addEventListener("navigate", function (event) {
+        const browserUrl = resolveBrowserUrl(event.destination && event.destination.url);
+        if (!browserUrl) {
+          return;
+        }
+        if (typeof event.preventDefault === "function") {
+          event.preventDefault();
+        }
+        postExternalUrl(browserUrl.toString(), "navigation_api");
+      });
     }
   } catch (_) {
-    // ignore
+    // Navigation API is optional across the embedded WebViews.
   }
 })();

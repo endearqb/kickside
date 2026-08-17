@@ -419,6 +419,9 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
   const EXTERNAL_LINK_SOURCE = "{external_link_bridge_source}";
   const SESSION_SYNC_SOURCE = "{shell_session_sync_source}";
   const SESSION_BRIDGE_SOURCE = "{session_bridge_source}";
+  const KIMI_BROWSER_ORIGIN = "https://www.kimi.com";
+  const KIMI_CODE_ACCOUNT_ROUTE_PATTERN =
+    /^\/(?:login(?:\/|$)|auth(?:\/|$)|oauth(?:\/|$)|membership(?:\/|$)|subscription(?:\/|$))/i;
   const QUERY = "(prefers-color-scheme: dark)";
   const UPSTREAM_WS_ORIGIN = "{upstream_ws_origin}";
   const APP_BRAND_ZH = "KickSide 启伴";
@@ -736,18 +739,46 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     }}
   }}
 
-  function shouldOpenExternally(url) {{
-    if (!url) {{
+  function isLocalKimiCodeFrame() {{
+    if (!getBridgeNonce()) {{
       return false;
+    }}
+    try {{
+      const origin = new URL(window.location.origin);
+      return (
+        origin.protocol === "http:" &&
+        (origin.hostname === "127.0.0.1" ||
+          origin.hostname === "localhost" ||
+          origin.hostname === "::1")
+      );
+    }} catch (_) {{
+      return false;
+    }}
+  }}
+
+  function resolveExternalBrowserUrl(url) {{
+    if (!url) {{
+      return null;
     }}
     try {{
       const parsed = new URL(url, window.location.href);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {{
-        return false;
+        return null;
       }}
-      return parsed.origin !== window.location.origin;
+      if (parsed.origin !== window.location.origin) {{
+        return parsed.toString();
+      }}
+      if (!isLocalKimiCodeFrame() || !KIMI_CODE_ACCOUNT_ROUTE_PATTERN.test(parsed.pathname)) {{
+        return null;
+      }}
+
+      const browserUrl = new URL(KIMI_BROWSER_ORIGIN);
+      browserUrl.pathname = parsed.pathname;
+      browserUrl.search = parsed.search;
+      browserUrl.hash = parsed.hash;
+      return browserUrl.toString();
     }} catch (_) {{
-      return false;
+      return null;
     }}
   }}
 
@@ -981,6 +1012,9 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     document.addEventListener(
       "click",
       function(event) {{
+        if (event.defaultPrevented) {{
+          return;
+        }}
         const target = event && event.target;
         if (!(target instanceof Element)) {{
           return;
@@ -990,12 +1024,17 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
           return;
         }}
         const href = anchor.getAttribute("href") || "";
-        if (!shouldOpenExternally(href)) {{
+        const targetName = (anchor.getAttribute("target") || "").trim().toLowerCase();
+        if (targetName && targetName !== "_self") {{
+          return;
+        }}
+        const browserUrl = resolveExternalBrowserUrl(href);
+        if (!browserUrl) {{
           return;
         }}
         event.preventDefault();
         event.stopPropagation();
-        postExternalLink(new URL(href, window.location.href).toString(), "anchor_click");
+        postExternalLink(browserUrl, "anchor_click");
       }},
       true
     );
@@ -1003,20 +1042,59 @@ pub(super) fn theme_bridge_script_tag(upstream_port: u16) -> String {
     // ignore
   }}
 
-  try {{
-    const nativeWindowOpen = window.open;
-    if (typeof nativeWindowOpen === "function") {{
-      window.open = function(url, target, features) {{
-        const resolvedUrl = typeof url === "string" ? url : String(url || "");
-        if (shouldOpenExternally(resolvedUrl)) {{
-          postExternalLink(new URL(resolvedUrl, window.location.href).toString(), "window_open");
-          return null;
+  ["pushState", "replaceState"].forEach(function(methodName) {{
+    try {{
+      const nativeMethod = window.history[methodName];
+      if (typeof nativeMethod !== "function") {{
+        return;
+      }}
+      window.history[methodName] = function(state, title, url) {{
+        const browserUrl = resolveExternalBrowserUrl(url);
+        if (browserUrl) {{
+          postExternalLink(browserUrl, "history_" + methodName);
+          return undefined;
         }}
-        return nativeWindowOpen.call(window, url, target, features);
+        return nativeMethod.apply(this, arguments);
       }};
+    }} catch (_) {{
+      // ignore
+    }}
+  }});
+
+  ["assign", "replace"].forEach(function(methodName) {{
+    try {{
+      const nativeMethod = window.location[methodName];
+      if (typeof nativeMethod !== "function") {{
+        return;
+      }}
+      window.location[methodName] = function(url) {{
+        const browserUrl = resolveExternalBrowserUrl(url);
+        if (browserUrl) {{
+          postExternalLink(browserUrl, "location_" + methodName);
+          return undefined;
+        }}
+        return nativeMethod.call(window.location, url);
+      }};
+    }} catch (_) {{
+      // Some WebViews expose location methods as non-writable properties.
+    }}
+  }});
+
+  try {{
+    if (window.navigation && typeof window.navigation.addEventListener === "function") {{
+      window.navigation.addEventListener("navigate", function(event) {{
+        const browserUrl = resolveExternalBrowserUrl(event.destination && event.destination.url);
+        if (!browserUrl) {{
+          return;
+        }}
+        if (typeof event.preventDefault === "function") {{
+          event.preventDefault();
+        }}
+        postExternalLink(browserUrl, "navigation_api");
+      }});
     }}
   }} catch (_) {{
-    // ignore
+    // Navigation API is optional across the embedded WebViews.
   }}
 
   try {{
@@ -1146,5 +1224,14 @@ mod tests {
         let script = theme_bridge_script_tag(57999);
         assert!(script.contains("function getBridgeNonce()"));
         assert!(script.contains("bridgeNonce: getBridgeNonce()"));
+    }
+
+    #[test]
+    fn theme_bridge_script_externalizes_kimi_code_account_routes() {
+        let script = theme_bridge_script_tag(57999);
+        assert!(script.contains(r#"KIMI_BROWSER_ORIGIN = "https://www.kimi.com""#));
+        assert!(script.contains("KIMI_CODE_ACCOUNT_ROUTE_PATTERN"));
+        assert!(script.contains("history_"));
+        assert!(script.contains("event.defaultPrevented"));
     }
 }

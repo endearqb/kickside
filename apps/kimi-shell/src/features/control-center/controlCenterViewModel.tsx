@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Boxes, CalendarClock, SlidersHorizontal, Sparkles } from "lucide-react";
+import type { DshControllerModel } from "@/app/useDshController";
 import type {
   ActionableOnboardingStep,
   AppUpdateInfo,
@@ -231,11 +232,11 @@ export type ControlCenterViewProps = {
   installSessionSnapshot: InstallSessionSnapshot;
   activeTask: ControlCenterTaskId | null;
   activeTaskPayload: ControlCenterTaskPayload | null;
+  dsh: DshControllerModel;
   setActiveControlSection: (section: ControlSectionId) => void;
   setActiveRuntimePanel: (panel: RuntimePanelId) => void;
   onWorkDirInputChange: (value: string) => void;
   onRefreshCoreState: () => Promise<void>;
-  onRefreshDshState: () => Promise<unknown>;
   onRefreshDiagnostics: () => Promise<void>;
   onRunKimiDoctor: () => Promise<void>;
   onRefreshContextMenuStatus: () => Promise<void>;

@@ -13,7 +13,10 @@ import {
 } from "@/features/workspace-import/WorkspaceImportModal";
 import { ShellTitlebar } from "@/features/window/ShellTitlebar";
 import { WorkspaceView } from "@/features/workspace/WorkspaceView";
-import { addDshPaneToWorkspaceGrid } from "@/features/workspace-grid/gridStore";
+import {
+  addDshPaneToWorkspaceGrid,
+  useWorkspaceGridStore,
+} from "@/features/workspace-grid/gridStore";
 import { getTrustedDshRuntimeUrl } from "@/services/dshService";
 import "./App.css";
 import "./components/control-center/control-center.css";
@@ -21,13 +24,31 @@ import "./features/directory/directory.css";
 
 function App() {
   const shell = useShellController();
-  const dsh = useDshController(shell.tauriRuntime);
+  const dshPaneVisible = useWorkspaceGridStore((state) => {
+    const visiblePaneIds = state.maximizedPaneId
+      ? [state.maximizedPaneId]
+      : state.slots.flatMap((slot) => (slot.paneId ? [slot.paneId] : []));
+    return visiblePaneIds.some((paneId) =>
+      state.panes.some((pane) => pane.id === paneId && pane.kind === "dsh"),
+    );
+  });
+  const controlCenterVisible =
+    shell.screen === "control_center" || shell.controlCenterModalOpen;
+  const dshForeground =
+    controlCenterVisible || (shell.screen === "workspace" && dshPaneVisible);
+  const dsh = useDshController(shell.tauriRuntime, dshForeground);
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
   const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
   const controlCenterDialogRef = useDialogFocusBoundary(
     shell.controlCenterModalOpen && shell.screen === "workspace",
   );
+  useEffect(() => {
+    if (!controlCenterVisible) return;
+    void dsh.refresh({
+      preflight: dsh.settings?.enabled === true ? "cached" : "none",
+    });
+  }, [controlCenterVisible, dsh.refresh, dsh.settings?.enabled]);
   useEffect(() => {
     if (!shell.controlCenterModalOpen) {
       return;
@@ -198,6 +219,7 @@ function App() {
     installSessionSnapshot: shell.installSessionSnapshot,
     activeTask: shell.activeControlTask,
     activeTaskPayload: shell.activeControlTaskPayload,
+    dsh,
     installBusy: shell.installBusy,
     appUpdateSupported: shell.appUpdateSupported,
     appUpdateStatus: shell.appUpdateStatus,
@@ -207,7 +229,6 @@ function App() {
     installMessage: shell.installMessage,
     onClose: shell.dismissControlCenter,
     onRefreshCoreState: shell.refreshCoreState,
-    onRefreshDshState: dsh.refresh,
     onRefreshDiagnostics: shell.refreshDiagnostics,
     onRunKimiDoctor: shell.handleRunKimiDoctor,
     onRefreshContextMenuStatus: shell.refreshContextMenuStatus,

@@ -52,6 +52,8 @@ if (typeof installerHooks !== "string" || installerHooks.length === 0) {
   } else {
     const hooks = fs.readFileSync(hooksPath, "utf8");
     for (const marker of [
+      "!define MUI_CUSTOMFUNCTION_GUIINIT KicksideLegacyPreflight",
+      "Function KicksideLegacyPreflight",
       "NSIS_HOOK_PREINSTALL",
       "Uninstall\\Kimi Sidekick",
       '$R8 == "kimi sidekick"',
@@ -62,6 +64,17 @@ if (typeof installerHooks !== "string" || installerHooks.length === 0) {
       if (!hooks.includes(marker)) {
         errors.push(`Windows NSIS legacy migration hook is missing marker: ${marker}`);
       }
+    }
+    const guiInitIndex = hooks.indexOf(
+      "!define MUI_CUSTOMFUNCTION_GUIINIT KicksideLegacyPreflight",
+    );
+    const preinstallMacroIndex = hooks.indexOf("!macro NSIS_HOOK_PREINSTALL");
+    if (
+      guiInitIndex === -1 ||
+      preinstallMacroIndex === -1 ||
+      guiInitIndex > preinstallMacroIndex
+    ) {
+      errors.push("Windows NSIS legacy migration must run GUI preflight before the install hook");
     }
   }
 }

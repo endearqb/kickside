@@ -1,6 +1,6 @@
 [package]
 name = "appskimi-shell"
-version = "0.2.1"
+version = "0.2.2"
 description = "KickSide"
 authors = ["kimi-shell"]
 edition = "2021"

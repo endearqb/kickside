@@ -29,8 +29,8 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package version v$version." >&2
             exit 1
           }
-          test "$GITHUB_REF_NAME" = "v0.2.1" || {
-            echo "The unsigned macOS release exception is restricted to v0.2.1. Restore the signed release workflow before publishing another version." >&2
+          test "$GITHUB_REF_NAME" = "v0.2.2" || {
+            echo "The unsigned macOS release exception is restricted to v0.2.2. Restore the signed release workflow before publishing another version." >&2
             exit 1
           }
           test -f "$notes_path" || {

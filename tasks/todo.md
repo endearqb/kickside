@@ -16,10 +16,17 @@
 - [x] 版本同步到 0.2.3，新增 warning-first release notes 与精确 unsigned macOS ADR。
 - [x] 手动 Gitee workflow 改为校验当前 package tag 并动态核对版本化资产名。
 - [x] 前端 57 files / 298 tests、安全门、Rust 303 tests/locked check/clippy、Go vet/test/race、Node 发布测试与 workflow YAML 通过。
-- [ ] 推送同一 main 提交到 GitHub 与 Gitee，并等待 GitHub CI。
-- [ ] 创建并推送 `v0.2.3`，验证 GitHub canonical Release。
-- [ ] 完成 Gitee 8 项同字节镜像、manifest-last、公开回下载与 stable promotion。
-- [ ] 基于真实成功轨迹创建并验证个人发布流程 Skill。
+- [x] 推送同一 main 提交 `2b8aa5dab749061664e99d8e13041ef8ca92eea4` 到 GitHub 与 Gitee；GitHub main CI run `32135084282` 的 8 个 job 全部成功。
+- [x] 创建并推送 annotated `v0.2.3`；GitHub canonical Release 为 stable，8 项附件的 API size/state/SHA-256 与本地回下载一致。
+- [x] 完成 Gitee 8 项同字节镜像、manifest-last、公开回下载与 stable promotion；`releases/latest` 指向 `v0.2.3`。
+- [x] 基于真实成功轨迹创建并以 `quick_validate.py` 验证个人 Skill `/Users/qian/.codex/skills/release-kickside`。
+
+## 发布复盘
+
+- GitHub release run `32135911550` 的 prepare、macOS、Windows 与 updater manifest job 成功；Gitee mirror job 在首个大附件等待 15 分钟后失败，因此整个 run 的结论为 failure，不能把自动镜像描述为成功。
+- 失败保持 Gitee `v0.2.3` 为 prerelease 且未暴露 `latest.json`。经用户在提交时确认后，从 GitHub canonical Release 下载并按 API digest 校验 8 项资产；通过已登录 Gitee 会话先上传 7 个安装/签名附件，逐项公开回下载 SHA-256 后最后上传 Gitee 专用 `latest.json`，再提升 stable。
+- GitHub/Gitee main 均指向 `2b8aa5dab749061664e99d8e13041ef8ca92eea4`；annotated tag object 均为 `5f01de654d02717ffc637902e09ddea9c6ffb31a`，解引用到同一 release commit。
+- macOS `.dmg` 与 `.app.tar.gz` 仍是 ad-hoc、未 Developer ID 签名且未公证；该例外只适用于 `v0.2.3`。
 
 # Gitee 双源发布与应用更新源选择
 

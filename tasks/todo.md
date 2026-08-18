@@ -22,6 +22,8 @@
 - [x] 更新 README、架构事实、验证门和 `.ai/changes/2026-08-18.md`。
 - [x] 运行 G0/G1 与 diff 检查，记录无法在本地完成的 G3。
 - [x] 增加 `workflow_dispatch` 手动镜像入口，用现有 GitHub stable Release 回填首个 Gitee Release。
+- [x] 真实回填 `v0.2.2`：7 个 canonical 资产公开回下载 SHA-256、Gitee manifest-last、固定 tag/latest 双入口与 8 项 stable 矩阵均通过。
+- [ ] 将 Gitee 附件上传迁移到可达 Gitee 的受控 runner 或等价国内上传面；GitHub-hosted runner 首个约 21MB 附件已实测 15 分钟超时，当前自动 job 只提供 fail-closed staging，不能视为无人值守镜像完成。
 
 ## Review
 

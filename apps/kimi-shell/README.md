@@ -128,7 +128,7 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
-推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0` 与经产品所有者再次明确批准的 `0.2.1` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；`0.2.1` Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
+推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2` 与经 Accepted 决策精确批准的 `0.2.3` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
 
 GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 `GITEE_RELEASE_TOKEN` 将相同安装包与 `.sig` 以 prerelease 暂存到 Gitee，逐件匿名回下载校验 SHA-256，最后上传 Gitee 版 `latest.json` 并转为正式 Release；Gitee 不执行第二次构建，镜像失败不会回滚 GitHub Release。
 
@@ -141,7 +141,7 @@ GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/KickSide.app`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg`
 
-`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 accepted 决策的精确过渡 tag 使用；当前已批准 `v0.1.24`、`v0.2.0` 与 `v0.2.1`。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
+`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 Accepted 决策的精确过渡 tag 使用；当前历史例外为 `v0.1.24`、`v0.2.0`、`v0.2.1`、`v0.2.2`，当前新增精确 `v0.2.3` 例外。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
 
 ## 发布资料
 

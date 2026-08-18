@@ -44,12 +44,24 @@ Kimi Code 保留原生会话侧栏、消息交互和附件能力。KickSide 为�
 
 ![KickSide 控制中心](apps/kimi-shell/public/readme/control-center.png)
 
+## 可信局域网访问
+
+需要临时离开电脑时，可以在控制中心开启“局域网访问”，让同一可信家庭或办公网络中的手机、平板和其他电脑继续使用当前由 KickSide 启动的 Kimi Code。界面会显示局域网地址，并可按需生成二维码；关闭功能或退出 KickSide 后，本次访问地址与二维码会从界面内存中清除。
+
+![KickSide 局域网访问设置（二维码已从文档截图中裁除）](apps/kimi-shell/public/readme/lan-access.png)
+
+- 默认关闭，每次启动 KickSide 都需要重新开启；外部复用的 Kimi 实例不会被切换或重启。
+- 仅适合可信家庭或办公网络。连接使用 HTTP，不适合公共 Wi-Fi，也不提供公网、跨 VLAN 或 NAT 穿透。
+- Kimi Code 的 Bearer 认证始终开启；远程终端、远程关机和 debug 接口保持关闭。
+- 开关会重启当前由 KickSide 管理的 Kimi Code，请先确认没有正在运行的任务。
+
 ## 核心能力
 
 | 领域 | 能力 |
 |---|---|
 | 工作区 | 多窗格布局、Pane Shelf、拖拽交换、缩放、主题和会话恢复 |
 | Kimi Code | 本地 Web runtime、会话路由、消息 TOC、附件拖放、安装与升级引导 |
+| 局域网访问 | 将 KickSide 管理的 Kimi Code 临时开放给同一可信网络中的手机与电脑，支持地址复制和按需二维码 |
 | DeepSeek Harness | 私有前缀安装、受支持 Node 工具链校验、实时安装日志、多个共享 runtime 的窗格 |
 | 控制中心 | 应用更新、Runtime 状态、Skill、WorkspaceHub、调度、诊断与日志 |
 | IM Bridge | 飞书等通道管理、会话切换、审批与工作目录映射 |

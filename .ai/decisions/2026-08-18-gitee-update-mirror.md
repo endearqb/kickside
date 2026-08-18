@@ -30,8 +30,8 @@ Accepted
 
 ## Consequences
 
-- GitHub Actions 需要 `GITEE_ACCESS_TOKEN` Secret；token 只通过环境变量传入镜像脚本，日志不得输出 token 或带 token 的 URL。
-- Gitee API、Release 附件限制或匿名下载行为变化会使 Gitee 腿失败，但不会改变 GitHub canonical 产物；发布 workflow 将 fail closed，不更新任何 latest manifest。
+- GitHub Actions 需要 `GITEE_RELEASE_TOKEN` Secret；token 只通过环境变量传入镜像脚本，日志不得输出 token 或带 token 的 URL。
+- Gitee API、Release 附件限制或匿名下载行为变化会使 Gitee 腿失败，但不会改变已经发布的 GitHub canonical 产物；Gitee 腿将 fail closed，保留 prerelease 且不发布或替换 Gitee latest manifest。
 - 自动模式最多执行两次 manifest 请求，换取可比较版本和单源容错；需要通过并发与合理 timeout 控制感知延迟。
 - 更新源设置成为持久化契约，后续改名或删除需要新的迁移与 ADR。
 
@@ -40,5 +40,5 @@ Accepted
 - Node 测试覆盖双源 manifest URL、签名复用、Gitee API 响应解析、附件回验和 manifest-last 顺序。
 - Rust 测试覆盖设置默认/round-trip、源端点解析、自动模式单源失败、版本选择与同版本 Gitee 优先。
 - React 测试覆盖启动加载、源切换保存、重新检测、忙碌态禁用和 browser mode。
-- Release workflow 静态检查 Secret fail-fast、唯一构建、Gitee 镜像位于 build 之后、GitHub draft 仅在 Gitee 稳定入口成功后发布。
+- Release workflow 静态检查 Secret fail-fast、唯一构建、GitHub canonical Release 完成后才启动 Gitee 镜像，以及 Gitee manifest-last/stable promotion 顺序。
 - G3 分别从中国大陆网络下的 Gitee 源与可访问 GitHub 的网络完成旧版升级、签名损坏、下载中断和服务退出回归；未完成前不得声明双源已发布验证。

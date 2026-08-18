@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing stable GitHub Release tag to mirror
         required: true
-        default: v0.2.2
+        default: v0.2.3
         type: string
 
 permissions:
@@ -39,8 +39,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          test "$RELEASE_TAG" = "v0.2.2" || {
-            echo "The initial manual mirror is restricted to v0.2.2." >&2
+          package_version="$(node -p "require('./apps/kimi-shell/package.json').version")"
+          test "$RELEASE_TAG" = "v$package_version" || {
+            echo "Manual mirror tag $RELEASE_TAG must match the checked-out package version v$package_version." >&2
             exit 1
           }
           mkdir -p release-assets
@@ -124,7 +125,7 @@ jobs:
             --repo kickside \
             --tag "$RELEASE_TAG" \
             --name "KickSide $RELEASE_TAG" \
-            --target main \
+            --target "$(git rev-list -n 1 "$RELEASE_TAG")" \
             --body-file release-body.md \
             --asset "$windows_bundle" \
             --asset "$windows_bundle.sig" \
@@ -156,14 +157,16 @@ jobs:
             --output verified-assets.json
           node - <<'NODE'
           const fs = require("fs");
+          const tag = process.env.RELEASE_TAG;
+          const version = tag.replace(/^v/, "");
           const expected = [
-            "KickSide_0.2.2_aarch64.app.tar.gz",
-            "KickSide_0.2.2_aarch64.app.tar.gz.sig",
-            "KickSide_0.2.2_aarch64.dmg",
-            "KickSide_0.2.2_x64-setup.exe",
-            "KickSide_0.2.2_x64-setup.exe.sig",
-            "KickSide_0.2.2_x64_en-US.msi",
-            "KickSide_0.2.2_x64_en-US.msi.sig",
+            `KickSide_${version}_aarch64.app.tar.gz`,
+            `KickSide_${version}_aarch64.app.tar.gz.sig`,
+            `KickSide_${version}_aarch64.dmg`,
+            `KickSide_${version}_x64-setup.exe`,
+            `KickSide_${version}_x64-setup.exe.sig`,
+            `KickSide_${version}_x64_en-US.msi`,
+            `KickSide_${version}_x64_en-US.msi.sig`,
             "latest.json",
           ].sort();
           const actual = JSON.parse(fs.readFileSync("verified-assets.json", "utf8"))

@@ -22,7 +22,7 @@ KickSide is an open-source desktop application for Windows x64 and Apple Silicon
 - **Sessions stay alive:** Pane Shelf keeps temporarily hidden sessions mounted so long-running work keeps its context.
 - **Desktop runtime operations:** manage Kimi Code, DSH, app updates, the default work directory, logs, and diagnostics in one place.
 - **Platform-native behavior:** native macOS traffic lights, menus, and Dock lifecycle; Windows tray behavior, WebView2, and Explorer entry points.
-- **Explicit security boundaries:** runtimes are restricted to controlled loopback origins, while tokens stay out of README files, persisted layouts, and diagnostics.
+- **Explicit security boundaries:** runtimes default to controlled loopback origins; users can temporarily expose only a KickSide-owned Kimi Code instance to a trusted LAN, while tokens stay out of README files, persisted layouts, and diagnostics.
 
 ## Two Agents, One Workspace
 
@@ -40,9 +40,20 @@ Kimi Code keeps its native sessions sidebar, conversation behavior, and attachme
 
 ## Unified Control Center
 
-The Control Center brings together app and runtime status, update checks, Kimi Code health, the DeepSeek Harness switch, the default work directory, external IM channels, skills, WorkspaceHub, scheduling, diagnostics, and logs.
+The Control Center brings together app and runtime status, update checks, Kimi Code health, temporary LAN access, the DeepSeek Harness switch, the default work directory, external IM channels, skills, WorkspaceHub, scheduling, diagnostics, and logs.
 
 ![KickSide Control Center](apps/kimi-shell/public/readme/control-center.png)
+
+## Trusted LAN Access
+
+Turn on LAN access when you need to continue using the current KickSide-managed Kimi Code session from a phone, tablet, or another computer on the same trusted home or office network. The Control Center shows a local address and can generate a QR code on demand; the in-memory address and QR payload are cleared when LAN access is disabled or KickSide exits.
+
+![KickSide LAN access settings (the QR code is intentionally cropped from this documentation image)](apps/kimi-shell/public/readme/lan-access.png)
+
+- LAN access is off after every KickSide launch. Reused external Kimi instances are never restarted or reconfigured.
+- Use it only on a trusted home or office network. Traffic is HTTP and is not suitable for public Wi-Fi, public internet exposure, cross-VLAN access, or NAT traversal.
+- Kimi Code Bearer authentication remains enabled; remote terminals, remote shutdown, and debug endpoints remain disabled.
+- Switching modes restarts the KickSide-owned Kimi Code runtime, so finish active work first.
 
 ## Core Capabilities
 
@@ -50,6 +61,7 @@ The Control Center brings together app and runtime status, update checks, Kimi C
 |---|---|
 | Workspace | Multi-pane layouts, Pane Shelf, drag-to-swap, resizing, themes, and session restoration |
 | Kimi Code | Local Web runtime, session routing, message outline, attachment drop, install and upgrade guidance |
+| LAN Access | Temporarily expose KickSide-owned Kimi Code to devices on the same trusted network, with address copy and an on-demand QR code |
 | DeepSeek Harness | Private-prefix install, supported Node toolchain validation, live install logs, and multiple panes sharing one runtime |
 | Control Center | App updates, runtime status, Skills, WorkspaceHub, scheduling, diagnostics, and logs |
 | IM Bridge | Channel management, session switching, approvals, and working-directory mapping |
@@ -57,7 +69,7 @@ The Control Center brings together app and runtime status, update checks, Kimi C
 
 ## Install and Run
 
-Download the installer for your platform from [GitHub Releases](https://github.com/endearqb/kickside/releases):
+Download the installer for your platform from [GitHub Releases](https://github.com/endearqb/kickside/releases), or use [Gitee Releases](https://gitee.com/endearqb/kickside/releases) when access from mainland China is more reliable:
 
 - Windows 10/11 x64 with the WebView2 Runtime.
 - Apple Silicon macOS 13+. Check each Release for its signing and notarization status.

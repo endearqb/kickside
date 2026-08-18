@@ -1,3 +1,26 @@
+# v0.2.3 双源发布与发布流程 Skill
+
+## 任务契约
+
+- 用户目标：在 README 增加局域网功能简介与安全截图，将 0.2.3 推送到 GitHub/Gitee main，按 canonical GitHub build + Gitee 同字节镜像流程发布，并在成功后固化发布 Skill。
+- 直接交付物：中英文 README、裁除二维码的 LAN 截图、0.2.3 版本号与发布说明、精确未签名 macOS 例外、双源 main/tag/Release、发布后 Skill。
+- 影响范围：根 README、发布图片、Shell 版本与 release notes、GitHub Actions、发布/架构治理记录、GitHub/Gitee 仓库与 Release。
+- 非目标：不在 Gitee 二次构建；不发布截图中的二维码凭据；不把 ad-hoc macOS 包描述为 Developer ID 签名、公证或 Gatekeeper 可信。
+- 约束：GitHub 是 canonical build；Gitee 只接受经 SHA-256 回验的同字节附件，manifest 最后上传；任何失败保持 prerelease/fail closed；Skill 只在真实 0.2.3 流程成功后创建。
+- 验收：main 在两端指向同一提交；GitHub/Gitee `v0.2.3` 均为稳定 Release 且 8 项资产矩阵完整；manifest 平台/版本/URL/签名正确；有效 CI 全绿；Skill 通过 `quick_validate.py`。
+- 保守假设：未配置 Apple 发布凭据时，沿用上一版本安全等级并以 Accepted ADR 精确批准 `v0.2.3` ad-hoc 例外；下一版本不得自动沿用。
+
+## Checklist
+
+- [x] README 增加可信局域网访问简介与不含二维码主体的真实界面截图。
+- [x] 版本同步到 0.2.3，新增 warning-first release notes 与精确 unsigned macOS ADR。
+- [x] 手动 Gitee workflow 改为校验当前 package tag 并动态核对版本化资产名。
+- [x] 前端 57 files / 298 tests、安全门、Rust 303 tests/locked check/clippy、Go vet/test/race、Node 发布测试与 workflow YAML 通过。
+- [ ] 推送同一 main 提交到 GitHub 与 Gitee，并等待 GitHub CI。
+- [ ] 创建并推送 `v0.2.3`，验证 GitHub canonical Release。
+- [ ] 完成 Gitee 8 项同字节镜像、manifest-last、公开回下载与 stable promotion。
+- [ ] 基于真实成功轨迹创建并验证个人发布流程 Skill。
+
 # Gitee 双源发布与应用更新源选择
 
 ## 任务契约

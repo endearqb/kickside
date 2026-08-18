@@ -57,7 +57,7 @@ Kimi Code 保留原生会话侧栏、消息交互和附件能力。KickSide 为�
 
 ## 安装与运行
 
-从 [GitHub Releases](https://github.com/endearqb/kickside/releases) 下载对应平台的安装包：
+从 [GitHub Releases](https://github.com/endearqb/kickside/releases) 或中国大陆访问更稳定的 [Gitee Releases](https://gitee.com/endearqb/kickside/releases) 下载对应平台的安装包：
 
 - Windows 10/11 x64，需要 WebView2 Runtime。
 - Apple Silicon macOS 13+。签名与公证状态以对应 Release 说明为准。

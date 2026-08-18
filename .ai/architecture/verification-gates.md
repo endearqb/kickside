@@ -19,6 +19,7 @@ pnpm test
 pnpm check:nfr:security
 pnpm check:kimi-web:visual
 node --test scripts/generate_updater_manifest.test.mjs
+node --test scripts/publish_gitee_release.test.mjs
 ```
 
 `pnpm check:kimi-web:visual` 使用本机 Chrome 对比脱敏 Kimi 0.36.1 fixture 的 10 张断点/主题/原生 TOC 左侧短条/mobile projection/focus 展开/sidebar 原状截图；Chrome 不在标准路径时设置 `CHROME_PATH`。它是 DOM 注入的本地视觉回归 gate，不替代 WKWebView/WebView2 G3。
@@ -43,6 +44,9 @@ go test -race ./...
 - PR CI 必须实际执行 `cargo test --locked`，不能以 `--no-run` 代替；macOS PR job 必须上传经过 `plutil`/`lipo` 校验的 unsigned `.app` artifact，但该 artifact 不代表签名或公证通过。
 
 ## Manual Release Gates
+
+- Gitee 镜像必须包含与 GitHub canonical Release 同名、同 SHA-256 的 NSIS/MSI、macOS app archive/DMG 和 `.sig`；Gitee `latest.json` 必须最后上传，并在 prerelease 提升 stable 前完成匿名回下载校验。
+- 分别选择 Gitee、GitHub 与自动更新源验证检查/下载；自动模式覆盖单源不可达、两端版本不同和同版本优先 Gitee。每次发布监控 Gitee `/releases/download/latest/latest.json` 匿名入口、单文件 100MB 与仓库附件容量。
 
 P5 发布前仍需要人工或专用环境验证：
 

@@ -4,6 +4,8 @@
 
 Accepted
 
+> 2026-08-18：更新源与发布位置部分由 `2026-08-18-gitee-update-mirror.md` 增量扩展；GitHub 仍是 canonical 构建与 Release。
+
 ## Decision
 
 - Kimi 小助手通过 Tauri v2 Updater 从 GitHub Releases 的 `latest.json` 检测更新，更新必须由用户确认后下载和安装；Windows 安装使用 `passive` 模式。

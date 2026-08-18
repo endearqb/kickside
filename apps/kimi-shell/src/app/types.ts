@@ -1411,9 +1411,13 @@ export type AppUpdateStatus =
   | "installing"
   | "error";
 
+export type AppUpdateSource = "auto" | "gitee" | "github";
+
 export interface AppUpdateInfo {
   currentVersion: string;
   available: boolean;
+  configuredSource: AppUpdateSource;
+  resolvedSource?: Exclude<AppUpdateSource, "auto">;
   version?: string;
   date?: string;
   body?: string;

@@ -1,3 +1,34 @@
+# Gitee 双源发布与应用更新源选择
+
+## 任务契约
+
+- 用户目标：为中国大陆用户提供 Gitee 安装包镜像，并允许在应用内选择自动、Gitee 或 GitHub 更新源。
+- 直接交付物：Accepted ADR、GitHub 单一构建后的 Gitee Release 镜像、双源 updater 清单、持久化更新源设置、自动源选择、测试与治理记录。
+- 影响范围：发布 workflow、updater manifest/镜像脚本、AppSettings schema、Rust updater command、控制中心更新设置、相关测试和发布文档。
+- 非目标：不在 Gitee 独立构建第二套二进制；不更换 Tauri updater 公钥；不把更新下载或验签移到 React；不从自动化结果声明双平台 G3。
+- 约束：GitHub 构建产物是唯一可信来源；Gitee 必须镜像完全相同的安装包与 `.sig`；两个源均使用 HTTPS；任何 secret 不进入日志、README 或 `.ai/`。
+- 验收：源选择可持久化且旧设置默认兼容；明确源只访问该源；自动模式可在单源失败时继续并选择可用的较新版本；检查与安装复用相同决策；Gitee 在安装包/签名校验后最后发布清单；G0/G1 通过。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、Accepted signed updater ADR、`DESIGN.md`。
+- 保守假设：现有 GitHub 发布继续作为 canonical release；Gitee 只承担中国大陆分发镜像；新安装默认自动，既有安装经 additive schema 默认自动。
+
+## Checklist
+
+- [x] 接受双源发布与更新源选择 ADR。
+- [x] 实现 Gitee Release 附件镜像与固定清单入口，确保 `latest.json` 最后可见。
+- [x] 扩展 manifest 生成器支持经允许的 GitHub/Gitee HTTPS 发布 URL。
+- [x] 增加 AppSettings schema 与自动/Gitee/GitHub 源选择 command。
+- [x] 控制中心增加符合 DESIGN 的紧凑更新源选择行。
+- [x] 补充 Rust、React、Node 与 workflow 静态回归。
+- [x] 更新 README、架构事实、验证门和 `.ai/changes/2026-08-18.md`。
+- [x] 运行 G0/G1 与 diff 检查，记录无法在本地完成的 G3。
+- [x] 增加 `workflow_dispatch` 手动镜像入口，用现有 GitHub stable Release 回填首个 Gitee Release。
+
+## Review
+
+- 自动模式不复用 Tauri endpoint 顺序 fallback，而是在 Rust 中并行检查并比较 SemVer，避免 Gitee 返回 200 旧清单时阻止 GitHub 较新版本。
+- Gitee job 不接触签名私钥，只从已发布 GitHub Release 下载 canonical 资产；manifest 的签名文本继续来自同一 `.sig`。
+- 真实发布仍 blocked 于 `GITEE_RELEASE_TOKEN` 与新 tag；首次发布必须观察 prerelease 附件匿名下载和 latest alias，再完成中国大陆网络下的安装版 G3。
+
 # DSH 菜单状态同步与 Kimi 后端控制评估
 
 ## 任务契约

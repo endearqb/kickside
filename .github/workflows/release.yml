@@ -197,6 +197,7 @@ jobs:
           macos_bundle="$(exactly_one '*.app.tar.gz')"
           macos_dmg="$(exactly_one '*.dmg')"
           test -f "$windows_bundle.sig"
+          test -f "$windows_msi.sig"
           test -f "$macos_bundle.sig"
           echo "Verified installers: $(basename "$windows_bundle"), $(basename "$windows_msi"), $(basename "$macos_bundle"), $(basename "$macos_dmg")"
 
@@ -212,5 +213,95 @@ jobs:
             --macos-url "$base_url/$(basename "$macos_bundle")" \
             --macos-signature-file "$macos_bundle.sig" \
             --output latest.json
+          gitee_base_url="https://gitee.com/endearqb/kickside/releases/download/${GITHUB_REF_NAME}"
+          node apps/kimi-shell/scripts/generate_updater_manifest.mjs \
+            --version "$version" \
+            --tag "$GITHUB_REF_NAME" \
+            --pub-date "$(git show -s --format=%cI "$GITHUB_REF_NAME")" \
+            --notes "KickSide $version：修复 Windows DSH 安装与启动，并优化应用退出体验。macOS 安装包未签名、未公证。" \
+            --windows-url "$gitee_base_url/$(basename "$windows_bundle")" \
+            --windows-signature-file "$windows_bundle.sig" \
+            --macos-url "$gitee_base_url/$(basename "$macos_bundle")" \
+            --macos-signature-file "$macos_bundle.sig" \
+            --output gitee-latest.json
           gh release upload "$GITHUB_REF_NAME" latest.json --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+
+      - name: Preserve Gitee updater manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitee-updater-manifest
+          path: gitee-latest.json
+          if-no-files-found: error
+
+  mirror-gitee:
+    name: Mirror canonical release to Gitee
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download canonical GitHub release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release view "$GITHUB_REF_NAME" --json isDraft,isPrerelease,body --jq '
+            if .isDraft or .isPrerelease then error("canonical release is not stable") else .body end
+          ' > release-body.md
+          gh release download "$GITHUB_REF_NAME" --dir release-assets
+
+      - name: Download Gitee updater manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: gitee-updater-manifest
+          path: gitee-manifest
+
+      - name: Validate canonical asset matrix and publish Gitee mirror
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${GITEE_RELEASE_TOKEN:-}" || {
+            echo "Required release secret GITEE_RELEASE_TOKEN is not configured." >&2
+            exit 1
+          }
+
+          exactly_one() {
+            local pattern="$1"
+            mapfile -t matches < <(find release-assets -maxdepth 1 -type f -name "$pattern" -print)
+            test "${#matches[@]}" -eq 1 || {
+              echo "Expected one canonical asset matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            }
+            printf '%s' "${matches[0]}"
+          }
+
+          windows_bundle="$(exactly_one '*-setup.exe')"
+          windows_msi="$(exactly_one '*.msi')"
+          macos_bundle="$(exactly_one '*.app.tar.gz')"
+          macos_dmg="$(exactly_one '*.dmg')"
+          for signature in "$windows_bundle.sig" "$windows_msi.sig" "$macos_bundle.sig"; do
+            test -s "$signature"
+          done
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "8"
+          test -s gitee-manifest/gitee-latest.json
+
+          node apps/kimi-shell/scripts/publish_gitee_release.mjs \
+            --owner endearqb \
+            --repo kickside \
+            --tag "$GITHUB_REF_NAME" \
+            --name "KickSide $GITHUB_REF_NAME" \
+            --target "$(git rev-list -n 1 "$GITHUB_REF_NAME")" \
+            --body-file release-body.md \
+            --asset "$windows_bundle" \
+            --asset "$windows_bundle.sig" \
+            --asset "$windows_msi" \
+            --asset "$windows_msi.sig" \
+            --asset "$macos_bundle" \
+            --asset "$macos_bundle.sig" \
+            --asset "$macos_dmg" \
+            --manifest gitee-manifest/gitee-latest.json

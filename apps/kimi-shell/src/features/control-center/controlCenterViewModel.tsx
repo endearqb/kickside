@@ -6,6 +6,7 @@ import type {
   ActionableOnboardingStep,
   AppUpdateInfo,
   AppUpdateProgress,
+  AppUpdateSource,
   AppUpdateStatus,
   AppStatus,
   BindingRecord,
@@ -171,6 +172,8 @@ export type ControlCenterViewProps = {
   appUpdateInfo: AppUpdateInfo | null;
   appUpdateProgress: AppUpdateProgress | null;
   appUpdateError: string | null;
+  appUpdateSource: AppUpdateSource;
+  appUpdateSourceBusy: boolean;
   bridgeSettings: BridgeSettings;
   bridgeStatus: BridgeStatus;
   bridgeOnboardingDraft: BridgeOnboardingConfigInput;
@@ -351,6 +354,7 @@ export type ControlCenterViewProps = {
   onCancelInstallTask: () => Promise<void>;
   onCheckAppUpdate: () => Promise<AppUpdateInfo | null>;
   onInstallAppUpdate: () => Promise<void>;
+  onSaveAppUpdateSource: (source: AppUpdateSource) => Promise<void>;
   onCompleteOnboarding: () => Promise<void>;
   onSkipOnboarding: () => Promise<void>;
   onOpenExternalUrl: (url: string) => Promise<void>;

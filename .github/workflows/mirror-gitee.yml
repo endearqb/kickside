@@ -1,0 +1,181 @@
+name: Mirror GitHub Release to Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable GitHub Release tag to mirror
+        required: true
+        default: v0.2.2
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitee-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate manual mirror implementation
+        run: node --test apps/kimi-shell/scripts/generate_updater_manifest.test.mjs apps/kimi-shell/scripts/publish_gitee_release.test.mjs
+
+      - name: Download and validate canonical GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "v0.2.2" || {
+            echo "The initial manual mirror is restricted to v0.2.2." >&2
+            exit 1
+          }
+          mkdir -p release-assets
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,body,publishedAt,assets --jq '
+              if .isDraft or .isPrerelease then error("canonical release is not stable")
+              else {body: .body, publishedAt: .publishedAt, assets: .assets} end
+            ' > release-metadata.json
+          node -e '
+            const fs = require("fs");
+            const value = JSON.parse(fs.readFileSync("release-metadata.json", "utf8"));
+            fs.writeFileSync("release-body.md", value.body ?? "");
+          '
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "8"
+          node - <<'NODE'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+          const metadata = JSON.parse(fs.readFileSync("release-metadata.json", "utf8"));
+          if (metadata.assets.length !== 8) throw new Error("canonical release asset metadata is not exact");
+          for (const asset of metadata.assets) {
+            const file = path.join("release-assets", asset.name);
+            const bytes = fs.readFileSync(file);
+            const digest = `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`;
+            if (asset.state !== "uploaded" || asset.size !== bytes.length || asset.digest !== digest) {
+              throw new Error(`canonical asset verification failed: ${asset.name}`);
+            }
+          }
+          NODE
+
+      - name: Generate Gitee updater manifest and mirror assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "${GITEE_RELEASE_TOKEN:-}" || {
+            echo "Required release secret GITEE_RELEASE_TOKEN is not configured." >&2
+            exit 1
+          }
+
+          exactly_one() {
+            local pattern="$1"
+            mapfile -t matches < <(find release-assets -maxdepth 1 -type f -name "$pattern" -print)
+            test "${#matches[@]}" -eq 1 || {
+              echo "Expected one canonical asset matching $pattern, found ${#matches[@]}." >&2
+              exit 1
+            }
+            printf '%s' "${matches[0]}"
+          }
+
+          windows_bundle="$(exactly_one '*-setup.exe')"
+          windows_msi="$(exactly_one '*.msi')"
+          macos_bundle="$(exactly_one '*.app.tar.gz')"
+          macos_dmg="$(exactly_one '*.dmg')"
+          for signature in "$windows_bundle.sig" "$windows_msi.sig" "$macos_bundle.sig"; do
+            test -s "$signature"
+          done
+
+          version="$(node -p "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8')).version")"
+          test "$RELEASE_TAG" = "v$version"
+          notes="$(node -p "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8')).notes")"
+          pub_date="$(node -p "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8')).pub_date")"
+          base_url="https://gitee.com/endearqb/kickside/releases/download/$RELEASE_TAG"
+          node apps/kimi-shell/scripts/generate_updater_manifest.mjs \
+            --version "$version" \
+            --tag "$RELEASE_TAG" \
+            --pub-date "$pub_date" \
+            --notes "$notes" \
+            --windows-url "$base_url/$(basename "$windows_bundle")" \
+            --windows-signature-file "$windows_bundle.sig" \
+            --macos-url "$base_url/$(basename "$macos_bundle")" \
+            --macos-signature-file "$macos_bundle.sig" \
+            --output gitee-latest.json
+
+          node apps/kimi-shell/scripts/publish_gitee_release.mjs \
+            --owner endearqb \
+            --repo kickside \
+            --tag "$RELEASE_TAG" \
+            --name "KickSide $RELEASE_TAG" \
+            --target main \
+            --body-file release-body.md \
+            --asset "$windows_bundle" \
+            --asset "$windows_bundle.sig" \
+            --asset "$windows_msi" \
+            --asset "$windows_msi.sig" \
+            --asset "$macos_bundle" \
+            --asset "$macos_bundle.sig" \
+            --asset "$macos_dmg" \
+            --manifest gitee-latest.json
+
+      - name: Verify stable public Gitee release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            --retry 6 --retry-all-errors --retry-delay 2 \
+            "https://gitee.com/api/v5/repos/endearqb/kickside/releases/tags/$RELEASE_TAG" \
+            --output verified-release.json
+          release_id="$(node -p '
+            const value = JSON.parse(require("fs").readFileSync("verified-release.json", "utf8"));
+            if (!value?.id || value.prerelease) throw new Error("Gitee release is not stable");
+            value.id;
+          ')"
+          curl --fail --location --silent --show-error \
+            --retry 6 --retry-all-errors --retry-delay 2 \
+            "https://gitee.com/api/v5/repos/endearqb/kickside/releases/$release_id/attach_files?per_page=100" \
+            --output verified-assets.json
+          node - <<'NODE'
+          const fs = require("fs");
+          const expected = [
+            "KickSide_0.2.2_aarch64.app.tar.gz",
+            "KickSide_0.2.2_aarch64.app.tar.gz.sig",
+            "KickSide_0.2.2_aarch64.dmg",
+            "KickSide_0.2.2_x64-setup.exe",
+            "KickSide_0.2.2_x64-setup.exe.sig",
+            "KickSide_0.2.2_x64_en-US.msi",
+            "KickSide_0.2.2_x64_en-US.msi.sig",
+            "latest.json",
+          ].sort();
+          const actual = JSON.parse(fs.readFileSync("verified-assets.json", "utf8"))
+            .map((asset) => asset.name)
+            .sort();
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            throw new Error(`unexpected stable Gitee asset matrix: ${actual.join(", ")}`);
+          }
+          NODE
+          curl --fail --location --silent --show-error \
+            --retry 6 --retry-all-errors --retry-delay 2 \
+            "https://gitee.com/endearqb/kickside/releases/download/$RELEASE_TAG/latest.json" \
+            --output verified-latest.json
+          test "$(node -p "JSON.parse(require('fs').readFileSync('verified-latest.json', 'utf8')).version")" = "${RELEASE_TAG#v}"
+          cmp --silent verified-latest.json gitee-latest.json

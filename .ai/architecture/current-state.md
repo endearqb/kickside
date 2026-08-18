@@ -1,6 +1,7 @@
 # Current State
 
 ## Shell Runtime
+- `AppSettings` 当前 schema 14；在 schema 13 品牌默认文案迁移之上 additive 增加默认 `auto` 的 `appUpdateSource`（下文 DSH 段的 schema 13 表述仅是该迁移的历史背景，不再表示当前版本）。安装版支持 `auto | gitee | github`：明确源只访问该源，auto 并行检查两端、选择较高 SemVer 且同版本优先 Gitee，单源失败时继续使用另一端。GitHub 是唯一构建与 canonical Release；Gitee prerelease 只镜像同字节资产，匿名回下载校验 SHA-256 后最后上传独立 manifest 并转 stable。
 - 桌面产品展示品牌为英文/系统级 `KickSide`、中文界面 `KickSide 启伴`，GitHub 仓库为 `endearqb/kickside`。兼容身份继续保留 `com.kimi.shell`、用户数据路径、localStorage/IPC key、`apps/kimi-shell`、Rust crate/binary、sidecar 名和旧 Go module/import path；当前图标保持不变。
 - `apps/kimi-shell` 是共享一套 Tauri v2 + React 代码的 Windows x86_64 / Apple Silicon macOS 13+ 桌面壳。Windows 保持自定义标题栏与 close-to-tray；macOS 使用原生 decorations/traffic lights、App Menu、关闭隐藏、Dock reopen 与 Cmd+Q graceful exit。
 - 后端默认使用 `kimi web --no-open --port <port>`；控制中心可把当前 `OwnedByShell` runtime 事务式重启为额外带 `--host 0.0.0.0` 的临时 LAN 模式，状态不持久化且应用进程启动默认关闭。External registry/legacy lock 仍只接受 loopback；owned wildcard record 只有在本次 child/process group、启动时间窗、端口与 Bearer health 全部匹配时才映射为 loopback probe origin。`ReusedExternal` 永不停止或切换。

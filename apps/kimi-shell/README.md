@@ -24,7 +24,7 @@ KickSide 启伴是基于 `Tauri v2 + React` 的 Windows / macOS 桌面工作台�
 - 诊断与日志：后端 stdout/stderr 在落盘前脱敏，诊断读取再次脱敏，并提供 Kimi Code Doctor、启动失败原因与恢复操作
 - 认证与 API 诊断：控制中心只读展示当前认证模式、Kimi 登录和 Provider API 健康状态；API、模型与 Search / Fetch 服务编辑由 Kimi Code Web 内置设置负责
 - 安全退出流程：退出读秒窗 + 状态反馈
-- 本体更新：安装版启动后后台检测一次，设置页可手动重检并在用户确认后下载签名更新；安装前停止 Kimi 后端、DSH owned 实例与 IM Bridge
+- 本体更新：安装版启动后后台检测一次，设置页可选择自动、Gitee（中国大陆）或 GitHub 更新源并手动重检；自动模式并行比较两个源，同版本优先 Gitee。用户确认后下载签名更新，安装前停止 Kimi 后端、DSH owned 实例与 IM Bridge
 
 ## 界面预览
 
@@ -129,6 +129,8 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
 推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0` 与经产品所有者再次明确批准的 `0.2.1` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；`0.2.1` Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
+
+GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 `GITEE_RELEASE_TOKEN` 将相同安装包与 `.sig` 以 prerelease 暂存到 Gitee，逐件匿名回下载校验 SHA-256，最后上传 Gitee 版 `latest.json` 并转为正式 Release；Gitee 不执行第二次构建，镜像失败不会回滚 GitHub Release。
 
 ## 安装包位置
 

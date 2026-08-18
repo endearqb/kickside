@@ -466,6 +466,11 @@
   padding: 0 12px;
 }
 
+.cc-app-update-source-select {
+  max-width: 320px;
+  border-radius: 8px;
+}
+
 .cc-control-code-list {
   display: flex;
   flex-wrap: wrap;

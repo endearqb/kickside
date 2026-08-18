@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import https from "node:https";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -110,11 +111,51 @@ async function deleteAttachment(token, owner, repo, releaseId, attachmentId) {
 }
 
 async function uploadAttachment(token, owner, repo, releaseId, filename, bytes) {
-  const form = new FormData();
-  form.append("file", new Blob([bytes]), filename);
-  return apiRequest(token, `/repos/${owner}/${repo}/releases/${releaseId}/attach_files`, {
-    method: "POST",
-    body: form,
+  const boundary = `kickside-${randomUUID()}`;
+  const safeFilename = filename.replaceAll("\\", "_").replaceAll('"', "_").replaceAll("\r", "_").replaceAll("\n", "_");
+  const prefix = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeFilename}"\r\n` +
+      "Content-Type: application/octet-stream\r\n\r\n",
+  );
+  const suffix = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const pathname = `/api/v5/repos/${owner}/${repo}/releases/${releaseId}/attach_files`;
+
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      protocol: "https:",
+      hostname: "gitee.com",
+      path: pathname,
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": prefix.length + bytes.length + suffix.length,
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        clearTimeout(deadline);
+        if (!response.statusCode || response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`Gitee API POST ${pathname} returned HTTP ${response.statusCode ?? "unknown"}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        } catch {
+          reject(new Error(`Gitee API POST ${pathname} returned invalid JSON`));
+        }
+      });
+    });
+    const deadline = setTimeout(() => request.destroy(new Error(`Gitee upload timed out for ${filename}`)), 15 * 60_000);
+    request.on("error", (error) => {
+      clearTimeout(deadline);
+      reject(error);
+    });
+    request.write(prefix);
+    request.write(bytes);
+    request.end(suffix);
   });
 }
 

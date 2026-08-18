@@ -11217,6 +11217,72 @@ input:focus {
   padding-top: 14px;
 }
 
+.cc-lan-access-settings .cc-settings-detail-stack {
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.cc-lan-address-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--cc-border);
+  border-radius: 12px;
+  background: var(--cc-surface);
+}
+
+.cc-lan-address-row > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cc-lan-address-row strong {
+  color: var(--cc-foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cc-lan-address-row span {
+  color: var(--cc-muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.cc-lan-qr {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--cc-border);
+  border-radius: 12px;
+  background: var(--cc-surface);
+}
+
+.cc-lan-qr svg {
+  display: block;
+  width: min(220px, 100%);
+  height: auto;
+}
+
+.cc-lan-qr p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--cc-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .cc-lan-address-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .cc-dsh-toggle {
   display: inline-flex;
   align-items: center;

@@ -32,7 +32,7 @@ jobs:
         working-directory: apps/kimi-shell
         run: >-
           node scripts/dsh_runtime_smoke.mjs
-          --version 0.1.0-rc.6
+          --version 0.1.0-rc.7
           --samples ${{ github.event_name == 'pull_request' && 1 || 5 }}
 
   node-20-observation:
@@ -53,7 +53,7 @@ jobs:
           node-version: 20.12.0
       - name: Observe pinned DSH on the legacy Node baseline
         working-directory: apps/kimi-shell
-        run: node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5
+        run: node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.7 --samples 5
 
   latest-canary:
     name: Latest DSH alert (${{ matrix.os }})

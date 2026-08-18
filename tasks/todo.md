@@ -28,23 +28,28 @@
 ## 任务契约
 
 - 用户目标：让拖入 Tauri App 的文件事件直接进入 Kimi Code Web，使聊天框能够接收附件。
-- 直接交付物：关闭主 WebView 的 Tauri 原生拖放拦截，并加入配置回归约束。
-- 影响范围：`main` 窗口 Tauri 配置、capability/config gate、变更记录。
-- 非目标：不改变 prefill/import picker，不新增 Shell 原生文件导入，不修改 Kimi Code 上游附件逻辑。
-- 验收：`main.dragDropEnabled=false`；安全配置 gate、前端测试与构建通过；真实 WKWebView/WebView2 拖放留作 G3。
-- 关键取舍：主窗口不再接收 Tauri 原生 drag/drop event，文件由 WebView 的 HTML5 `dragover/drop` 链路处理。
+- 直接交付物：Windows 保持 HTML5 拖放；macOS 通过窗口原生 Drop、单次文件授权与 Kimi 自有 file input 恢复附件。
+- 影响范围：macOS main 配置、Rust 原生 drop grant、Workspace Grid 落点路由、all-frame bridge、ACL/command registry、回归测试与架构记录。
+- 非目标：不改变 prefill/import picker，不提供任意路径读取，不直接调用 Kimi 上传 API，不依赖 Vue 私有实例。
+- 验收：真实 macOS Finder 单文件松开后进入 Kimi 原生附件条目；路径不进入 JS/iframe/日志；非 Code pane 不消费；grant single-use/TTL/上限；Windows base config 仍关闭 native DnD。
+- 关键取舍：Tao `NSWindow` 是 macOS 已证明的事件入口；附件内容只通过本次 OS Drop 建立的 opaque grant 跨越原生边界。
 
 ## Checklist
 
 - [x] 确认 Tauri 默认原生 handler 会阻止 WebView 默认文件拖放。
-- [x] 仅对承载 Kimi Code iframe 的 `main` 窗口关闭原生拖放。
-- [x] 在配置 gate 中锁定该行为，防止未来回退到默认值。
-- [ ] 在 macOS WKWebView 与 Windows WebView2 实机拖文件到 Kimi 聊天框完成 G3。
+- [x] 真实 DOM trace 证明 Finder 事件未进入 Kimi iframe；正确的 `WindowEvent::DragDrop` 收到 Enter/Over/Drop。
+- [x] Windows base main 保持 `dragDropEnabled=false`；macOS main 平台覆盖为 true。
+- [x] 实现 O_NOFOLLOW 普通文件句柄 grant、30 秒 TTL、single-use、8 文件/25 MiB 单文件/50 MiB 总量上限。
+- [x] 只把 Code pane 落点经 exact origin + nonce 转发到 Kimi 自有 file input，不暴露路径。
+- [x] 核对 Kimi Code 0.36.1 生产 bundle，确认 dragover 只检查 items、drop 已回退到 files。
+- [x] 在可信 Kimi frame 内补充 `types=Files/items=[]` 的窄兼容，并覆盖作用域和事件传播反例。
+- [x] macOS debug App 实机拖入单文件并确认出现 Kimi 原生附件条目。
+- [ ] 发布前补第二 Code pane、多文件、目录/超限、第三方文件管理器与 Windows WebView2 G3。
 
 ## Review
 
-- Kimi Code 已有标准 HTML5 文件拖放监听，Shell 不需要读取文件或跨 IPC 重建 `File` 对象；把事件所有权交还 WebView 是最小修复。
-- 独立嵌入式 WebView 原本已使用相同配置；本次补齐主窗口路径。
+- 先前纯 DOM workaround 被真实事件 trace 推翻：Kimi iframe 连 `dragenter` 都未收到，缺失 Chrome 的“松开鼠标添加附件”正是该事实的 UI 证据。
+- 原生窗口链路已稳定收到文件数量与落点；正式桥不暴露路径或通用 fs command，只允许主窗口消费本次 Drop 的一次性句柄 grant。真实单文件端到端已通过。
 
 # Kimi Code Web 响应式布局增强
 
@@ -1582,3 +1587,110 @@
 - Release workflow `31957251104` 的校验、Windows、macOS 与 updater manifest 4 个 jobs 全部成功，Release 已公开并成为 Latest。
 - Release 正文首行保留 macOS 未签名、未公证警告；8 个资产全部 uploaded、非零且带 SHA-256 digest。
 - `latest.json` 为 `version=0.2.1`，仅包含 `windows-x86_64` 与 `darwin-aarch64`，下载 URL 精确指向 `v0.2.1`，两端 updater 签名均非空。
+# Kimi Native LAN Access
+
+## 任务契约
+
+- 用户目标：回退 LAN Gateway，实现仅面向 KickSide-owned Kimi Code 的原生局域网开关。
+- 直接交付物：非持久开关、事务式重启/回滚、registry 安全边界、私有 IPv4、按需 URL/QR、控制中心入口和验证文档。
+- 非目标：DSH、Gateway sidecar、配对/Cookie/proxy、防火墙自动规则、持久可信网络。
+- 验收：自动化门通过；Windows/macOS/移动真机 G3 未回填前只声明实现和对应 G1。
+
+## Checklist
+
+- [x] 删除旧 Gateway 代码、CI 与验证接线。
+- [x] 接受 Native LAN ADR，旧 Gateway 文档降级为未来备选。
+- [x] 实现 owned-only、running-session 拒绝、失败回滚与应用启动默认关闭。
+- [x] 实现 external loopback / owned wildcard registry 分界。
+- [x] 实现私有 IPv4 状态、按需完整 URL/QR 与 main-only command ACL。
+- [x] 实现符合 DESIGN.md 的控制中心设置行与可信网络提示。
+- [x] 完成全量 Shell G1。
+- [ ] 完成 macOS 实际 owned runtime 开关与回滚 smoke。
+- [ ] 用户完成 Windows G3，移动设备完成 LAN browser G3。
+
+## Review
+
+- 当前主路径不包含 DSH；任何恢复 Gateway 的工作必须重新立项。
+
+# LAN 切换后 KimiCode pane 白屏
+
+## 任务契约
+
+- 用户目标：手机端 LAN 正常时，App 内 KimiCode pane 也必须在 Kimi 重启后恢复。
+- 根因：独立 LAN controller 未刷新 Shell AppStatus，且 iframe key 未包含后端启动周期。
+- 验收：切换成功和失败回滚都刷新 Shell；同 URL 的新 `startCycleId` 会强制 remount；前端 gate 与新 App 构建通过。
+
+## Checklist
+
+- [x] 通过真实 listener 与手机成功事实排除 LAN 服务端故障。
+- [x] 将 LAN 切换完成通知接入 Shell `refreshCoreState`。
+- [x] 将 `startCycleId` 纳入 Kimi workspace frame identity。
+- [x] 完成前端 gate。
+- [x] 重新构建本机测试 App。
+- [ ] 用户复验开启/关闭 LAN 后 KimiCode pane 均恢复。
+
+# Native LAN iframe CSP 适配
+
+## 任务契约
+
+- 用户目标：新建 KimiCode pane 在 LAN 模式也必须可用。
+- 根因：Kimi 0.36.1 wildcard HTML 固定 `frame-ancestors 'self'`，拒绝 Tauri iframe；手机顶层访问不受影响。
+- 验收：App 仅通过 loopback adapter 嵌入，手机仍直连 LAN；CSP 只放行 Tauri ancestor；Bearer/WS 与敏感日志边界保持；新包 WKWebView 复验通过。
+
+## Checklist
+
+- [x] 从真实 wildcard Kimi 响应头确认 CSP 阻断。
+- [x] 排除 stale iframe：新 pane 同样白屏。
+- [x] 实现 LAN-only、generation-owned loopback adapter 与受限 CSP 改写。
+- [x] 脱敏 adapter 的 Authorization/Cookie/WS subprotocol 日志。
+- [x] 完成 Rust 全量 gate（296 tests）。
+- [x] 构建新测试 App。
+- [ ] 用户复验 pane HTML、会话列表、prompt/stream、关闭 LAN 与 adapter 端口释放。
+
+# LAN adapter prompt 超时
+
+## 任务契约
+
+- 用户目标：修复 pane 可见但发送 prompt 30 秒超时。
+- 根因：串行 proxy loop 被首条 WebSocket tunnel 永久占用。
+- 验收：WS 有界并发且不阻塞 prompt HTTP；双 pane 可同时收 stream；全量 gate 和新包通过。
+
+## Checklist
+
+- [x] 用现场 socket 映射确认 adapter accept 堆积、上游连接未建立。
+- [x] 将 WS tunnel 分离为最多 32 条并发 worker，并确保退出回收计数。
+- [x] 完成 Rust gate并构建新 App。
+- [ ] 用户复验 prompt receipt、stream 与双 pane。
+
+# LAN adapter 流式输出锁饥饿
+
+## 任务契约
+
+- 用户目标：手机与 App pane 都必须实时显示同一 Kimi assistant stream。
+- 根因：tiny_http upgrade stream 的共享 Mutex 在阻塞 client read 期间不释放，upstream delta 无法写回 WebKit。
+- 验收：client→Kimi 与 Kimi→client 可同时推进；连接/header/body framing 有硬边界；Rust 全量 gate 与新 App 构建通过。
+
+## Checklist
+
+- [x] 根据手机正常、App 停滞和 tunnel 锁作用域定位根因。
+- [x] 改为拥有并克隆 loopback TCP socket 的 full-duplex tunnel。
+- [x] 增加同时双向复制回归测试和 HTTP framing fail-closed 边界。
+- [x] 完成 Rust fmt/check/strict clippy/full 298 tests。
+- [x] 构建独立、ad-hoc 签名的 arm64 测试 App。
+- [ ] 用户复验长回复、双 pane、断线重连。
+
+# macOS LAN adapter WebSocket EAGAIN
+
+## 任务契约
+
+- 用户目标：消除新包持续出现的 `WebSocket error`。
+- 根因：macOS accepted socket 继承 nonblocking listener，空读返回 EAGAIN 后 tunnel 误关闭 upstream write。
+- 验收：accepted socket 在 worker 前恢复 blocking；nonblocking-listener tunnel 回归通过；新 App 不再重复连接后立即关闭。
+
+## Checklist
+
+- [x] 由现场日志确认 Upgrade 成功、固定首帧后关闭与 os error 35。
+- [x] accepted socket 显式恢复 blocking mode。
+- [x] 双向回归覆盖 nonblocking listener 的生产形态。
+- [x] 完成全量 Rust gate和新 App build。
+- [ ] 用户复验 WebSocket 稳定连接与流式输出。

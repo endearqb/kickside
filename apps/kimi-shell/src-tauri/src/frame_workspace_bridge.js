@@ -8,6 +8,7 @@
   const SESSION_BRIDGE_SOURCE = "kimi-shell-session-bridge";
   const DSH_WORKSPACE_SYNC_SOURCE = "kimi-shell-dsh-workspace-sync";
   const DSH_WORKSPACE_BRIDGE_SOURCE = "kimi-shell-dsh-workspace-bridge";
+  const NATIVE_FILE_DROP_SOURCE = "kimi-shell-native-file-drop";
   const DSH_SESSION_STORAGE_KEY = "dsh.sessions.current";
   const CHAT_ORIGIN = "https://www.kimi.com";
   const KIMI_BROWSER_ORIGIN = "https://www.kimi.com";
@@ -98,6 +99,95 @@
   let kimiLayoutMutationObserver = null;
   let kimiLayoutProjectionSignature = "";
   let kimiLayoutMissingContractWarned = false;
+  let kimiFileDropCompatInitialized = false;
+  let kimiNativeFileDropNonce = "";
+
+  function attachNativeDroppedFiles(data) {
+    if (
+      !kimiLayoutRequested ||
+      !kimiNativeFileDropNonce ||
+      data.bridgeNonce !== kimiNativeFileDropNonce ||
+      !Array.isArray(data.files) ||
+      data.files.length === 0 ||
+      data.files.length > 8
+    ) {
+      return;
+    }
+    const input = document.querySelector(
+      'input[type="file"].file-input-hidden,input[type="file"][multiple]',
+    );
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    try {
+      const transfer = new DataTransfer();
+      for (const item of data.files) {
+        if (
+          !item ||
+          typeof item.name !== "string" ||
+          typeof item.type !== "string" ||
+          !(item.bytes instanceof ArrayBuffer) ||
+          item.bytes.byteLength !== item.size
+        ) {
+          return;
+        }
+        transfer.items.add(
+          new File([item.bytes], item.name, {
+            type: item.type,
+            lastModified: Date.now(),
+          }),
+        );
+      }
+      input.value = "";
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch (_) {
+      // Kimi owns upload validation and user-facing error handling.
+    }
+  }
+
+  function hasProtectedWebKitFileDrag(event) {
+    const transfer = event && event.dataTransfer;
+    if (!transfer) {
+      return false;
+    }
+
+    const hasFilesType = Array.from(transfer.types || []).some(
+      (type) => String(type) === "Files",
+    );
+    const hasVisibleFileItem = Array.from(transfer.items || []).some(
+      (item) => item && item.kind === "file",
+    );
+    return hasFilesType && !hasVisibleFileItem;
+  }
+
+  function initializeKimiFileDropCompat() {
+    if (kimiFileDropCompatInitialized || window.top === window) {
+      return;
+    }
+    kimiFileDropCompatInitialized = true;
+
+    function allowProtectedWebKitFileDrop(event) {
+      if (hasProtectedWebKitFileDrag(event)) {
+        // Finder file metadata is protected during dragover in WKWebView. Kimi
+        // already falls back to dataTransfer.files on drop; cancelling these
+        // phases only tells WebKit to deliver that drop to Kimi's own handler.
+        event.preventDefault();
+      }
+    }
+
+    document.addEventListener("dragenter", allowProtectedWebKitFileDrop, true);
+    document.addEventListener("dragover", allowProtectedWebKitFileDrop, true);
+    window.addEventListener(
+      "pagehide",
+      function () {
+        document.removeEventListener("dragenter", allowProtectedWebKitFileDrop, true);
+        document.removeEventListener("dragover", allowProtectedWebKitFileDrop, true);
+      },
+      { once: true },
+    );
+  }
 
   function isKimiLayoutEnabledByUser() {
     try {
@@ -707,12 +797,23 @@
         data.layoutEnhancement === "v2"
       ) {
         kimiLayoutRequested = true;
+        kimiNativeFileDropNonce =
+          typeof data.bridgeNonce === "string" ? data.bridgeNonce : "";
         kimiLayoutHostAccent = typeof data.accent === "string" ? data.accent : "";
+        initializeKimiFileDropCompat();
         initializeKimiLayout();
         if (kimiLayoutInitialized) {
           applyKimiAccent();
         }
       }
+      return;
+    }
+    if (
+      data.source === NATIVE_FILE_DROP_SOURCE &&
+      data.action === "attach_files" &&
+      event.source === window.parent
+    ) {
+      attachNativeDroppedFiles(data);
       return;
     }
     if (

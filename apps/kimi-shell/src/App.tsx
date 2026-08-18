@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { useShellController } from "@/app/useShellController";
 import { useDshController } from "@/app/useDshController";
+import { useLanAccessController } from "@/app/useLanAccessController";
 import { Button } from "@/components/ui/button";
 import { useDialogFocusBoundary } from "@/components/control-center/useDialogFocusBoundary";
 import { ControlCenterView } from "@/features/control-center/ControlCenterView";
@@ -37,6 +38,10 @@ function App() {
   const dshForeground =
     controlCenterVisible || (shell.screen === "workspace" && dshPaneVisible);
   const dsh = useDshController(shell.tauriRuntime, dshForeground);
+  const lanAccess = useLanAccessController(
+    shell.tauriRuntime,
+    shell.refreshCoreState,
+  );
   const [rememberMainCloseDecision, setRememberMainCloseDecision] = useState(false);
   const currentHashRoute = window.location.hash.replace(/^#\/?/, "");
   const isWorkspaceImportPickerRoute = currentHashRoute === "workspace-import-picker";
@@ -154,6 +159,7 @@ function App() {
     kimiDoctorBusy: shell.kimiDoctorBusy,
     contextMenuBusy: shell.contextMenuBusy,
     mainWindowCloseBehavior: shell.mainWindowCloseBehavior,
+    lanAccess,
     bridgeSettings: shell.bridgeSettings,
     bridgeStatus: shell.bridgeStatus,
     bridgeOnboardingDraft: shell.bridgeOnboardingDraft,

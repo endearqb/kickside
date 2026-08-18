@@ -6,7 +6,7 @@
 ## 适用范围
 
 - 只约束 KickSide 对内嵌 Kimi Code Web 的响应式布局增强；不约束 Kimi Chat、DSH 或 generic external pane。
-- 生产工作区直接加载 Kimi runtime URL。布局、主题和 session bridge 通过主窗口的 `initialization_script_for_all_frames` 注入，不恢复旧 workspace proxy。
+- 生产工作区在默认 local 模式直接加载 Kimi runtime URL。owned LAN 模式因上游 `frame-ancestors 'self'` 改走仅 loopback 的 CSP/传输 adapter；布局、主题和 session bridge 仍只通过主窗口的 `initialization_script_for_all_frames` 注入，不恢复旧 workspace HTML 产品注入。
 - `third_party/kimi-cli-web/upstream-web/` 是只读审查快照，不是当前运行时 DOM 的事实权威；它与生产 bundle 冲突时，以当前安装版本的生产 bundle 和实测行为为准。
 
 ## 2026-08-16 审计基线
@@ -43,7 +43,8 @@
   "theme": "light | dark",
   "accent": "<host CSS color fallback>",
   "surface": "kimi-code",
-  "layoutEnhancement": "v2"
+  "layoutEnhancement": "v2",
+  "bridgeNonce": "<当前主窗口随机 nonce>"
 }
 ```
 
@@ -60,6 +61,15 @@
 - 宽窄切换、原生 TOC 重新挂载或 projection 被原生 TOC 替代时，不得重复生成节点或污染可访问性状态。
 - MutationObserver 只观察 child-list 并以 `requestAnimationFrame` 合并刷新，不做周期扫描。
 
+## Finder 文件拖放兼容
+
+- Windows 继续使用基础配置 `main.dragDropEnabled=false`，由 WebView2 将真实 HTML5 `FileList` 直接交给 Kimi。受保护 WebKit file-item 的 capture 兼容仍保留为 fail-open fallback，但不再承担 macOS Finder 主路径。
+- macOS 平台配置单独设置 `main.dragDropEnabled=true`。实机证据表明 Tao `NSWindow` 收到完整 `Enter/Over/Drop`，而顶层与真实 Kimi iframe 均没有 DOM `dragenter`；因此正式入口是 `RunEvent::WindowEvent::DragDrop`，不得再把纯 DOM workaround 宣称为 macOS 修复。
+- Rust 仅对用户本次 Drop 交付的普通文件创建最多 8 个随机、30 秒、single-use grant：打开时使用 `O_NOFOLLOW`，拒绝目录、符号链接与特殊文件，限制单文件 25 MiB、总计 50 MiB。grant 持有已打开文件句柄，不向 Shell/iframe/日志发送路径，也不提供接受任意 path 的读取命令。
+- Shell 只在 drop 坐标命中 `[data-workspace-pane-id]` 且 pane kind 为 `code` 时消费 grant；物理坐标先按原值命中，Retina 场景再以 `devicePixelRatio` 回退。Chat、DSH、external、header 或窗口外落点不读取授权内容。
+- Shell 通过 iframe URL 的精确 origin、当前 `bridgeNonce` 与 transferable `ArrayBuffer` 发送 `kimi-shell-native-file-drop/attach_files`。all-frame bridge 还必须验证 `event.source===window.parent`、已建立的可信 Kimi surface 与相同非空 nonce，随后构造真实 `File` 并赋给 Kimi 0.36.1 自有的隐藏多选 file input，触发其原生 `change` 上传链路；不得遍历 Vue 私有实例、直接 POST `/files` 或暴露通用 fs API。
+- 当前 macOS 原生路径在松开后显示 Kimi 附件条目，但不会把 Chrome 的 pre-drop `dragover` 提示伪装到 Shell；若未来增加 hover UX，必须由原生 Enter/Leave 驱动，并遵循 `DESIGN.md`，不能改变授权与数据面边界。
+
 ## 上游升级检查
 
 1. 从当前安装 Kimi 二进制的生产 bundle 或 live DOM 重新确认 `ConversationToc` 选择器、渲染条件与锚点契约；不得仅凭 vendored snapshot 下结论。
@@ -68,6 +78,7 @@
 4. 验证只有一个用户 turn、loading、mobile、长标题、重复标题、TOC 重挂载和 sidebar 显隐场景。
 5. 核对 `.con` container、`--p-content-max` / `--toc-content-max` 和正文 gutter；不得让左置 TOC 覆盖正文或 sidebar。
 6. 验证关闭开关后页面完整恢复原生布局，console 不输出 DOM、URL、路径、turn label 或 token。
+7. 在 Finder→Kimi composer 实测单文件、多文件与第二个 Code pane；确认附件进入 Kimi 原生上传链路，DSH/Chat/普通文本拖动不受影响，日志不出现文件名、路径或内容。
 
 ## 验证
 

@@ -34,7 +34,8 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": false,
-        "shadow": true
+        "shadow": true,
+        "dragDropEnabled": true
       },
       {
         "label": "workspace-import-picker",

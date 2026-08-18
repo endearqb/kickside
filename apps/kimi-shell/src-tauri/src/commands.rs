@@ -5,6 +5,7 @@ pub(crate) mod app_update;
 pub(crate) mod bridge;
 pub(crate) mod context_menu;
 pub(crate) mod install;
+pub(crate) mod lan_access;
 pub(crate) mod skills;
 pub(crate) mod workspace_grid;
 pub(crate) mod workspace_import;
@@ -33,13 +34,19 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         super::submit_main_window_close_decision,
         super::save_kimi_path,
         super::save_work_dir,
+        super::native_file_drop::consume_native_file_drop_grant,
+        lan_access::get_kimi_lan_access_status,
+        lan_access::set_kimi_lan_access,
+        lan_access::get_kimi_lan_launch_url,
         app_update::check_app_update,
         app_update::install_app_update,
         // DeepSeek Harness (main window only)
         super::dsh_manager::dsh_get_settings,
         super::dsh_manager::dsh_save_settings,
         super::dsh_manager::dsh_get_preflight,
+        super::dsh_manager::dsh_check_update,
         super::dsh_manager::dsh_install,
+        super::dsh_manager::dsh_update,
         super::dsh_manager::dsh_start,
         super::dsh_manager::dsh_get_status,
         super::dsh_manager::dsh_stop,

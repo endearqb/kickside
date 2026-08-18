@@ -1,10 +1,13 @@
 import {
+  useEffect,
   useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { WorkspaceViewProps } from "@/features/workspace/WorkspaceView";
 import { openExternalWebviewWindow } from "@/services/externalWebviewService";
 import {
@@ -29,6 +32,17 @@ import { PaneFrame } from "./PaneFrame";
 import { normalizeEmbeddableUrl } from "./urlSafety";
 
 type ResizeAxis = "columns" | "rows";
+
+const NATIVE_FILE_DROP_EVENT = "native-file-drop";
+
+interface NativeFileDropPayload {
+  files: Array<{
+    grantId: string;
+    name: string;
+    size: number;
+  }>;
+  position: { x: number; y: number };
+}
 
 interface ResizeDraft {
   axis: ResizeAxis;
@@ -69,6 +83,27 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
   const [resizePreviewTrackSizes, setResizePreviewTrackSizes] =
     useState<WorkspaceGridTrackSizes | null>(null);
   const [paneDragDraft, setPaneDragDraft] = useState<PaneDragDraft | null>(null);
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<NativeFileDropPayload>(NATIVE_FILE_DROP_EVENT, (event) => {
+      void forwardNativeFileDropToKimi(event.payload, props.workspaceBridgeNonce);
+    }).then((dispose) => {
+      if (disposed) {
+        dispose();
+      } else {
+        unlisten = dispose;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [props.workspaceBridgeNonce]);
 
   const template = GRID_PRESETS[preset];
   const trackCounts = getGridTrackCounts(preset);
@@ -419,6 +454,110 @@ export function WorkspaceGridView(props: WorkspaceViewProps) {
       </div>
     </section>
   );
+}
+
+async function forwardNativeFileDropToKimi(
+  payload: NativeFileDropPayload,
+  bridgeNonce: string,
+): Promise<void> {
+  const frame = findCodeDropFrame(payload.position);
+  const frameWindow = frame?.contentWindow;
+  if (!frame || !frameWindow || !bridgeNonce || payload.files.length === 0) {
+    return;
+  }
+
+  let targetOrigin = "";
+  try {
+    targetOrigin = new URL(frame.src).origin;
+  } catch {
+    return;
+  }
+
+  const attachments: Array<{
+    name: string;
+    size: number;
+    type: string;
+    bytes: ArrayBuffer;
+  }> = [];
+  for (const file of payload.files) {
+    try {
+      const bytes = await invoke<ArrayBuffer>("consume_native_file_drop_grant", {
+        grantId: file.grantId,
+      });
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength !== file.size) {
+        continue;
+      }
+      attachments.push({
+        name: file.name,
+        size: file.size,
+        type: inferAttachmentMimeType(file.name),
+        bytes,
+      });
+    } catch {
+      // Grants are single-use and short-lived; a failed item must not block others.
+    }
+  }
+  if (attachments.length === 0) {
+    return;
+  }
+
+  frameWindow.postMessage(
+    {
+      source: "kimi-shell-native-file-drop",
+      action: "attach_files",
+      bridgeNonce,
+      files: attachments,
+    },
+    targetOrigin,
+    attachments.map((attachment) => attachment.bytes),
+  );
+}
+
+export function findCodeDropFrame(position: {
+  x: number;
+  y: number;
+}): HTMLIFrameElement | null {
+  const scale = window.devicePixelRatio || 1;
+  const candidates = [position];
+  if (scale !== 1) {
+    candidates.push({ x: position.x / scale, y: position.y / scale });
+  }
+
+  for (const candidate of candidates) {
+    const element = document.elementFromPoint(candidate.x, candidate.y);
+    const paneElement = element?.closest<HTMLElement>("[data-workspace-pane-id]");
+    const paneId = paneElement?.dataset.workspacePaneId;
+    if (!paneElement || !paneId) {
+      continue;
+    }
+    const pane = useWorkspaceGridStore
+      .getState()
+      .panes.find((item) => item.id === paneId);
+    if (pane?.kind !== "code") {
+      continue;
+    }
+    const frame = paneElement.querySelector<HTMLIFrameElement>(".workspace-iframe");
+    if (frame) {
+      return frame;
+    }
+  }
+  return null;
+}
+
+function inferAttachmentMimeType(name: string): string {
+  const extension = name.split(".").pop()?.toLowerCase();
+  const knownTypes: Record<string, string> = {
+    gif: "image/gif",
+    jpeg: "image/jpeg",
+    jpg: "image/jpeg",
+    json: "application/json",
+    pdf: "application/pdf",
+    png: "image/png",
+    svg: "image/svg+xml",
+    txt: "text/plain",
+    webp: "image/webp",
+  };
+  return extension ? knownTypes[extension] ?? "" : "";
 }
 
 function getSlotIdAtPoint(

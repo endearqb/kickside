@@ -162,6 +162,125 @@ pub fn restart_backend(app: AppHandle) {
     start_backend_locked(app.clone());
 }
 
+pub fn switch_kimi_lan_access(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _operation = state
+        .backend_lifecycle_operation
+        .lock()
+        .map_err(|_| "Kimi 生命周期状态不可用".to_string())?;
+    let previous = {
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "Kimi 运行时状态不可用".to_string())?;
+        if runtime.lan_access_switching {
+            return Err("局域网访问正在切换".to_string());
+        }
+        if runtime.state != BackendState::Running
+            || runtime.runtime_ownership != RuntimeOwnership::OwnedByShell
+            || runtime.child.is_none()
+        {
+            return Err("当前 Kimi 服务不由 KickSide 管理，无法修改监听地址".to_string());
+        }
+        if runtime.lan_access_enabled == enabled {
+            return Ok(());
+        }
+        let previous = runtime.lan_access_enabled;
+        runtime.lan_access_switching = true;
+        runtime.lan_access_last_error = None;
+        previous
+    };
+
+    let has_running_session = match workspace_session::list_workspace_sessions_for_grid(&app) {
+        Ok(sessions) => sessions.into_iter().any(|session| session.is_running),
+        Err(error) => {
+            let message = format!("无法确认 Kimi 任务状态：{error}");
+            finish_lan_switch(&app, Some(message.clone()));
+            return Err(message);
+        }
+    };
+    if has_running_session {
+        finish_lan_switch(&app, Some("当前有任务正在执行，请完成后再切换".to_string()));
+        return Err("当前有任务正在执行，请完成后再切换".to_string());
+    }
+
+    let switch_result = restart_in_lan_mode(&app, enabled);
+    if switch_result.is_ok() {
+        finish_lan_switch(&app, None);
+        return Ok(());
+    }
+
+    let switch_error = switch_result.unwrap_err();
+    let rollback_result = restart_in_lan_mode(&app, previous);
+    let message = match rollback_result {
+        Ok(()) => format!("局域网访问切换失败，已恢复原模式：{switch_error}"),
+        Err(rollback_error) => format!(
+            "局域网访问切换失败，且原模式恢复失败：{switch_error}；恢复错误：{rollback_error}"
+        ),
+    };
+    finish_lan_switch(&app, Some(message.clone()));
+    Err(message)
+}
+
+fn restart_in_lan_mode(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    stop_backend_locked(app).map_err(|error| format!("停止 Kimi 失败：{error:#}"))?;
+    {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "Kimi 运行时状态不可用".to_string())?;
+        runtime.lan_access_enabled = enabled;
+        runtime.lan_access_force_owned_start = true;
+    }
+    start_backend_locked(app.clone());
+    wait_for_lan_restart(app, enabled)
+}
+
+fn wait_for_lan_restart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let deadline = Instant::now() + OWNED_REGISTRY_TIMEOUT + Duration::from_secs(5);
+    loop {
+        let snapshot = {
+            let state = app.state::<AppState>();
+            let runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "Kimi 运行时状态不可用".to_string())?;
+            (
+                runtime.state,
+                runtime.runtime_ownership,
+                runtime.lan_access_enabled,
+                runtime.last_error.clone(),
+            )
+        };
+        if snapshot.0 == BackendState::Running
+            && snapshot.1 == RuntimeOwnership::OwnedByShell
+            && snapshot.2 == enabled
+        {
+            return Ok(());
+        }
+        if matches!(
+            snapshot.0,
+            BackendState::Crashed | BackendState::MissingKimi
+        ) {
+            return Err(snapshot
+                .3
+                .unwrap_or_else(|| "Kimi 未能重新启动".to_string()));
+        }
+        if Instant::now() >= deadline {
+            return Err("等待 Kimi 重新启动超时".to_string());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn finish_lan_switch(app: &AppHandle, error: Option<String>) {
+    if let Ok(mut runtime) = app.state::<AppState>().runtime.lock() {
+        runtime.lan_access_switching = false;
+        runtime.lan_access_last_error = error;
+    }
+}
+
 pub fn set_session_work_dir(app: &AppHandle, work_dir: Option<PathBuf>) -> anyhow::Result<()> {
     if let Some(path) = work_dir.as_ref() {
         if !path.exists() {
@@ -328,7 +447,23 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         ),
     );
 
-    match try_reuse_existing_server(app) {
+    let (lan_access_enabled, force_owned_start) = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        (
+            runtime.lan_access_enabled,
+            runtime.lan_access_force_owned_start,
+        )
+    };
+
+    match if lan_access_enabled || force_owned_start {
+        ReuseAttempt::Stale
+    } else {
+        try_reuse_existing_server(app)
+    } {
         ReuseAttempt::Ready {
             server,
             origin,
@@ -431,7 +566,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         }
     };
     append_backend_start_boundary(&log_path, generation, u64::from(base_port));
-    let command_args = build_kimi_web_args(base_port);
+    let command_args = build_kimi_web_args(base_port, lan_access_enabled);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
     let kimi_shell_path = kimi_locator::locate_shell_path();
     let agent_swarm_max_concurrency = settings.kimi_runtime_launch.agent_swarm_max_concurrency;
@@ -551,7 +686,11 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
                 restore_unconfirmed_owned_process(app, generation, owned_process)?;
                 return Ok(());
             }
-            match try_reuse_existing_server(app) {
+            match if lan_access_enabled || force_owned_start {
+                ReuseAttempt::Stale
+            } else {
+                try_reuse_existing_server(app)
+            } {
                 ReuseAttempt::Ready {
                     server,
                     origin,
@@ -810,8 +949,8 @@ fn local_server_origin(host: &str, port: u64) -> anyhow::Result<String> {
         .to_ascii_lowercase()
         .as_str()
     {
-        "127.0.0.1" | "localhost" | "0.0.0.0" => "127.0.0.1",
-        "::1" | "::" => "[::1]",
+        "127.0.0.1" | "localhost" => "127.0.0.1",
+        "::1" => "[::1]",
         _ => anyhow::bail!("host 不是本机回环地址"),
     };
     Ok(format!("http://{host}:{port}"))
@@ -895,7 +1034,10 @@ fn wait_for_owned_runtime(
             for instance in
                 instance_registry::owned_candidates(&registry.instances, child_pid, launch_time_ms)
             {
-                let Some(origin) = instance.origin() else {
+                if instance.port != base_port {
+                    continue;
+                }
+                let Some(origin) = instance.owned_probe_origin() else {
                     continue;
                 };
                 if probe_liveness(&origin).is_ok()
@@ -939,7 +1081,23 @@ fn finish_ready(
     health_wait_ms: u128,
     token_wait_ms: u128,
 ) -> anyhow::Result<()> {
-    let workspace_url = token_resolver::build_workspace_url(&origin, Some(&token.value));
+    let use_lan_workspace_adapter = {
+        let state = app.state::<AppState>();
+        let runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
+        runtime.generation == generation
+            && ownership == RuntimeOwnership::OwnedByShell
+            && runtime.lan_access_enabled
+    };
+    let workspace_port = if use_lan_workspace_adapter {
+        workspace_proxy::start_workspace_proxy(app, generation, port)?
+    } else {
+        port
+    };
+    let workspace_origin = format!("http://{KIMI_HOST}:{workspace_port}");
+    let workspace_url = token_resolver::build_workspace_url(&workspace_origin, Some(&token.value));
     {
         let state = app.state::<AppState>();
         let mut runtime = state
@@ -960,11 +1118,12 @@ fn finish_ready(
         runtime.runtime_ownership = ownership;
         runtime.base_port = Some(port);
         runtime.active_port = Some(port);
-        runtime.workspace_port = Some(port);
+        runtime.workspace_port = Some(workspace_port);
         runtime.runtime_origin = Some(origin.clone());
         runtime.server_token_path = Some(token.path.clone());
         runtime.server_token_redacted = Some(token.redacted.clone());
         runtime.workspace_url = Some(workspace_url);
+        runtime.lan_access_force_owned_start = false;
         runtime.last_error = None;
         runtime.backend_ready_at_ms = Some(unix_time_millis());
         runtime.last_exit_reason = None;
@@ -1320,13 +1479,17 @@ fn startup_failure_message(
     format!("后端启动失败：{reason}。{guidance}{shell_guidance}")
 }
 
-fn build_kimi_web_args(base_port: u16) -> Vec<String> {
-    vec![
+fn build_kimi_web_args(base_port: u16, lan_access_enabled: bool) -> Vec<String> {
+    let mut args = vec![
         "web".to_string(),
         "--no-open".to_string(),
         "--port".to_string(),
         base_port.to_string(),
-    ]
+    ];
+    if lan_access_enabled {
+        args.extend(["--host".to_string(), "0.0.0.0".to_string()]);
+    }
+    args
 }
 
 fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
@@ -1693,7 +1856,7 @@ mod tests {
         let child = spawn_backend_process(
             &executable,
             &root,
-            &build_kimi_web_args(58627),
+            &build_kimi_web_args(58627, false),
             &log_path,
             None,
             None,
@@ -1709,8 +1872,16 @@ mod tests {
     #[test]
     fn launch_args_enforce_local_only_mode() {
         assert_eq!(
-            build_kimi_web_args(57999),
+            build_kimi_web_args(57999, false),
             vec!["web", "--no-open", "--port", "57999"]
+        );
+    }
+
+    #[test]
+    fn launch_args_enable_native_lan_without_relaxing_other_controls() {
+        assert_eq!(
+            build_kimi_web_args(57999, true),
+            vec!["web", "--no-open", "--port", "57999", "--host", "0.0.0.0"]
         );
     }
 
@@ -1880,14 +2051,8 @@ mod tests {
         assert!(
             parse_existing_server_lock(r#"{"pid":0,"host":"localhost","port":55695}"#).is_err()
         );
-        assert_eq!(
-            local_server_origin("0.0.0.0", 55695).unwrap(),
-            "http://127.0.0.1:55695"
-        );
-        assert_eq!(
-            local_server_origin("::", 55695).unwrap(),
-            "http://[::1]:55695"
-        );
+        assert!(local_server_origin("0.0.0.0", 55695).is_err());
+        assert!(local_server_origin("::", 55695).is_err());
         assert!(local_server_origin("127.0.0.1", 0).is_err());
         assert!(local_server_origin("127.0.0.1", 70_000).is_err());
     }

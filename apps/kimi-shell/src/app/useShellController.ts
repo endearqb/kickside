@@ -111,7 +111,10 @@ import { useAppUpdateController } from "@/app/useAppUpdateController";
 import { useInstallController } from "@/app/useInstallController";
 import { useSkillCenterController } from "@/app/useSkillCenterController";
 import { useShellPollingController } from "@/app/useShellPollingController";
-import { useWorkspaceEmbedUrl } from "@/app/useWorkspaceEmbedUrl";
+import {
+  buildWorkspaceFrameKey,
+  useWorkspaceEmbedUrl,
+} from "@/app/useWorkspaceEmbedUrl";
 import { useWorkspaceImportController } from "@/app/useWorkspaceImportController";
 import { useWorkspaceGridStore } from "@/features/workspace-grid/gridStore";
 import { usePlatformCapabilities } from "@/platform/usePlatformCapabilities";
@@ -471,9 +474,12 @@ export function useShellController() {
     return "loading";
   }, [hashRoute, keepControlCenterForUpgrade, onboarding, status, useBootHintWorkspace]);
 
-  const workspaceFrameKey = remoteUrl
-    ? `${remoteUrl}::${workspaceWebSettings.mode}::${workspaceFrameReloadToken}`
-    : "workspace-empty";
+  const workspaceFrameKey = buildWorkspaceFrameKey(
+    remoteUrl,
+    workspaceWebSettings.mode,
+    workspaceFrameReloadToken,
+    status?.startCycleId,
+  );
   const chatRemoteUrl = KIMI_CHAT_REMOTE_URL;
   const isWorkspaceSplit = workspaceLayoutMode === "split";
   const chatOrigin = useMemo(() => {

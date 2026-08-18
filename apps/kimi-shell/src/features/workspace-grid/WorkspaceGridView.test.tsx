@@ -12,7 +12,7 @@ import { getAgentRoomCapabilities } from "@/services/agentRoomService";
 import { createDefaultWorkspaceGridState } from "./gridMigration";
 import { useWorkspaceGridStore } from "./gridStore";
 import { postThemeToFrame } from "./PaneFrame";
-import { WorkspaceGridView } from "./WorkspaceGridView";
+import { findCodeDropFrame, WorkspaceGridView } from "./WorkspaceGridView";
 
 vi.mock("@/services/externalWebviewService", () => ({
   createEmbeddedExternalWebview: vi.fn(async () => ({
@@ -100,6 +100,10 @@ const props: WorkspaceViewProps = {
 describe("WorkspaceGridView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => null),
+    });
     if (typeof window.localStorage?.clear === "function") {
       window.localStorage.clear();
     }
@@ -109,6 +113,10 @@ describe("WorkspaceGridView", () => {
   afterEach(() => {
     cleanup();
     document.body.replaceChildren();
+    Object.defineProperty(window, "devicePixelRatio", {
+      configurable: true,
+      value: 1,
+    });
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -119,6 +127,43 @@ describe("WorkspaceGridView", () => {
     fireEvent.keyDown(screen.getByRole("region"), { key: "ArrowRight" });
 
     expect(useWorkspaceGridStore.getState().activePaneId).toBe("pane-chat");
+  });
+
+  it("routes native file drops only to the code pane under the physical point", () => {
+    render(<WorkspaceGridView {...props} />);
+    const codeFrame = document.querySelector<HTMLIFrameElement>(
+      '[data-workspace-pane-id="pane-code"] .workspace-iframe',
+    );
+    const chatFrame = document.querySelector<HTMLIFrameElement>(
+      '[data-workspace-pane-id="pane-chat"] .workspace-iframe',
+    );
+    expect(codeFrame).toBeTruthy();
+    expect(chatFrame).toBeTruthy();
+
+    vi.mocked(document.elementFromPoint).mockReturnValue(codeFrame);
+    expect(findCodeDropFrame({ x: 300, y: 500 })).toBe(codeFrame);
+
+    vi.mocked(document.elementFromPoint).mockReturnValue(chatFrame);
+    expect(findCodeDropFrame({ x: 900, y: 500 })).toBeNull();
+  });
+
+  it("falls back from physical Retina coordinates to CSS coordinates", () => {
+    render(<WorkspaceGridView {...props} />);
+    const codeFrame = document.querySelector<HTMLIFrameElement>(
+      '[data-workspace-pane-id="pane-code"] .workspace-iframe',
+    );
+    Object.defineProperty(window, "devicePixelRatio", {
+      configurable: true,
+      value: 2,
+    });
+    const elementFromPoint = vi
+      .mocked(document.elementFromPoint)
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(codeFrame);
+
+    expect(findCodeDropFrame({ x: 600, y: 1000 })).toBe(codeFrame);
+    expect(elementFromPoint).toHaveBeenNthCalledWith(1, 600, 1000);
+    expect(elementFromPoint).toHaveBeenNthCalledWith(2, 300, 500);
   });
 
   it("does not use edge-to-edge chrome in the default multi-pane layout", () => {

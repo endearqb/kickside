@@ -1,12 +1,11 @@
 use std::{
-    collections::HashSet,
     fs,
     net::IpAddr,
     path::{Path, PathBuf},
 };
 
 #[cfg(windows)]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -30,6 +29,10 @@ pub(super) struct ServerInstance {
 impl ServerInstance {
     pub(super) fn origin(&self) -> Option<String> {
         loopback_origin(&self.host, self.port)
+    }
+
+    pub(super) fn owned_probe_origin(&self) -> Option<String> {
+        owned_local_probe_origin(&self.host, self.port)
     }
 }
 
@@ -93,10 +96,33 @@ pub(super) fn owned_candidates(
     child_pid: u32,
     launch_time_ms: u64,
 ) -> Vec<ServerInstance> {
-    let owned_pids = owned_process_ids(child_pid);
-    owned_candidates_matching(instances, child_pid, launch_time_ms, |pid, _| {
-        owned_pids.contains(&pid)
-    })
+    owned_candidates_matching(
+        instances,
+        child_pid,
+        launch_time_ms,
+        belongs_to_owned_launcher,
+    )
+}
+
+#[cfg(not(windows))]
+fn belongs_to_owned_launcher(pid: u32, launcher_pid: u32) -> bool {
+    if pid == launcher_pid {
+        return true;
+    }
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    let Ok(launcher_pid) = i32::try_from(launcher_pid) else {
+        return false;
+    };
+    nix::unistd::getpgid(Some(nix::unistd::Pid::from_raw(pid)))
+        .map(|group| group.as_raw() == launcher_pid)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn belongs_to_owned_launcher(pid: u32, launcher_pid: u32) -> bool {
+    owned_process_ids(launcher_pid).contains(&pid)
 }
 
 fn owned_candidates_matching(
@@ -116,11 +142,6 @@ fn owned_candidates_matching(
         })
         .cloned()
         .collect()
-}
-
-#[cfg(not(windows))]
-fn owned_process_ids(launcher_pid: u32) -> HashSet<u32> {
-    HashSet::from([launcher_pid])
 }
 
 #[cfg(windows)]
@@ -206,8 +227,10 @@ fn validate_instance(instance: ServerInstance) -> Result<ServerInstance, String>
     if instance.port == 0 {
         return Err("port is invalid".to_string());
     }
-    if loopback_origin(&instance.host, instance.port).is_none() {
-        return Err("host is not loopback".to_string());
+    if loopback_origin(&instance.host, instance.port).is_none()
+        && owned_local_probe_origin(&instance.host, instance.port).is_none()
+    {
+        return Err("host is neither loopback nor an owned wildcard bind".to_string());
     }
     if instance.started_at > instance.heartbeat_at.saturating_add(60_000) {
         return Err("heartbeat predates started_at beyond tolerance".to_string());
@@ -238,6 +261,15 @@ fn loopback_origin(host: &str, port: u16) -> Option<String> {
     match address {
         IpAddr::V4(address) => Some(format!("http://{address}:{port}")),
         IpAddr::V6(address) => Some(format!("http://[{address}]:{port}")),
+    }
+}
+
+fn owned_local_probe_origin(host: &str, port: u16) -> Option<String> {
+    let normalized = host.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+    match normalized.as_str() {
+        "0.0.0.0" => Some(format!("http://127.0.0.1:{port}")),
+        "::" => Some(format!("http://[::1]:{port}")),
+        _ => loopback_origin(host, port),
     }
 }
 
@@ -500,5 +532,14 @@ mod tests {
         );
         assert!(loopback_origin("0.0.0.0", 58627).is_none());
         assert!(loopback_origin("192.0.2.1", 58627).is_none());
+        assert_eq!(
+            owned_local_probe_origin("0.0.0.0", 58627).as_deref(),
+            Some("http://127.0.0.1:58627")
+        );
+        assert_eq!(
+            owned_local_probe_origin("::", 58627).as_deref(),
+            Some("http://[::1]:58627")
+        );
+        assert!(owned_local_probe_origin("192.0.2.1", 58627).is_none());
     }
 }

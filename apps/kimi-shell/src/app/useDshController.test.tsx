@@ -5,6 +5,15 @@ import * as dshService from "@/services/dshService";
 import { useDshController } from "./useDshController";
 
 vi.mock("@/services/dshService", () => ({
+  checkDshUpdate: vi.fn(async () => ({
+    state: "up_to_date",
+    installedVersion: "0.1.0-rc.7",
+    recommendedVersion: "0.1.0-rc.7",
+    upstreamVersion: "0.1.0-rc.7",
+    updateAvailable: false,
+    compatible: true,
+    checkedAtMs: 1,
+  })),
   getDshPreflight: vi.fn(),
   getDshSettings: vi.fn(),
   getDshStatus: vi.fn(),
@@ -12,6 +21,7 @@ vi.mock("@/services/dshService", () => ({
   saveDshSettings: vi.fn(),
   startDsh: vi.fn(),
   stopDsh: vi.fn(),
+  updateDsh: vi.fn(),
 }));
 
 describe("useDshController", () => {

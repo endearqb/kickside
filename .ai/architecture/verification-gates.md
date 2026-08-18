@@ -23,7 +23,9 @@ node --test scripts/generate_updater_manifest.test.mjs
 
 `pnpm check:kimi-web:visual` 使用本机 Chrome 对比脱敏 Kimi 0.36.1 fixture 的 10 张断点/主题/原生 TOC 左侧短条/mobile projection/focus 展开/sidebar 原状截图；Chrome 不在标准路径时设置 `CHROME_PATH`。它是 DOM 注入的本地视觉回归 gate，不替代 WKWebView/WebView2 G3。
 
-真实 DSH runtime canary 在 `.github/workflows/dsh-runtime-canary.yml` 运行：PR 必须通过 Windows/macOS × Node 22.19/24 的固定 `0.1.0-rc.6` smoke 与稳定汇总检查 `DSH runtime gate`；每周/手动运行时每腿连续采样 5 次，并额外观察 Node 20.12 与 latest breaking，但观察项不改变应用支持矩阵或 pin。仓库外仍需在 GitHub ruleset/branch protection 将 `DSH runtime gate` 配为 required，才具备不可绕过的远端合并权限。单机可运行 `pnpm check:dsh:runtime`；该命令使用隔离临时前缀/`DSH_HOME` 验证 npm 安装、固定入口、精确 loopback HTTP 状态、有界 `__DSH_BOOT__` 页面身份、整树停止和端口释放，但不经过 Rust 生产 npm launcher。需要重复采样时运行 `node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6 --samples 5`。
+Kimi Native LAN 由 Shell gate 覆盖：Rust 测试必须固定 local/LAN argv、external wildcard 拒绝与 owned wildcard loopback probe；React 测试覆盖 external disabled、可信网络确认、按需 QR 与内存清理。真实 Windows/macOS listener、防火墙与移动设备访问仍属于 G3。
+
+真实 DSH runtime canary 在 `.github/workflows/dsh-runtime-canary.yml` 运行：PR 必须通过 Windows/macOS × Node 22.19/24 的推荐 `0.1.0-rc.7` smoke 与稳定汇总检查 `DSH runtime gate`；Rust 定向测试另行守护 `0.1.0-rc.6` 仍具备运行资格、安装/升级仍只接受推荐版本。每周/手动运行时每腿连续采样 5 次，并额外观察 Node 20.12 与 latest breaking，但观察项不改变应用支持矩阵或推荐版本。仓库外仍需在 GitHub ruleset/branch protection 将 `DSH runtime gate` 配为 required，才具备不可绕过的远端合并权限。单机可运行 `pnpm check:dsh:runtime`；该命令使用隔离临时前缀/`DSH_HOME` 验证 npm 安装、固定入口、精确 loopback HTTP 状态、有界 `__DSH_BOOT__` 页面身份、整树停止和端口释放，但不经过 Rust 生产 npm launcher。需要重复采样时运行 `node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.7 --samples 5`。
 
 ## IM Bridge
 

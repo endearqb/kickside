@@ -382,6 +382,7 @@ export function PaneFrame({
         onOpenTauriWebviewUrl={onOpenTauriWebviewUrl}
         paneTheme={paneTheme}
         themeSignal={themeMode}
+        workspaceBridgeNonce={workspaceBridgeNonce}
         active={active}
         onResumePane={onResumePane}
         iframeRef={paneIframeRef}
@@ -488,6 +489,7 @@ interface PaneContentProps {
   ) => void;
   paneTheme: Theme;
   themeSignal: Theme;
+  workspaceBridgeNonce: string;
   onResumePane: () => void;
   iframeRef: MutableRefObject<HTMLIFrameElement | null>;
   onIframeLoad: () => void;
@@ -506,6 +508,7 @@ function PaneContent({
   onOpenTauriWebviewUrl,
   paneTheme,
   themeSignal,
+  workspaceBridgeNonce,
   onResumePane,
   iframeRef,
   onIframeLoad,
@@ -532,9 +535,15 @@ function PaneContent({
       iframeRef.current,
       sourceUrl,
       paneTheme,
-      pane.kind === "code" ? { surface: "kimi-code", layoutEnhancement: "v2" } : undefined,
+      pane.kind === "code"
+        ? {
+            surface: "kimi-code",
+            layoutEnhancement: "v2",
+            bridgeNonce: workspaceBridgeNonce,
+          }
+        : undefined,
     );
-  }, [pane.kind, paneTheme, sourceUrl, themeSignal]);
+  }, [pane.kind, paneTheme, sourceUrl, themeSignal, workspaceBridgeNonce]);
 
   useEffect(() => {
     if (pane.kind !== "external" || !source.url) {
@@ -813,7 +822,11 @@ function PaneContent({
                 sourceUrl,
                 paneTheme,
                 pane.kind === "code"
-                  ? { surface: "kimi-code", layoutEnhancement: "v2" }
+                  ? {
+                      surface: "kimi-code",
+                      layoutEnhancement: "v2",
+                      bridgeNonce: workspaceBridgeNonce,
+                    }
                   : undefined,
               );
               if (pane.kind === "external") {
@@ -991,6 +1004,7 @@ export function postThemeToFrame(
   options?: {
     surface: "kimi-code";
     layoutEnhancement: "v2";
+    bridgeNonce?: string;
   },
 ): void {
   if (!frame?.contentWindow || !sourceUrl) {
@@ -1004,11 +1018,13 @@ export function postThemeToFrame(
       accent?: string;
       surface?: "kimi-code";
       layoutEnhancement?: "v2";
+      bridgeNonce?: string;
     } = { source: THEME_SYNC_SOURCE, theme };
     if (options && isKimiLayoutEnhancementEnabled()) {
       payload.accent = readHostAccentColor();
       payload.surface = options.surface;
       payload.layoutEnhancement = options.layoutEnhancement;
+      payload.bridgeNonce = options.bridgeNonce;
     }
     frame.contentWindow.postMessage(
       payload,
@@ -1106,7 +1122,7 @@ function resolvePaneSource({
       url: sessionUrl ?? codeRemoteUrl,
       title: "KimiCode",
       frameKey: `${pane.id}:${sessionUrl ?? codeFrameKey}`,
-      frameName: pane.id === "pane-code" ? workspaceBridgeNonce : undefined,
+      frameName: workspaceBridgeNonce,
       iframeRef: pane.id === "pane-code" ? workspaceIframeRef : undefined,
       loadState: codePaneState,
       onLoad: onCodeFrameLoad,

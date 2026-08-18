@@ -83,6 +83,10 @@ pub struct RuntimeState {
     pub startup_monitor_detail: Option<String>,
     pub startup_monitor_log_key: Option<String>,
     pub startup_trace: Vec<String>,
+    pub lan_access_enabled: bool,
+    pub lan_access_force_owned_start: bool,
+    pub lan_access_switching: bool,
+    pub lan_access_last_error: Option<String>,
 }
 
 impl Default for RuntimeState {
@@ -139,6 +143,10 @@ impl Default for RuntimeState {
             startup_monitor_detail: None,
             startup_monitor_log_key: None,
             startup_trace: Vec::new(),
+            lan_access_enabled: false,
+            lan_access_force_owned_start: false,
+            lan_access_switching: false,
+            lan_access_last_error: None,
         }
     }
 }

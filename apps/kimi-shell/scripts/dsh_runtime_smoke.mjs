@@ -7,7 +7,7 @@ import path from "node:path";
 import process from "node:process";
 
 const DSH_PACKAGE = "@deepseek-ai/dsh";
-const DEFAULT_PIN = "0.1.0-rc.6";
+const DEFAULT_PIN = "0.1.0-rc.7";
 const ENTRY_RELATIVE = path.join("node_modules", "@deepseek-ai", "dsh", "lib", "bin.js");
 const OUTPUT_LIMIT = 256 * 1024;
 const HTTP_BODY_LIMIT = 512 * 1024;

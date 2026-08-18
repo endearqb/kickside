@@ -3,14 +3,17 @@ import {
   getDshPreflight,
   getDshSettings,
   getDshStatus,
+  checkDshUpdate,
   installDsh,
   saveDshSettings,
   startDsh,
   stopDsh,
+  updateDsh,
   type DshInstallEvent,
   type DshPreflight,
   type DshSettings,
   type DshStatus,
+  type DshUpdateInfo,
 } from "@/services/dshService";
 
 const PREFLIGHT_TTL_MS = 60_000;
@@ -21,18 +24,31 @@ export type DshRefreshOptions = {
   preflight?: "none" | "cached" | "force";
 };
 
-export type DshBusyAction = "toggle" | "install" | "start" | "stop" | null;
+export type DshBusyAction =
+  | "toggle"
+  | "check_update"
+  | "install"
+  | "update"
+  | "start"
+  | "stop"
+  | null;
 
 export type DshControllerModel = {
   settings: DshSettings | null;
   preflight: DshPreflight | null;
   status: DshStatus | null;
+  updateInfo: DshUpdateInfo | null;
+  updateError: string | null;
   error: string | null;
   busy: boolean;
   busyAction: DshBusyAction;
   refresh: (options?: DshRefreshOptions) => Promise<DshStatus | null>;
   toggle: (enabled: boolean) => Promise<DshSettings | null>;
   install: (
+    onEvent?: (event: DshInstallEvent) => void,
+  ) => Promise<DshPreflight | null>;
+  checkUpdate: (force?: boolean) => Promise<DshUpdateInfo | null>;
+  update: (
     onEvent?: (event: DshInstallEvent) => void,
   ) => Promise<DshPreflight | null>;
   start: (workspaceDir: string) => Promise<DshStatus | null>;
@@ -46,12 +62,15 @@ export function useDshController(
   const [settings, setSettings] = useState<DshSettings | null>(null);
   const [preflight, setPreflight] = useState<DshPreflight | null>(null);
   const [status, setStatus] = useState<DshStatus | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<DshUpdateInfo | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<DshBusyAction>(null);
   const preflightRef = useRef<DshPreflight | null>(null);
   const preflightCheckedAtRef = useRef(0);
   const preflightPromiseRef = useRef<Promise<DshPreflight | null> | null>(null);
   const refreshPromiseRef = useRef<Promise<DshStatus | null> | null>(null);
+  const updateCheckPromiseRef = useRef<Promise<DshUpdateInfo | null> | null>(null);
 
   useEffect(() => {
     preflightRef.current = preflight;
@@ -130,9 +149,40 @@ export function useDshController(
     [refreshPreflight, tauriRuntime],
   );
 
+  const checkUpdate = useCallback(
+    async (force = false) => {
+      if (!tauriRuntime) return null;
+      if (updateCheckPromiseRef.current) return updateCheckPromiseRef.current;
+      if (force) setBusyAction("check_update");
+      setUpdateError(null);
+      const request = (async () => {
+        try {
+          const next = await checkDshUpdate(force);
+          setUpdateInfo(next);
+          return next;
+        } catch (cause) {
+          setUpdateError(formatError(cause));
+          return null;
+        } finally {
+          if (force) setBusyAction(null);
+        }
+      })();
+      updateCheckPromiseRef.current = request;
+      try {
+        return await request;
+      } finally {
+        if (updateCheckPromiseRef.current === request) {
+          updateCheckPromiseRef.current = null;
+        }
+      }
+    },
+    [tauriRuntime],
+  );
+
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void checkUpdate();
+  }, [checkUpdate, refresh]);
 
   useEffect(() => {
     if (!tauriRuntime || !settings?.enabled) return;
@@ -190,6 +240,7 @@ export function useDshController(
         preflightCheckedAtRef.current = Date.now();
         setPreflight(nextPreflight);
         await refresh();
+        await checkUpdate(true);
         return nextPreflight;
       } catch (cause) {
         setError(formatError(cause));
@@ -198,7 +249,29 @@ export function useDshController(
         setBusyAction(null);
       }
     },
-    [refresh],
+    [checkUpdate, refresh],
+  );
+
+  const update = useCallback(
+    async (onEvent?: (event: DshInstallEvent) => void) => {
+      setBusyAction("update");
+      setError(null);
+      try {
+        const nextPreflight = await updateDsh(onEvent);
+        preflightRef.current = nextPreflight;
+        preflightCheckedAtRef.current = Date.now();
+        setPreflight(nextPreflight);
+        await refresh();
+        await checkUpdate(true);
+        return nextPreflight;
+      } catch (cause) {
+        setError(formatError(cause));
+        return null;
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [checkUpdate, refresh],
   );
 
   const start = useCallback(async (workspaceDir: string) => {
@@ -238,12 +311,16 @@ export function useDshController(
     settings,
     preflight,
     status,
+    updateInfo,
+    updateError,
     error,
     busy: busyAction !== null,
     busyAction,
     refresh,
     toggle,
     install,
+    checkUpdate,
+    update,
     start,
     stop,
   };

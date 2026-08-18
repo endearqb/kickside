@@ -123,6 +123,27 @@ function dispatchKimiLayoutTheme(
   );
 }
 
+function dispatchFrameDrag(
+  frameDocument: Document,
+  type: "dragenter" | "dragover" | "drop",
+  dataTransfer: {
+    types: string[];
+    items: Array<{ kind: string }>;
+    files: File[];
+  },
+) {
+  const event = new frameDocument.defaultView!.Event(type, {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.defineProperty(event, "dataTransfer", {
+    configurable: true,
+    value: dataTransfer,
+  });
+  (frameDocument.body || frameDocument.documentElement).dispatchEvent(event);
+  return event;
+}
+
 describe("link bridge iframe source checks", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -634,6 +655,141 @@ describe("link bridge iframe source checks", () => {
     );
     expect(frameDocument.documentElement.dataset.kimiShellLayout).toBeUndefined();
     expect(frameDocument.getElementById("kickside-kimi-layout-v2")).toBeNull();
+  });
+
+  it("allows protected WKWebView file drags only after a trusted Kimi request", () => {
+    const { frameDocument, frameWindow } = createKimiLayoutFixture(1180);
+    const file = new frameWindow.File(["hello"], "hello.txt", { type: "text/plain" });
+    const protectedTransfer = {
+      types: ["Files"],
+      items: [],
+      files: [file],
+    };
+
+    expect(dispatchFrameDrag(frameDocument, "dragover", protectedTransfer).defaultPrevented).toBe(
+      false,
+    );
+
+    dispatchKimiLayoutTheme(frameWindow);
+    const bubbledDragOver = vi.fn();
+    frameDocument.body.addEventListener("dragover", bubbledDragOver);
+
+    expect(dispatchFrameDrag(frameDocument, "dragenter", protectedTransfer).defaultPrevented).toBe(
+      true,
+    );
+    expect(dispatchFrameDrag(frameDocument, "dragover", protectedTransfer).defaultPrevented).toBe(
+      true,
+    );
+    expect(bubbledDragOver).toHaveBeenCalledOnce();
+
+    const receivedFiles: File[] = [];
+    frameDocument.addEventListener("drop", (event) => {
+      receivedFiles.push(...Array.from((event as DragEvent).dataTransfer?.files || []));
+    });
+    const drop = dispatchFrameDrag(frameDocument, "drop", protectedTransfer);
+    expect(drop.defaultPrevented).toBe(false);
+    expect(receivedFiles).toEqual([file]);
+  });
+
+  it("does not intercept non-file drags or file items already visible to Kimi", () => {
+    const { frameDocument, frameWindow } = createKimiLayoutFixture(1180);
+    dispatchKimiLayoutTheme(frameWindow);
+
+    expect(
+      dispatchFrameDrag(frameDocument, "dragover", {
+        types: ["text/plain"],
+        items: [],
+        files: [],
+      }).defaultPrevented,
+    ).toBe(false);
+    expect(
+      dispatchFrameDrag(frameDocument, "dragover", {
+        types: ["Files"],
+        items: [{ kind: "file" }],
+        files: [],
+      }).defaultPrevented,
+    ).toBe(false);
+  });
+
+  it("does not enable protected file drops for non-Kimi surfaces", () => {
+    const { frameDocument, frameWindow } = createKimiLayoutFixture(1180);
+    dispatchKimiLayoutTheme(frameWindow, {
+      surface: "dsh",
+      layoutEnhancement: undefined,
+    });
+
+    expect(
+      dispatchFrameDrag(frameDocument, "dragover", {
+        types: ["Files"],
+        items: [],
+        files: [],
+      }).defaultPrevented,
+    ).toBe(false);
+  });
+
+  it("attaches native drop bytes only after the trusted Kimi nonce handshake", () => {
+    const { frameDocument, frameWindow } = createKimiLayoutFixture(1180);
+    frameWindow.name = "native-drop-nonce";
+    const input = frameDocument.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.className = "file-input-hidden";
+    frameDocument.body.append(input);
+
+    const transferredFiles: File[] = [];
+    class FixtureDataTransfer {
+      readonly items = {
+        add: (file: File) => {
+          transferredFiles.push(file);
+        },
+      };
+      get files() {
+        return transferredFiles;
+      }
+    }
+    Object.defineProperty(frameWindow, "DataTransfer", {
+      configurable: true,
+      value: FixtureDataTransfer,
+    });
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      get: () => transferredFiles,
+      set: () => undefined,
+    });
+    const changed = vi.fn();
+    input.addEventListener("change", changed);
+
+    dispatchKimiLayoutTheme(frameWindow, { bridgeNonce: "native-drop-nonce" });
+    const bytes = new frameWindow.Uint8Array([104, 105]).buffer;
+    frameWindow.dispatchEvent(
+      new MessageEvent("message", {
+        source: frameWindow.parent,
+        data: {
+          source: "kimi-shell-native-file-drop",
+          action: "attach_files",
+          bridgeNonce: "wrong-nonce",
+          files: [{ name: "hello.txt", type: "text/plain", size: 2, bytes }],
+        },
+      }),
+    );
+    expect(changed).not.toHaveBeenCalled();
+
+    frameWindow.dispatchEvent(
+      new MessageEvent("message", {
+        source: frameWindow.parent,
+        data: {
+          source: "kimi-shell-native-file-drop",
+          action: "attach_files",
+          bridgeNonce: "native-drop-nonce",
+          files: [{ name: "hello.txt", type: "text/plain", size: 2, bytes }],
+        },
+      }),
+    );
+
+    expect(changed).toHaveBeenCalledOnce();
+    expect(transferredFiles).toHaveLength(1);
+    expect(transferredFiles[0]?.name).toBe("hello.txt");
+    expect(transferredFiles[0]?.size).toBe(2);
   });
 
   it("fails open and emits a bounded diagnostic when semantic hooks are missing", () => {

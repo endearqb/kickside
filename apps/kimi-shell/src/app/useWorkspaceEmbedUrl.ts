@@ -6,6 +6,16 @@ import {
 } from "@/app/linkBridge";
 import type { AppStatus } from "@/app/types";
 
+export function buildWorkspaceFrameKey(
+  remoteUrl: string | null,
+  mode: string,
+  reloadToken: number,
+  startCycleId: number | null | undefined,
+) {
+  if (!remoteUrl) return "workspace-empty";
+  return `${remoteUrl}::${mode}::${reloadToken}::cycle-${startCycleId ?? "unknown"}`;
+}
+
 export function useWorkspaceEmbedUrl(status: AppStatus | null) {
   const [workspaceEmbedUrl, setWorkspaceEmbedUrlState] = useState<string | null>(null);
   const workspaceEmbedUrlRef = useRef<string | null>(null);

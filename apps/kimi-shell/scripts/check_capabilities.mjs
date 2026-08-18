@@ -7,6 +7,9 @@ const raw = JSON.parse(fs.readFileSync(root, "utf8"));
 const tauriConfig = JSON.parse(
   fs.readFileSync(path.resolve(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),
 );
+const macosTauriConfig = JSON.parse(
+  fs.readFileSync(path.resolve(process.cwd(), "src-tauri", "tauri.macos.conf.json"), "utf8"),
+);
 
 const capabilityList = Array.isArray(raw)
   ? raw
@@ -131,7 +134,15 @@ if (tauriConfig.app?.windows?.some((item) => item.label === "agent-room")) {
 const mainWindowConfig = tauriConfig.app?.windows?.find((item) => item.label === "main");
 if (mainWindowConfig?.dragDropEnabled !== false) {
   errors.push(
-    "main window must disable Tauri native drag/drop so Kimi Code receives HTML5 file drops",
+    "base main window must disable Tauri native drag/drop for Windows HTML5 file drops",
+  );
+}
+const macosMainWindowConfig = macosTauriConfig.app?.windows?.find(
+  (item) => item.label === "main",
+);
+if (macosMainWindowConfig?.dragDropEnabled !== true) {
+  errors.push(
+    "macOS main window must enable native drag/drop for the bounded Kimi attachment bridge",
   );
 }
 

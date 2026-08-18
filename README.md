@@ -22,7 +22,7 @@ KickSide 是面向 Windows x64 与 Apple Silicon macOS 13+ 的开源桌面应用
 - **会话始终在场**：Pane Shelf 收纳暂时不可见的会话；重新排列窗格不会让长任务丢失上下文。
 - **桌面级运行管理**：统一管理 Kimi Code、DSH、应用更新、默认工作目录、日志与诊断。
 - **跨平台原生体验**：macOS 使用原生 traffic lights、菜单与 Dock 生命周期；Windows 支持托盘、WebView2 和 Explorer 打开入口。
-- **安全边界明确**：运行时只接受受控 loopback 地址，令牌不进入 README、持久化布局或诊断输出。
+- **安全边界明确**：运行时默认只接受受控 loopback；用户可临时把 KickSide-owned Kimi 开放到可信局域网，令牌不进入持久化布局或诊断输出。
 
 ## 两种智能体，一个工作台
 
@@ -40,7 +40,7 @@ Kimi Code 保留原生会话侧栏、消息交互和附件能力。KickSide 为�
 
 ## 统一控制中心
 
-控制中心集中呈现应用与运行时状态，提供更新检查、Kimi Code 健康状态、DeepSeek Harness 开关、默认工作目录、外部 IM 通道、Skill、WorkspaceHub、调度和诊断入口。
+控制中心集中呈现应用与运行时状态，提供更新检查、Kimi Code 健康状态、临时局域网访问、DeepSeek Harness 开关、默认工作目录、外部 IM 通道、Skill、WorkspaceHub、调度和诊断入口。
 
 ![KickSide 控制中心](apps/kimi-shell/public/readme/control-center.png)
 

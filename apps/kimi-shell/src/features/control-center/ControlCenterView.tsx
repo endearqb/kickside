@@ -42,6 +42,7 @@ import {
 } from "@/features/control-center/KimiCodeAccessPanel";
 import { ControlCenterTaskSurface } from "@/features/control-center/ControlCenterTaskSurface";
 import { DshSettingsPanel } from "@/features/control-center/DshSettingsPanel";
+import { LanAccessSettingsPanel } from "@/features/control-center/LanAccessSettingsPanel";
 import {
   InstallFlowTaskContent,
 } from "@/features/control-center/InstallFlowModal";
@@ -100,7 +101,7 @@ const DEFAULT_CONTEXT_MENU_LABELS: ContextMenuLabelsInput = {
 };
 
 type PreservedControlPage = "settings" | "skill_center" | "workspace_hub" | "schedule";
-type SettingsDisclosureId = OnboardingCardId | "dsh";
+type SettingsDisclosureId = OnboardingCardId | "dsh" | "lan_access";
 
 export function ControlCenterPreservedPage({
   active,
@@ -225,6 +226,7 @@ export function ControlCenterView({
   activeTask,
   activeTaskPayload,
   dsh,
+  lanAccess,
   setActiveControlSection,
   setActiveRuntimePanel,
   onWorkDirInputChange,
@@ -1458,12 +1460,12 @@ export function ControlCenterView({
     const settingsGroups: Array<{
       id: string;
       title: string;
-      stepIds: Array<OnboardingCardId | "dsh">;
+      stepIds: Array<OnboardingCardId | "dsh" | "lan_access">;
     }> = [
       {
         id: "updates",
         title: "更新与运行",
-        stepIds: ["app_update", "install", "dsh", "auth"],
+        stepIds: ["app_update", "install", "lan_access", "dsh", "auth"],
       },
       {
         id: "workspace",
@@ -1720,6 +1722,18 @@ export function ControlCenterView({
               </div>
               <ul className="cc-image-row-list cc-settings-group-list">
                 {group.stepIds.map((stepId) => {
+                  if (stepId === "lan_access") {
+                    return (
+                      <LanAccessSettingsPanel
+                        key="lan_access"
+                        lanAccess={lanAccess}
+                        expanded={expandedOnboardingCard === "lan_access"}
+                        onExpandedChange={(expanded) =>
+                          setExpandedOnboardingCard(expanded ? "lan_access" : null)
+                        }
+                      />
+                    );
+                  }
                   if (stepId === "dsh") {
                     return (
                       <DshSettingsPanel

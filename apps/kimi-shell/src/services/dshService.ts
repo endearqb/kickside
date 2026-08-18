@@ -45,6 +45,23 @@ export interface DshPreflight {
   issues: string[];
 }
 
+export type DshUpdateState =
+  | "not_installed"
+  | "up_to_date"
+  | "update_available"
+  | "ahead"
+  | "unsupported";
+
+export interface DshUpdateInfo {
+  state: DshUpdateState;
+  installedVersion?: string;
+  recommendedVersion: string;
+  upstreamVersion?: string;
+  updateAvailable: boolean;
+  compatible: boolean;
+  checkedAtMs: number;
+}
+
 export type DshInstallStage =
   | "preflight"
   | "prepare"
@@ -90,10 +107,20 @@ export function getDshPreflight() {
   return invoke<DshPreflight>("dsh_get_preflight");
 }
 
+export function checkDshUpdate(force = false) {
+  return invoke<DshUpdateInfo>("dsh_check_update", { force });
+}
+
 export function installDsh(onEvent?: (event: DshInstallEvent) => void) {
   const progress = new Channel<DshInstallEvent>();
   progress.onmessage = (event) => onEvent?.(event);
   return invoke<DshPreflight>("dsh_install", { progress });
+}
+
+export function updateDsh(onEvent?: (event: DshInstallEvent) => void) {
+  const progress = new Channel<DshInstallEvent>();
+  progress.onmessage = (event) => onEvent?.(event);
+  return invoke<DshPreflight>("dsh_update", { progress });
 }
 
 export function getDshStatus() {

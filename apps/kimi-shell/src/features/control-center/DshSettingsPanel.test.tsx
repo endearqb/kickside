@@ -36,12 +36,16 @@ function createDshController(
     settings: null,
     preflight: null,
     status: null,
+    updateInfo: null,
+    updateError: null,
     error: null,
     busy: false,
     busyAction: null,
     refresh: vi.fn(async () => null),
     toggle: vi.fn(async () => null),
     install: vi.fn(async () => null),
+    checkUpdate: vi.fn(async () => null),
+    update: vi.fn(async () => null),
     start: vi.fn(async () => null),
     stop: vi.fn(async () => null),
     ...overrides,
@@ -108,7 +112,7 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
     expect(screen.getByText(/启用后随应用启动默认工作区/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新安装固定版本" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新安装当前版本" })).toBeTruthy();
     expect(dsh.refresh).toHaveBeenCalledWith({ preflight: "cached" });
   });
 
@@ -135,6 +139,46 @@ describe("DshSettingsPanel", () => {
 
     await waitFor(() => expect(toggle).toHaveBeenCalledWith(true));
     expect(onExpandedChange).not.toHaveBeenCalled();
+  });
+
+  it("shows a checked recommended update and delegates one-click upgrade", async () => {
+    const update = vi.fn(async () => readyPreflight());
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: {
+        ...readyPreflight(),
+        installedVersion: "0.1.0-rc.6",
+        installValid: true,
+        runtimeReady: true,
+      },
+      status: { state: "stopped", pinnedVersion: "0.1.0-rc.7" },
+      updateInfo: {
+        state: "update_available",
+        installedVersion: "0.1.0-rc.6",
+        recommendedVersion: "0.1.0-rc.7",
+        upstreamVersion: "0.1.0-rc.7",
+        updateAvailable: true,
+        compatible: true,
+        checkedAtMs: 1,
+      },
+      update,
+    });
+
+    render(
+      <ul>
+        <DshSettingsPanel
+          dsh={dsh}
+          expanded
+          onExpandedChange={vi.fn()}
+          defaultWorkspaceDir="/tmp/workspace"
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText(/0.1.0-rc.6 → 0.1.0-rc.7/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "启动实例" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "升级到 0.1.0-rc.7" }));
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
   });
 
   it("requests preflight through the shared controller only when expanded", () => {
@@ -211,7 +255,7 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新安装固定版本" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新安装当前版本" }));
     expect(screen.getByRole("status").textContent).toContain("正在检测 Node.js");
 
     act(() => {

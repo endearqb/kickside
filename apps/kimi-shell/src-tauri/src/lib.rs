@@ -18,8 +18,10 @@ mod feishu_onboarding;
 mod harness;
 mod install_manager;
 mod kimi_locator;
+mod lan_access;
 mod log_manager;
 mod menu_manager;
+mod native_file_drop;
 mod nodejs_locator;
 mod onboarding_http;
 mod open_request;
@@ -1113,6 +1115,20 @@ pub fn run() {
     app.run(|app_handle, event| match event {
         RunEvent::WindowEvent { label, event, .. } => {
             if label == window_manager::MAIN_WINDOW_LABEL {
+                #[cfg(target_os = "macos")]
+                if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop {
+                    paths,
+                    position,
+                }) = &event
+                {
+                    if let Err(error) = native_file_drop::publish_drop(app_handle, paths, *position)
+                    {
+                        log_manager::append_line(
+                            app_handle,
+                            format!("native file drop rejected: {error}"),
+                        );
+                    }
+                }
                 match event {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();

@@ -53,6 +53,14 @@ const commandRegistry = {
     "save_kimi_path",
     "save_work_dir",
   ],
+  native_file_drop: [
+    "native_file_drop::consume_native_file_drop_grant",
+  ],
+  lan_access: [
+    "lan_access::get_kimi_lan_access_status",
+    "lan_access::set_kimi_lan_access",
+    "lan_access::get_kimi_lan_launch_url",
+  ],
   app_update: [
     "app_update::check_app_update",
     "app_update::install_app_update",
@@ -61,7 +69,9 @@ const commandRegistry = {
     "dsh_manager::dsh_get_settings",
     "dsh_manager::dsh_save_settings",
     "dsh_manager::dsh_get_preflight",
+    "dsh_manager::dsh_check_update",
     "dsh_manager::dsh_install",
+    "dsh_manager::dsh_update",
     "dsh_manager::dsh_start",
     "dsh_manager::dsh_get_status",
     "dsh_manager::dsh_stop",
@@ -252,6 +262,16 @@ const commandDomainMetadata = {
     windowCapability: "main,prefill",
     purpose: "backend lifecycle, startup handoff, workspace web settings, and persisted shell settings",
   },
+  native_file_drop: {
+    owner: "workspace-grid",
+    windowCapability: "main",
+    purpose: "single-use macOS Finder drop grants consumed by the exact Kimi Code pane",
+  },
+  lan_access: {
+    owner: "kimi-native-lan",
+    windowCapability: "main",
+    purpose: "ephemeral native Kimi LAN mode, private address projection, and explicit launch URL generation",
+  },
   workspace_grid: {
     owner: "workspace-grid",
     windowCapability: "main",
@@ -305,7 +325,7 @@ const commandDomainMetadata = {
   dsh: {
     owner: "dsh-manager",
     windowCapability: "main",
-    purpose: "DeepSeek Harness settings, private installation, owned local lifecycle, status, and redacted logs",
+    purpose: "DeepSeek Harness settings, checked updates, private installation, owned local lifecycle, status, and redacted logs",
   },
   install_compat: {
     owner: "install-center",

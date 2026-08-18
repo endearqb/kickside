@@ -31,7 +31,7 @@
     "check:enhanced-web:i18n": "node scripts/check_enhanced_web_i18n.mjs",
     "check:enhanced-web:compliance": "node scripts/check_enhanced_web_compliance.mjs",
     "check:nfr:security": "node scripts/check_capabilities.mjs && node scripts/check_bundle_resources.mjs && node scripts/check_command_registry.mjs",
-    "check:dsh:runtime": "node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.6",
+    "check:dsh:runtime": "node scripts/dsh_runtime_smoke.mjs --version 0.1.0-rc.7",
     "check:nfr:port-conflict": "powershell -ExecutionPolicy Bypass -File scripts/nfr_port_conflict.ps1",
     "check:nfr:reliability": "powershell -ExecutionPolicy Bypass -File scripts/nfr_reliability.ps1"
   },

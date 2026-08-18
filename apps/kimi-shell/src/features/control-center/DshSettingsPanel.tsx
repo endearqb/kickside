@@ -33,8 +33,8 @@ export function DshSettingsPanel({
   const [panelError, setPanelError] = useState<string | null>(null);
   const logRef = useRef<HTMLPreElement | null>(null);
   const keepLogPinnedRef = useRef(true);
-  const { settings, preflight, status, error, busy, busyAction } = dsh;
-  const displayedError = error ?? panelError;
+  const { settings, preflight, status, updateInfo, updateError, error, busy, busyAction } = dsh;
+  const displayedError = error ?? updateError ?? panelError;
 
   useEffect(() => {
     if (!keepLogPinnedRef.current || !logRef.current) return;
@@ -44,7 +44,8 @@ export function DshSettingsPanel({
   useEffect(() => {
     if (!expanded) return;
     void dsh.refresh({ preflight: "cached" });
-  }, [dsh.refresh, expanded]);
+    void dsh.checkUpdate(false);
+  }, [dsh.checkUpdate, dsh.refresh, expanded]);
 
   async function toggle(enabled: boolean) {
     setPanelError(null);
@@ -75,6 +76,30 @@ export function DshSettingsPanel({
     }
   }
 
+  async function update() {
+    setPanelError(null);
+    setLogs([]);
+    keepLogPinnedRef.current = true;
+    setInstallProgress({ stage: "preflight", message: "正在检查 DSH 推荐版本" });
+    const nextPreflight = await dsh.update((event) => {
+      if (event.type === "stage") {
+        setInstallProgress({ stage: event.stage, message: event.message });
+      } else if (event.type === "output") {
+        setLogs((current) => [...current, event.line].slice(-160));
+      } else if (event.type === "completed") {
+        setInstallProgress({
+          stage: "completed",
+          message: `DeepSeek Harness ${event.version} 升级完成`,
+        });
+      } else {
+        setPanelError(event.message);
+      }
+    });
+    if (!nextPreflight) {
+      setLogs(await getDshLogTail(160).catch(() => []));
+    }
+  }
+
   async function stop() {
     setPanelError(null);
     await dsh.stop();
@@ -91,6 +116,9 @@ export function DshSettingsPanel({
     status?.state === "running" ||
     status?.state === "degraded" ||
     status?.state === "starting";
+  const upgradeCandidate = updateInfo
+    ? updateInfo.updateAvailable
+    : Boolean(preflight?.installedVersion && !preflight.installValid);
   const canStart =
     settings?.enabled === true &&
     preflight?.runtimeReady === true &&
@@ -110,7 +138,7 @@ export function DshSettingsPanel({
     <ControlCenterSettingsRow
       id="dsh"
       title="DeepSeek Harness"
-      summary={formatSummary(settings, preflight, status)}
+      summary={formatSummary(settings, preflight, status, updateInfo?.updateAvailable === true)}
       statusTone={statusTone}
       icon={<BackendBrandIcon brand="dsh" size={18} />}
       expanded={expanded}
@@ -134,10 +162,25 @@ export function DshSettingsPanel({
     >
       <div className="cc-settings-detail-stack">
         <div className="cc-settings-live-row" aria-live="polite">
-          {preflight?.runtimeReady
+          {updateInfo?.updateAvailable
+            ? `发现可用更新 · ${updateInfo.installedVersion} → ${updateInfo.recommendedVersion}`
+            : preflight?.runtimeReady
             ? `已就绪 · Node ${preflight.nodeVersion ?? "已检测"} · DSH ${preflight.installedVersion}`
             : preflight?.issues.join(" ") ?? "正在检测 Node 与 DSH 私有安装…"}
         </div>
+        {updateInfo ? (
+          <p className="hint">
+            当前版本：{updateInfo.installedVersion ?? "未安装"} · KickSide 推荐：
+            {updateInfo.recommendedVersion} · 上游最新：{updateInfo.upstreamVersion ?? "未知"}
+          </p>
+        ) : null}
+        {updateInfo?.upstreamVersion &&
+        updateInfo.upstreamVersion !== updateInfo.recommendedVersion ? (
+          <p className="hint">已发现上游版本，尚未通过 KickSide 兼容性验证。</p>
+        ) : null}
+        {updateInfo?.updateAvailable ? (
+          <p className="hint">升级会暂时中断 DSH 窗格；启动验证失败会自动回滚。</p>
+        ) : null}
         <p className="hint">运行状态：{formatState(status?.state)}。启用后随应用启动默认工作区。</p>
         {status?.lastError ? <p className="cc-config-error">{status.lastError}</p> : null}
         {displayedError ? (
@@ -149,14 +192,26 @@ export function DshSettingsPanel({
             variant="outline"
             icon={<Download size={14} />}
             className="cc-action-btn"
-            disabled={busy || !preflight?.installReady}
-            onClick={() => void install()}
+            disabled={busy || !preflight?.installReady || updateInfo?.compatible === false}
+            onClick={() => void (upgradeCandidate ? update() : install())}
           >
-            {busyAction === "install"
-              ? "安装中"
+            {busyAction === "install" || busyAction === "update"
+              ? busyAction === "update" ? "升级中" : "安装中"
+              : upgradeCandidate
+                ? `升级到 ${updateInfo?.recommendedVersion ?? preflight?.pinnedVersion}`
               : preflight?.installValid
-                ? "重新安装固定版本"
-                : "安装固定版本"}
+                ? "重新安装当前版本"
+                : "安装 DSH"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            icon={<RefreshCcw size={14} />}
+            className="cc-action-btn"
+            disabled={busy}
+            onClick={() => void dsh.checkUpdate(true)}
+          >
+            {busyAction === "check_update" ? "检查中" : "检查更新"}
           </Button>
           <Button
             type="button"
@@ -166,7 +221,7 @@ export function DshSettingsPanel({
             disabled={busy}
             onClick={() => void dsh.refresh({ preflight: "force" })}
           >
-            重新检测
+            检测环境
           </Button>
           <Button
             type="button"
@@ -218,9 +273,11 @@ export function DshSettingsPanel({
             {installProgress.message}
           </div>
         ) : null}
-        {busyAction === "install" || logs.length > 0 ? (
+        {busyAction === "install" || busyAction === "update" || logs.length > 0 ? (
           <div className="cc-dsh-install-output">
-            <span className="cc-dsh-install-log-label">安装日志</span>
+            <span className="cc-dsh-install-log-label">
+              {busyAction === "update" ? "升级日志" : "安装日志"}
+            </span>
             <pre
               ref={logRef}
               className="cc-dsh-install-log"
@@ -248,13 +305,19 @@ function formatSummary(
   settings: DshSettings | null,
   preflight: DshPreflight | null,
   status: DshStatus | null,
+  updateAvailable: boolean,
 ) {
-  if (status?.state === "running") return `运行中 · ${directoryName(status.workspaceDir)}`;
+  if (status?.state === "running") {
+    return updateAvailable
+      ? "运行中 · 发现可用更新"
+      : `运行中 · ${directoryName(status.workspaceDir)}`;
+  }
   if (status?.state === "degraded") return "运行异常 · 展开查看详情";
   if (status?.state === "starting") return "正在加载默认工作区";
   if (status?.state === "crashed") return "启动失败 · 展开查看详情";
   if (!preflight) return "展开后检测";
   if (!preflight.runtimeReady) return preflight.issues[0] ?? "尚未安装";
+  if (updateAvailable) return "发现可用更新";
   return settings?.enabled ? "已启用 · 随 KickSide 启动" : "已就绪 · 当前未启用";
 }
 

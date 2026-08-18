@@ -26,22 +26,28 @@ describe("useAppUpdateController", () => {
   });
 
   it("checks once at startup and reports the latest version", async () => {
-    mockedInvoke.mockResolvedValue({ currentVersion: "0.1.12", available: false });
+    mockedInvoke.mockImplementation((command) => command === "get_app_update_source"
+      ? Promise.resolve("auto")
+      : Promise.resolve({ currentVersion: "0.1.12", available: false, configuredSource: "auto" }));
     const { result, rerender } = renderHook(() =>
       useAppUpdateController({ tauriRuntime: true, enabled: true }),
     );
     await waitFor(() => expect(result.current.appUpdateStatus).toBe("up_to_date"));
     rerender();
-    expect(mockedInvoke).toHaveBeenCalledTimes(1);
+    expect(mockedInvoke.mock.calls.filter(([command]) => command === "check_app_update")).toHaveLength(1);
   });
 
   it("keeps available update metadata", async () => {
-    mockedInvoke.mockResolvedValue({
-      currentVersion: "0.1.12",
-      available: true,
-      version: "0.1.13",
-      body: "更新说明",
-    });
+    mockedInvoke.mockImplementation((command) => command === "get_app_update_source"
+      ? Promise.resolve("auto")
+      : Promise.resolve({
+        currentVersion: "0.1.12",
+        available: true,
+        configuredSource: "auto",
+        resolvedSource: "gitee",
+        version: "0.1.13",
+        body: "更新说明",
+      }));
     const { result } = renderHook(() =>
       useAppUpdateController({ tauriRuntime: true, enabled: true }),
     );
@@ -50,7 +56,9 @@ describe("useAppUpdateController", () => {
   });
 
   it("keeps startup check failures local to update settings", async () => {
-    mockedInvoke.mockRejectedValue(new Error("offline"));
+    mockedInvoke.mockImplementation((command) => command === "get_app_update_source"
+      ? Promise.resolve("auto")
+      : Promise.reject(new Error("offline")));
     const { result } = renderHook(() =>
       useAppUpdateController({ tauriRuntime: true, enabled: true }),
     );
@@ -61,8 +69,9 @@ describe("useAppUpdateController", () => {
   it("reports download progress and ignores duplicate install clicks", async () => {
     let finish: (() => void) | undefined;
     mockedInvoke.mockImplementation((command) => {
+      if (command === "get_app_update_source") return Promise.resolve("auto");
       if (command === "check_app_update") {
-        return Promise.resolve({ currentVersion: "0.1.12", available: true, version: "0.1.13" });
+        return Promise.resolve({ currentVersion: "0.1.12", available: true, configuredSource: "auto", version: "0.1.13" });
       }
       return new Promise<void>((resolve) => {
         finish = resolve;
@@ -80,6 +89,24 @@ describe("useAppUpdateController", () => {
     act(() => latestChannel?.onmessage({ stage: "downloading", downloaded: 50, total: 100 }));
     expect(result.current.appUpdateProgress?.downloaded).toBe(50);
     act(() => finish?.());
+  });
+
+  it("persists a selected source and rechecks with the saved preference", async () => {
+    mockedInvoke.mockImplementation((command, payload) => {
+      if (command === "get_app_update_source") return Promise.resolve("auto");
+      if (command === "save_app_update_source") {
+        return Promise.resolve((payload as { source: string } | undefined)?.source);
+      }
+      return Promise.resolve({ currentVersion: "0.1.12", available: false, configuredSource: "gitee" });
+    });
+    const { result } = renderHook(() =>
+      useAppUpdateController({ tauriRuntime: true, enabled: true }),
+    );
+    await waitFor(() => expect(result.current.appUpdateStatus).toBe("up_to_date"));
+    await act(async () => result.current.saveAppUpdateSource("gitee"));
+    expect(mockedInvoke).toHaveBeenCalledWith("save_app_update_source", { source: "gitee" });
+    expect(result.current.appUpdateSource).toBe("gitee");
+    expect(mockedInvoke.mock.calls.filter(([command]) => command === "check_app_update")).toHaveLength(2);
   });
 
   it("does nothing in browser mode", () => {

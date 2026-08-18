@@ -24,6 +24,8 @@ const APP_COMMANDS: &[&str] = &[
     "get_kimi_lan_access_status",
     "set_kimi_lan_access",
     "get_kimi_lan_launch_url",
+    "get_app_update_source",
+    "save_app_update_source",
     "check_app_update",
     "install_app_update",
     "dsh_get_settings",

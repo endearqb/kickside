@@ -36,3 +36,33 @@ test("rejects a tag that does not match the version", async () => {
     /does not match/,
   );
 });
+
+test("accepts Gitee release asset URLs for the same signed artifacts", async () => {
+  const directory = await import("node:fs/promises").then(({ mkdtemp }) =>
+    mkdtemp(path.join(os.tmpdir(), "kickside-gitee-manifest-")),
+  );
+  const windowsSignature = path.join(directory, "windows.sig");
+  const macosSignature = path.join(directory, "macos.sig");
+  await writeFile(windowsSignature, "windows-signature\n", "utf8");
+  await writeFile(macosSignature, "macos-signature\n", "utf8");
+  const manifest = await buildManifest(new Map([
+    ["version", "0.2.3"],
+    ["tag", "v0.2.3"],
+    ["windows-url", "https://gitee.com/endearqb/kickside/releases/download/v0.2.3/KickSide.exe"],
+    ["windows-signature-file", windowsSignature],
+    ["macos-url", "https://gitee.com/endearqb/kickside/releases/download/v0.2.3/KickSide.app.tar.gz"],
+    ["macos-signature-file", macosSignature],
+  ]));
+  assert.equal(new URL(manifest.platforms["windows-x86_64"].url).hostname, "gitee.com");
+});
+
+test("rejects updater assets from an untrusted release host", async () => {
+  await assert.rejects(
+    () => buildManifest(new Map([
+      ["version", "0.2.3"],
+      ["tag", "v0.2.3"],
+      ["windows-url", "https://example.com/releases/download/v0.2.3/KickSide.exe"],
+    ])),
+    /unsupported host/,
+  );
+});

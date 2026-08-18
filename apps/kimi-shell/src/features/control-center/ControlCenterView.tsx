@@ -169,6 +169,8 @@ export function ControlCenterView({
   appUpdateInfo,
   appUpdateProgress,
   appUpdateError,
+  appUpdateSource,
+  appUpdateSourceBusy,
   bridgeSettings,
   bridgeStatus,
   bridgeOnboardingDraft,
@@ -312,6 +314,7 @@ export function ControlCenterView({
   onCancelInstallTask,
   onCheckAppUpdate,
   onInstallAppUpdate,
+  onSaveAppUpdateSource,
   onCompleteOnboarding,
   onOpenExternalUrl,
   onOpenSystemTerminal,
@@ -1487,6 +1490,21 @@ export function ControlCenterView({
       if (stepId === "app_update") {
         return (
           <div className="cc-settings-detail-stack">
+            <label className="cc-control-field">
+              <span>更新源</span>
+              <select
+                className="cc-control-select cc-app-update-source-select"
+                value={appUpdateSource}
+                onChange={(event) => void onSaveAppUpdateSource(
+                  event.target.value as import("@/app/types").AppUpdateSource,
+                )}
+                disabled={!appUpdateSupported || appUpdateBusy || appUpdateSourceBusy}
+              >
+                <option value="auto">自动选择（推荐）</option>
+                <option value="gitee">Gitee（中国大陆）</option>
+                <option value="github">GitHub</option>
+              </select>
+            </label>
             <div className="cc-settings-live-row" aria-live="polite">
               {appUpdateActionLabel}
             </div>
@@ -1499,6 +1517,12 @@ export function ControlCenterView({
                 <div>
                   <dt>最新版本</dt>
                   <dd>v{appUpdateInfo.version}</dd>
+                </div>
+              ) : null}
+              {appUpdateInfo?.resolvedSource ? (
+                <div>
+                  <dt>本次来源</dt>
+                  <dd>{appUpdateInfo.resolvedSource === "gitee" ? "Gitee" : "GitHub"}</dd>
                 </div>
               ) : null}
             </dl>

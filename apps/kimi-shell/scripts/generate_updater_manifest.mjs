@@ -4,6 +4,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const PLATFORM_KEYS = ["windows-x86_64", "darwin-aarch64"];
+const RELEASE_HOSTS = new Set(["github.com", "gitee.com"]);
 
 function parseArgs(argv) {
   const values = new Map();
@@ -36,6 +37,9 @@ function assertReleaseUrl(value, expectedTag) {
   const url = new URL(value);
   if (url.protocol !== "https:") {
     throw new Error(`release asset URL must use HTTPS: ${value}`);
+  }
+  if (!RELEASE_HOSTS.has(url.hostname)) {
+    throw new Error(`release asset URL uses an unsupported host: ${value}`);
   }
   if (!url.pathname.includes(`/releases/download/${expectedTag}/`)) {
     throw new Error(`release asset URL does not target ${expectedTag}: ${value}`);

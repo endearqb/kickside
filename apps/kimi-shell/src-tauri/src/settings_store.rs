@@ -235,4 +235,18 @@ mod tests {
         assert_eq!(value["agentBackends"]["dsh"]["enabled"], true);
         assert!(value.get("providers").is_none());
     }
+
+    #[test]
+    fn app_update_source_defaults_to_auto_and_round_trips() {
+        use crate::types::AppUpdateSource;
+
+        let legacy = serde_json::json!({"schemaVersion": 13});
+        let restored: AppSettings = serde_json::from_value(legacy).expect("legacy settings");
+        assert_eq!(restored.app_update_source, AppUpdateSource::Auto);
+
+        let mut gitee = restored;
+        gitee.app_update_source = AppUpdateSource::Gitee;
+        let value = serde_json::to_value(&gitee).expect("serialize settings");
+        assert_eq!(value["appUpdateSource"], "gitee");
+    }
 }

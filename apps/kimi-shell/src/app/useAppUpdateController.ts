@@ -3,6 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppUpdateInfo,
   AppUpdateProgress,
+  AppUpdateSource,
   AppUpdateStatus,
 } from "@/app/types";
 
@@ -19,6 +20,8 @@ export function useAppUpdateController({
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateProgress | null>(null);
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
+  const [appUpdateSource, setAppUpdateSource] = useState<AppUpdateSource>("auto");
+  const [appUpdateSourceBusy, setAppUpdateSourceBusy] = useState(false);
   const checkedRef = useRef(false);
   const installInFlightRef = useRef(false);
 
@@ -41,8 +44,33 @@ export function useAppUpdateController({
   useEffect(() => {
     if (!tauriRuntime || !enabled || checkedRef.current) return;
     checkedRef.current = true;
-    void checkAppUpdate();
+    void (async () => {
+      try {
+        const source = await invoke<AppUpdateSource>("get_app_update_source");
+        setAppUpdateSource(source);
+      } catch (error) {
+        setAppUpdateError(String(error));
+      }
+      await checkAppUpdate();
+    })();
   }, [checkAppUpdate, enabled, tauriRuntime]);
+
+  const saveAppUpdateSource = useCallback(async (source: AppUpdateSource) => {
+    if (!tauriRuntime || !enabled || appUpdateSourceBusy || installInFlightRef.current) return;
+    setAppUpdateSourceBusy(true);
+    setAppUpdateError(null);
+    try {
+      const saved = await invoke<AppUpdateSource>("save_app_update_source", { source });
+      setAppUpdateSource(saved);
+      setAppUpdateInfo(null);
+      setAppUpdateProgress(null);
+      await checkAppUpdate();
+    } catch (error) {
+      setAppUpdateError(String(error));
+    } finally {
+      setAppUpdateSourceBusy(false);
+    }
+  }, [appUpdateSourceBusy, checkAppUpdate, enabled, tauriRuntime]);
 
   const installAppUpdate = useCallback(async () => {
     if (!tauriRuntime || !enabled || installInFlightRef.current) return;
@@ -72,7 +100,10 @@ export function useAppUpdateController({
     appUpdateInfo,
     appUpdateProgress,
     appUpdateError,
+    appUpdateSource,
+    appUpdateSourceBusy,
     checkAppUpdate,
     installAppUpdate,
+    saveAppUpdateSource,
   };
 }

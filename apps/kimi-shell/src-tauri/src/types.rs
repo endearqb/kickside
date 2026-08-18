@@ -57,7 +57,16 @@ pub struct PlatformCapabilities {
 }
 
 pub const CURRENT_ONBOARDING_VERSION: u32 = 1;
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 13;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 14;
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppUpdateSource {
+    #[default]
+    Auto,
+    Gitee,
+    Github,
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -493,6 +502,7 @@ pub struct AppSettings {
     pub agent_room_enabled: bool,
     pub onboarding_completed_version: u32,
     pub onboarding_step_acks: OnboardingStepAcks,
+    pub app_update_source: AppUpdateSource,
     pub preferred_install_source: InstallSource,
     pub mirror_preset: InstallMirrorPreset,
     pub custom_mirror_config: InstallCustomMirrorConfig,
@@ -523,6 +533,7 @@ impl Default for AppSettings {
             agent_room_enabled: false,
             onboarding_completed_version: 0,
             onboarding_step_acks: OnboardingStepAcks::default(),
+            app_update_source: AppUpdateSource::Auto,
             preferred_install_source: InstallSource::Official,
             mirror_preset: InstallMirrorPreset::Mixed,
             custom_mirror_config: InstallCustomMirrorConfig::default(),

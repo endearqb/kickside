@@ -38,6 +38,8 @@ pub(crate) fn invoke_handler() -> impl Fn(Invoke<Wry>) -> bool + Send + Sync + '
         lan_access::get_kimi_lan_access_status,
         lan_access::set_kimi_lan_access,
         lan_access::get_kimi_lan_launch_url,
+        app_update::get_app_update_source,
+        app_update::save_app_update_source,
         app_update::check_app_update,
         app_update::install_app_update,
         // DeepSeek Harness (main window only)

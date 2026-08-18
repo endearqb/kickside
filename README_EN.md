@@ -94,6 +94,7 @@ Main directories:
 
 - `apps/kimi-shell`: Tauri/React desktop app, runtime management, and platform packaging.
 - `apps/kimi-im-bridge`: external IM Bridge sidecar.
+- `.agents/skills`: repository-versioned Agent skills available in this workspace.
 - `.ai/architecture`: current architecture facts, boundaries, and verification entry points.
 - `tasks`: engineering tasks and review records.
 

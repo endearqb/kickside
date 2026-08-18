@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release KickSide"
+  short_description: "验证并发布 KickSide GitHub/Gitee 双源版本"
+  default_prompt: "Use $release-kickside to prepare, publish, and verify the next KickSide release."

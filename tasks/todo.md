@@ -19,7 +19,7 @@
 - [x] 推送同一 main 提交 `2b8aa5dab749061664e99d8e13041ef8ca92eea4` 到 GitHub 与 Gitee；GitHub main CI run `32135084282` 的 8 个 job 全部成功。
 - [x] 创建并推送 annotated `v0.2.3`；GitHub canonical Release 为 stable，8 项附件的 API size/state/SHA-256 与本地回下载一致。
 - [x] 完成 Gitee 8 项同字节镜像、manifest-last、公开回下载与 stable promotion；`releases/latest` 指向 `v0.2.3`。
-- [x] 基于真实成功轨迹创建并以 `quick_validate.py` 验证个人 Skill `/Users/qian/.codex/skills/release-kickside`。
+- [x] 基于真实成功轨迹创建并以 `quick_validate.py` 验证工作区 Skill `.agents/skills/release-kickside`；个人全局副本已移除。
 
 ## 发布复盘
 

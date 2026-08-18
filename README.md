@@ -94,6 +94,7 @@ pnpm -C apps/kimi-shell tauri:build:macos:local
 
 - `apps/kimi-shell`：Tauri/React 桌面应用、运行时管理与平台打包。
 - `apps/kimi-im-bridge`：外部 IM Bridge sidecar。
+- `.agents/skills`：随仓库版本化、供当前工作区使用的 Agent Skill。
 - `.ai/architecture`：当前架构事实、边界和验证入口。
 - `tasks`：工程任务与复盘记录。
 

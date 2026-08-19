@@ -1,5 +1,8 @@
 use std::{collections::HashSet, net::Ipv4Addr};
 
+#[cfg(windows)]
+use std::{collections::HashMap, mem::size_of};
+
 use get_if_addrs::{get_if_addrs, IfAddr};
 use qrcode::{render::svg, QrCode};
 use serde::Serialize;
@@ -134,14 +137,20 @@ pub fn launch_url(app: &AppHandle, requested_ip: &str) -> Result<KimiLanLaunchUr
 }
 
 fn discover_private_ipv4(port: u16) -> Result<Vec<KimiLanAddress>, String> {
+    #[cfg(windows)]
+    let windows_adapters = windows_adapter_metadata()?;
+
     let mut seen = HashSet::new();
     let mut addresses = get_if_addrs()
         .map_err(|_| "无法枚举当前网络接口".to_string())?
         .into_iter()
         .filter_map(|interface| {
-            if excluded_interface(&interface.name) {
-                return None;
-            }
+            #[cfg(windows)]
+            let display_name = windows_interface_display_name(&interface.name, &windows_adapters)?;
+            #[cfg(not(windows))]
+            let display_name = (!excluded_interface(&interface.name))
+                .then(|| friendly_interface_name(&interface.name))?;
+
             let IfAddr::V4(address) = interface.addr else {
                 return None;
             };
@@ -150,7 +159,7 @@ fn discover_private_ipv4(port: u16) -> Result<Vec<KimiLanAddress>, String> {
                 return None;
             }
             Some(KimiLanAddress {
-                name: friendly_interface_name(&interface.name),
+                name: display_name,
                 ip: ip.to_string(),
                 url: format!("http://{ip}:{port}"),
             })
@@ -187,6 +196,165 @@ fn excluded_interface(name: &str) -> bool {
     .any(|marker| name.contains(marker))
         || name == "lo"
         || name.starts_with("lo0")
+}
+
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone)]
+struct WindowsAdapterMetadata {
+    friendly_name: String,
+    description: String,
+    is_up: bool,
+    is_virtual_kind: bool,
+    has_gateway: bool,
+}
+
+#[cfg(windows)]
+fn windows_interface_display_name(
+    adapter_name: &str,
+    adapters: &HashMap<String, WindowsAdapterMetadata>,
+) -> Option<String> {
+    let metadata = adapters.get(&normalize_windows_adapter_name(adapter_name))?;
+    if !windows_adapter_is_eligible(adapter_name, metadata) {
+        return None;
+    }
+    Some(if metadata.friendly_name.trim().is_empty() {
+        adapter_name.trim().to_string()
+    } else {
+        metadata.friendly_name.trim().to_string()
+    })
+}
+
+#[cfg(any(windows, test))]
+fn windows_adapter_is_eligible(adapter_name: &str, metadata: &WindowsAdapterMetadata) -> bool {
+    if !metadata.is_up || metadata.is_virtual_kind {
+        return false;
+    }
+
+    let strong_tunnel_marker = [
+        "docker",
+        "vbox",
+        "virtualbox",
+        "vmnet",
+        "vmware",
+        "wsl",
+        "default switch",
+        "container",
+        "vpn",
+        "tailscale",
+        "wireguard",
+        "zerotier",
+        "wintun",
+        "tap-windows",
+        "loopback",
+    ];
+    let identity = format!(
+        "{} {} {}",
+        adapter_name, metadata.friendly_name, metadata.description
+    )
+    .to_ascii_lowercase();
+    if strong_tunnel_marker
+        .iter()
+        .any(|marker| identity.contains(marker))
+    {
+        return false;
+    }
+
+    // Hyper-V external switches can own the host's real LAN address and gateway,
+    // while WSL/default/internal switches normally have no gateway. Preserve the
+    // former and apply the conservative virtual-interface name filter to the latter.
+    metadata.has_gateway
+        || ![adapter_name, &metadata.friendly_name, &metadata.description]
+            .iter()
+            .any(|name| excluded_interface(name))
+}
+
+#[cfg(windows)]
+fn normalize_windows_adapter_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+#[cfg(windows)]
+fn windows_adapter_metadata() -> Result<HashMap<String, WindowsAdapterMetadata>, String> {
+    use std::mem::MaybeUninit;
+
+    use windows::Win32::{
+        Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_NO_DATA, NO_ERROR},
+        NetworkManagement::{
+            IpHelper::{
+                GetAdaptersAddresses, GAA_FLAG_INCLUDE_GATEWAYS, GAA_FLAG_SKIP_ANYCAST,
+                GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, IF_TYPE_ATM_VIRTUAL,
+                IF_TYPE_MPLS_TUNNEL, IF_TYPE_PPP, IF_TYPE_PROP_VIRTUAL, IF_TYPE_SOFTWARE_LOOPBACK,
+                IF_TYPE_TUNNEL, IP_ADAPTER_ADDRESSES_LH,
+            },
+            Ndis::IfOperStatusUp,
+        },
+        Networking::WinSock::AF_INET,
+    };
+
+    let flags = GAA_FLAG_INCLUDE_GATEWAYS
+        | GAA_FLAG_SKIP_ANYCAST
+        | GAA_FLAG_SKIP_MULTICAST
+        | GAA_FLAG_SKIP_DNS_SERVER;
+    let mut byte_len = 0u32;
+    let first_result =
+        unsafe { GetAdaptersAddresses(AF_INET.0 as u32, flags, None, None, &mut byte_len) };
+    if first_result == ERROR_NO_DATA.0 {
+        return Ok(HashMap::new());
+    }
+    if first_result != ERROR_BUFFER_OVERFLOW.0 || byte_len == 0 {
+        return Err("无法读取 Windows 网络接口元数据".to_string());
+    }
+
+    for _ in 0..3 {
+        let item_len = (byte_len as usize).div_ceil(size_of::<IP_ADAPTER_ADDRESSES_LH>());
+        let mut buffer = Vec::<MaybeUninit<IP_ADAPTER_ADDRESSES_LH>>::with_capacity(item_len);
+        buffer.resize_with(item_len, MaybeUninit::uninit);
+        let head = buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        let result = unsafe {
+            GetAdaptersAddresses(AF_INET.0 as u32, flags, None, Some(head), &mut byte_len)
+        };
+        if result == ERROR_BUFFER_OVERFLOW.0 {
+            continue;
+        }
+        if result == ERROR_NO_DATA.0 {
+            return Ok(HashMap::new());
+        }
+        if result != NO_ERROR.0 {
+            return Err("无法读取 Windows 网络接口元数据".to_string());
+        }
+
+        let mut adapters = HashMap::new();
+        let mut current = head;
+        while let Some(adapter) = unsafe { current.as_ref() } {
+            let adapter_name = unsafe { adapter.AdapterName.to_string() }.unwrap_or_default();
+            if !adapter_name.is_empty() {
+                let friendly_name = unsafe { adapter.FriendlyName.to_string() }.unwrap_or_default();
+                let description = unsafe { adapter.Description.to_string() }.unwrap_or_default();
+                let is_virtual_kind = matches!(
+                    adapter.IfType,
+                    IF_TYPE_SOFTWARE_LOOPBACK
+                        | IF_TYPE_TUNNEL
+                        | IF_TYPE_PROP_VIRTUAL
+                        | IF_TYPE_ATM_VIRTUAL
+                        | IF_TYPE_MPLS_TUNNEL
+                        | IF_TYPE_PPP
+                );
+                adapters.insert(
+                    normalize_windows_adapter_name(&adapter_name),
+                    WindowsAdapterMetadata {
+                        friendly_name,
+                        description,
+                        is_up: adapter.OperStatus == IfOperStatusUp,
+                        is_virtual_kind,
+                        has_gateway: !adapter.FirstGatewayAddress.is_null(),
+                    },
+                );
+            }
+            current = adapter.Next;
+        }
+        return Ok(adapters);
+    }
+    Err("Windows 网络接口在枚举期间持续变化，请稍后重试".to_string())
 }
 
 fn friendly_interface_name(name: &str) -> String {
@@ -226,6 +394,74 @@ mod tests {
         for name in ["en0", "Ethernet", "Wi-Fi"] {
             assert!(!excluded_interface(name), "{name} should remain eligible");
         }
+    }
+
+    #[test]
+    fn windows_guid_uses_friendly_name_to_exclude_internal_virtual_switch() {
+        let metadata = WindowsAdapterMetadata {
+            friendly_name: "vEthernet (WSL)".to_string(),
+            description: "Hyper-V Virtual Ethernet Adapter".to_string(),
+            is_up: true,
+            is_virtual_kind: false,
+            has_gateway: false,
+        };
+        assert!(!windows_adapter_is_eligible(
+            "{ED780EBA-14A6-47A2-8228-D59A550EBF0C}",
+            &metadata
+        ));
+        let routed_wsl = WindowsAdapterMetadata {
+            has_gateway: true,
+            ..metadata
+        };
+        assert!(!windows_adapter_is_eligible(
+            "{ROUTED-WSL-GUID}",
+            &routed_wsl
+        ));
+    }
+
+    #[test]
+    fn windows_keeps_physical_and_routed_external_switch_adapters() {
+        let physical = WindowsAdapterMetadata {
+            friendly_name: "Wi-Fi".to_string(),
+            description: "Intel(R) Wi-Fi 6 AX201".to_string(),
+            is_up: true,
+            is_virtual_kind: false,
+            has_gateway: true,
+        };
+        assert!(windows_adapter_is_eligible("{PHYSICAL-GUID}", &physical));
+
+        let external_switch = WindowsAdapterMetadata {
+            friendly_name: "vEthernet (External)".to_string(),
+            description: "Hyper-V Virtual Ethernet Adapter".to_string(),
+            is_up: true,
+            is_virtual_kind: false,
+            has_gateway: true,
+        };
+        assert!(windows_adapter_is_eligible(
+            "{EXTERNAL-SWITCH-GUID}",
+            &external_switch
+        ));
+
+        let routed_vpn = WindowsAdapterMetadata {
+            friendly_name: "Contoso VPN".to_string(),
+            description: "Virtual private network adapter".to_string(),
+            is_up: true,
+            is_virtual_kind: false,
+            has_gateway: true,
+        };
+        assert!(!windows_adapter_is_eligible(
+            "{ROUTED-VPN-GUID}",
+            &routed_vpn
+        ));
+
+        let disconnected_wifi = WindowsAdapterMetadata {
+            is_up: false,
+            ..physical
+        };
+        assert!(!windows_adapter_is_eligible(
+            "{DISCONNECTED-GUID}",
+            &disconnected_wifi
+        ));
     }
 
     #[test]

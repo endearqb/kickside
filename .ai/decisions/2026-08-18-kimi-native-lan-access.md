@@ -21,7 +21,7 @@ Kimi Code 原生支持 `--host 0.0.0.0`、Bearer Token 与 Host 校验，并在�
 7. 状态接口只返回私有 IPv4 与无 token URL。完整 `#token=` launch URL 与二维码只由 main window 在用户显式操作时临时生成，前端关闭二维码后清空内存；不写日志、诊断或持久化状态。
 8. P0 不自动修改 Windows/macOS 防火墙。UI 明示仅限可信家庭/办公网络及 HTTP 风险，并提供无地址/外部 runtime/切换失败提示。
 9. DSH 不进入本阶段。旧 Gateway ADR 与详细文档降级为未来备选，仅在 DSH 必须远程访问或需要设备级权限控制时重新立项。
-10. 网卡枚举使用跨平台 `get_if_addrs`；第一版以私有 IPv4 + 保守接口名过滤排除 loopback、link-local、容器、虚拟机和 VPN/tunnel 地址。地址只用于展示，不影响 Kimi 的 wildcard bind。
+10. IPv4 地址枚举使用跨平台 `get_if_addrs`；macOS 以私有 IPv4 + 保守接口名过滤排除 loopback、link-local、容器、虚拟机和 VPN/tunnel 地址。Windows 额外通过系统 `GetAdaptersAddresses` 把 GUID 映射到 FriendlyName、Description、接口类型、运行状态和 IPv4 网关：停用、隧道、VPN 与无网关的内部虚拟交换机不展示，有网关的 Hyper-V 外部交换机仍可作为真实 LAN 入口。地址只用于展示，不影响 Kimi 的 wildcard bind。
 11. Kimi 0.36.1 的 HTML 固定返回 `frame-ancestors 'self'`，因此 wildcard 模式下 App 的 Tauri iframe 不能直连。仅在 owned LAN 模式启动既有 Rust workspace proxy 作为随机 loopback 嵌入适配器：手机仍直连 Kimi 端口；适配器只为 HTML 把 `frame-ancestors` 改写为 `'self'` 加受控 Tauri origins，并转发 Bearer/REST/WS。它不监听 LAN、不提供配对/授权、不进入 locator，也不恢复旧 HTML 产品注入。
 
 ## Consequences

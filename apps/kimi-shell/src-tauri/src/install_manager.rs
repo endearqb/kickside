@@ -2373,14 +2373,14 @@ fn decode_stream_bytes(bytes: &[u8]) -> String {
     };
 
     let zero_bytes = bytes.iter().filter(|byte| **byte == 0).count();
-    let utf16_candidate = bytes.len() >= 2
-        && bytes.chunks_exact(2).remainder().is_empty()
-        && zero_bytes * 4 >= bytes.len();
+    let (utf16_pairs, utf16_remainder) = bytes.as_chunks::<2>();
+    let utf16_candidate =
+        bytes.len() >= 2 && utf16_remainder.is_empty() && zero_bytes * 4 >= bytes.len();
 
     let decoded = if utf16_candidate {
-        let units = bytes
-            .chunks_exact(2)
-            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        let units = utf16_pairs
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect::<Vec<_>>();
         String::from_utf16_lossy(&units)
     } else if let Ok(decoded) = String::from_utf8(bytes.to_vec()) {

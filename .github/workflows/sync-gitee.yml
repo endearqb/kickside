@@ -1,0 +1,63 @@
+name: Sync GitHub Refs to Gitee
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitee-repository-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Pull GitHub refs into Gitee
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Request mirror pull and verify main
+        shell: bash
+        env:
+          GITEE_RELEASE_TOKEN: ${{ secrets.GITEE_RELEASE_TOKEN }}
+          EXPECTED_MAIN: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "main" || {
+            echo "Repository sync must be dispatched from main." >&2
+            exit 1
+          }
+          test -n "${GITEE_RELEASE_TOKEN:-}" || {
+            echo "Required secret GITEE_RELEASE_TOKEN is not configured." >&2
+            exit 1
+          }
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN"
+
+          response_file="$(mktemp)"
+          status="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --data-urlencode "access_token=$GITEE_RELEASE_TOKEN" \
+            https://gitee.com/api/v5/repos/endearqb/kickside/remote_mirror/pull)"
+          case "$status" in
+            2??) ;;
+            *)
+              echo "Gitee mirror pull request failed with HTTP $status." >&2
+              exit 1
+              ;;
+          esac
+
+          for attempt in $(seq 1 30); do
+            actual="$(git ls-remote https://gitee.com/endearqb/kickside.git refs/heads/main | awk '{print $1}')"
+            if test "$actual" = "$EXPECTED_MAIN"; then
+              echo "Gitee main synchronized to $EXPECTED_MAIN."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Gitee main did not reach $EXPECTED_MAIN within the verification window." >&2
+          exit 1

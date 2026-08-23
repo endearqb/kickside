@@ -45,6 +45,8 @@ go test -race ./...
 
 ## Manual Release Gates
 
+- When Gitee is maintained as a GitHub import mirror and local Gitee Git credentials are unavailable, dispatch `Sync GitHub Refs to Gitee` from GitHub `main`. The job must use the configured secret only within Actions, and it must finish by observing the exact expected commit from Gitee's public Git endpoint before tagging or closing out.
+
 - Gitee 镜像必须包含与 GitHub canonical Release 同名、同 SHA-256 的 NSIS/MSI、macOS app archive/DMG 和 `.sig`；Gitee `latest.json` 必须最后上传，并在 prerelease 提升 stable 前完成匿名回下载校验。
 - 分别选择 Gitee、GitHub 与自动更新源验证检查/下载；自动模式覆盖单源不可达、两端版本不同和同版本优先 Gitee。每次发布监控 Gitee `/releases/download/latest/latest.json` 匿名入口、单文件 100MB 与仓库附件容量。
 - 当前 GitHub-hosted runner 到 Gitee 的首个约 21MB 附件上传已实测在 15 分钟有界等待后失败；在迁移到可达 Gitee 的受控 runner 前，每次发布必须显式确认镜像 job 结果，失败时保持 prerelease，并按同一资产矩阵执行受控本机上传、公开回下载 SHA-256、manifest-last 与 stable promotion，不得把 job 触发成功当作镜像成功。

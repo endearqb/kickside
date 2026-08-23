@@ -28,6 +28,7 @@
 - 本机 Apple Silicon `KickSide.app` 0.2.4 构建成功，主程序与 bundled Bridge 均验证 arm64。该本地开发 app 为 ad-hoc 且不作为最终 Release codesign 证据；tag workflow 会使用精确 unsigned 配置重新构建并严格验证。
 - 官方 DSH latest 真实 smoke：`0.1.1-rc.2`，Node 24.19.0 / darwin-arm64，隔离安装 383588ms、ready 1012ms、stop 252ms、未强杀、端口释放。
 - 首次 main CI run `32641698359` 在 macOS stable Rust 1.98 strict clippy 暴露 `chunks_exact(2)` 新 lint；改用 `slice::as_chunks::<2>()` 后，本机 strict clippy 与 UTF-8/UTF-16LE/GBK 定向测试通过。第二次 run `32641943733` 的 macOS Rust 与 unsigned app bundle 通过，Windows stable Rust 1.98 strict clippy 进一步发现 `friendly_interface_name` 在 Windows target 为 dead code；已用 `#[cfg(not(windows))]` 收紧平台编译边界，待最终 main CI 复跑。
+- 第三次 main CI run `32642289618` 在提交 `0d7681d4be65d4c1f03bd26bcf09c53d7f8b675d` 上 8/8 job 成功。公开 Gitee main 仍为旧提交且两个浏览器均无登录态，因此新增最小手动仓库同步 workflow：令牌只在 Actions 内调用官方 mirror pull，完成条件是公开 Gitee Git ref 等于精确 GitHub main；该 workflow 自身仍须先过 main CI。
 - 待发布完成后继续回填实际 commit、Actions run、资产矩阵、镜像 fallback、G3 限制与公开链接。
 
 # DSH 官方 latest 轻量跟随与受控更新

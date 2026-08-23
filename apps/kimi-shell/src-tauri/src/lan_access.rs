@@ -357,6 +357,7 @@ fn windows_adapter_metadata() -> Result<HashMap<String, WindowsAdapterMetadata>,
     Err("Windows 网络接口在枚举期间持续变化，请稍后重试".to_string())
 }
 
+#[cfg(not(windows))]
 fn friendly_interface_name(name: &str) -> String {
     match name.trim().to_ascii_lowercase().as_str() {
         "en0" => "Wi-Fi / Ethernet".to_string(),

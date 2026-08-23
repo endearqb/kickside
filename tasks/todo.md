@@ -27,7 +27,7 @@
 - 本地证据：Rust fmt/locked check/strict clippy 与 310 tests；React 57 files/304 tests；10 张视觉基线；190-command security gate；Go vet/test/race；updater/Gitee publisher 5 tests；workflow YAML、版本、release-note 首行与 diff gate全部通过。
 - 本机 Apple Silicon `KickSide.app` 0.2.4 构建成功，主程序与 bundled Bridge 均验证 arm64。该本地开发 app 为 ad-hoc 且不作为最终 Release codesign 证据；tag workflow 会使用精确 unsigned 配置重新构建并严格验证。
 - 官方 DSH latest 真实 smoke：`0.1.1-rc.2`，Node 24.19.0 / darwin-arm64，隔离安装 383588ms、ready 1012ms、stop 252ms、未强杀、端口释放。
-- 首次 main CI run `32641698359` 在 macOS stable Rust 1.98 strict clippy 暴露 `chunks_exact(2)` 新 lint；改用 `slice::as_chunks::<2>()` 后，本机 strict clippy 与 UTF-8/UTF-16LE/GBK 定向测试通过，待修复提交的 main CI 复跑。
+- 首次 main CI run `32641698359` 在 macOS stable Rust 1.98 strict clippy 暴露 `chunks_exact(2)` 新 lint；改用 `slice::as_chunks::<2>()` 后，本机 strict clippy 与 UTF-8/UTF-16LE/GBK 定向测试通过。第二次 run `32641943733` 的 macOS Rust 与 unsigned app bundle 通过，Windows stable Rust 1.98 strict clippy 进一步发现 `friendly_interface_name` 在 Windows target 为 dead code；已用 `#[cfg(not(windows))]` 收紧平台编译边界，待最终 main CI 复跑。
 - 待发布完成后继续回填实际 commit、Actions run、资产矩阵、镜像 fallback、G3 限制与公开链接。
 
 # DSH 官方 latest 轻量跟随与受控更新

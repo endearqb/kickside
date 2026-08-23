@@ -240,7 +240,7 @@ export function useDshController(
         preflightCheckedAtRef.current = Date.now();
         setPreflight(nextPreflight);
         await refresh();
-        await checkUpdate(true);
+        await checkUpdate(false);
         return nextPreflight;
       } catch (cause) {
         setError(formatError(cause));
@@ -262,7 +262,7 @@ export function useDshController(
         preflightCheckedAtRef.current = Date.now();
         setPreflight(nextPreflight);
         await refresh();
-        await checkUpdate(true);
+        await checkUpdate(false);
         return nextPreflight;
       } catch (cause) {
         setError(formatError(cause));

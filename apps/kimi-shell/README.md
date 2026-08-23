@@ -12,7 +12,7 @@ KickSide 启伴是基于 `Tauri v2 + React` 的 Windows / macOS 桌面工作台�
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
-- Workspace Grid V2 壳层：常驻 `KimiCode` 与 `KimiChat`，标题栏通过纵向 `+` 菜单直接新建带官方品牌图标的窗格；开启 DSH 并完成固定版本安装后，每次点击都会用默认工作目录新增一个 DeepSeek Harness pane，多个 pane 共享同一个受管 DSH 后端。每个 DSH pane 独立观测本窗格当前会话，通过固定版本官方 `session.list` 契约解析绝对 `cwd`，用于 pane header 打开目录及 Pane Shelf 动态目录名；不会用跨窗格 storage 事件串联选择状态。DSH URL/PID/状态不进入 Grid 持久化，关闭任意 pane（包括最后一个）只移除视图；DSH 仅在退出应用或用户在控制中心显式关闭时停止。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用。
+- Workspace Grid V2 壳层：常驻 `KimiCode` 与 `KimiChat`，标题栏通过纵向 `+` 菜单直接新建带官方品牌图标的窗格；开启 DSH 并完成受控安装后，每次点击都会用默认工作目录新增一个 DeepSeek Harness pane，多个 pane 共享同一个受管 DSH 后端。每个 DSH pane 独立观测本窗格当前会话，通过当前安装版本的官方 `session.list` 契约解析绝对 `cwd`，用于 pane header 打开目录及 Pane Shelf 动态目录名；不会用跨窗格 storage 事件串联选择状态。DSH URL/PID/状态不进入 Grid 持久化，关闭任意 pane（包括最后一个）只移除视图；DSH 仅在退出应用或用户在控制中心显式关闭时停止。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用。
 - 后端守护与健康探测：优先按 `<KIMI_CODE_HOME>/server/instances/*.json` 发现并复用健康的既有 loopback Kimi Server，旧 `server/lock` 仅作兼容 fallback；否则拉起 `kimi web --no-open --port <port>`。用户可临时把 KickSide-owned Kimi 以 `--host 0.0.0.0` 重启用于可信局域网，外部实例永不切换；owned wildcard registry 仍只映射为 loopback health/Bearer probe。应用进程重启后恢复关闭。DSH 始终保持精确 loopback。
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
 - 控制中心：KickSide 设置承载更新、安装/升级、Kimi 原生局域网访问、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；LAN 开关只存在于当前进程，切换 owned Kimi 时先拒绝 running session、失败自动回滚，完整 token URL/二维码只按需存在于内存。DSH 不提供局域网访问。
@@ -79,9 +79,9 @@ pnpm check:kimi-web:visual
 ## 代码组织
 
 - `src/app/useShellController.ts` 保留窗口、workspace、prefill、Skill 动作 handler 与主壳层编排；安装流状态和 handler 放在 `src/app/useInstallController.ts`，轮询放在 `src/app/useShellPollingController.ts`，Bridge 运行态刷新放在 `src/app/useBridgeRuntimeController.ts`，Skill Center 状态和刷新放在 `src/app/useSkillCenterController.ts`，workspace embed URL 与 import picker 状态分别放在 `src/app/useWorkspaceEmbedUrl.ts`、`src/app/useWorkspaceImportController.ts`，默认值/纯转换 helper 放在 `src/app/shellControllerDefaults.ts`。
-- DSH 前端状态切片位于 `src/app/useDshController.ts`，IPC 契约位于 `src/services/dshService.ts`；Rust `src-tauri/src/dsh_manager.rs` 负责固定 pin、私有安装、精确 loopback URL、owned process group 和日志，不推广为通用 AgentBackend registry。preflight 分别投影运行就绪与安装就绪：已安装 DSH 只需受支持 Node 即可启动，安装/重装必须选择 Node 与 npm 同目录、launcher 可验证的完整工具链。Windows 优先用同工具链 `node.exe + npm-cli.js`，shim 布局缺少真实 CLI 时才通过已校验的系统 `cmd.exe` 执行固定 npm 命令。安装 UI 通过 Tauri Channel 实时显示阶段与脱敏日志，不称为交互式终端。`src-tauri/src/nodejs_locator.rs` 覆盖 PATH、NVM、Volta、asdf、nodenv、mise、fnm 与平台常见安装路径，但不会把其他 PATH 来源的 npm 配给当前 Node。
-- `scripts/dsh_runtime_smoke.mjs` 使用隔离临时前缀与 `DSH_HOME` 验证真实 npm 包、固定入口、精确 loopback HTTP 状态与 DSH 启动页标记 `__DSH_BOOT__`、有界响应/输出、整树停止和端口释放；`--samples 1..10` 可在同一次安装后连续采样并输出 ready/stop 中位数。KickSide 的 DSH 支持矩阵为 Node 22.19+ 的 22.x 或 24+，同时要求 `util.parseEnv` 能力；Node 20.12 仅保留观察性兼容采样。`.github/workflows/dsh-runtime-canary.yml` 在 PR 上阻断 Windows/macOS × Node 22.19/24 的固定 pin smoke，每周/手动再运行 Node 20.12 与 latest 告警。它不覆盖 Rust 生产 launcher 或 WebView2/WKWebView 人工发布门禁。
-- DSH 推荐版本固定为 `0.1.0-rc.7`，已验证的 `0.1.0-rc.6` 仍可继续运行，是否升级由用户决定。Shell 启动与 DSH 设置页通过官方 npm metadata 检测本地/推荐/上游版本；发现更新只提示并提供按钮，不改变既有兼容安装的运行资格。一键升级只能安装编译期推荐版本并核对 sha512 integrity；激活后必须通过真实 loopback readiness 与页面身份验证才删除 backup，失败恢复旧安装。上游 `latest` 只作提示，不自动成为安装目标。
+- DSH 前端状态切片位于 `src/app/useDshController.ts`，IPC 契约位于 `src/services/dshService.ts`；Rust `src-tauri/src/dsh_manager.rs` 负责官方 latest 发现、精确版本私有安装、精确 loopback URL、owned process group 和日志，不推广为通用 AgentBackend registry。preflight 分别投影运行就绪与安装就绪：已安装 DSH 只需受支持 Node 即可启动，安装/重装必须选择 Node 与 npm 同目录、launcher 可验证的完整工具链。Windows 优先用同工具链 `node.exe + npm-cli.js`，shim 布局缺少真实 CLI 时才通过已校验的系统 `cmd.exe` 执行固定模板与已验证 SemVer。安装 UI 通过 Tauri Channel 实时显示阶段与脱敏日志，不称为交互式终端。`src-tauri/src/nodejs_locator.rs` 覆盖 PATH、NVM、Volta、asdf、nodenv、mise、fnm 与平台常见安装路径，但不会把其他 PATH 来源的 npm 配给当前 Node。
+- `scripts/dsh_runtime_smoke.mjs` 使用隔离临时前缀与 `DSH_HOME` 验证真实 npm 包、固定入口、精确 loopback HTTP 状态与 DSH 启动页标记 `__DSH_BOOT__`、有界响应/输出、整树停止和端口释放；`--samples 1..10` 可在同一次安装后连续采样并输出 ready/stop 中位数。KickSide 的 DSH 支持矩阵为 Node 22.19+ 的 22.x 或 24+，同时要求 `util.parseEnv` 能力；Node 20.12 仅保留观察性兼容采样。`.github/workflows/dsh-runtime-canary.yml` 在 PR 上阻断 Windows/macOS × Node 22.19/24 的 `0.1.1-rc.2` tested baseline smoke，每周/手动再运行 Node 20.12 与官方 latest 告警。它不覆盖 Rust 生产 launcher 或 WebView2/WKWebView 人工发布门禁。
+- DSH 采用用户主动、轻量跟随上游的策略：Shell 启动与设置页从 npm 官方 `latest` 元数据读取版本和 sha512 integrity，将响应冻结为本次精确 SemVer 目标，再执行 `@deepseek-ai/dsh@<version>`；前端不能传入包名或版本，也不会后台静默升级。`0.1.1-rc.2` 仅作为 published baseline 和 CI tested baseline，不再限制安装目标；已发布的 `recommendedVersion/state/updateAvailable/compatible` 语义保持不变，当前 UI 使用 additive `officialVersion/officialState/officialUpdateAvailable/installedSupported`。运行时接受不低于 `0.1.0-rc.6`、固定入口有效的 SemVer 版本。首次安装、重装与升级都核对精确版本及官方 integrity；npm 使用壳私有持久缓存，staging 安装与校验期间现有 DSH 继续运行，只在原子切换前停止。单调停止 epoch 确保退出/手动停止不会被并发安装清除；激活后必须通过真实 loopback readiness 与页面身份验证才删除 backup，失败时优先隔离失败目录并恢复旧安装，文件系统拒绝恢复时保留 backup 并 fail closed。
 - `src/platform/` 只负责加载 additive `PlatformCapabilities` 并提供 fail-closed 平台状态；产品组件不得自行解析 user agent 决定原生能力。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`；更新与运行等折叠设置行统一复用 `src/components/control-center/ControlCenterSettingsRow.tsx`，业务动作作为独立 trailing control 注入，避免点击更新或开关时误触发展开。
 - Kimi 局域网前端状态切片位于 `src/app/useLanAccessController.ts`，IPC 位于 `src/services/lanAccessService.ts`；Rust `src-tauri/src/lan_access.rs` 只投影私有 IPv4 与按需 URL/QR，Windows 通过系统网卡 FriendlyName、Description、类型、运行状态与 IPv4 网关排除内部虚拟交换机和 VPN，事务式 owned runtime 切换仍由 `backend_manager` 持有。
@@ -128,7 +128,7 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
-推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2` 与经 Accepted 决策精确批准的 `0.2.3` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
+推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2`、`0.2.3` 与经 Accepted 决策精确批准的 `0.2.4` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
 
 GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 `GITEE_RELEASE_TOKEN` 将相同安装包与 `.sig` 以 prerelease 暂存到 Gitee，逐件匿名回下载校验 SHA-256，最后上传 Gitee 版 `latest.json` 并转为正式 Release；Gitee 不执行第二次构建，镜像失败不会回滚 GitHub Release。
 
@@ -141,7 +141,7 @@ GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/KickSide.app`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg`
 
-`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 Accepted 决策的精确过渡 tag 使用；当前历史例外为 `v0.1.24`、`v0.2.0`、`v0.2.1`、`v0.2.2`，当前新增精确 `v0.2.3` 例外。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
+`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 Accepted 决策的精确过渡 tag 使用；历史例外为 `v0.1.24`、`v0.2.0`、`v0.2.1`、`v0.2.2`、`v0.2.3`，当前新增精确 `v0.2.4` 例外。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
 
 ## 发布资料
 

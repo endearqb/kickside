@@ -22,8 +22,8 @@ function readyPreflight(): dshService.DshPreflight {
     installNodePath: "/opt/homebrew/bin/node",
     installNodeVersion: "v24.19.0",
     npmPath: "/opt/homebrew/bin/npm",
-    installedVersion: "0.1.0-rc.6",
-    pinnedVersion: "0.1.0-rc.6",
+    installedVersion: "0.1.1-rc.2",
+    pinnedVersion: "0.1.1-rc.2",
     installPath: "/tmp/dsh",
     issues: [],
   };
@@ -56,7 +56,7 @@ const enabledSettings: dshService.DshSettings = {
   enabled: true,
   portRange: [3080, 3179],
   startTimeoutSec: 60,
-  pinnedVersion: "0.1.0-rc.6",
+  pinnedVersion: "0.1.1-rc.2",
 };
 
 const disabledSettings: dshService.DshSettings = {
@@ -77,7 +77,7 @@ describe("DshSettingsPanel", () => {
       status: {
         state: "running",
         workspaceDir: "/Users/qian/work/demo",
-        pinnedVersion: "0.1.0-rc.6",
+        pinnedVersion: "0.1.1-rc.2",
       },
     });
     const onExpandedChange = vi.fn();
@@ -112,7 +112,7 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
     expect(screen.getByText(/启用后随应用启动默认工作区/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "重新安装当前版本" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新安装官方最新版" })).toBeTruthy();
     expect(dsh.refresh).toHaveBeenCalledWith({ preflight: "cached" });
   });
 
@@ -121,7 +121,7 @@ describe("DshSettingsPanel", () => {
     const dsh = createDshController({
       settings: disabledSettings,
       preflight: readyPreflight(),
-      status: { state: "stopped", pinnedVersion: "0.1.0-rc.6" },
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
       toggle,
     });
     const onExpandedChange = vi.fn();
@@ -141,23 +141,27 @@ describe("DshSettingsPanel", () => {
     expect(onExpandedChange).not.toHaveBeenCalled();
   });
 
-  it("shows a checked recommended update and delegates one-click upgrade", async () => {
+  it("shows a resolved official latest update and delegates one-click upgrade", async () => {
     const update = vi.fn(async () => readyPreflight());
     const dsh = createDshController({
       settings: enabledSettings,
       preflight: {
         ...readyPreflight(),
-        installedVersion: "0.1.0-rc.6",
+        installedVersion: "0.1.1-rc.2",
         installValid: true,
         runtimeReady: true,
       },
-      status: { state: "stopped", pinnedVersion: "0.1.0-rc.7" },
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
       updateInfo: {
-        state: "update_available",
-        installedVersion: "0.1.0-rc.6",
-        recommendedVersion: "0.1.0-rc.7",
-        upstreamVersion: "0.1.0-rc.7",
-        updateAvailable: true,
+        state: "up_to_date",
+        installedVersion: "0.1.1-rc.2",
+        recommendedVersion: "0.1.1-rc.2",
+        upstreamVersion: "0.1.1-rc.3",
+        updateAvailable: false,
+        officialVersion: "0.1.1-rc.3",
+        officialState: "update_available",
+        officialUpdateAvailable: true,
+        installedSupported: true,
         compatible: true,
         checkedAtMs: 1,
       },
@@ -175,10 +179,120 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    expect(screen.getByText(/0.1.0-rc.6 → 0.1.0-rc.7/)).toBeTruthy();
+    expect(screen.getByText(/0.1.1-rc.2 → 0.1.1-rc.3/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "启动实例" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "升级到 0.1.0-rc.7" }));
+    fireEvent.click(screen.getByRole("button", { name: "升级到 0.1.1-rc.3" }));
     await waitFor(() => expect(update).toHaveBeenCalledOnce());
+  });
+
+  it("projects npm latest as the exact official target", () => {
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: readyPreflight(),
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
+      updateInfo: {
+        state: "up_to_date",
+        installedVersion: "0.1.1-rc.2",
+        recommendedVersion: "0.1.1-rc.2",
+        upstreamVersion: "0.1.1-rc.2",
+        updateAvailable: false,
+        officialVersion: "0.1.1-rc.2",
+        officialState: "up_to_date",
+        officialUpdateAvailable: false,
+        installedSupported: true,
+        compatible: true,
+        checkedAtMs: 1,
+      },
+    });
+
+    render(
+      <ul>
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    expect(screen.getByText("官方最新")).toBeTruthy();
+    expect(screen.getByText("用户主动 · npm latest")).toBeTruthy();
+    expect(screen.queryByText(/尚未通过 KickSide 兼容性验证/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /升级到/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "重新安装官方最新版" })).toBeTruthy();
+  });
+
+  it("repairs an unsupported installation through the official install path", async () => {
+    const install = vi.fn(async () => readyPreflight());
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: {
+        ...readyPreflight(),
+        installValid: false,
+        runtimeReady: false,
+        installedVersion: "not-semver",
+      },
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
+      updateInfo: {
+        state: "unsupported",
+        installedVersion: "not-semver",
+        recommendedVersion: "0.1.1-rc.2",
+        upstreamVersion: "0.1.1-rc.3",
+        updateAvailable: false,
+        officialVersion: "0.1.1-rc.3",
+        officialState: "unsupported",
+        officialUpdateAvailable: false,
+        installedSupported: false,
+        compatible: false,
+        checkedAtMs: 1,
+      },
+      install,
+    });
+
+    render(
+      <ul>
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "恢复官方最新版 0.1.1-rc.3" }),
+    );
+    await waitFor(() => expect(install).toHaveBeenCalledOnce());
+  });
+
+  it("labels replacement of an ahead installation as restoring official latest", async () => {
+    const install = vi.fn(async () => readyPreflight());
+    const dsh = createDshController({
+      settings: enabledSettings,
+      preflight: {
+        ...readyPreflight(),
+        installedVersion: "0.1.1-rc.4",
+      },
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
+      updateInfo: {
+        state: "ahead",
+        installedVersion: "0.1.1-rc.4",
+        recommendedVersion: "0.1.1-rc.2",
+        upstreamVersion: "0.1.1-rc.3",
+        updateAvailable: false,
+        officialVersion: "0.1.1-rc.3",
+        officialState: "ahead",
+        officialUpdateAvailable: false,
+        installedSupported: true,
+        compatible: true,
+        checkedAtMs: 1,
+      },
+      install,
+    });
+
+    render(
+      <ul>
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    expect(screen.getByText(/恢复操作会替换为官方最新版/)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "恢复官方最新版 0.1.1-rc.3" }),
+    );
+    await waitFor(() => expect(install).toHaveBeenCalledOnce());
   });
 
   it("requests preflight through the shared controller only when expanded", () => {
@@ -205,7 +319,7 @@ describe("DshSettingsPanel", () => {
       status: {
         state: "degraded",
         lastError: "DSH 进程仍在运行，但 HTTP 健康检查连续 3 次失败。",
-        pinnedVersion: "0.1.0-rc.6",
+        pinnedVersion: "0.1.1-rc.2",
       },
     });
 
@@ -220,12 +334,12 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    expect(screen.getByText("运行异常 · 展开查看详情")).toBeTruthy();
+    expect(screen.getByText("错误 · 展开查看详情")).toBeTruthy();
     expect(
       screen.getByText(
         (_, node) =>
           node?.tagName === "P" &&
-          node.textContent?.includes("运行状态：服务异常") === true,
+          node.textContent?.includes("运行状态：错误") === true,
       ),
     ).toBeTruthy();
     expect(screen.getByText(/健康检查连续 3 次失败/)).toBeTruthy();
@@ -245,7 +359,7 @@ describe("DshSettingsPanel", () => {
     const dsh = createDshController({
       settings: disabledSettings,
       preflight: readyPreflight(),
-      status: { state: "stopped", pinnedVersion: "0.1.0-rc.6" },
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
       install,
     });
 
@@ -255,14 +369,14 @@ describe("DshSettingsPanel", () => {
       </ul>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "重新安装当前版本" }));
-    expect(screen.getByRole("status").textContent).toContain("正在检测 Node.js");
+    fireEvent.click(await screen.findByRole("button", { name: "重新安装官方最新版" }));
+    expect(screen.getByRole("status").textContent).toContain("正在检查官方最新版本与安装环境");
 
     act(() => {
       emit({
         type: "stage",
         stage: "install",
-        message: "正在连接 npm registry 并安装固定版本",
+        message: "正在连接 npm registry 并安装精确版本",
       });
       emit({ type: "output", stream: "stdout", line: "added 120 packages" });
     });
@@ -271,7 +385,7 @@ describe("DshSettingsPanel", () => {
     expect(screen.getByRole("log").textContent).toContain("added 120 packages");
 
     await act(async () => {
-      emit({ type: "completed", version: "0.1.0-rc.6" });
+      emit({ type: "completed", version: "0.1.1-rc.2" });
       resolveInstall(readyPreflight());
     });
 
@@ -279,6 +393,36 @@ describe("DshSettingsPanel", () => {
       expect(screen.getByRole("status").textContent).toContain("安装完成"),
     );
     expect(dshService.getDshLogTail).not.toHaveBeenCalled();
+  });
+
+  it("replaces in-progress copy with a terminal failure state", async () => {
+    const install = vi.fn(async (onEvent?: (event: dshService.DshInstallEvent) => void) => {
+      onEvent?.({
+        type: "failed",
+        code: "E-DSH-002",
+        message: "npm registry 不可用",
+      });
+      return null;
+    });
+    const dsh = createDshController({
+      settings: disabledSettings,
+      preflight: readyPreflight(),
+      status: { state: "stopped", pinnedVersion: "0.1.1-rc.2" },
+      install,
+    });
+
+    render(
+      <ul>
+        <DshSettingsPanel dsh={dsh} expanded onExpandedChange={vi.fn()} />
+      </ul>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新安装官方最新版" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain("安装失败"),
+    );
+    expect(screen.getByRole("alert").textContent).toContain("npm registry 不可用");
   });
 
   it("projects stop and start actions through the shared controller", async () => {
@@ -289,7 +433,7 @@ describe("DshSettingsPanel", () => {
       status: {
         state: "running",
         workspaceDir: "/Users/qian/work/demo",
-        pinnedVersion: "0.1.0-rc.6",
+        pinnedVersion: "0.1.1-rc.2",
       },
       stop: vi.fn(
         () =>
@@ -330,11 +474,11 @@ describe("DshSettingsPanel", () => {
     ).toBe(true);
 
     await act(async () => {
-      resolveStop({ state: "stopped", pinnedVersion: "0.1.0-rc.6" });
+      resolveStop({ state: "stopped", pinnedVersion: "0.1.1-rc.2" });
     });
     dsh.busy = false;
     dsh.busyAction = null;
-    dsh.status = { state: "stopped", pinnedVersion: "0.1.0-rc.6" };
+    dsh.status = { state: "stopped", pinnedVersion: "0.1.1-rc.2" };
     rerender(
       <ul>
         <DshSettingsPanel

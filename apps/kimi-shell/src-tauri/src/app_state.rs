@@ -3,7 +3,10 @@ use std::{
     fs::{File, OpenOptions},
     path::PathBuf,
     process::Child,
-    sync::{atomic::AtomicBool, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicU64},
+        Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -271,7 +274,7 @@ pub struct AppState {
     pub dsh_runtime: Mutex<DshProcessState>,
     pub dsh_lifecycle_operation: Mutex<()>,
     pub dsh_log_operation: Mutex<()>,
-    pub dsh_cancel_requested: AtomicBool,
+    pub dsh_stop_epoch: AtomicU64,
     pub bridge_runtime: Mutex<BridgeProcessState>,
     pub feishu_onboarding: Mutex<Option<FeishuOnboardingRuntimeState>>,
     pub weixin_onboarding: Mutex<Option<WeixinOnboardingRuntimeState>>,
@@ -332,7 +335,7 @@ impl AppState {
             dsh_runtime: Mutex::new(DshProcessState::default()),
             dsh_lifecycle_operation: Mutex::new(()),
             dsh_log_operation: Mutex::new(()),
-            dsh_cancel_requested: AtomicBool::new(false),
+            dsh_stop_epoch: AtomicU64::new(0),
             bridge_runtime: Mutex::new(BridgeProcessState::new(bridge_admin_token)),
             feishu_onboarding: Mutex::new(None),
             weixin_onboarding: Mutex::new(None),

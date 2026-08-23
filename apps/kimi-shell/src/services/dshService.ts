@@ -53,11 +53,18 @@ export type DshUpdateState =
   | "unsupported";
 
 export interface DshUpdateInfo {
+  /** Legacy projection against the compiled KickSide baseline. */
   state: DshUpdateState;
   installedVersion?: string;
   recommendedVersion: string;
   upstreamVersion?: string;
   updateAvailable: boolean;
+  /** Exact, integrity-bound target resolved from the official npm `latest` tag. */
+  officialVersion: string;
+  officialState: DshUpdateState;
+  officialUpdateAvailable: boolean;
+  installedSupported: boolean;
+  /** Historical SemVer compatibility projection; not upstream approval. */
   compatible: boolean;
   checkedAtMs: number;
 }

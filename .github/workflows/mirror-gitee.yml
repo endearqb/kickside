@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing stable GitHub Release tag to mirror
         required: true
-        default: v0.2.3
+        default: v0.2.4
         type: string
 
 permissions:

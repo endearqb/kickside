@@ -1,3 +1,68 @@
+# v0.2.4 GitHub canonical 发布与 Gitee 镜像
+
+## 任务契约
+
+- 用户目标：把当前 DSH 官方 latest 轻量更新实现发布到 GitHub `main`，版本从 0.2.3 增加到 0.2.4，构建并公开 Releases。
+- 直接交付物：0.2.4 版本同步、warning-first release notes、精确 unsigned macOS ADR、完整本地门禁、GitHub main/tag/canonical Release、Gitee 同字节镜像与发布后证据。
+- 影响范围：当前 DSH 变更、Shell 版本/说明、发布 workflows、架构/决策/变更记录、GitHub/Gitee main/tag/Release。
+- 非目标：不引入 Apple Developer ID 凭据；不把 ad-hoc macOS 包描述为已签名/公证/Gatekeeper 可信；不在 Gitee 二次构建；不移动已发布 tag。
+- 约束：只允许精确 `v0.2.4` 使用未签名配置；Release 首行必须警告；Tauri updater 必须签名；GitHub 是唯一 canonical build；Gitee 资产必须同字节且 manifest 最后上传；任何失败 fail closed。
+- 验收：版本声明一致；完整本地 gate 与 main CI 通过；两端 main/tag 指向受审提交；GitHub/Gitee stable Release 均为精确 `v0.2.4` 且 8 项资产、SHA-256、manifest 语义完整。
+- 已授权假设：产品所有者于 2026-08-23 明确授权 `v0.2.4` 精确未签名 macOS 预览例外；该授权不自动延续到后续版本。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、signed updater/Gitee mirror ADR、`2026-08-23-v0.2.4-unsigned-macos-release.md`。
+
+## Checklist
+
+- [x] 核对目标版本/tag、GitHub updater/Gitee Secret 名称、Apple signing 缺口、公开 Gitee 仓库与两端 main。
+- [x] 获得精确 `v0.2.4` 未签名 macOS 预览授权并新增 Accepted ADR。
+- [x] 准备 0.2.4 warning-first release notes、workflow exact-tag guard、manual mirror default 与架构事实。
+- [x] 同步 package/Cargo/Tauri/Cargo.lock 到 0.2.4，并完成完整本地发布 gate、macOS arm64 `.app` 构建与官方 latest 真实 smoke。
+- [ ] 提交并推送 GitHub main，等待全部 main CI 成功；同步 Gitee main 到相同提交。
+- [ ] 创建 annotated `v0.2.4`，推送并核验两端 tag object/commit。
+- [ ] 核验 GitHub canonical stable Release、8 项资产、API SHA-256 与 updater manifest。
+- [ ] 完成 Gitee 8 项同字节镜像、manifest-last、stable/latest 入口与最终 closeout 记录。
+
+## Review
+
+- 本地证据：Rust fmt/locked check/strict clippy 与 310 tests；React 57 files/304 tests；10 张视觉基线；190-command security gate；Go vet/test/race；updater/Gitee publisher 5 tests；workflow YAML、版本、release-note 首行与 diff gate全部通过。
+- 本机 Apple Silicon `KickSide.app` 0.2.4 构建成功，主程序与 bundled Bridge 均验证 arm64。该本地开发 app 为 ad-hoc 且不作为最终 Release codesign 证据；tag workflow 会使用精确 unsigned 配置重新构建并严格验证。
+- 官方 DSH latest 真实 smoke：`0.1.1-rc.2`，Node 24.19.0 / darwin-arm64，隔离安装 383588ms、ready 1012ms、stop 252ms、未强杀、端口释放。
+- 待发布完成后继续回填实际 commit、Actions run、资产矩阵、镜像 fallback、G3 限制与公开链接。
+
+# DSH 官方 latest 轻量跟随与受控更新
+
+## 任务契约
+
+- 用户目标：在前序 DSH 修复基础上，让壳应用无需发布新版 KickSide 即可由用户主动升级到 DeepSeek 官方 latest，同时保持轻量和可回滚。
+- 直接交付物：官方 latest 单源发现、精确 SemVer/integrity 安装、最低运行基线、元数据复用、壳私有 npm cache、staging 后切换、状态语义/UI/测试/CI/架构记录。
+- 影响范围：DSH Rust manager、TS IPC/controller、控制中心、runtime smoke/canary、Shell README 与架构事实。
+- 非目标：不后台静默升级；不把可变 `@latest` 直接交给 npm；不引入签名远程清单、runtime bundle、下载源选择或 preview 通道；不改变 `dsh_update -> DshPreflight` 及既有字段语义。
+- 约束：`latest` 仅作发现并在后端冻结为精确 SemVer；固定包名/入口、官方 sha512 integrity、最低 rc.6 运行基线、私有前缀、启动验证、优先自动回滚且无法恢复时保留 backup/fail closed、日志脱敏和双平台生命周期边界不变。
+- 验收：真实官方 latest smoke 通过；一次元数据请求得到精确目标；更新前后不重复强制联网；npm cache 持久复用；现有 DSH 只在 Activate 前停止；G0/G1 与文档记录通过。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、Accepted DSH P0 ADR、`DESIGN.md`。
+
+## Checklist
+
+- [x] 校核 npm 官方版本、入口、integrity 与 Node 元数据。
+- [x] 保留 `0.1.1-rc.2` 及 `recommendedVersion/state/updateAvailable/compatible` 的 published baseline 语义，不再用它限制安装目标。
+- [x] 以最低 rc.6 + 有效 SemVer/固定入口取代枚举运行 allowlist；additive 投影 `officialVersion/officialState/officialUpdateAvailable/installedSupported`。
+- [x] 单次读取官方 latest，把版本/integrity 冻结为精确目标；安装/升级复用缓存并在成功后原地更新。
+- [x] 首次安装、重装和升级统一强制官方 sha512 integrity。
+- [x] 增加壳私有持久 npm cache、prefer-offline 与低噪声配置。
+- [x] staging 安装/校验完成后再停止旧实例，并加强激活/恢复失败报告。
+- [x] 用单调停止 epoch 收口元数据、staging、验证与正式启动竞态，并为所有命令失败发送终态进度。
+- [x] 完成 macOS arm64 / Node 24.19.0 的 rc.2 tested baseline 真实 runtime smoke。
+- [x] 完成当前官方 latest（当日解析为 rc.2）同字节 tested-baseline 真实 smoke、DSH/前端 delta G0/G1、strict clippy、security 与最终 diff 复核；当前受限沙箱不允许 loopback bind/Chrome 启动的复跑证据见 Review。
+- [ ] 由 PR CI 补 Windows/macOS × Node 22.19/24 canary；安装包 WebView2/WKWebView 仍按 G3 执行。
+
+## Review
+
+- 官方包仍使用 `lib/bin.js`，但没有附件所称的 `engines` 字段；Node 22.19/24 是 KickSide 自有、由能力探针守护的支持矩阵。
+- 真实 smoke 的首次 npm 安装耗时约 507 秒，而启动/停止仅约 1.27 秒/0.25 秒；本轮把感知优化集中在元数据、缓存与停机窗口，没有伪装成 DSH 启动优化。
+- `recommendedVersion/state/updateAvailable/compatible` 都保留 v0.2.3 语义；官方 latest 目标和最低运行基线只使用 additive 字段，旧客户端可安全忽略。
+- 轻量策略把 DeepSeek npm 发布视为兼容授权，放弃 KickSide 预先批准；签名清单和预构建 bundle 会改变供应链、发布和回退表面，仍留作独立单向门决策。
+- 完成态复核所在沙箱拒绝任何 loopback `bind`，因此 Rust 全量复跑为 279 通过、30 项同因 `Operation not permitted` 失败；DSH 非监听测试 18/18、strict clippy、57 文件/304 项前端测试、production build、190-command security gate 均通过。Chrome headless 同样被沙箱 `SIGABRT`；这些环境失败没有产生产品断言差异，仍由 PR canary/G3 在非受限宿主复跑。
+
 # v0.2.3 双源发布与发布流程 Skill
 
 ## 任务契约

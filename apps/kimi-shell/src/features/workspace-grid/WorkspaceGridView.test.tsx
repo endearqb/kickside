@@ -415,7 +415,7 @@ describe("WorkspaceGridView", () => {
       state: "running" as const,
       port: 3080,
       url: "http://127.0.0.1:3080",
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     };
     const { rerender } = render(
       <WorkspaceGridView
@@ -463,7 +463,7 @@ describe("WorkspaceGridView", () => {
           state: "running",
           port: 3080,
           url: "http://127.0.0.1:3080",
-          pinnedVersion: "0.1.0-rc.6",
+          pinnedVersion: "0.1.1-rc.2",
         }}
       />,
     );
@@ -480,7 +480,7 @@ describe("WorkspaceGridView", () => {
           port: 3080,
           url: "http://127.0.0.1:3080",
           lastError: "HTTP 健康检查连续失败",
-          pinnedVersion: "0.1.0-rc.6",
+          pinnedVersion: "0.1.1-rc.2",
         }}
       />,
     );
@@ -501,7 +501,7 @@ describe("WorkspaceGridView", () => {
         {...props}
         dshStatus={{
           state: "stopped",
-          pinnedVersion: "0.1.0-rc.6",
+          pinnedVersion: "0.1.1-rc.2",
         }}
       />,
     );
@@ -526,7 +526,7 @@ describe("WorkspaceGridView", () => {
           state: "running",
           port: 3080,
           url: "http://127.0.0.1:3080",
-          pinnedVersion: "0.1.0-rc.6",
+          pinnedVersion: "0.1.1-rc.2",
         }}
       />,
     );
@@ -588,7 +588,7 @@ describe("WorkspaceGridView", () => {
           state: "running",
           port: 3080,
           url: "http://127.0.0.1:3080",
-          pinnedVersion: "0.1.0-rc.6",
+          pinnedVersion: "0.1.1-rc.2",
         }}
       />,
     );

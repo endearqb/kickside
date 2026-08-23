@@ -20,8 +20,11 @@ use crate::{
     types::DshSettings,
 };
 
-pub const DSH_PINNED_VERSION: &str = "0.1.0-rc.7";
-const DSH_SUPPORTED_RUNTIME_VERSIONS: &[&str] = &["0.1.0-rc.6", DSH_PINNED_VERSION];
+/// Retained in published `pinnedVersion` projections as the tested offline
+/// baseline. New installs resolve npm's official `latest` tag to an exact
+/// version before invoking npm.
+pub const DSH_PINNED_VERSION: &str = "0.1.1-rc.2";
+const DSH_MIN_RUNTIME_VERSION: &str = "0.1.0-rc.6";
 const DSH_PACKAGE: &str = "@deepseek-ai/dsh";
 const DSH_REGISTRY_ORIGIN: &str = "https://registry.npmjs.org";
 const DSH_REGISTRY_RESPONSE_MAX_BYTES: u64 = 1024 * 1024;
@@ -102,11 +105,22 @@ pub enum DshUpdateState {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DshUpdateInfo {
+    /// Published compatibility projection against KickSide's compiled
+    /// baseline. Keep this and the other legacy fields stable for old clients.
     pub state: DshUpdateState,
     pub installed_version: Option<String>,
     pub recommended_version: String,
     pub upstream_version: Option<String>,
     pub update_available: bool,
+    /// Additive projection used by current clients that explicitly follow the
+    /// official npm `latest` tag.
+    pub official_version: String,
+    pub official_state: DshUpdateState,
+    pub official_update_available: bool,
+    pub installed_supported: bool,
+    /// Compatibility projection retained for existing callers. Equivalent to
+    /// the historical `state != unsupported` projection; it does not describe
+    /// the minimum runtime baseline or upstream trust policy.
     pub compatible: bool,
     pub checked_at_ms: u64,
 }
@@ -114,7 +128,7 @@ pub struct DshUpdateInfo {
 #[derive(Debug, Clone)]
 struct CheckedDshUpdate {
     info: DshUpdateInfo,
-    recommended_integrity: String,
+    official_integrity: String,
 }
 
 #[derive(Debug, Clone)]
@@ -123,14 +137,14 @@ struct CachedDshUpdate {
     cached_at: Instant,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct NpmPackageMetadata {
     name: String,
     version: String,
     dist: NpmPackageDist,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct NpmPackageDist {
     integrity: String,
 }
@@ -246,21 +260,43 @@ pub(crate) async fn dsh_install(
     app: AppHandle,
     progress: Channel<DshInstallEvent>,
 ) -> Result<DshPreflight, String> {
+    let operation_epoch = app
+        .state::<AppState>()
+        .dsh_stop_epoch
+        .load(Ordering::Acquire);
     send_install_stage(
         Some(&progress),
         DshInstallStage::Preflight,
-        "正在检测 Node.js 与 npm",
+        "正在检查官方最新版本与安装环境",
     );
-    let install_app = app.clone();
-    let install_progress = progress.clone();
-    let report = tauri::async_runtime::spawn_blocking(move || {
-        install(&install_app, Some(&install_progress), None)
-    })
-    .await
-    .map_err(|error| format!("DSH 安装任务异常结束：{error}"))?
-    .map_err(|error| error.to_string());
-    let report = match report {
-        Ok(report) => report,
+    let outcome: Result<_, String> = async {
+        let check_app = app.clone();
+        let checked =
+            tauri::async_runtime::spawn_blocking(move || check_update_for_install(&check_app))
+                .await
+                .map_err(|error| format!("DSH 安装元数据任务异常结束：{error}"))?
+                .map_err(|error| error.to_string())?;
+        let install_app = app.clone();
+        let install_progress = progress.clone();
+        let target_version = checked.info.official_version.clone();
+        let integrity = checked.official_integrity.clone();
+        let report = tauri::async_runtime::spawn_blocking(move || {
+            install(
+                &install_app,
+                Some(&install_progress),
+                &target_version,
+                &integrity,
+                operation_epoch,
+            )
+        })
+        .await
+        .map_err(|error| format!("DSH 安装任务异常结束：{error}"))?
+        .map_err(|error| error.to_string())?;
+        Ok((checked, report))
+    }
+    .await;
+    let (checked, report) = match outcome {
+        Ok(outcome) => outcome,
         Err(message) => {
             let _ = progress.send(DshInstallEvent::Failed {
                 code: dsh_error_code(&message).to_string(),
@@ -269,19 +305,10 @@ pub(crate) async fn dsh_install(
             return Err(message);
         }
     };
-    if report.runtime_ready {
-        send_install_stage(
-            Some(&progress),
-            DshInstallStage::Start,
-            "正在启动默认工作区",
-        );
-        if let Err(error) = start_default_workspace(&app) {
-            append_log(&app, format!("DSH 安装后自动启动失败：{error:#}"));
-        }
-    }
     let _ = progress.send(DshInstallEvent::Completed {
-        version: DSH_PINNED_VERSION.to_string(),
+        version: checked.info.official_version.clone(),
     });
+    cache_successful_update(&checked);
     Ok(report)
 }
 
@@ -290,34 +317,50 @@ pub(crate) async fn dsh_update(
     app: AppHandle,
     progress: Channel<DshInstallEvent>,
 ) -> Result<DshPreflight, String> {
+    let operation_epoch = app
+        .state::<AppState>()
+        .dsh_stop_epoch
+        .load(Ordering::Acquire);
     send_install_stage(
         Some(&progress),
         DshInstallStage::Preflight,
-        "正在检查 DSH 推荐版本",
+        "正在检查 DSH 官方最新版本",
     );
-    let check_app = app.clone();
-    let checked = tauri::async_runtime::spawn_blocking(move || check_update(&check_app, true))
-        .await
-        .map_err(|error| format!("DSH 更新检测任务异常结束：{error}"))?
-        .map_err(|error| error.to_string())?;
-    if !checked.info.compatible {
-        return Err("当前 DSH 推荐版本与 KickSide 不兼容".to_string());
-    }
-    if !checked.info.update_available {
-        return Err("当前 DSH 已是 KickSide 推荐版本".to_string());
-    }
+    let outcome: Result<_, String> = async {
+        let check_app = app.clone();
+        let checked =
+            tauri::async_runtime::spawn_blocking(move || check_update_for_install(&check_app))
+                .await
+                .map_err(|error| format!("DSH 更新检测任务异常结束：{error}"))?
+                .map_err(|error| error.to_string())?;
+        if checked.info.official_state == DshUpdateState::Unsupported {
+            return Err("当前 DSH 安装或官方最新版本不可识别".to_string());
+        }
+        if !checked.info.official_update_available {
+            return Err("当前 DSH 已是官方最新版本".to_string());
+        }
 
-    let update_app = app.clone();
-    let update_progress = progress.clone();
-    let integrity = checked.recommended_integrity;
-    let report = tauri::async_runtime::spawn_blocking(move || {
-        install(&update_app, Some(&update_progress), Some(&integrity))
-    })
-    .await
-    .map_err(|error| format!("DSH 升级任务异常结束：{error}"))?
-    .map_err(|error| error.to_string());
-    let report = match report {
-        Ok(report) => report,
+        let update_app = app.clone();
+        let update_progress = progress.clone();
+        let target_version = checked.info.official_version.clone();
+        let integrity = checked.official_integrity.clone();
+        let report = tauri::async_runtime::spawn_blocking(move || {
+            install(
+                &update_app,
+                Some(&update_progress),
+                &target_version,
+                &integrity,
+                operation_epoch,
+            )
+        })
+        .await
+        .map_err(|error| format!("DSH 升级任务异常结束：{error}"))?
+        .map_err(|error| error.to_string())?;
+        Ok((checked, report))
+    }
+    .await;
+    let (checked, report) = match outcome {
+        Ok(outcome) => outcome,
         Err(message) => {
             let _ = progress.send(DshInstallEvent::Failed {
                 code: dsh_error_code(&message).to_string(),
@@ -326,22 +369,10 @@ pub(crate) async fn dsh_update(
             return Err(message);
         }
     };
-    if report.runtime_ready {
-        send_install_stage(
-            Some(&progress),
-            DshInstallStage::Start,
-            "正在重启默认工作区",
-        );
-        if let Err(error) = start_default_workspace(&app) {
-            append_log(&app, format!("DSH 升级后自动启动失败：{error:#}"));
-        }
-    }
     let _ = progress.send(DshInstallEvent::Completed {
-        version: DSH_PINNED_VERSION.to_string(),
+        version: checked.info.official_version.clone(),
     });
-    if let Ok(mut cache) = DSH_UPDATE_CACHE.get_or_init(Default::default).lock() {
-        *cache = None;
-    }
+    cache_successful_update(&checked);
     Ok(report)
 }
 
@@ -573,7 +604,7 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
         );
     } else if !node_supported {
         issues.push(format!(
-            "E-DSH-001：DSH {DSH_PINNED_VERSION} 支持 Node.js {DSH_NODE_REQUIREMENT}，并要求 parseEnv 运行时能力；当前为 {}。请升级 Node.js LTS。",
+            "E-DSH-001：DSH 支持 Node.js {DSH_NODE_REQUIREMENT}，并要求 parseEnv 运行时能力；当前为 {}。请升级 Node.js LTS。",
             node_version.as_deref().unwrap_or("未知版本")
         ));
     }
@@ -585,8 +616,7 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
     }
     if !install_valid {
         issues.push(format!(
-            "尚未安装受支持的 DSH；可运行版本为 {}。",
-            DSH_SUPPORTED_RUNTIME_VERSIONS.join("、")
+            "尚未安装可验证的 DSH；要求官方包版本不低于 {DSH_MIN_RUNTIME_VERSION} 且固定入口有效。"
         ));
     }
     let runtime_ready = node_supported && install_valid;
@@ -612,50 +642,106 @@ fn preflight(app: &AppHandle) -> anyhow::Result<DshPreflight> {
 
 fn check_update(app: &AppHandle, force: bool) -> anyhow::Result<CheckedDshUpdate> {
     if !force {
-        if let Ok(cache) = DSH_UPDATE_CACHE.get_or_init(Default::default).lock() {
-            if let Some(cached) = cache.as_ref() {
-                if cached.cached_at.elapsed() < DSH_UPDATE_CACHE_TTL {
-                    let installed = installed_version_at(&install_dir(app));
-                    if installed == cached.checked.info.installed_version {
-                        return Ok(cached.checked.clone());
-                    }
-                }
-            }
+        if let Some(cached) = cached_update_for_current_install(app) {
+            return Ok(cached);
         }
     }
 
-    let recommended = fetch_npm_metadata(DSH_PINNED_VERSION)?;
-    validate_npm_metadata(&recommended, DSH_PINNED_VERSION)?;
-    let upstream = fetch_npm_metadata("latest")?;
-    validate_npm_metadata(&upstream, &upstream.version)?;
-    let installed_version = installed_version_at(&install_dir(app));
+    let latest = fetch_latest_npm_metadata()?;
+    validate_npm_metadata(&latest)?;
+    let checked = build_checked_update(
+        installed_version_at(&install_dir(app)),
+        latest.version,
+        latest.dist.integrity,
+    );
+    store_update_cache(checked.clone());
+    Ok(checked)
+}
+
+fn check_update_for_install(app: &AppHandle) -> anyhow::Result<CheckedDshUpdate> {
+    if let Some(cached) = cached_update_for_current_install(app) {
+        return Ok(cached);
+    }
+
+    let latest = fetch_latest_npm_metadata()?;
+    validate_npm_metadata(&latest)?;
+    let checked = build_checked_update(
+        installed_version_at(&install_dir(app)),
+        latest.version,
+        latest.dist.integrity,
+    );
+    store_update_cache(checked.clone());
+    Ok(checked)
+}
+
+fn build_checked_update(
+    installed_version: Option<String>,
+    official_version: String,
+    official_integrity: String,
+) -> CheckedDshUpdate {
     let state = classify_update_state(installed_version.as_deref(), DSH_PINNED_VERSION);
-    let checked = CheckedDshUpdate {
+    let official_state = classify_update_state(installed_version.as_deref(), &official_version);
+    let installed_supported = installed_version
+        .as_deref()
+        .map(runtime_version_supported)
+        .unwrap_or(false);
+    CheckedDshUpdate {
         info: DshUpdateInfo {
             state,
             installed_version,
             recommended_version: DSH_PINNED_VERSION.to_string(),
-            upstream_version: Some(upstream.version),
+            upstream_version: Some(official_version.clone()),
             update_available: state == DshUpdateState::UpdateAvailable,
+            official_version,
+            official_state,
+            official_update_available: official_state == DshUpdateState::UpdateAvailable,
+            installed_supported,
             compatible: state != DshUpdateState::Unsupported,
             checked_at_ms: unix_time_millis(),
         },
-        recommended_integrity: recommended.dist.integrity,
-    };
+        official_integrity,
+    }
+}
+
+fn cached_update_for_current_install(app: &AppHandle) -> Option<CheckedDshUpdate> {
+    let cache = DSH_UPDATE_CACHE.get_or_init(Default::default).lock().ok()?;
+    let cached = cache.as_ref()?;
+    if cached.cached_at.elapsed() >= DSH_UPDATE_CACHE_TTL {
+        return None;
+    }
+    let installed = installed_version_at(&install_dir(app));
+    (installed == cached.checked.info.installed_version).then(|| cached.checked.clone())
+}
+
+fn store_update_cache(checked: CheckedDshUpdate) {
     if let Ok(mut cache) = DSH_UPDATE_CACHE.get_or_init(Default::default).lock() {
         *cache = Some(CachedDshUpdate {
-            checked: checked.clone(),
+            checked,
             cached_at: Instant::now(),
         });
     }
-    Ok(checked)
 }
 
-fn fetch_npm_metadata(version: &str) -> anyhow::Result<NpmPackageMetadata> {
-    if version != "latest" && version != DSH_PINNED_VERSION {
-        bail!("拒绝查询未登记的 DSH 版本");
-    }
-    let url = format!("{DSH_REGISTRY_ORIGIN}/@deepseek-ai%2Fdsh/{version}");
+fn cache_successful_update(previous: &CheckedDshUpdate) {
+    store_update_cache(successful_update_cache_entry(previous));
+}
+
+fn successful_update_cache_entry(previous: &CheckedDshUpdate) -> CheckedDshUpdate {
+    let mut checked = previous.clone();
+    let installed_version = checked.info.official_version.clone();
+    checked.info.state = classify_update_state(Some(&installed_version), DSH_PINNED_VERSION);
+    checked.info.installed_version = Some(installed_version);
+    checked.info.update_available = checked.info.state == DshUpdateState::UpdateAvailable;
+    checked.info.official_state = DshUpdateState::UpToDate;
+    checked.info.official_update_available = false;
+    checked.info.installed_supported = true;
+    checked.info.compatible = true;
+    checked.info.checked_at_ms = unix_time_millis();
+    checked
+}
+
+fn fetch_latest_npm_metadata() -> anyhow::Result<NpmPackageMetadata> {
+    let url = format!("{DSH_REGISTRY_ORIGIN}/@deepseek-ai%2Fdsh/latest");
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
@@ -676,11 +762,14 @@ fn fetch_npm_metadata(version: &str) -> anyhow::Result<NpmPackageMetadata> {
     serde_json::from_slice(&body).context("DSH 版本元数据格式无效")
 }
 
-fn validate_npm_metadata(metadata: &NpmPackageMetadata, expected: &str) -> anyhow::Result<()> {
-    if metadata.name != DSH_PACKAGE || metadata.version != expected {
-        bail!("DSH npm 元数据包名或版本不匹配");
+fn validate_npm_metadata(metadata: &NpmPackageMetadata) -> anyhow::Result<()> {
+    if metadata.name != DSH_PACKAGE {
+        bail!("DSH npm 元数据包名不匹配");
     }
     Version::parse(&metadata.version).context("DSH npm 版本不是有效 semver")?;
+    if !runtime_version_supported(&metadata.version) {
+        bail!("DSH npm 官方最新版本低于运行基线 {DSH_MIN_RUNTIME_VERSION}");
+    }
     if !metadata.dist.integrity.starts_with("sha512-")
         || metadata.dist.integrity.len() <= "sha512-".len()
     {
@@ -706,16 +795,31 @@ fn classify_update_state(installed: Option<&str>, recommended: &str) -> DshUpdat
     }
 }
 
+fn runtime_version_supported(value: &str) -> bool {
+    let Ok(version) = Version::parse(value) else {
+        return false;
+    };
+    let minimum = Version::parse(DSH_MIN_RUNTIME_VERSION)
+        .expect("DSH minimum runtime version must be valid semver");
+    version >= minimum
+}
+
 fn install(
     app: &AppHandle,
     progress: Option<&Channel<DshInstallEvent>>,
-    expected_integrity: Option<&str>,
+    target_version: &str,
+    expected_integrity: &str,
+    operation_epoch: u64,
 ) -> anyhow::Result<DshPreflight> {
+    Version::parse(target_version).context("DSH 安装目标不是有效 semver")?;
     let shared = app.state::<AppState>();
     let _operation = shared
         .dsh_lifecycle_operation
         .lock()
         .map_err(|_| anyhow::anyhow!("DSH 生命周期锁已损坏"))?;
+    if dsh_operation_cancelled(&shared, operation_epoch) {
+        bail!("DSH 安装已取消");
+    }
     let (generation, previously_running, previous_workspace) = {
         let runtime = shared
             .dsh_runtime
@@ -727,8 +831,6 @@ fn install(
             runtime.workspace_dir.clone(),
         )
     };
-    stop_generation(app, generation, false).context("安装 DSH 前停止现有实例失败")?;
-    shared.dsh_cancel_requested.store(false, Ordering::Release);
     let (runtime, _node_version, launcher) = select_node_toolchain_for_install().with_context(|| {
         format!(
             "E-DSH-001：未找到 Node.js {DSH_NODE_REQUIREMENT} 与同工具链 npm；请安装完整的 Node.js LTS"
@@ -739,6 +841,8 @@ fn install(
     let state = app.state::<AppState>();
     send_install_stage(progress, DshInstallStage::Prepare, "正在准备私有安装目录");
     fs::create_dir_all(&state.dsh_root_dir).context("创建 DSH 私有目录失败")?;
+    let npm_cache = state.dsh_root_dir.join("npm-cache");
+    fs::create_dir_all(&npm_cache).context("创建 DSH npm 缓存目录失败")?;
     let nonce = unix_time_millis();
     let temporary = state
         .dsh_root_dir
@@ -748,11 +852,11 @@ fn install(
         .dsh_root_dir
         .join(format!("backup-{}-{nonce}", std::process::id()));
     fs::create_dir(&temporary).context("创建 DSH 临时安装目录失败")?;
-    append_log(app, format!("开始安装 {DSH_PACKAGE}@{DSH_PINNED_VERSION}"));
+    append_log(app, format!("开始安装 {DSH_PACKAGE}@{target_version}"));
     send_install_stage(
         progress,
         DshInstallStage::Install,
-        "正在连接 npm registry 并安装固定版本",
+        "正在连接 npm registry 并安装精确版本",
     );
 
     command
@@ -760,7 +864,8 @@ fn install(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     retain_safe_environment(&mut command, Some(&runtime.node_path));
-    launcher.configure_install(&mut command, &temporary);
+    configure_npm_install_environment(&mut command, &npm_cache);
+    launcher.configure_install(&mut command, &temporary, target_version);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -791,7 +896,7 @@ fn install(
     let result = match wait_for_exit(
         &mut child,
         INSTALL_TIMEOUT,
-        Some(&shared.dsh_cancel_requested),
+        Some((&shared.dsh_stop_epoch, operation_epoch)),
     ) {
         Ok(result) => result,
         Err(error) => {
@@ -803,7 +908,7 @@ fn install(
     let Some(result) = result else {
         let _ = terminate_process_tree(&mut child, install_group, Duration::from_secs(2));
         let _ = fs::remove_dir_all(&temporary);
-        if shared.dsh_cancel_requested.swap(false, Ordering::AcqRel) {
+        if dsh_operation_cancelled(&shared, operation_epoch) {
             bail!("DSH 安装已取消");
         }
         bail!("E-DSH-002：DSH 安装超过 10 分钟；请检查 npm registry 与网络/代理设置，安装进程树已终止");
@@ -818,17 +923,15 @@ fn install(
     send_install_stage(
         progress,
         DshInstallStage::Verify,
-        "正在校验固定版本与私有入口",
+        "正在校验精确版本与私有入口",
     );
-    if let Err(error) = verify_recommended_install(&temporary) {
+    if let Err(error) = verify_target_install(&temporary, target_version) {
         let _ = fs::remove_dir_all(&temporary);
         return Err(error);
     }
-    if let Some(expected_integrity) = expected_integrity {
-        if let Err(error) = verify_install_integrity(&temporary, expected_integrity) {
-            let _ = fs::remove_dir_all(&temporary);
-            return Err(error);
-        }
+    if let Err(error) = verify_install_integrity(&temporary, target_version, expected_integrity) {
+        let _ = fs::remove_dir_all(&temporary);
+        return Err(error);
     }
     let settings = settings_store::load_or_default(app)?;
     let validation_workspace = previous_workspace
@@ -836,12 +939,40 @@ fn install(
         .unwrap_or(backend_manager::resolve_working_directory(&settings, None)?);
 
     send_install_stage(progress, DshInstallStage::Activate, "正在启用已校验的安装");
+    if dsh_operation_cancelled(&shared, operation_epoch) {
+        let _ = fs::remove_dir_all(&temporary);
+        bail!("DSH 安装已取消");
+    }
+    if let Err(error) = stop_generation(app, generation, false) {
+        let _ = fs::remove_dir_all(&temporary);
+        return Err(error).context("切换 DSH 版本前停止现有实例失败");
+    }
     if active.exists() {
-        fs::rename(&active, &backup).context("备份当前 DSH 安装失败")?;
+        if let Err(error) = fs::rename(&active, &backup) {
+            let _ = fs::remove_dir_all(&temporary);
+            if let Err(restart_error) = restart_previous_install_locked(
+                app,
+                previously_running,
+                previous_workspace.as_deref(),
+            ) {
+                bail!("备份当前 DSH 安装失败：{error}；旧实例重启也失败：{restart_error:#}");
+            }
+            bail!("备份当前 DSH 安装失败：{error}");
+        }
     }
     if let Err(error) = fs::rename(&temporary, &active) {
         if backup.exists() {
-            let _ = fs::rename(&backup, &active);
+            if let Err(restore_error) = fs::rename(&backup, &active) {
+                bail!(
+                    "启用新 DSH 安装失败：{error}；恢复旧安装也失败：{restore_error}。旧安装仍保留在 {}",
+                    backup.display()
+                );
+            }
+        }
+        if let Err(restart_error) =
+            restart_previous_install_locked(app, previously_running, previous_workspace.as_deref())
+        {
+            bail!("启用新 DSH 安装失败：{error}；旧实例重启也失败：{restart_error:#}");
         }
         bail!("启用新 DSH 安装失败：{error}");
     }
@@ -851,31 +982,95 @@ fn install(
         &validation_workspace,
         settings.agent_backends.dsh.port_range,
         settings.agent_backends.dsh.start_timeout_sec,
+        operation_epoch,
     ) {
-        let _ = fs::remove_dir_all(&active);
+        if let Err(remove_error) = fs::remove_dir_all(&active) {
+            let failed_active = state.dsh_root_dir.join(format!(
+                "failed-{}-{}",
+                std::process::id(),
+                unix_time_millis()
+            ));
+            if let Err(quarantine_error) = fs::rename(&active, &failed_active) {
+                let recovery_hint = if backup.exists() {
+                    format!("旧安装仍保留在 {}", backup.display())
+                } else {
+                    "没有旧安装可供恢复".to_string()
+                };
+                bail!(
+                    "DSH 新版本启动验证失败：{validation_error:#}；移除失败的新安装时出错：{remove_error}；隔离失败安装也出错：{quarantine_error}。{recovery_hint}"
+                );
+            }
+            append_log(
+                app,
+                format!(
+                    "无法直接移除验证失败的 DSH 安装，已隔离到 {}：{remove_error}",
+                    failed_active.display()
+                ),
+            );
+        }
         let restored = if backup.exists() {
-            fs::rename(&backup, &active).context("恢复旧 DSH 安装失败")?;
+            fs::rename(&backup, &active).with_context(|| {
+                format!(
+                    "恢复旧 DSH 安装失败；原验证错误：{validation_error:#}；备份仍保留在 {}",
+                    backup.display()
+                )
+            })?;
             true
         } else {
             false
         };
+        let recovery = if restored {
+            "已回滚"
+        } else {
+            "失败安装已移除或隔离"
+        };
         append_log(
             app,
-            format!("DSH 新版本启动验证失败，已回滚：{validation_error:#}"),
+            format!("DSH 新版本启动验证失败，{recovery}：{validation_error:#}"),
         );
-        if restored && previously_running {
-            if let Some(workspace) = previous_workspace.as_deref() {
-                start_locked(app, workspace.to_string_lossy().as_ref(), true)
-                    .context("回滚后重启旧 DSH 失败")?;
-            }
+        if restored && !dsh_operation_cancelled(&shared, operation_epoch) {
+            restart_previous_install_locked(app, previously_running, previous_workspace.as_deref())
+                .context("回滚后重启旧 DSH 失败")?;
         }
-        bail!("DSH 新版本启动验证失败，已回滚：{validation_error:#}");
+        bail!("DSH 新版本启动验证失败，{recovery}：{validation_error:#}");
     }
     if backup.exists() {
         let _ = fs::remove_dir_all(&backup);
     }
-    append_log(app, format!("DSH {DSH_PINNED_VERSION} 安装完成"));
-    preflight(app)
+    append_log(app, format!("DSH {target_version} 安装完成"));
+    let report = preflight(app)?;
+    if !dsh_operation_cancelled(&shared, operation_epoch)
+        && report.runtime_ready
+        && settings.agent_backends.dsh.enabled
+    {
+        send_install_stage(progress, DshInstallStage::Start, "正在启动默认工作区");
+        let workspace = backend_manager::resolve_working_directory(&settings, None)?;
+        if let Err(error) = start_locked(app, workspace.to_string_lossy().as_ref(), false) {
+            append_log(app, format!("DSH 安装后自动启动失败：{error:#}"));
+        }
+    }
+    Ok(report)
+}
+
+fn dsh_operation_cancelled(shared: &AppState, operation_epoch: u64) -> bool {
+    stop_epoch_changed(&shared.dsh_stop_epoch, operation_epoch)
+}
+
+fn stop_epoch_changed(epoch: &std::sync::atomic::AtomicU64, captured: u64) -> bool {
+    epoch.load(Ordering::Acquire) != captured
+}
+
+fn restart_previous_install_locked(
+    app: &AppHandle,
+    previously_running: bool,
+    previous_workspace: Option<&Path>,
+) -> anyhow::Result<()> {
+    if previously_running {
+        if let Some(workspace) = previous_workspace {
+            start_locked(app, workspace.to_string_lossy().as_ref(), true)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_activated_install(
@@ -884,6 +1079,7 @@ fn validate_activated_install(
     workspace: &Path,
     port_range: [u16; 2],
     timeout_sec: u64,
+    operation_epoch: u64,
 ) -> anyhow::Result<()> {
     let entry = node_main_module_path(&verified_entry_at(&install_dir(app))?);
     let port = allocate_port(port_range)?;
@@ -913,6 +1109,12 @@ fn validate_activated_install(
     let group = owned_process_group_id(child.id());
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
     loop {
+        if dsh_operation_cancelled(&app.state::<AppState>(), operation_epoch) {
+            if !terminate_process_tree(&mut child, group, STOP_TIMEOUT) {
+                bail!("DSH 安装取消后，验证实例未能确认关闭");
+            }
+            bail!("DSH 安装已取消");
+        }
         match child.try_wait() {
             Ok(Some(exit)) => bail!("DSH 验证实例提前退出（exit={:?}）", exit.code()),
             Ok(None) => {}
@@ -967,23 +1169,23 @@ impl NpmLauncher {
         }
     }
 
-    fn configure_install(&self, command: &mut Command, prefix: &Path) {
+    fn configure_install(&self, command: &mut Command, prefix: &Path, target_version: &str) {
         match self {
             Self::Direct(_) => {
-                append_direct_npm_install_args(command, prefix);
+                append_direct_npm_install_args(command, prefix, target_version);
             }
             Self::NodeCli { npm_cli, .. } => {
                 command.arg(npm_cli);
-                append_direct_npm_install_args(command, prefix);
+                append_direct_npm_install_args(command, prefix, target_version);
             }
             Self::CommandScript { .. } => {
-                // The command string is entirely fixed. The validated shim is
-                // resolved through the native working directory and the
-                // dynamic install prefix travels only through npm's environment
-                // config. Delayed expansion and cmd AutoRun hooks stay disabled.
-                let command_line = format!(
-                    "npm.cmd install --no-audit --no-fund {DSH_PACKAGE}@{DSH_PINNED_VERSION}"
-                );
+                // The command template and package name are fixed. The only
+                // interpolated value is a SemVer already parsed from official
+                // npm metadata. The dynamic prefix travels only through npm's
+                // environment config. Delayed expansion and cmd AutoRun hooks
+                // stay disabled.
+                let command_line =
+                    format!("npm.cmd install --no-audit --no-fund {DSH_PACKAGE}@{target_version}");
                 command
                     .args(["/D", "/S", "/V:OFF", "/C"])
                     .arg(command_line)
@@ -993,11 +1195,20 @@ impl NpmLauncher {
     }
 }
 
-fn append_direct_npm_install_args(command: &mut Command, prefix: &Path) {
+fn append_direct_npm_install_args(command: &mut Command, prefix: &Path, target_version: &str) {
     command
         .args(["install", "--no-audit", "--no-fund", "--prefix"])
         .arg(prefix)
-        .arg(format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}"));
+        .arg(format!("{DSH_PACKAGE}@{target_version}"));
+}
+
+fn configure_npm_install_environment(command: &mut Command, cache_dir: &Path) {
+    command
+        .env("npm_config_cache", cache_dir)
+        .env("npm_config_prefer_offline", "true")
+        .env("npm_config_progress", "false")
+        .env("npm_config_loglevel", "warn")
+        .env("npm_config_update_notifier", "false");
 }
 
 fn resolve_npm_launcher(
@@ -1086,26 +1297,26 @@ fn npm_cli_candidates(node_path: &Path, npm_path: &Path) -> Vec<PathBuf> {
 
 fn verify_runtime_install(prefix: &Path) -> anyhow::Result<()> {
     let version = installed_version_at(prefix).context("DSH package.json 缺失或无效")?;
-    if !DSH_SUPPORTED_RUNTIME_VERSIONS.contains(&version.as_str()) {
-        bail!(
-            "DSH 安装版本不受支持：可运行版本为 {}，实际 {version}",
-            DSH_SUPPORTED_RUNTIME_VERSIONS.join("、")
-        );
+    if !runtime_version_supported(&version) {
+        bail!("DSH 安装版本不受支持：最低 {DSH_MIN_RUNTIME_VERSION}，实际 {version}");
     }
     verified_entry_at(prefix).context("DSH 固定入口无效")?;
     Ok(())
 }
 
-fn verify_recommended_install(prefix: &Path) -> anyhow::Result<()> {
+fn verify_target_install(prefix: &Path, expected_version: &str) -> anyhow::Result<()> {
     let version = installed_version_at(prefix).context("DSH package.json 缺失或无效")?;
-    if version != DSH_PINNED_VERSION {
-        bail!("DSH 安装版本不匹配：期望 {DSH_PINNED_VERSION}，实际 {version}");
+    if version != expected_version {
+        bail!("DSH 安装版本不匹配：期望 {expected_version}，实际 {version}");
     }
-    verified_entry_at(prefix).context("DSH 固定入口无效")?;
-    Ok(())
+    verify_runtime_install(prefix)
 }
 
-fn verify_install_integrity(prefix: &Path, expected: &str) -> anyhow::Result<()> {
+fn verify_install_integrity(
+    prefix: &Path,
+    expected_version: &str,
+    expected_integrity: &str,
+) -> anyhow::Result<()> {
     let lock_path = prefix.join("node_modules/.package-lock.json");
     let raw = fs::read_to_string(&lock_path)
         .with_context(|| format!("DSH npm lock 缺失：{}", lock_path.display()))?;
@@ -1116,7 +1327,7 @@ fn verify_install_integrity(prefix: &Path, expected: &str) -> anyhow::Result<()>
         .context("DSH npm lock 缺少固定包记录")?;
     let version = package.get("version").and_then(|value| value.as_str());
     let integrity = package.get("integrity").and_then(|value| value.as_str());
-    if version != Some(DSH_PINNED_VERSION) || integrity != Some(expected) {
+    if version != Some(expected_version) || integrity != Some(expected_integrity) {
         bail!("DSH npm lock 的版本或 integrity 与官方元数据不匹配");
     }
     Ok(())
@@ -1255,15 +1466,15 @@ fn dsh_web_args(port: u16) -> [String; 3] {
 fn wait_for_exit(
     child: &mut Child,
     timeout: Duration,
-    cancel: Option<&std::sync::atomic::AtomicBool>,
+    cancel_epoch: Option<(&std::sync::atomic::AtomicU64, u64)>,
 ) -> anyhow::Result<Option<std::process::ExitStatus>> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait().context("检查子进程状态失败")? {
             return Ok(Some(status));
         }
-        if cancel
-            .map(|cancel| cancel.load(Ordering::Acquire))
+        if cancel_epoch
+            .map(|(epoch, captured)| epoch.load(Ordering::Acquire) != captured)
             .unwrap_or(false)
         {
             return Ok(None);
@@ -1483,7 +1694,7 @@ fn refresh_exit_state(app: &AppHandle) -> anyhow::Result<()> {
 
 pub(crate) fn stop(app: &AppHandle) -> anyhow::Result<()> {
     let shared = app.state::<AppState>();
-    shared.dsh_cancel_requested.store(true, Ordering::Release);
+    shared.dsh_stop_epoch.fetch_add(1, Ordering::AcqRel);
     let _operation = shared
         .dsh_lifecycle_operation
         .lock()
@@ -1887,6 +2098,18 @@ mod tests {
     }
 
     #[test]
+    fn stop_epoch_is_monotonic_and_invalidates_older_operations() {
+        let epoch = std::sync::atomic::AtomicU64::new(7);
+        let captured = epoch.load(Ordering::Acquire);
+        assert!(!stop_epoch_changed(&epoch, captured));
+
+        epoch.fetch_add(1, Ordering::AcqRel);
+
+        assert!(stop_epoch_changed(&epoch, captured));
+        assert!(!stop_epoch_changed(&epoch, captured + 1));
+    }
+
+    #[test]
     fn classifies_prerelease_updates_with_semver_ordering() {
         assert_eq!(
             classify_update_state(Some("0.1.0-rc.6"), "0.1.0-rc.7"),
@@ -1911,20 +2134,113 @@ mod tests {
     }
 
     #[test]
-    fn npm_metadata_requires_the_fixed_package_version_and_sha512_integrity() {
+    fn update_info_adds_official_target_without_changing_published_fields() {
+        let official = "0.1.1-rc.3";
+        let not_installed =
+            build_checked_update(None, official.to_string(), "sha512-tested".to_string());
+        assert!(!not_installed.info.installed_supported);
+        assert!(not_installed.info.compatible);
+        assert_eq!(not_installed.info.state, DshUpdateState::NotInstalled);
+        assert_eq!(not_installed.info.recommended_version, DSH_PINNED_VERSION);
+        assert_eq!(not_installed.info.official_version, official);
+        assert_eq!(
+            not_installed.info.official_state,
+            DshUpdateState::NotInstalled
+        );
+        assert_eq!(
+            not_installed.info.upstream_version.as_deref(),
+            Some(official)
+        );
+
+        let supported_semver = build_checked_update(
+            Some("0.1.0-rc.8".to_string()),
+            official.to_string(),
+            "sha512-tested".to_string(),
+        );
+        assert!(supported_semver.info.installed_supported);
+        assert!(supported_semver.info.compatible);
+        assert!(supported_semver.info.official_update_available);
+
+        let below_minimum = build_checked_update(
+            Some("0.0.0".to_string()),
+            official.to_string(),
+            "sha512-tested".to_string(),
+        );
+        assert!(!below_minimum.info.installed_supported);
+        assert!(below_minimum.info.compatible);
+        assert!(below_minimum.info.official_update_available);
+
+        let invalid = build_checked_update(
+            Some("not-semver".to_string()),
+            official.to_string(),
+            "sha512-tested".to_string(),
+        );
+        assert!(!invalid.info.installed_supported);
+        assert!(!invalid.info.compatible);
+        assert_eq!(invalid.info.official_state, DshUpdateState::Unsupported);
+
+        let available = build_checked_update(
+            Some("0.1.0-rc.7".to_string()),
+            official.to_string(),
+            "sha512-tested".to_string(),
+        );
+        assert!(available.info.official_update_available);
+        let completed = successful_update_cache_entry(&available);
+        assert_eq!(completed.info.state, DshUpdateState::Ahead);
+        assert_eq!(completed.info.installed_version.as_deref(), Some(official));
+        assert!(!completed.info.update_available);
+        assert_eq!(completed.info.official_state, DshUpdateState::UpToDate);
+        assert!(!completed.info.official_update_available);
+        assert_eq!(
+            completed.info.upstream_version,
+            available.info.upstream_version
+        );
+    }
+
+    #[test]
+    fn update_info_serialization_keeps_legacy_and_additive_camel_case_fields() {
+        let checked = build_checked_update(
+            Some(DSH_PINNED_VERSION.to_string()),
+            "0.1.1-rc.3".to_string(),
+            "sha512-tested".to_string(),
+        );
+        let value = serde_json::to_value(&checked.info).expect("serialize update info");
+
+        assert_eq!(value["state"], "up_to_date");
+        assert_eq!(value["recommendedVersion"], DSH_PINNED_VERSION);
+        assert_eq!(value["updateAvailable"], false);
+        assert_eq!(value["compatible"], true);
+        assert_eq!(value["officialVersion"], "0.1.1-rc.3");
+        assert_eq!(value["officialState"], "update_available");
+        assert_eq!(value["officialUpdateAvailable"], true);
+        assert_eq!(value["installedSupported"], true);
+    }
+
+    #[test]
+    fn npm_metadata_requires_the_official_package_semver_and_sha512_integrity() {
         let valid = NpmPackageMetadata {
             name: DSH_PACKAGE.to_string(),
-            version: DSH_PINNED_VERSION.to_string(),
+            version: "0.1.1-rc.3".to_string(),
             dist: NpmPackageDist {
                 integrity: "sha512-tested".to_string(),
             },
         };
-        assert!(validate_npm_metadata(&valid, DSH_PINNED_VERSION).is_ok());
+        assert!(validate_npm_metadata(&valid).is_ok());
         let wrong_package = NpmPackageMetadata {
             name: "other-package".to_string(),
+            ..valid.clone()
+        };
+        assert!(validate_npm_metadata(&wrong_package).is_err());
+        let below_minimum = NpmPackageMetadata {
+            version: "0.1.0-rc.5".to_string(),
+            ..valid.clone()
+        };
+        assert!(validate_npm_metadata(&below_minimum).is_err());
+        let invalid_version = NpmPackageMetadata {
+            version: "latest;exit 0".to_string(),
             ..valid
         };
-        assert!(validate_npm_metadata(&wrong_package, DSH_PINNED_VERSION).is_err());
+        assert!(validate_npm_metadata(&invalid_version).is_err());
     }
 
     #[test]
@@ -2011,6 +2327,48 @@ mod tests {
     }
 
     #[test]
+    fn npm_install_uses_the_private_persistent_cache_with_quiet_offline_preferences() {
+        let cache = PathBuf::from("private-npm-cache");
+        let mut command = Command::new("npm");
+        configure_npm_install_environment(&mut command, &cache);
+        let environment = command
+            .get_envs()
+            .filter_map(|(name, value)| {
+                value.map(|value| {
+                    (
+                        name.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    )
+                })
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(
+            environment.get("npm_config_cache").map(String::as_str),
+            Some("private-npm-cache")
+        );
+        assert_eq!(
+            environment
+                .get("npm_config_prefer_offline")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            environment.get("npm_config_progress").map(String::as_str),
+            Some("false")
+        );
+        assert_eq!(
+            environment.get("npm_config_loglevel").map(String::as_str),
+            Some("warn")
+        );
+        assert_eq!(
+            environment
+                .get("npm_config_update_notifier")
+                .map(String::as_str),
+            Some("false")
+        );
+    }
+
+    #[test]
     fn windows_npm_shim_fails_closed_without_cli_or_command_processor() {
         let root = std::env::temp_dir().join(format!(
             "kickside-npm-shim-closed-{}-{}",
@@ -2069,7 +2427,8 @@ mod tests {
         )
         .expect("resolve command shim");
         let mut command = launcher.command();
-        launcher.configure_install(&mut command, &prefix);
+        let target_version = "0.1.1-rc.9";
+        launcher.configure_install(&mut command, &prefix, target_version);
         let configured_prefix = command
             .get_envs()
             .find_map(|(name, value)| {
@@ -2084,7 +2443,7 @@ mod tests {
             .status()
             .expect("run npm shim");
         assert!(status.success());
-        let expected_package = format!("{DSH_PACKAGE}@{DSH_PINNED_VERSION}");
+        let expected_package = format!("{DSH_PACKAGE}@{target_version}");
         assert_eq!(
             fs::read_to_string(&args_file)
                 .expect("read argv")
@@ -2129,7 +2488,7 @@ mod tests {
     }
 
     #[test]
-    fn allows_supported_runtime_versions_but_installs_only_the_recommended_version() {
+    fn accepts_newer_official_semver_but_verifies_each_exact_install_target() {
         let root = std::env::temp_dir().join(format!(
             "dsh-verify-{}-{}",
             std::process::id(),
@@ -2144,14 +2503,22 @@ mod tests {
         .expect("package json");
         fs::write(package.join("lib/bin.js"), "#!/usr/bin/env node").expect("entry");
         assert!(verify_runtime_install(&root).is_ok());
-        assert!(verify_recommended_install(&root).is_ok());
+        assert!(verify_target_install(&root, DSH_PINNED_VERSION).is_ok());
+        fs::write(package.join("package.json"), r#"{"version":"0.1.0-rc.7"}"#)
+            .expect("supported previous version");
+        assert!(verify_runtime_install(&root).is_ok());
+        assert!(verify_target_install(&root, DSH_PINNED_VERSION).is_err());
         fs::write(package.join("package.json"), r#"{"version":"0.1.0-rc.6"}"#)
             .expect("supported previous version");
         assert!(verify_runtime_install(&root).is_ok());
-        assert!(verify_recommended_install(&root).is_err());
+        assert!(verify_target_install(&root, "0.1.0-rc.6").is_ok());
+        fs::write(package.join("package.json"), r#"{"version":"0.1.1-rc.99"}"#)
+            .expect("newer official version");
+        assert!(verify_runtime_install(&root).is_ok());
+        assert!(verify_target_install(&root, "0.1.1-rc.99").is_ok());
         fs::write(package.join("package.json"), r#"{"version":"0.0.0"}"#).expect("wrong version");
         assert!(verify_runtime_install(&root).is_err());
-        assert!(verify_recommended_install(&root).is_err());
+        assert!(verify_target_install(&root, DSH_PINNED_VERSION).is_err());
 
         #[cfg(unix)]
         {
@@ -2184,6 +2551,27 @@ mod tests {
             let _ = fs::remove_file(outside_package_json);
             let _ = fs::remove_file(outside_entry);
         }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn install_integrity_requires_the_exact_resolved_target_lock_record() {
+        let root = std::env::temp_dir().join(format!(
+            "dsh-integrity-{}-{}",
+            std::process::id(),
+            unix_time_millis()
+        ));
+        let modules = root.join("node_modules");
+        fs::create_dir_all(&modules).expect("create node_modules");
+        fs::write(
+            modules.join(".package-lock.json"),
+            r#"{"packages":{"node_modules/@deepseek-ai/dsh":{"version":"0.1.1-rc.9","integrity":"sha512-tested"}}}"#,
+        )
+        .expect("write lock");
+
+        assert!(verify_install_integrity(&root, "0.1.1-rc.9", "sha512-tested").is_ok());
+        assert!(verify_install_integrity(&root, "0.1.1-rc.8", "sha512-tested").is_err());
+        assert!(verify_install_integrity(&root, "0.1.1-rc.9", "sha512-other").is_err());
         let _ = fs::remove_dir_all(root);
     }
 

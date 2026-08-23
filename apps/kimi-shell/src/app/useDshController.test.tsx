@@ -7,10 +7,14 @@ import { useDshController } from "./useDshController";
 vi.mock("@/services/dshService", () => ({
   checkDshUpdate: vi.fn(async () => ({
     state: "up_to_date",
-    installedVersion: "0.1.0-rc.7",
-    recommendedVersion: "0.1.0-rc.7",
-    upstreamVersion: "0.1.0-rc.7",
+    installedVersion: "0.1.1-rc.2",
+    recommendedVersion: "0.1.1-rc.2",
+    upstreamVersion: "0.1.1-rc.2",
     updateAvailable: false,
+    officialVersion: "0.1.1-rc.2",
+    officialState: "up_to_date",
+    officialUpdateAvailable: false,
+    installedSupported: true,
     compatible: true,
     checkedAtMs: 1,
   })),
@@ -35,11 +39,11 @@ describe("useDshController", () => {
       enabled: false,
       portRange: [3080, 3179],
       startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.startDsh).mockRejectedValue(
       new Error("E-DSH-004：启动超时"),
@@ -63,11 +67,11 @@ describe("useDshController", () => {
       enabled: false,
       portRange: [3080, 3179],
       startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.getDshPreflight).mockResolvedValue({
       ready: false,
@@ -76,7 +80,7 @@ describe("useDshController", () => {
       nodeSupported: false,
       npmAvailable: false,
       installValid: false,
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
       installPath: "/tmp/dsh",
       issues: ["未检测"],
     });
@@ -97,11 +101,11 @@ describe("useDshController", () => {
       enabled: false,
       portRange: [3080, 3179],
       startTimeoutSec: 60,
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.getDshStatus).mockResolvedValue({
       state: "stopped",
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
     });
     vi.mocked(dshService.getDshPreflight).mockResolvedValue({
       ready: true,
@@ -110,7 +114,7 @@ describe("useDshController", () => {
       nodeSupported: true,
       npmAvailable: true,
       installValid: true,
-      pinnedVersion: "0.1.0-rc.6",
+      pinnedVersion: "0.1.1-rc.2",
       installPath: "/tmp/dsh",
       issues: [],
     });
@@ -124,5 +128,79 @@ describe("useDshController", () => {
     });
 
     expect(dshService.getDshPreflight).toHaveBeenCalledOnce();
+  });
+
+  it("reuses backend update metadata after a successful upgrade", async () => {
+    const nextPreflight: dshService.DshPreflight = {
+      ready: true,
+      runtimeReady: true,
+      installReady: true,
+      nodeSupported: true,
+      npmAvailable: true,
+      installValid: true,
+      installedVersion: "0.1.1-rc.2",
+      pinnedVersion: "0.1.1-rc.2",
+      installPath: "/tmp/dsh",
+      issues: [],
+    };
+    vi.mocked(dshService.getDshSettings).mockResolvedValue({
+      enabled: false,
+      portRange: [3080, 3179],
+      startTimeoutSec: 60,
+      pinnedVersion: "0.1.1-rc.2",
+    });
+    vi.mocked(dshService.getDshStatus).mockResolvedValue({
+      state: "stopped",
+      pinnedVersion: "0.1.1-rc.2",
+    });
+    vi.mocked(dshService.updateDsh).mockResolvedValue(nextPreflight);
+
+    const { result } = renderHook(() => useDshController(true));
+    await waitFor(() => expect(result.current.status?.state).toBe("stopped"));
+
+    await act(async () => {
+      await result.current.update();
+    });
+
+    expect(dshService.updateDsh).toHaveBeenCalledOnce();
+    expect(dshService.checkDshUpdate).not.toHaveBeenCalledWith(true);
+    expect(dshService.checkDshUpdate).toHaveBeenLastCalledWith(false);
+  });
+
+  it("reuses backend update metadata after a successful install", async () => {
+    const nextPreflight: dshService.DshPreflight = {
+      ready: true,
+      runtimeReady: true,
+      installReady: true,
+      nodeSupported: true,
+      npmAvailable: true,
+      installValid: true,
+      installedVersion: "0.1.1-rc.2",
+      pinnedVersion: "0.1.1-rc.2",
+      installPath: "/tmp/dsh",
+      issues: [],
+    };
+    vi.mocked(dshService.getDshSettings).mockResolvedValue({
+      enabled: false,
+      portRange: [3080, 3179],
+      startTimeoutSec: 60,
+      pinnedVersion: "0.1.1-rc.2",
+    });
+    vi.mocked(dshService.getDshStatus).mockResolvedValue({
+      state: "stopped",
+      pinnedVersion: "0.1.1-rc.2",
+    });
+    vi.mocked(dshService.installDsh).mockResolvedValue(nextPreflight);
+
+    const { result } = renderHook(() => useDshController(true));
+    await waitFor(() => expect(result.current.status?.state).toBe("stopped"));
+
+    await act(async () => {
+      await result.current.install();
+    });
+
+    expect(dshService.installDsh).toHaveBeenCalledOnce();
+    expect(dshService.checkDshUpdate).not.toHaveBeenCalledWith(true);
+    expect(dshService.checkDshUpdate).toHaveBeenLastCalledWith(false);
   });
 });

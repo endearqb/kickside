@@ -44,11 +44,11 @@ Resolve failures before continuing. Record commands and outcomes rather than sum
 
 ## 5. Publish main and tag
 
-Commit the reviewed release scope intentionally. Push the release commit to GitHub `main`, then synchronize Gitee `main`. If local Gitee Git credentials are unavailable, dispatch the repository's `Sync GitHub Refs to Gitee` workflow from `main`; it uses the configured secret only inside GitHub Actions and publicly verifies the resulting main ref. If that workflow is unavailable or fails, use the already authenticated Gitee repository mirror UI only with explicit release authorization; keep remote-branch/tag deletion and wiki-sync options off.
+Commit the reviewed release scope intentionally. Push the release commit to GitHub `main`, then synchronize Gitee `main`. If local Gitee Git credentials are unavailable, use the already authenticated Gitee repository mirror UI only with explicit release authorization; keep remote-branch/tag deletion and wiki-sync options off. Do not add a repository-sync workflow around an undocumented or unverified Gitee API endpoint.
 
 Verify both remote `main` refs equal the release commit. Wait for the GitHub main CI run and require every expected job to succeed.
 
-Create an annotated `vX.Y.Z` tag at that commit, push it to GitHub, synchronize it to Gitee (dispatching the repository sync workflow again when used), and verify both the tag object and dereferenced commit match. Never move a published tag.
+Create an annotated `vX.Y.Z` tag at that commit, push it to GitHub, synchronize it to Gitee through the same authenticated mirror UI when direct Git credentials are unavailable, and verify both the tag object and dereferenced commit match. Never move a published tag.
 
 ## 6. Verify GitHub canonical release
 

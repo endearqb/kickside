@@ -17,19 +17,20 @@
 - [x] 获得精确 `v0.2.4` 未签名 macOS 预览授权并新增 Accepted ADR。
 - [x] 准备 0.2.4 warning-first release notes、workflow exact-tag guard、manual mirror default 与架构事实。
 - [x] 同步 package/Cargo/Tauri/Cargo.lock 到 0.2.4，并完成完整本地发布 gate、macOS arm64 `.app` 构建与官方 latest 真实 smoke。
-- [ ] 提交并推送 GitHub main，等待全部 main CI 成功；同步 Gitee main 到相同提交。
-- [ ] 创建 annotated `v0.2.4`，推送并核验两端 tag object/commit。
-- [ ] 核验 GitHub canonical stable Release、8 项资产、API SHA-256 与 updater manifest。
-- [ ] 完成 Gitee 8 项同字节镜像、manifest-last、stable/latest 入口与最终 closeout 记录。
+- [x] 提交并推送 GitHub main，最终 main CI run `32642866339` 8/8 成功；同步 Gitee main 到相同提交。
+- [x] 创建 annotated `v0.2.4`，两端 tag object 均为 `29b43b57c449995c3f18a335565947c1ae7e02f8`，解引用到 release commit `2f79b88efb0cafbc76cee7e9f28d827356fcacbb`。
+- [x] 核验 GitHub canonical stable Release、8 项资产、API SHA-256 与 updater manifest。
+- [x] 完成 Gitee 8 项同字节镜像、manifest-last、stable/latest 入口与最终 closeout 记录。
 
 ## Review
 
 - 本地证据：Rust fmt/locked check/strict clippy 与 310 tests；React 57 files/304 tests；10 张视觉基线；190-command security gate；Go vet/test/race；updater/Gitee publisher 5 tests；workflow YAML、版本、release-note 首行与 diff gate全部通过。
 - 本机 Apple Silicon `KickSide.app` 0.2.4 构建成功，主程序与 bundled Bridge 均验证 arm64。该本地开发 app 为 ad-hoc 且不作为最终 Release codesign 证据；tag workflow 会使用精确 unsigned 配置重新构建并严格验证。
 - 官方 DSH latest 真实 smoke：`0.1.1-rc.2`，Node 24.19.0 / darwin-arm64，隔离安装 383588ms、ready 1012ms、stop 252ms、未强杀、端口释放。
-- 首次 main CI run `32641698359` 在 macOS stable Rust 1.98 strict clippy 暴露 `chunks_exact(2)` 新 lint；改用 `slice::as_chunks::<2>()` 后，本机 strict clippy 与 UTF-8/UTF-16LE/GBK 定向测试通过。第二次 run `32641943733` 的 macOS Rust 与 unsigned app bundle 通过，Windows stable Rust 1.98 strict clippy 进一步发现 `friendly_interface_name` 在 Windows target 为 dead code；已用 `#[cfg(not(windows))]` 收紧平台编译边界，待最终 main CI 复跑。
-- 第三次 main CI run `32642289618` 在提交 `0d7681d4be65d4c1f03bd26bcf09c53d7f8b675d` 上 8/8 job 成功。公开 Gitee main 仍为旧提交且两个浏览器均无登录态，因此新增最小手动仓库同步 workflow：令牌只在 Actions 内调用官方 mirror pull，完成条件是公开 Gitee Git ref 等于精确 GitHub main；该 workflow 自身仍须先过 main CI。
-- 待发布完成后继续回填实际 commit、Actions run、资产矩阵、镜像 fallback、G3 限制与公开链接。
+- 首次 main CI run `32641698359` 在 macOS stable Rust 1.98 strict clippy 暴露 `chunks_exact(2)` 新 lint；改用 `slice::as_chunks::<2>()` 后，本机 strict clippy 与 UTF-8/UTF-16LE/GBK 定向测试通过。第二次 run `32641943733` 的 macOS Rust 与 unsigned app bundle 通过，Windows stable Rust 1.98 strict clippy 进一步发现 `friendly_interface_name` 在 Windows target 为 dead code；用 `#[cfg(not(windows))]` 收紧平台编译边界。第三次 run `32642289618` 与最终 release-commit run `32642866339` 均为 8/8 成功。
+- GitHub Release workflow run `32643415686` 的 draft、macOS、Windows 与 updater manifest job 成功；Gitee mirror job 在首个 Windows EXE 上传 15 分钟后超时，因此 workflow 总结论为 failure。Gitee 保持 prerelease 且无半上传资产，随后通过已登录镜像 UI 同步 refs，并以已登录 Release 编辑器上传 canonical 资产。
+- GitHub stable Release 与 Gitee stable Release 均为 `v0.2.4`、精确 8 项资产。7 个二进制/签名从 Gitee 公开回下载后与 GitHub canonical 逐字节一致；Gitee 专用 `latest.json` SHA-256 为 `bd29700b3c9226c5909c3c8dce2e10fefcbe85acdae2cd395a05870d85aae331`，版本/平台/签名与 GitHub 清单一致，仅 URL 固定到 Gitee。
+- 2026-08-24 发现 Gitee Release 仍残留 prerelease 标志，导致 Windows 使用的 `/releases/download/latest/latest.json` 继续指向旧版；关闭预览标志后，Gitee API 为 `prerelease=false`，latest alias 指向 v0.2.4 附件 `3083094` 并返回 `version=0.2.4`。此前尝试的 `remote_mirror/pull` workflow 以 HTTP 404 失败，已在 closeout 删除，后续使用已验证的镜像 UI fallback。
 
 # DSH 官方 latest 轻量跟随与受控更新
 

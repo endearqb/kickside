@@ -1755,6 +1755,7 @@ export function ControlCenterView({
                         onExpandedChange={(expanded) =>
                           setExpandedOnboardingCard(expanded ? "lan_access" : null)
                         }
+                        onOpenExternalUrl={onOpenExternalUrl}
                       />
                     );
                   }

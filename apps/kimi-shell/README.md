@@ -7,15 +7,15 @@ KickSide 启伴是基于 `Tauri v2 + React` 的 Windows / macOS 桌面工作台�
 - 应用名称：中文界面 `KickSide 启伴`，系统与英文界面 `KickSide`
 - 当前版本：以 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 为准
 - 目标平台：Windows x86_64 与 Apple Silicon macOS 13+（NSIS / MSI / app / DMG）
-- 核心目标：把 `kimi web --no-open` 的启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
+- 核心目标：把 `kimi web` 的本机、可信局域网与 Kimi 官方远程（实验）启动、恢复、安装引导、右键入口与桌面体验统一在一个桌面应用中
 
 ## 核心能力
 
 - 启动前置页（prefill）：显示启动状态、随机 Tips、失败恢复入口
 - Workspace Grid V2 壳层：常驻 `KimiCode` 与 `KimiChat`，标题栏通过纵向 `+` 菜单直接新建带官方品牌图标的窗格；开启 DSH 并完成受控安装后，每次点击都会用默认工作目录新增一个 DeepSeek Harness pane，多个 pane 共享同一个受管 DSH 后端。每个 DSH pane 独立观测本窗格当前会话，通过当前安装版本的官方 `session.list` 契约解析绝对 `cwd`，用于 pane header 打开目录及 Pane Shelf 动态目录名；不会用跨窗格 storage 事件串联选择状态。DSH URL/PID/状态不进入 Grid 持久化，关闭任意 pane（包括最后一个）只移除视图；DSH 仅在退出应用或用户在控制中心显式关闭时停止。旧 Agent Room Pane 在加载 state/saved layout 时被移除并修复布局引用。
-- 后端守护与健康探测：优先按 `<KIMI_CODE_HOME>/server/instances/*.json` 发现并复用健康的既有 loopback Kimi Server，旧 `server/lock` 仅作兼容 fallback；否则拉起 `kimi web --no-open --port <port>`。用户可临时把 KickSide-owned Kimi 以 `--host 0.0.0.0` 重启用于可信局域网，外部实例永不切换；owned wildcard registry 仍只映射为 loopback health/Bearer probe。应用进程重启后恢复关闭。DSH 始终保持精确 loopback。
+- 后端守护与健康探测：优先按 `<KIMI_CODE_HOME>/server/instances/*.json` 发现并复用健康的既有 loopback Kimi Server，旧 `server/lock` 仅作兼容 fallback；否则拉起受管 `kimi web`。访问方式是单一互斥状态：仅本机、可信局域网（当前官方 CLI 用 `--host 0.0.0.0`）或 Kimi 官方远程（实验，能力探测通过后用 `--remote-control`）。非本机模式强制 owned、拒绝 external 切换、拒绝运行中任务、失败自动回滚；同一 App 只持有一个 owned Kimi 进程。DSH 始终保持精确 loopback。
 - 会话与 workspace 映射：Shell 后端通过 `/api/v1` Bearer 客户端创建/读取 workspace 与 session，Workspace Grid 只使用真实 server session id
-- 控制中心：KickSide 设置承载更新、安装/升级、Kimi 原生局域网访问、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；LAN 开关只存在于当前进程，切换 owned Kimi 时先拒绝 running session、失败自动回滚，完整 token URL/二维码只按需存在于内存。DSH 不提供局域网访问。
+- 控制中心：KickSide 设置承载更新、安装/升级、Kimi 三态访问方式、右键菜单、认证与 API 状态、默认工作目录、外部 IM 通道、Kimi Doctor 和日志；访问模式只存在于当前进程，完整 LAN/官方远程 URL 与二维码只按需存在于内存。远控状态在标题栏持续显示。DSH 不复用这项 Kimi 专属能力。
 - Skill Center 与 WorkspaceHub：主视图使用可搜索、可筛选的紧凑目录；Skill 工作区目标合并 discovery index 与 WorkspaceHub 完整注册表并按路径去重；Skill、Harness 模板和已注册工作区详情使用只读文件树与文件预览，工作区文件读取仅允许已注册 workspace id 并受路径、数量和大小限制
 - Web 集成收口：Kimi Code 登录验证与 Chat 跨站链接跳系统默认浏览器；Windows 安装版下载使用原生“另存为”。macOS 13 使用 WKWebView 共享 data store，不传仅 Windows 支持的 `dataDirectory`。
 - 平台原生体验：macOS 使用原生 traffic lights、App/Edit/View/Window 菜单、关闭主窗口隐藏、Dock reopen 恢复与 Cmd+Q graceful exit；Windows 保持自定义标题栏和 close-to-tray。
@@ -84,7 +84,7 @@ pnpm check:kimi-web:visual
 - DSH 采用用户主动、轻量跟随上游的策略：Shell 启动与设置页从 npm 官方 `latest` 元数据读取版本和 sha512 integrity，将响应冻结为本次精确 SemVer 目标，再执行 `@deepseek-ai/dsh@<version>`；前端不能传入包名或版本，也不会后台静默升级。`0.1.1-rc.2` 仅作为 published baseline 和 CI tested baseline，不再限制安装目标；已发布的 `recommendedVersion/state/updateAvailable/compatible` 语义保持不变，当前 UI 使用 additive `officialVersion/officialState/officialUpdateAvailable/installedSupported`。运行时接受不低于 `0.1.0-rc.6`、固定入口有效的 SemVer 版本。首次安装、重装与升级都核对精确版本及官方 integrity；npm 使用壳私有持久缓存，staging 安装与校验期间现有 DSH 继续运行，只在原子切换前停止。单调停止 epoch 确保退出/手动停止不会被并发安装清除；激活后必须通过真实 loopback readiness 与页面身份验证才删除 backup，失败时优先隔离失败目录并恢复旧安装，文件系统拒绝恢复时保留 backup 并 fail closed。
 - `src/platform/` 只负责加载 additive `PlatformCapabilities` 并提供 fail-closed 平台状态；产品组件不得自行解析 user agent 决定原生能力。
 - `src/features/control-center/ControlCenterView.tsx` 保留控制中心 JSX 编排；props 类型、导航项和纯展示 helper 放在 `src/features/control-center/controlCenterViewModel.tsx`；更新与运行等折叠设置行统一复用 `src/components/control-center/ControlCenterSettingsRow.tsx`，业务动作作为独立 trailing control 注入，避免点击更新或开关时误触发展开。
-- Kimi 局域网前端状态切片位于 `src/app/useLanAccessController.ts`，IPC 位于 `src/services/lanAccessService.ts`；Rust `src-tauri/src/lan_access.rs` 只投影私有 IPv4 与按需 URL/QR，Windows 通过系统网卡 FriendlyName、Description、类型、运行状态与 IPv4 网关排除内部虚拟交换机和 VPN，事务式 owned runtime 切换仍由 `backend_manager` 持有。
+- Kimi 访问方式前端状态切片位于 `src/app/useLanAccessController.ts`，IPC 位于 `src/services/lanAccessService.ts`；Rust `src-tauri/src/kimi_access.rs` 负责三态投影、官方远控输出的内存状态与按需 URL/QR，`src-tauri/src/lan_access.rs` 继续负责私有 IPv4/LAN URL。事务式 owned runtime 切换仍由 `backend_manager` 持有；既有三项 LAN commands 作为已发布兼容契约保留。
 - `src-tauri/src/install_manager.rs` 保留 Tauri install command 入口与运行状态管理；安装 catalog、task 和 step 构造放在 `src-tauri/src/install_manager/catalog.rs`；`src-tauri/src/macos_kimi_upgrade.sh` 只负责按 Rust 传入的固定官方 origin、目标版本和已验证路径下载/校验/原子替换 macOS native binary，不执行远程脚本。`src-tauri/windows/nsis-hooks.nsh` 是品牌迁移兼容层，只能匹配已登记的历史产品名并调用其正式卸载器，不得递归删除安装目录或用户数据；`tauri.windows.conf.json` 中的 WiX UpgradeCode 是发布兼容常量，不得随公开品牌名修改。
 - `src-tauri/src/commands.rs` 是 Tauri command 注册表；`src-tauri/src/commands/agent_room.rs`、`bridge.rs`、`install.rs`、`skills.rs`、`workspace_grid.rs`、`context_menu.rs` 和 `workspace_import.rs` 承载对应域的 command 实现；`scripts/check_command_registry.mjs` 校验注册命令、owner、窗口 capability、用途说明和 install compat 退出登记。
 - Agent Room 已下线并冻结：无设置、标题栏入口、独立窗口、Grid Pane 或可启用 Bridge 路径。旧 command/type 和 V2 输入解析仅作为一个发布周期的兼容墓碑，不得新增功能。
@@ -104,6 +104,7 @@ pnpm check:kimi-web:visual
 - DSH 当前目录 bridge 只接受精确 iframe window + 当前 DSH loopback origin 的消息，并校验 session id 与绝对目录；iframe 只上报当前会话 id/cwd，不上报 API 响应、凭据或 URL。目录最终仍由 Rust `open_folder` 做存在性与文件夹类型校验。
 - `workspaceUrl` 展示面只能使用 redacted 值；带 `kimi_onboarded=1` 与 `#token=` 的 URL 只用于 iframe/embed 导航，其中 session URL 必须同时保留 query 与 fragment，token 不进入诊断、日志或可见文本。
 - Kimi 后端 stdout/stderr 必须先脱敏再写入 `backend.log`；日志读取和诊断导出仍需二次脱敏。
+- Kimi 官方远程 URL、Relay URL 与其查询参数不得进入日志、locator、持久化设置或常规状态投影；原始 CLI 输出只允许在 Rust 内存中识别后立即脱敏。
 
 ## 打包命令
 
@@ -128,7 +129,7 @@ pnpm tauri build --config src-tauri/tauri.conf.bundle.en-US.json
 
 默认会同步版本号到 `Cargo.toml` 和 `tauri.conf.json`，并构建前端与 Tauri 安装包。
 
-推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2`、`0.2.3` 与经 Accepted 决策精确批准的 `0.2.4` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
+推送与 `package.json` 版本一致的 `vX.Y.Z` tag 会触发 `.github/workflows/release.yml`：先创建 draft，再并行生成 Windows x86_64 与 macOS arm64 资产，最后合成一个跨平台 `latest.json` 并发布。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2`、`0.2.3`、`0.2.4` 与经 Accepted 决策精确批准的 `0.2.5` 预览版本，其 macOS `.app` / DMG 只使用 Apple Silicon 运行所需的 ad-hoc identity，不包含 Developer ID 身份且不公证；Release 顶部必须标注“⚠️ macOS 版本未签名、未公证”，两端 updater artifact 仍使用 Tauri updater 私钥签名。例外按精确 tag fail-closed，后续版本必须恢复 Developer ID 签名、公证、stapling 及对应验证，或另立 accepted 决策。任一平台失败都不会发布 draft。`0.1.12` 及更早版本需先手动安装一次支持 Updater 的版本。
 
 GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 `GITEE_RELEASE_TOKEN` 将相同安装包与 `.sig` 以 prerelease 暂存到 Gitee，逐件匿名回下载校验 SHA-256，最后上传 Gitee 版 `latest.json` 并转为正式 Release；Gitee 不执行第二次构建，镜像失败不会回滚 GitHub Release。
 
@@ -141,7 +142,7 @@ GitHub 是唯一构建与 canonical Release。发布完成后，workflow 使用 
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/KickSide.app`
 - `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg`
 
-`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 Accepted 决策的精确过渡 tag 使用；历史例外为 `v0.1.24`、`v0.2.0`、`v0.2.1`、`v0.2.2`、`v0.2.3`，当前新增精确 `v0.2.4` 例外。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
+`src-tauri/tauri.macos.unsigned.conf.json` 仅供获得 Accepted 决策的精确过渡 tag 使用；历史例外为 `v0.1.24`、`v0.2.0`、`v0.2.1`、`v0.2.2`、`v0.2.3`、`v0.2.4`，当前新增精确 `v0.2.5` 例外。它以 ad-hoc identity 保证 Apple Silicon 可运行，不是 Developer ID 签名配置，后续版本不得自动继续使用。
 
 ## 发布资料
 

@@ -2,7 +2,7 @@
   "name": "appskimi-shell",
   "description": "KickSide desktop workspace for Kimi Code and DeepSeek Harness.",
   "private": true,
-  "version": "0.2.4",
+  "version": "0.2.5",
   "packageManager": "pnpm@10.34.4",
   "license": "MIT",
   "repository": {

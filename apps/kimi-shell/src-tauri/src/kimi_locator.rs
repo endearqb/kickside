@@ -10,6 +10,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(crate) const KIMI_REMOTE_CONTROL_EXPERIMENT_ENV: &str = "KIMI_CODE_EXPERIMENTAL_REMOTE_CONTROL";
+
 use crate::{command_utils, types::AppSettings};
 
 const KIMI_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -155,6 +157,18 @@ fn is_executable(_metadata: &fs::Metadata) -> bool {
 }
 
 fn supports_kimi_web(path: &Path) -> bool {
+    read_kimi_web_help(path, false)
+        .as_deref()
+        .is_some_and(supports_kimi_web_help)
+}
+
+pub(crate) fn supports_remote_control(path: &Path) -> bool {
+    read_kimi_web_help(path, true)
+        .as_deref()
+        .is_some_and(supports_remote_control_help)
+}
+
+fn read_kimi_web_help(path: &Path, enable_experimental_remote: bool) -> Option<String> {
     let mut command = Command::new(path);
     command_utils::configure_kimi_query_command(&mut command);
     command
@@ -163,11 +177,25 @@ fn supports_kimi_web(path: &Path) -> bool {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_isolated_probe(&mut command);
-    let Some(output) = command_output_successfully(command, KIMI_PROBE_TIMEOUT) else {
-        return false;
-    };
-    let help = String::from_utf8_lossy(&output);
+    if enable_experimental_remote {
+        command.env(KIMI_REMOTE_CONTROL_EXPERIMENT_ENV, "1");
+    }
+    let output = command_output_successfully(command, KIMI_PROBE_TIMEOUT)?;
+    Some(String::from_utf8_lossy(&output).into_owned())
+}
+
+fn supports_kimi_web_help(help: &str) -> bool {
     help.contains("--no-open") && help.contains("--allowed-host") && help.contains("rotate-token")
+}
+
+fn supports_remote_control_help(help: &str) -> bool {
+    help.lines().any(|line| {
+        let option = line.trim_start();
+        option.starts_with('-')
+            && option
+                .split_whitespace()
+                .any(|token| token.trim_end_matches(',') == "--remote-control")
+    })
 }
 
 fn command_output_successfully(mut command: Command, timeout: Duration) -> Option<Vec<u8>> {
@@ -297,7 +325,27 @@ fn terminate_isolated_probe(child: &mut std::process::Child) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn terminate_isolated_probe(child: &mut std::process::Child) {
+    let mut command = Command::new("taskkill");
+    command_utils::configure_system_command(&mut command);
+    let status = command.args(taskkill_probe_args(child.id())).status();
+    if !status.is_ok_and(|status| status.success()) {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(windows)]
+fn taskkill_probe_args(pid: u32) -> [String; 4] {
+    [
+        "/PID".to_string(),
+        pid.to_string(),
+        "/T".to_string(),
+        "/F".to_string(),
+    ]
+}
+
+#[cfg(all(not(unix), not(windows)))]
 fn terminate_isolated_probe(child: &mut std::process::Child) {
     let _ = child.kill();
 }
@@ -410,6 +458,15 @@ fn shell_candidate_paths() -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn probe_termination_targets_the_full_windows_process_tree() {
+        assert_eq!(
+            taskkill_probe_args(4242),
+            ["/PID", "4242", "/T", "/F"].map(str::to_string)
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn login_shell_parser_uses_last_absolute_path_and_ignores_noise() {
@@ -492,6 +549,26 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn remote_control_capability_requires_a_real_option_line() {
+        assert_eq!(
+            KIMI_REMOTE_CONTROL_EXPERIMENT_ENV,
+            "KIMI_CODE_EXPERIMENTAL_REMOTE_CONTROL"
+        );
+        assert!(supports_remote_control_help(
+            "Options:\n  --remote-control  Connect through Kimi's relay\n"
+        ));
+        assert!(supports_remote_control_help(
+            "Options:\n  --rc, --remote-control  Expose the web UI through Kimi Remote Control\n"
+        ));
+        assert!(!supports_remote_control_help(
+            "Options:\n  --rc  Enable remote control\n"
+        ));
+        assert!(!supports_remote_control_help(
+            "Remote control is unavailable; try --help later\n"
+        ));
     }
 
     #[test]

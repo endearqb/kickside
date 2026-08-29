@@ -26,6 +26,8 @@ node --test scripts/publish_gitee_release.test.mjs
 
 Kimi Native LAN 由 Shell gate 覆盖：Rust 测试必须固定 local/LAN argv、external wildcard 拒绝与 owned wildcard loopback probe；React 测试覆盖 external disabled、可信网络确认、按需 QR 与内存清理。真实 Windows/macOS listener、防火墙与移动设备访问仍属于 G3。
 
+Kimi 官方 Remote Control 由同一 Shell gate 覆盖：Rust 测试固定 capability fail-closed、三态 argv 互斥、官方远程 URL 内存解析与落盘前脱敏；React 测试覆盖三态互斥、旧 CLI disabled、按需 QR/打开动作和标题栏持续状态。真实 OAuth、Relay、异地设备连接、双平台进程树清理与日志/诊断包核验属于 G3；没有实际暴露 `--remote-control` 的目标 CLI 时不得声明远控已完成发布验证。
+
 真实 DSH runtime canary 在 `.github/workflows/dsh-runtime-canary.yml` 运行：PR 必须通过 Windows/macOS × Node 22.19/24 的 `0.1.1-rc.2` tested baseline smoke 与稳定汇总检查 `DSH runtime gate`；Rust 定向测试守护最低 `0.1.0-rc.6`、未来更高 SemVer 的运行资格，以及 npm latest 只能先冻结为精确目标、再按同一版本和官方 sha512 integrity 安装。每周/手动运行时每腿连续采样 5 次，并额外观察 Node 20.12 与官方 latest breaking；latest 告警不自动静默安装。仓库外仍需在 GitHub ruleset/branch protection 将 `DSH runtime gate` 配为 required，才具备不可绕过的远端合并权限。单机可运行 `pnpm check:dsh:runtime` 验证 tested baseline，或运行 `pnpm check:dsh:latest` 验证当时官方 latest；两者都使用隔离临时前缀/`DSH_HOME` 验证 npm 安装、固定入口、精确 loopback HTTP 状态、有界 `__DSH_BOOT__` 页面身份、整树停止和端口释放，但不经过 Rust 生产 npm launcher。需要重复采样时运行 `node scripts/dsh_runtime_smoke.mjs --version latest --samples 5`。
 
 ## IM Bridge
@@ -68,5 +70,5 @@ P5 发布前仍需要人工或专用环境验证：
 - macOS arm64 `.app` / DMG 必须在干净账户验证 traffic lights、App/Edit/Window 菜单、关闭隐藏、Dock reopen、Cmd+Q owned runtime 收口、OAuth 跳转、WebSocket、下载、文件选择和中文 IME。
 - DSH 发布前必须在 Windows/macOS 各验证：Node/npm preflight、官方 latest 解析为精确版本、私有精确版本安装与 integrity/入口校验、默认工作区启动与 DSH UI 内会话目录切换、精确 loopback iframe 完整交互、端口占用错误、控制中心关闭/停止、应用退出、更新退出三条整树停止路径、最后一个 pane 关闭后进程仍存活、日志脱敏和无陈旧状态恢复；Windows 需 WebView2 + descendant taskkill 证据，macOS 需 WKWebView + process-group 证据。未完成任一平台时不得称为双平台发布完成。
 - Kimi Web 布局发布前必须在 macOS WKWebView 与 Windows WebView2 各验证：480/800/959/960/1179/1180/1280/1440 CSS px、3:2 屏幕、125%/150% 缩放、明暗主题、长对话、空/多会话、中文 IME、触控与键盘/屏幕阅读器；确认 Sessions sidebar 与 Header 原样、所有宽度左侧 TOC 短条常驻且只在 hover/focus 时向右展开、mobile projection、无-sidebar 窄 pane 的 12px±1 composer 底距和蓝色工作区图标。任一真实引擎未完成时只可声明自动化完成，不得声明双平台视觉发布完成。
-- 常规 macOS 公开发布必须针对最终 DMG 内的 app 通过 `codesign --verify --deep --strict`、`spctl --assess`、notarization 与 stapling；Developer ID certificate、Apple ID app-specific password 与 Team ID 只存 Actions Secrets。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2`、`0.2.3` 与 Accepted 决策精确批准的 `0.2.4` 临时未签名例外，改由 CI 验证 `.app` 仅含 ad-hoc signature 且无 Apple signing authority，并要求对应 Release 顶部标注未签名/未公证警告；例外不授权任何 Gatekeeper、双平台 G3 或生产就绪结论，后续版本不得自动沿用。
+- 常规 macOS 公开发布必须针对最终 DMG 内的 app 通过 `codesign --verify --deep --strict`、`spctl --assess`、notarization 与 stapling；Developer ID certificate、Apple ID app-specific password 与 Team ID 只存 Actions Secrets。`0.1.24`、`0.2.0`、`0.2.1`、`0.2.2`、`0.2.3`、`0.2.4` 与 Accepted 决策精确批准的 `0.2.5` 临时未签名例外，改由 CI 验证 `.app` 仅含 ad-hoc signature 且无 Apple signing authority，并要求对应 Release 顶部标注未签名/未公证警告；例外不授权任何 Gatekeeper、双平台 G3 或生产就绪结论，后续版本不得自动沿用。
 - GitHub Release 必须同时包含 Windows updater、macOS `.app.tar.gz`、两端 `.sig`、DMG 及同时含 `windows-x86_64`/`darwin-aarch64` 的唯一 `latest.json`；任一 build job 失败时 draft 不得发布。

@@ -389,6 +389,7 @@ function App() {
         dshBusy={dsh.busy}
         dshRemoteUrl={getTrustedDshRuntimeUrl(dsh.status)}
         onCreateDshPane={handleCreateDshPane}
+        kimiAccessStatus={lanAccess.status}
       />
 
       {shell.actionError && <div className="shell-alert">{shell.actionError}</div>}

@@ -49,6 +49,11 @@ struct OwnedBackendProcess {
     process_group_id: Option<i32>,
 }
 
+struct BackendLaunchMode {
+    access_mode: crate::types::KimiAccessMode,
+    remote_context: Option<(AppHandle, u64)>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TerminationOutcome {
     reason: &'static str,
@@ -104,6 +109,15 @@ fn start_backend_locked(app: AppHandle) {
         runtime.server_token_path = None;
         runtime.server_token_redacted = None;
         runtime.workspace_url = None;
+        runtime.remote_control_url = None;
+        runtime.remote_control_started_at_ms = None;
+        runtime.remote_control_last_error = None;
+        runtime.remote_control_state =
+            if runtime.kimi_access_mode == crate::types::KimiAccessMode::KimiRemote {
+                crate::types::KimiRemoteControlState::Starting
+            } else {
+                crate::types::KimiRemoteControlState::Disabled
+            };
         runtime.generation = runtime.generation.saturating_add(1);
         runtime.start_cycle_id = runtime.generation;
         runtime.start_requested_at_ms = Some(unix_time_millis());
@@ -163,6 +177,20 @@ pub fn restart_backend(app: AppHandle) {
 }
 
 pub fn switch_kimi_lan_access(app: AppHandle, enabled: bool) -> Result<(), String> {
+    switch_kimi_access_mode(
+        app,
+        if enabled {
+            crate::types::KimiAccessMode::Lan
+        } else {
+            crate::types::KimiAccessMode::Local
+        },
+    )
+}
+
+pub fn switch_kimi_access_mode(
+    app: AppHandle,
+    requested_mode: crate::types::KimiAccessMode,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let _operation = state
         .backend_lifecycle_operation
@@ -182,12 +210,18 @@ pub fn switch_kimi_lan_access(app: AppHandle, enabled: bool) -> Result<(), Strin
         {
             return Err("当前 Kimi 服务不由 KickSide 管理，无法修改监听地址".to_string());
         }
-        if runtime.lan_access_enabled == enabled {
+        if runtime.kimi_access_mode == requested_mode {
             return Ok(());
         }
-        let previous = runtime.lan_access_enabled;
+        if requested_mode == crate::types::KimiAccessMode::KimiRemote
+            && runtime.remote_control_supported != Some(true)
+        {
+            return Err("当前 Kimi Code 版本不支持官方远程访问，请先升级".to_string());
+        }
+        let previous = runtime.kimi_access_mode;
         runtime.lan_access_switching = true;
         runtime.lan_access_last_error = None;
+        runtime.remote_control_last_error = None;
         previous
     };
 
@@ -204,25 +238,28 @@ pub fn switch_kimi_lan_access(app: AppHandle, enabled: bool) -> Result<(), Strin
         return Err("当前有任务正在执行，请完成后再切换".to_string());
     }
 
-    let switch_result = restart_in_lan_mode(&app, enabled);
+    let switch_result = restart_in_access_mode(&app, requested_mode);
     if switch_result.is_ok() {
         finish_lan_switch(&app, None);
         return Ok(());
     }
 
     let switch_error = switch_result.unwrap_err();
-    let rollback_result = restart_in_lan_mode(&app, previous);
+    let rollback_result = restart_in_access_mode(&app, previous);
     let message = match rollback_result {
-        Ok(()) => format!("局域网访问切换失败，已恢复原模式：{switch_error}"),
+        Ok(()) => format!("Kimi 访问方式切换失败，已恢复原模式：{switch_error}"),
         Err(rollback_error) => format!(
-            "局域网访问切换失败，且原模式恢复失败：{switch_error}；恢复错误：{rollback_error}"
+            "Kimi 访问方式切换失败，且原模式恢复失败：{switch_error}；恢复错误：{rollback_error}"
         ),
     };
     finish_lan_switch(&app, Some(message.clone()));
     Err(message)
 }
 
-fn restart_in_lan_mode(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn restart_in_access_mode(
+    app: &AppHandle,
+    mode: crate::types::KimiAccessMode,
+) -> Result<(), String> {
     stop_backend_locked(app).map_err(|error| format!("停止 Kimi 失败：{error:#}"))?;
     {
         let state = app.state::<AppState>();
@@ -230,14 +267,24 @@ fn restart_in_lan_mode(app: &AppHandle, enabled: bool) -> Result<(), String> {
             .runtime
             .lock()
             .map_err(|_| "Kimi 运行时状态不可用".to_string())?;
-        runtime.lan_access_enabled = enabled;
+        runtime.kimi_access_mode = mode;
         runtime.lan_access_force_owned_start = true;
+        runtime.remote_control_url = None;
+        runtime.remote_control_started_at_ms = None;
+        runtime.remote_control_state = if mode == crate::types::KimiAccessMode::KimiRemote {
+            crate::types::KimiRemoteControlState::Starting
+        } else {
+            crate::types::KimiRemoteControlState::Disabled
+        };
     }
     start_backend_locked(app.clone());
-    wait_for_lan_restart(app, enabled)
+    wait_for_access_restart(app, mode)
 }
 
-fn wait_for_lan_restart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn wait_for_access_restart(
+    app: &AppHandle,
+    mode: crate::types::KimiAccessMode,
+) -> Result<(), String> {
     let deadline = Instant::now() + OWNED_REGISTRY_TIMEOUT + Duration::from_secs(5);
     loop {
         let snapshot = {
@@ -249,13 +296,13 @@ fn wait_for_lan_restart(app: &AppHandle, enabled: bool) -> Result<(), String> {
             (
                 runtime.state,
                 runtime.runtime_ownership,
-                runtime.lan_access_enabled,
+                runtime.kimi_access_mode,
                 runtime.last_error.clone(),
             )
         };
         if snapshot.0 == BackendState::Running
             && snapshot.1 == RuntimeOwnership::OwnedByShell
-            && snapshot.2 == enabled
+            && snapshot.2 == mode
         {
             return Ok(());
         }
@@ -382,6 +429,9 @@ fn stop_backend_locked(app: &AppHandle) -> anyhow::Result<()> {
     runtime.server_token_path = None;
     runtime.server_token_redacted = None;
     runtime.workspace_url = None;
+    runtime.remote_control_url = None;
+    runtime.remote_control_started_at_ms = None;
+    runtime.remote_control_state = crate::types::KimiRemoteControlState::Disabled;
     runtime.start_requested_at_ms = None;
     runtime.loading_reported_at_ms = None;
     runtime.loading_reported_cycle_id = None;
@@ -447,19 +497,19 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         ),
     );
 
-    let (lan_access_enabled, force_owned_start) = {
+    let (access_mode, force_owned_start) = {
         let state = app.state::<AppState>();
         let runtime = state
             .runtime
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
         (
-            runtime.lan_access_enabled,
+            runtime.kimi_access_mode,
             runtime.lan_access_force_owned_start,
         )
     };
 
-    match if lan_access_enabled || force_owned_start {
+    match if access_mode != crate::types::KimiAccessMode::Local || force_owned_start {
         ReuseAttempt::Stale
     } else {
         try_reuse_existing_server(app)
@@ -542,6 +592,12 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         ),
     );
     log_manager::append_line(app, "startup_timing contract_check_ms=0 skipped=true");
+    let remote_control_supported = kimi_locator::supports_remote_control(&kimi_path);
+    if let Ok(mut runtime) = app.state::<AppState>().runtime.lock() {
+        if runtime.generation == generation {
+            runtime.remote_control_supported = Some(remote_control_supported);
+        }
+    }
 
     let base_port = match port_manager::choose_start_port() {
         Ok(port) => port,
@@ -566,7 +622,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
         }
     };
     append_backend_start_boundary(&log_path, generation, u64::from(base_port));
-    let command_args = build_kimi_web_args(base_port, lan_access_enabled);
+    let command_args = build_kimi_web_args(base_port, access_mode);
     let launch_command = format!("{} {}", kimi_path.display(), command_args.join(" "));
     let kimi_shell_path = kimi_locator::locate_shell_path();
     let agent_swarm_max_concurrency = settings.kimi_runtime_launch.agent_swarm_max_concurrency;
@@ -607,6 +663,11 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
             &log_path,
             kimi_shell_path.as_ref(),
             agent_swarm_max_concurrency,
+            BackendLaunchMode {
+                access_mode,
+                remote_context: (access_mode == crate::types::KimiAccessMode::KimiRemote)
+                    .then(|| (app.clone(), generation)),
+            },
         ) {
             Ok(child) => child,
             Err(error) => {
@@ -686,7 +747,7 @@ fn run_start_sequence(app: &AppHandle, generation: u64) -> anyhow::Result<()> {
                 restore_unconfirmed_owned_process(app, generation, owned_process)?;
                 return Ok(());
             }
-            match if lan_access_enabled || force_owned_start {
+            match if access_mode != crate::types::KimiAccessMode::Local || force_owned_start {
                 ReuseAttempt::Stale
             } else {
                 try_reuse_existing_server(app)
@@ -1089,7 +1150,7 @@ fn finish_ready(
             .map_err(|_| anyhow::anyhow!("runtime state mutex is poisoned"))?;
         runtime.generation == generation
             && ownership == RuntimeOwnership::OwnedByShell
-            && runtime.lan_access_enabled
+            && runtime.kimi_access_mode == crate::types::KimiAccessMode::Lan
     };
     let workspace_port = if use_lan_workspace_adapter {
         workspace_proxy::start_workspace_proxy(app, generation, port)?
@@ -1321,6 +1382,7 @@ fn spawn_backend_process(
     log_path: &PathBuf,
     kimi_shell_path: Option<&PathBuf>,
     agent_swarm_max_concurrency: Option<u32>,
+    launch_mode: BackendLaunchMode,
 ) -> anyhow::Result<Child> {
     OpenOptions::new()
         .create(true)
@@ -1345,6 +1407,9 @@ fn spawn_backend_process(
     }
     if let Some(value) = agent_swarm_max_concurrency {
         command.env("KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY", value.to_string());
+    }
+    if launch_mode.access_mode == crate::types::KimiAccessMode::KimiRemote {
+        command.env(kimi_locator::KIMI_REMOTE_CONTROL_EXPERIMENT_ENV, "1");
     }
 
     command.current_dir(work_dir);
@@ -1382,8 +1447,18 @@ fn spawn_backend_process(
         let _ = terminate_owned_process(&mut process);
         anyhow::bail!("kimi-code stderr pipe was unavailable");
     };
-    spawn_backend_log_reader(stdout, log_path.clone(), redactor.clone());
-    spawn_backend_log_reader(stderr, log_path.clone(), redactor);
+    spawn_backend_log_reader(
+        stdout,
+        log_path.clone(),
+        redactor.clone(),
+        launch_mode.remote_context.clone(),
+    );
+    spawn_backend_log_reader(
+        stderr,
+        log_path.clone(),
+        redactor,
+        launch_mode.remote_context,
+    );
     Ok(child)
 }
 
@@ -1391,6 +1466,7 @@ fn spawn_backend_log_reader(
     stream: impl Read + Send + 'static,
     log_path: PathBuf,
     redactor: Arc<super::redaction::SecretRedactor>,
+    remote_context: Option<(AppHandle, u64)>,
 ) {
     thread::spawn(move || {
         let mut reader = std::io::BufReader::new(stream);
@@ -1403,7 +1479,16 @@ fn spawn_backend_log_reader(
             if read == 0 {
                 return;
             }
-            let output = redactor.redact(&String::from_utf8_lossy(&buffer));
+            let raw = String::from_utf8_lossy(&buffer);
+            if let Some((app, generation)) = remote_context.as_ref() {
+                crate::kimi_access::observe_remote_output(app, *generation, &raw);
+            }
+            let output = if remote_context.is_some() {
+                crate::kimi_access::redact_remote_output(&raw)
+                    .unwrap_or_else(|| redactor.redact(&raw))
+            } else {
+                redactor.redact(&raw)
+            };
             // ponytail: open per line avoids retaining a Windows handle across log rotation;
             // use a joined writer thread if backend log volume becomes material.
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
@@ -1479,15 +1564,22 @@ fn startup_failure_message(
     format!("后端启动失败：{reason}。{guidance}{shell_guidance}")
 }
 
-fn build_kimi_web_args(base_port: u16, lan_access_enabled: bool) -> Vec<String> {
+fn build_kimi_web_args(base_port: u16, access_mode: crate::types::KimiAccessMode) -> Vec<String> {
     let mut args = vec![
         "web".to_string(),
         "--no-open".to_string(),
         "--port".to_string(),
         base_port.to_string(),
     ];
-    if lan_access_enabled {
-        args.extend(["--host".to_string(), "0.0.0.0".to_string()]);
+    match access_mode {
+        crate::types::KimiAccessMode::Local => {}
+        crate::types::KimiAccessMode::Lan => {
+            // Kimi Code 0.36.x exposes the official LAN mode as an explicit host bind.
+            args.extend(["--host".to_string(), "0.0.0.0".to_string()]);
+        }
+        crate::types::KimiAccessMode::KimiRemote => {
+            args.push("--remote-control".to_string());
+        }
     }
     args
 }
@@ -1519,6 +1611,9 @@ fn set_missing_kimi(app: &AppHandle, generation: u64, message: String) {
         runtime.server_token_path = None;
         runtime.server_token_redacted = None;
         runtime.workspace_url = None;
+        runtime.remote_control_url = None;
+        runtime.remote_control_started_at_ms = None;
+        runtime.remote_control_state = crate::types::KimiRemoteControlState::Error;
         runtime.backend_ready_at_ms = None;
         runtime.last_exit_reason = Some("missing_kimi".to_string());
         runtime.active_session_id = None;
@@ -1563,6 +1658,9 @@ fn set_crashed(app: &AppHandle, generation: u64, message: String) {
         runtime.server_token_path = None;
         runtime.server_token_redacted = None;
         runtime.workspace_url = None;
+        runtime.remote_control_url = None;
+        runtime.remote_control_started_at_ms = None;
+        runtime.remote_control_state = crate::types::KimiRemoteControlState::Error;
         runtime.active_session_id = None;
         runtime.active_session_work_dir = None;
         runtime.session_source = Some("cleared:crashed".to_string());
@@ -1856,10 +1954,14 @@ mod tests {
         let child = spawn_backend_process(
             &executable,
             &root,
-            &build_kimi_web_args(58627, false),
+            &build_kimi_web_args(58627, crate::types::KimiAccessMode::Local),
             &log_path,
             None,
             None,
+            BackendLaunchMode {
+                access_mode: crate::types::KimiAccessMode::Local,
+                remote_context: None,
+            },
         )
         .unwrap();
         let process = OwnedBackendProcess {
@@ -1872,7 +1974,7 @@ mod tests {
     #[test]
     fn launch_args_enforce_local_only_mode() {
         assert_eq!(
-            build_kimi_web_args(57999, false),
+            build_kimi_web_args(57999, crate::types::KimiAccessMode::Local),
             vec!["web", "--no-open", "--port", "57999"]
         );
     }
@@ -1880,9 +1982,19 @@ mod tests {
     #[test]
     fn launch_args_enable_native_lan_without_relaxing_other_controls() {
         assert_eq!(
-            build_kimi_web_args(57999, true),
+            build_kimi_web_args(57999, crate::types::KimiAccessMode::Lan),
             vec!["web", "--no-open", "--port", "57999", "--host", "0.0.0.0"]
         );
+    }
+
+    #[test]
+    fn launch_args_enable_only_official_remote_control_mode() {
+        let args = build_kimi_web_args(57999, crate::types::KimiAccessMode::KimiRemote);
+        assert_eq!(
+            args,
+            vec!["web", "--no-open", "--port", "57999", "--remote-control"]
+        );
+        assert!(!args.iter().any(|arg| arg == "--host"));
     }
 
     #[cfg(unix)]

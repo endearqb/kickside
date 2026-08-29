@@ -1,119 +1,152 @@
 import { useEffect, useState } from "react";
-import { Copy, QrCode, Radio } from "lucide-react";
+import { Copy, ExternalLink, QrCode, Radio } from "lucide-react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import type { LanAccessControllerModel } from "@/app/useLanAccessController";
 import { ControlCenterSettingsRow } from "@/components/control-center/ControlCenterSettingsRow";
 import { Button } from "@/components/ui/button";
-import type { KimiLanLaunchUrl } from "@/services/lanAccessService";
+import type { KimiAccessMode, KimiLanLaunchUrl, KimiRemoteLaunchUrl } from "@/services/lanAccessService";
 
 type Props = {
   lanAccess: LanAccessControllerModel;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  onOpenExternalUrl?: (url: string) => void;
 };
 
-export function LanAccessSettingsPanel({ lanAccess, expanded, onExpandedChange }: Props) {
+type LaunchProjection =
+  | { kind: "lan"; value: KimiLanLaunchUrl; ip: string }
+  | { kind: "remote"; value: KimiRemoteLaunchUrl };
+
+const MODES: Array<{ mode: KimiAccessMode; title: string; detail: string }> = [
+  { mode: "local", title: "仅本机", detail: "只在当前 KickSide 中访问" },
+  { mode: "lan", title: "局域网", detail: "供同一可信网络中的设备访问" },
+  { mode: "kimi_remote", title: "Kimi 官方远程（实验）", detail: "通过 Kimi 官方服务从互联网访问" },
+];
+
+export function LanAccessSettingsPanel({ lanAccess, expanded, onExpandedChange, onOpenExternalUrl }: Props) {
   const { status, error, busy } = lanAccess;
-  const [launch, setLaunch] = useState<KimiLanLaunchUrl | null>(null);
-  const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [launch, setLaunch] = useState<LaunchProjection | null>(null);
   const external = status?.runtimeOwnership === "reused_external";
 
   useEffect(() => {
     if (expanded) void lanAccess.refresh();
-    else {
-      setLaunch(null);
-      setSelectedIp(null);
-    }
+    else setLaunch(null);
   }, [expanded, lanAccess.refresh]);
+  useEffect(() => setLaunch(null), [status?.mode]);
 
-  async function toggle(enabled: boolean) {
+  async function selectMode(mode: KimiAccessMode) {
+    if (!status || status.mode === mode) return;
     setLaunch(null);
-    if (enabled) {
+    if (mode === "lan") {
       const confirmed = await ask(
-        "请仅在可信家庭或办公网络中开启。局域网访问使用 HTTP，切换会重启 Kimi Code，正在执行的任务可能会中断。",
+        "请仅在可信家庭或办公网络中开启。切换会重启 Kimi Code，正在执行的任务可能会中断。",
         { title: "开启局域网访问", kind: "warning", okLabel: "开启", cancelLabel: "取消" },
       );
       if (!confirmed) return;
     }
-    await lanAccess.toggle(enabled);
+    if (mode === "kimi_remote") {
+      const confirmed = await ask(
+        "远程操作会访问当前电脑上的项目与工具。本地电脑需保持开机、联网并运行 KickSide。",
+        { title: "开启 Kimi 官方远程", kind: "warning", okLabel: "开启", cancelLabel: "取消" },
+      );
+      if (!confirmed) return;
+    }
+    await lanAccess.setMode(mode);
   }
 
-  async function reveal(ip: string) {
-    const next = await lanAccess.getLaunchUrl(ip);
-    if (!next) return;
-    setSelectedIp(ip);
-    setLaunch(next);
+  async function revealLan(ip: string) {
+    const value = await lanAccess.getLaunchUrl(ip);
+    if (value) setLaunch({ kind: "lan", value, ip });
   }
-
-  async function copy(ip: string) {
-    const next = await lanAccess.getLaunchUrl(ip);
-    if (!next) return;
-    await navigator.clipboard.writeText(next.url);
+  async function copyLan(ip: string) {
+    const value = await lanAccess.getLaunchUrl(ip);
+    if (!value) return;
+    await navigator.clipboard.writeText(value.url);
     setLaunch(null);
-    setSelectedIp(null);
+  }
+  async function revealRemote() {
+    const value = await lanAccess.getRemoteLaunchUrl();
+    if (value) setLaunch({ kind: "remote", value });
+  }
+  async function copyRemote() {
+    const value = await lanAccess.getRemoteLaunchUrl();
+    if (!value) return;
+    await navigator.clipboard.writeText(value.url);
+    setLaunch(null);
+  }
+  async function openRemote() {
+    const value = await lanAccess.getRemoteLaunchUrl();
+    if (value) onOpenExternalUrl?.(value.url);
   }
 
   return (
     <ControlCenterSettingsRow
       id="lan_access"
-      title="局域网访问"
+      title="Kimi 访问方式"
       summary={summary(status)}
-      statusTone={status?.enabled ? "success" : external || error ? "warning" : "neutral"}
+      statusTone={tone(status, error)}
       icon={<Radio size={18} />}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
       className="cc-runtime-settings-row cc-lan-access-settings"
-      action={
-        <label className="cc-dsh-toggle" title="切换时会重启 Kimi Code">
-          <span className="cc-toggle-field-control">
-            <input
-              type="checkbox"
-              className="cc-switch-input"
-              aria-label="启用 Kimi Code 局域网访问"
-              checked={status?.enabled === true}
-              onChange={(event) => void toggle(event.currentTarget.checked)}
-              disabled={!status?.canToggle || busy}
-            />
-            <span className="cc-switch-track" aria-hidden />
-          </span>
-        </label>
-      }
     >
       <div className="cc-settings-detail-stack">
-        <p className="hint">允许同一局域网中的手机和电脑访问 Kimi Code。切换时会重启 Kimi Code。</p>
-        {external ? (
-          <p className="cc-settings-error">当前 Kimi 服务由外部进程管理，KickSide 不会停止或修改它。</p>
-        ) : null}
-        {status?.enabled ? (
-          <p className="cc-settings-error">仅用于可信家庭或办公网络；HTTP 流量不适合公共 Wi-Fi。远程终端、shutdown 与 debug 保持关闭。</p>
-        ) : null}
+        <div className="cc-kimi-access-modes" role="radiogroup" aria-label="Kimi 访问方式">
+          {MODES.map((option) => {
+            const unavailable = option.mode === "kimi_remote" && status?.remoteControlSupported !== true;
+            return (
+              <button
+                key={option.mode}
+                type="button"
+                role="radio"
+                aria-checked={status?.mode === option.mode}
+                className={`cc-kimi-access-mode ${status?.mode === option.mode ? "is-selected" : ""}`}
+                disabled={!status?.canChange || busy || unavailable}
+                onClick={() => void selectMode(option.mode)}
+              >
+                <span>{option.title}</span>
+                <small>{unavailable ? "当前 Kimi Code 版本不支持，请先升级" : option.detail}</small>
+              </button>
+            );
+          })}
+        </div>
+        {external ? <p className="cc-settings-warning">当前 Kimi 服务由外部进程管理，KickSide 不会停止或修改它。</p> : null}
         {error ? <p className="cc-config-error" role="alert">{error}</p> : null}
-        {status?.enabled && status.addresses.length === 0 ? (
-          <p className="cc-config-error">没有找到可展示的私有 IPv4 地址。请检查 Wi-Fi、企业网络隔离或防火墙设置。</p>
+
+        {status?.mode === "lan" ? (
+          <>
+            <p className="cc-settings-warning">仅用于可信网络；HTTP 流量不适合公共 Wi-Fi。</p>
+            {status.lanAddresses.length === 0 ? <p className="cc-config-error">没有找到可展示的私有 IPv4 地址。</p> : null}
+            {status.lanAddresses.map((address) => (
+              <div className="cc-lan-address-row" key={address.ip}>
+                <div><strong>{address.name}</strong><span>{address.url}</span></div>
+                <div className="cc-step-secondary-actions">
+                  <Button type="button" variant="outline" icon={<QrCode size={14} />} className="cc-action-btn" onClick={() => void revealLan(address.ip)}>显示二维码</Button>
+                  <Button type="button" variant="ghost" icon={<Copy size={14} />} className="cc-action-btn" onClick={() => void copyLan(address.ip)}>复制地址</Button>
+                </div>
+              </div>
+            ))}
+          </>
         ) : null}
-        {status?.addresses.map((address) => (
-          <div className="cc-lan-address-row" key={address.ip}>
-            <div>
-              <strong>{address.name}</strong>
-              <span>{address.url}</span>
-            </div>
-            <div className="cc-step-secondary-actions">
-              <Button type="button" variant="outline" icon={<QrCode size={14} />} className="cc-action-btn" onClick={() => void reveal(address.ip)}>
-                显示二维码
-              </Button>
-              <Button type="button" variant="ghost" icon={<Copy size={14} />} className="cc-action-btn" onClick={() => void copy(address.ip)}>
-                复制地址
-              </Button>
-            </div>
+
+        {status?.mode === "kimi_remote" ? (
+          <div className="cc-kimi-remote-detail">
+            <p className="hint">远程流量由 Kimi 官方服务转发，本地代码和命令仍在当前电脑处理。</p>
+            {status.remoteControlState === "connected" && status.remoteUrlAvailable ? (
+              <div className="cc-step-secondary-actions">
+                <Button type="button" variant="outline" icon={<QrCode size={14} />} className="cc-action-btn" onClick={() => void revealRemote()}>显示二维码</Button>
+                <Button type="button" variant="ghost" icon={<Copy size={14} />} className="cc-action-btn" onClick={() => void copyRemote()}>复制地址</Button>
+                <Button type="button" variant="ghost" icon={<ExternalLink size={14} />} className="cc-action-btn" onClick={() => void openRemote()}>在浏览器打开</Button>
+              </div>
+            ) : null}
           </div>
-        ))}
-        {launch && selectedIp ? (
-          <div className="cc-lan-qr" role="dialog" aria-label="Kimi Code 局域网二维码">
-            <div dangerouslySetInnerHTML={{ __html: launch.qrSvg }} />
-            <p>使用同一可信局域网中的设备扫码。关闭后地址会从界面内存中清除。</p>
-            <Button type="button" variant="outline" className="cc-action-btn" onClick={() => { setLaunch(null); setSelectedIp(null); }}>
-              关闭二维码
-            </Button>
+        ) : null}
+
+        {launch ? (
+          <div className="cc-lan-qr" role="dialog" aria-label={launch.kind === "lan" ? "Kimi Code 局域网二维码" : "Kimi 官方远程二维码"}>
+            <div dangerouslySetInnerHTML={{ __html: launch.value.qrSvg }} />
+            <p>{launch.kind === "lan" ? `使用同一可信局域网中的设备扫码（${launch.ip}）。` : "使用已登录 Kimi 账户的设备扫码。"}</p>
+            <Button type="button" variant="outline" className="cc-action-btn" onClick={() => setLaunch(null)}>关闭二维码</Button>
           </div>
         ) : null}
       </div>
@@ -126,6 +159,24 @@ function summary(status: LanAccessControllerModel["status"]) {
   if (status.switching) return "正在重启 Kimi Code";
   if (status.runtimeOwnership === "reused_external") return "外部进程管理 · 无法切换";
   if (!status.runtimeReady) return "Kimi Code 尚未运行";
-  if (status.enabled) return status.addresses[0]?.ip ? `已开启 · ${status.addresses[0].ip}` : "已开启 · 等待网络地址";
-  return "已关闭 · 仅本机访问";
+  if (status.mode === "lan") return status.lanAddresses[0]?.ip ? `局域网 · ${status.lanAddresses[0].ip}` : "局域网 · 等待网络地址";
+  if (status.mode === "kimi_remote") return `Kimi 官方远程 · ${remoteStateLabel(status.remoteControlState)}`;
+  return "仅本机";
+}
+
+function remoteStateLabel(state: NonNullable<LanAccessControllerModel["status"]>["remoteControlState"]) {
+  switch (state) {
+    case "connected": return "运行中";
+    case "registering": return "正在连接";
+    case "starting": return "正在启动";
+    case "disconnected": return "连接已断开";
+    case "error": return "错误";
+    default: return "已停止";
+  }
+}
+
+function tone(status: LanAccessControllerModel["status"], error: string | null) {
+  if (error || status?.remoteControlState === "error") return "warning" as const;
+  if (status?.mode === "lan" || status?.remoteControlState === "connected") return "success" as const;
+  return "neutral" as const;
 }

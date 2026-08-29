@@ -52,7 +52,8 @@ pub use config::{
     save_kimi_code_access_config, test_kimi_code_access_config,
 };
 pub use lifecycle::{
-    restart_backend, set_session_work_dir, start_backend, stop_backend, switch_kimi_lan_access,
+    restart_backend, set_session_work_dir, start_backend, stop_backend, switch_kimi_access_mode,
+    switch_kimi_lan_access,
 };
 pub use system_open::{
     open_external_url, open_folder, open_kimi_config_dir, open_logs_folder, open_system_terminal,

@@ -2042,6 +2042,27 @@ pub enum AuthMode {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum KimiAccessMode {
+    #[default]
+    Local,
+    Lan,
+    KimiRemote,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum KimiRemoteControlState {
+    #[default]
+    Disabled,
+    Starting,
+    Registering,
+    Connected,
+    Disconnected,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum KimiLoginHealthState {
     #[default]
     Unknown,

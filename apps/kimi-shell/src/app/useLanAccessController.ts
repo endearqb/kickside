@@ -1,34 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getKimiLanAccessStatus,
+  getKimiAccessStatus,
   getKimiLanLaunchUrl,
-  setKimiLanAccess,
-  type KimiLanAccessStatus,
+  getKimiRemoteLaunchUrl,
+  setKimiAccessMode,
+  type KimiAccessMode,
+  type KimiAccessStatus,
   type KimiLanLaunchUrl,
+  type KimiRemoteLaunchUrl,
 } from "@/services/lanAccessService";
 
 export type LanAccessControllerModel = {
-  status: KimiLanAccessStatus | null;
+  status: KimiAccessStatus | null;
   error: string | null;
   busy: boolean;
-  refresh: () => Promise<KimiLanAccessStatus | null>;
-  toggle: (enabled: boolean) => Promise<KimiLanAccessStatus | null>;
+  refresh: () => Promise<KimiAccessStatus | null>;
+  setMode: (mode: KimiAccessMode) => Promise<KimiAccessStatus | null>;
   getLaunchUrl: (ip: string) => Promise<KimiLanLaunchUrl | null>;
+  getRemoteLaunchUrl: () => Promise<KimiRemoteLaunchUrl | null>;
 };
 
 export function useLanAccessController(
   tauriRuntime: boolean,
   onRuntimeChanged?: () => void | Promise<void>,
 ): LanAccessControllerModel {
-  const [status, setStatus] = useState<KimiLanAccessStatus | null>(null);
+  const [status, setStatus] = useState<KimiAccessStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const refreshRef = useRef<Promise<KimiLanAccessStatus | null> | null>(null);
+  const refreshRef = useRef<Promise<KimiAccessStatus | null> | null>(null);
 
   const refresh = useCallback(async () => {
     if (!tauriRuntime) return null;
     if (refreshRef.current) return refreshRef.current;
-    const request = getKimiLanAccessStatus()
+    const request = getKimiAccessStatus()
       .then((next) => {
         setStatus(next);
         setError(next.lastError ?? null);
@@ -51,17 +55,18 @@ export function useLanAccessController(
   }, [refresh]);
 
   useEffect(() => {
-    if (!tauriRuntime || !status?.switching) return;
-    const timer = window.setInterval(() => void refresh(), 750);
+    const shouldPoll = status?.switching || status?.mode === "kimi_remote";
+    if (!tauriRuntime || !shouldPoll) return;
+    const timer = window.setInterval(() => void refresh(), status?.switching ? 750 : 1_500);
     return () => window.clearInterval(timer);
-  }, [refresh, status?.switching, tauriRuntime]);
+  }, [refresh, status?.mode, status?.switching, tauriRuntime]);
 
-  const toggle = useCallback(async (enabled: boolean) => {
+  const setMode = useCallback(async (mode: KimiAccessMode) => {
     if (!tauriRuntime || busy) return null;
     setBusy(true);
     setError(null);
     try {
-      const next = await setKimiLanAccess(enabled);
+      const next = await setKimiAccessMode(mode);
       setStatus(next);
       return next;
     } catch (cause) {
@@ -92,7 +97,27 @@ export function useLanAccessController(
     }
   }, [refresh, tauriRuntime]);
 
-  return { status, error, busy: busy || status?.switching === true, refresh, toggle, getLaunchUrl };
+  const getRemoteLaunchUrl = useCallback(async () => {
+    if (!tauriRuntime) return null;
+    setError(null);
+    try {
+      return await getKimiRemoteLaunchUrl();
+    } catch (cause) {
+      setError(formatError(cause));
+      await refresh();
+      return null;
+    }
+  }, [refresh, tauriRuntime]);
+
+  return {
+    status,
+    error,
+    busy: busy || status?.switching === true,
+    refresh,
+    setMode,
+    getLaunchUrl,
+    getRemoteLaunchUrl,
+  };
 }
 
 function formatError(value: unknown) {

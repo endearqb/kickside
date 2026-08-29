@@ -1,3 +1,67 @@
+# v0.2.5 Windows 核查与双源发布
+
+## 任务契约
+
+- 用户目标：在 macOS Remote Control 实测通过后，检查并完善 Windows 版本，提交并推送 GitHub，再发布 KickSide 0.2.5。
+- 直接交付物：Windows 进程边界修复、0.2.5 版本同步、warning-first release notes、精确 unsigned macOS ADR、完整本地门禁、GitHub main/tag/canonical Release、Gitee 同字节镜像与发布后证据。
+- 影响范围：Kimi locator/runtime、Shell 版本/说明、发布 workflows、架构/决策/变更记录、GitHub/Gitee main/tag/Release。
+- 非目标：不自建远控中继；不调用 Kimi 内部注册 API；不把 Windows CI 冒充真实 OAuth/Relay G3；不把 ad-hoc macOS 包描述为已签名、公证或 Gatekeeper 可信；不在 Gitee 二次构建。
+- 约束：只允许精确 `v0.2.5` 使用未签名配置；Release 首行必须警告；Tauri updater 必须签名；GitHub 是唯一 canonical build；Gitee 资产必须同字节且 manifest 最后上传；GitHub 新 main CI 未全绿不得打 tag。
+- 验收：Windows 原生 CI 与 NSIS/MSI build 通过；版本声明一致；完整本地 gate 通过；两端 main/tag 指向受审提交；GitHub/Gitee stable Release 均为精确 `v0.2.5` 且 8 项资产、SHA-256、manifest 语义完整。
+- 已授权假设：产品所有者于 2026-08-29 明确授权精确 `v0.2.5` 继续作为未签名、未公证的 macOS 预览发布；该授权不自动延续到后续版本。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、signed updater/Gitee mirror ADR、`2026-08-29-v0.2.5-unsigned-macos-release.md`。
+
+## Checklist
+
+- [x] 完成项目治理、发布 skill、Windows Remote Control 与发布 preflight 审计。
+- [x] 获得精确 `v0.2.5` 未签名、未公证 macOS 预览授权并新增 Accepted ADR。
+- [x] 修复 Windows CLI 能力探针超时/异常时只杀 launcher、可能遗留 Node descendant 的边界。
+- [x] 同步 0.2.5 版本、release notes、workflow exact-tag guard、manual mirror default 与架构事实。
+- [x] 完整运行 Rust/React/Go/Node/workflow 本地发布门禁。
+- [ ] 提交并推送 GitHub main，等待该提交的 Windows/macOS CI 全绿。
+- [ ] 创建 annotated `v0.2.5` 并验证 GitHub canonical stable Release 的 8 项资产与 manifest。
+- [ ] 同步 Gitee main/tag，完成 8 项同字节镜像与 latest alias 验证。
+- [ ] 写入最终 closeout 证据；Windows 真实 Kimi 0.39.1 OAuth/Relay/安装升级 G3 若未执行，继续明确列为限制。
+
+## Review
+
+- Windows 审计确认 Remote argv/env、ANSI/URL parser、typed IPC 与 owned lifecycle 使用共享主路径；GitHub `windows-latest` 是 G2 权威，本机 macOS 交叉编译因缺 Windows SDK C headers 不能替代原生 runner。
+- 正式 Kimi backend 已通过 `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP` 启动并用 `taskkill /T` 收口；本轮将短生命周期 help probe 也改为整树清理。
+- 本地发布 gate：Rust fmt/locked check/strict clippy 与 315 tests；React 57 files/306 tests、production build、10 张视觉基线与 193-command security gate；Go vet/test/race；updater/Gitee publisher 5 tests；Windows x86_64 Bridge sidecar 交叉构建；workflow YAML、版本、release-note 首行与 diff gate 全部通过。
+- Apple Silicon `KickSide.app` 0.2.5 构建成功，主程序与 bundled Bridge 均验证 arm64；重新施加 ad-hoc identity 后 `codesign --verify --deep --strict` 通过。该本地 App 不作为 Developer ID、公证或最终 Release 证据。
+- 最近一次定时 DSH Runtime Canary 的 macOS npm install 曾因 Node heap OOM 失败并取消 Windows legs；它与本次 Remote Control 代码无直接关系，但发布结论不得描述为“所有观察性门禁均绿色”。
+
+# Kimi 官方远程控制一键封装
+
+## 任务契约
+
+- 用户目标：把 Kimi Code 官方 Remote Control 做成与本机、局域网并列的一键功能，用户无需处理命令行、实验环境变量、OAuth 或中继细节。
+- 直接交付物：三态互斥访问模式、CLI 能力探测、owned 进程启停/回滚、远控输出内存状态、按需 URL/二维码、标题栏持续状态、测试与文档记录。
+- 影响范围：Shell Rust runtime/locator/commands/permissions、React controller/control center/titlebar、README、架构事实与验证门。
+- 非目标：不自建中继；不调用 Kimi 内部注册 API；不扩展到 DSH；不枚举或关闭用户从终端自行启动的远控；不持久化远程地址。
+- 约束：Kimi 专属；同一 KickSide App 只允许一个 owned Kimi；external instance never-kill；旧 CLI fail-closed；远程 URL/Relay/OAuth 信息不得进入日志、locator 或诊断。
+- 验收：G0/G1 全绿；无 Remote capability 的 CLI 明确禁用；Kimi 0.39.1 的实验开关、capability/argv/URL 脱敏/UI 契约通过；真实 OAuth/Relay 作为 G3 明确记录。
+- 架构事实入口：`.ai/architecture/current-state.md`、`.ai/architecture/verification-gates.md`、`DESIGN.md`。
+
+## Checklist
+
+- [x] 读取讨论、项目治理、Shell README、DESIGN 与现有 LAN/runtime 链路。
+- [x] 将访问方式收敛为 `local | lan | kimi_remote` 单一枚举，并复用 owned lifecycle、running-session guard 与失败回滚。
+- [x] 增加实验 help capability fail-closed、Remote argv/env 和外部 runtime 只读边界。
+- [x] 以官方 Remote CLI 为账户登录权威，删除可能陈旧的宿主认证摘要硬门槛。
+- [x] 增加远控输出内存状态、按需 URL/QR 与写日志前脱敏。
+- [x] 将控制中心改为三项互斥选择，并增加标题栏持续状态。
+- [x] 保留既有 LAN IPC commands，新增 additive access commands 与权限/registry 登记。
+- [x] 完成 Rust/React/production build/security G1 与文档记录。
+- [ ] 使用实际暴露 `--remote-control` 的 Kimi Code 完成异地设备、Windows、退出/升级清理和诊断包 G3；macOS 0.39.1 OAuth、relay connected 与官方 URL/QR 输出已实测。
+
+## Review
+
+- 本机实际 Kimi Code 为 `~/.kimi-code/bin/kimi` 0.39.1；其 Remote Control 需通过 `KIMI_CODE_EXPERIMENTAL_REMOTE_CONTROL=1` 激活，官方 help 形态为 `--rc, --remote-control`；能力探测和正式启动共用该实验开关并兼容短/长参数同一 option 行，无 capability 的版本仍会安全显示“不支持，请升级”。
+- 当前实现继续使用 0.36.x 的官方 LAN `--host 0.0.0.0` 契约；若未来 CLI 只保留 `--network`，应由 capability parser 做增量兼容，不能破坏当前已验证 LAN。
+- Remote 默认组合通用 `--no-open --port` 与 `--remote-control`，并依赖与普通 Web 相同的本地 registry/API ready 契约；Kimi 0.39.1 的真实 OAuth/Relay 行为仍需 G3，若公开 CLI 行为变化必须更新适配，不得绕过到内部注册 API。
+- 真实官方远控 G3 已进入本机 0.39.1 实测阶段；仍未声明双平台发布可用，需补 Windows/macOS OAuth、Relay、异地设备和诊断包验证。
+
 # v0.2.4 GitHub canonical 发布与 Gitee 镜像
 
 ## 任务契约

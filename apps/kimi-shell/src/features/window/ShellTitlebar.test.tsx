@@ -70,6 +70,28 @@ describe("ShellTitlebar", () => {
     ).toBe("chat");
   });
 
+  it("shows a persistent remote-control state without exposing its URL", () => {
+    render(
+      <ShellTitlebar
+        {...titlebarProps}
+        kimiAccessStatus={{
+          mode: "kimi_remote",
+          switching: false,
+          runtimeOwnership: "owned_by_shell",
+          runtimeReady: true,
+          canChange: true,
+          lanAddresses: [],
+          remoteControlSupported: true,
+          remoteControlState: "connected",
+          remoteUrlAvailable: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Kimi 官方远程 · 运行中")).toBeTruthy();
+    expect(screen.queryByText(/https:\/\//)).toBeNull();
+  });
+
   it("exposes DSH only when enabled and routes creation through the owner callback", () => {
     const onCreateDshPane = vi.fn(async () => undefined);
     const { rerender } = render(<ShellTitlebar {...titlebarProps} />);

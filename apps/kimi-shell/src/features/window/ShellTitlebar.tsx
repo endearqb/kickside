@@ -25,6 +25,7 @@ import type {
   Screen,
   Theme,
 } from "@/app/types";
+import type { KimiAccessStatus } from "@/services/lanAccessService";
 
 const DRAG_BLOCK_SELECTOR =
   ".titlebar-actions, .titlebar-window-controls, button, a, input, textarea, select, [role='button'], [data-no-drag='true']";
@@ -60,6 +61,7 @@ type ShellTitlebarProps = {
   dshBusy?: boolean;
   dshRemoteUrl?: string | null;
   onCreateDshPane?: () => Promise<void>;
+  kimiAccessStatus?: KimiAccessStatus | null;
 };
 
 export function ShellTitlebar({
@@ -90,6 +92,7 @@ export function ShellTitlebar({
   dshBusy = false,
   dshRemoteUrl = null,
   onCreateDshPane = async () => undefined,
+  kimiAccessStatus = null,
 }: ShellTitlebarProps) {
   const panes = useWorkspaceGridStore((state) => state.panes);
   const addPane = useWorkspaceGridStore((state) => state.addPane);
@@ -307,7 +310,14 @@ export function ShellTitlebar({
             onMouseDown={handleDragZoneMouseDown}
             onDoubleClick={handleDragZoneDoubleClick}
             aria-hidden="true"
-          />
+          >
+            {accessStatusLabel(kimiAccessStatus) ? (
+              <span className={`titlebar-access-status is-${kimiAccessStatus?.mode}`}>
+                <span className="titlebar-access-status-dot" />
+                {accessStatusLabel(kimiAccessStatus)}
+              </span>
+            ) : null}
+          </div>
         ) : (
           <div
             className="titlebar-drag titlebar-status-wrap"
@@ -317,6 +327,7 @@ export function ShellTitlebar({
             <KimiAssistantBrand compact className="titlebar-brand" />
             <span className="titlebar-app-status">
               {shellScreenLabel} | 状态：{statusText}
+              {accessStatusLabel(kimiAccessStatus) ? ` | ${accessStatusLabel(kimiAccessStatus)}` : ""}
             </span>
           </div>
         )}
@@ -360,4 +371,17 @@ export function ShellTitlebar({
       )}
     </header>
   );
+}
+
+function accessStatusLabel(status: KimiAccessStatus | null) {
+  if (!status || status.mode === "local") return null;
+  if (status.mode === "lan") return status.switching ? "局域网 · 正在切换" : "局域网访问中";
+  switch (status.remoteControlState) {
+    case "connected": return "Kimi 官方远程 · 运行中";
+    case "registering": return "Kimi 官方远程 · 正在连接";
+    case "starting": return "Kimi 官方远程 · 正在启动";
+    case "disconnected": return "Kimi 官方远程 · 连接已断开";
+    case "error": return "Kimi 官方远程 · 错误";
+    default: return "Kimi 官方远程 · 已停止";
+  }
 }

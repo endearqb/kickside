@@ -17,6 +17,7 @@ mod enhanced_web;
 mod feishu_onboarding;
 mod harness;
 mod install_manager;
+mod kimi_access;
 mod kimi_locator;
 mod lan_access;
 mod log_manager;

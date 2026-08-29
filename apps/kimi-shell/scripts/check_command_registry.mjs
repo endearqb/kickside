@@ -60,6 +60,9 @@ const commandRegistry = {
     "lan_access::get_kimi_lan_access_status",
     "lan_access::set_kimi_lan_access",
     "lan_access::get_kimi_lan_launch_url",
+    "lan_access::get_kimi_access_status",
+    "lan_access::set_kimi_access_mode",
+    "lan_access::get_kimi_remote_launch_url",
   ],
   app_update: [
     "app_update::get_app_update_source",

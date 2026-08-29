@@ -60,7 +60,7 @@ pub fn status(app: &AppHandle) -> Result<KimiLanAccessStatus, String> {
             .lock()
             .map_err(|_| "Kimi 运行时状态不可用".to_string())?;
         let runtime_ready = runtime.state == BackendState::Running;
-        let enabled = runtime.lan_access_enabled
+        let enabled = runtime.kimi_access_mode == crate::types::KimiAccessMode::Lan
             && runtime_ready
             && runtime.runtime_ownership == RuntimeOwnership::OwnedByShell;
         (
@@ -136,7 +136,7 @@ pub fn launch_url(app: &AppHandle, requested_ip: &str) -> Result<KimiLanLaunchUr
     Ok(KimiLanLaunchUrl { url, qr_svg })
 }
 
-fn discover_private_ipv4(port: u16) -> Result<Vec<KimiLanAddress>, String> {
+pub(crate) fn discover_private_ipv4(port: u16) -> Result<Vec<KimiLanAddress>, String> {
     #[cfg(windows)]
     let windows_adapters = windows_adapter_metadata()?;
 

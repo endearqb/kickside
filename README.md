@@ -22,7 +22,7 @@ KickSide 是面向 Windows x64 与 Apple Silicon macOS 13+ 的开源桌面应用
 - **会话始终在场**：Pane Shelf 收纳暂时不可见的会话；重新排列窗格不会让长任务丢失上下文。
 - **桌面级运行管理**：统一管理 Kimi Code、DSH、应用更新、默认工作目录、日志与诊断。
 - **跨平台原生体验**：macOS 使用原生 traffic lights、菜单与 Dock 生命周期；Windows 支持托盘、WebView2 和 Explorer 打开入口。
-- **安全边界明确**：运行时默认只接受受控 loopback；用户可临时把 KickSide-owned Kimi 开放到可信局域网，令牌不进入持久化布局或诊断输出。
+- **安全边界明确**：运行时默认只接受受控 loopback；用户可临时选择可信局域网，或在 CLI 支持时开启 Kimi 官方远程访问（实验）。远程地址与令牌不进入持久化布局、日志或诊断输出。
 
 ## 两种智能体，一个工作台
 
@@ -62,6 +62,7 @@ Kimi Code 保留原生会话侧栏、消息交互和附件能力。KickSide 为�
 | 工作区 | 多窗格布局、Pane Shelf、拖拽交换、缩放、主题和会话恢复 |
 | Kimi Code | 本地 Web runtime、会话路由、消息 TOC、附件拖放、安装与升级引导 |
 | 局域网访问 | 将 KickSide 管理的 Kimi Code 临时开放给同一可信网络中的手机与电脑，支持地址复制和按需二维码 |
+| Kimi 官方远程（实验） | 一键托管官方 `kimi web --remote-control` 进程；失败回滚、单活进程与按需地址/二维码由 KickSide 管理 |
 | DeepSeek Harness | 私有前缀安装、受支持 Node 工具链校验、实时安装日志、多个共享 runtime 的窗格 |
 | 控制中心 | 应用更新、Runtime 状态、Skill、WorkspaceHub、调度、诊断与日志 |
 | IM Bridge | 飞书等通道管理、会话切换、审批与工作目录映射 |

@@ -30,7 +30,7 @@
 - 本地发布 gate：Rust fmt/locked check/strict clippy 与 315 tests；React 57 files/306 tests、production build、10 张视觉基线与 193-command security gate；Go vet/test/race；updater/Gitee publisher 5 tests；Windows x86_64 Bridge sidecar 交叉构建；workflow YAML、版本、release-note 首行与 diff gate 全部通过。
 - Apple Silicon `KickSide.app` 0.2.5 构建成功，主程序与 bundled Bridge 均验证 arm64；重新施加 ad-hoc identity 后 `codesign --verify --deep --strict` 通过。该本地 App 不作为 Developer ID、公证或最终 Release 证据。
 - 最近一次定时 DSH Runtime Canary 的 macOS npm install 曾因 Node heap OOM 失败并取消 Windows legs；它与本次 Remote Control 代码无直接关系，但发布结论不得描述为“所有观察性门禁均绿色”。
-- 对 release commit 主动重跑 canary 后，首次 macOS Node 20.12/22.19/24 均在 npm install 的约 2 GiB 默认 V8 堆上限 OOM；4 GiB 修复重跑已让 3 个 macOS job 成功越过 OOM，其中 Node 24/22.19 与 latest 分别成功，但原 15 分钟 job timeout 取消其余 Windows/旧 Node legs。workflow 因此保留 4 GiB 有界堆并把观测预算调整为 25 分钟，需在新提交上重跑完整矩阵。
+- 对 release commit 主动重跑 canary 后，首次 macOS Node 20.12/22.19/24 均在 npm install 的约 2 GiB 默认 V8 堆上限 OOM；4 GiB 修复重跑已让 macOS 全矩阵成功越过 OOM。原 15 分钟预算取消首轮，25 分钟复跑又在 Windows Node 24 已输出完整成功 JSON 后、Actions cleanup 前越界，其他 Windows legs 仍在冷安装；workflow 因此保留 4 GiB 有界堆并基于实测把独立 job timeout 调整为 35 分钟，需在新提交上重跑完整矩阵。
 
 # Kimi 官方远程控制一键封装
 

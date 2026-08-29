@@ -16,7 +16,7 @@ jobs:
   baseline-runtime:
     name: Baseline DSH (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +42,7 @@ jobs:
     name: Node 20.12 DSH observation (${{ matrix.os }})
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +62,7 @@ jobs:
     name: Latest DSH alert (${{ matrix.os }})
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

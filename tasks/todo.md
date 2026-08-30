@@ -18,10 +18,10 @@
 - [x] 修复 Windows CLI 能力探针超时/异常时只杀 launcher、可能遗留 Node descendant 的边界。
 - [x] 同步 0.2.5 版本、release notes、workflow exact-tag guard、manual mirror default 与架构事实。
 - [x] 完整运行 Rust/React/Go/Node/workflow 本地发布门禁。
-- [ ] 提交并推送 GitHub main，等待该提交的 Windows/macOS CI 全绿。
-- [ ] 创建 annotated `v0.2.5` 并验证 GitHub canonical stable Release 的 8 项资产与 manifest。
-- [ ] 同步 Gitee main/tag，完成 8 项同字节镜像与 latest alias 验证。
-- [ ] 写入最终 closeout 证据；Windows 真实 Kimi 0.39.1 OAuth/Relay/安装升级 G3 若未执行，继续明确列为限制。
+- [x] 提交并推送 GitHub main；release commit `751b3920b63aeaca36f4fe4781a4d2c4aa2501f0` 的 Windows/macOS main CI run `33262322234` attempt 2 为 8/8 成功。
+- [x] 创建 annotated `v0.2.5` 并验证 GitHub canonical stable Release 的 8 项资产与 manifest。
+- [x] 同步 Gitee main/tag，完成 8 项同字节镜像、stable promotion 与 latest alias 验证。
+- [x] 写入最终 closeout 证据；Windows 真实 Kimi 0.39.1 OAuth/Relay/安装升级 G3 未执行，继续明确列为限制。
 
 ## Review
 
@@ -31,6 +31,11 @@
 - Apple Silicon `KickSide.app` 0.2.5 构建成功，主程序与 bundled Bridge 均验证 arm64；重新施加 ad-hoc identity 后 `codesign --verify --deep --strict` 通过。该本地 App 不作为 Developer ID、公证或最终 Release 证据。
 - 最近一次定时 DSH Runtime Canary 的 macOS npm install 曾因 Node heap OOM 失败并取消 Windows legs；它与本次 Remote Control 代码无直接关系，但发布结论不得描述为“所有观察性门禁均绿色”。
 - 对 release commit 主动重跑 canary 后，首次 macOS Node 20.12/22.19/24 均在 npm install 的约 2 GiB 默认 V8 堆上限 OOM；4 GiB 修复重跑已让 macOS 全矩阵成功越过 OOM。原 15 分钟预算取消首轮，25 分钟复跑又在 Windows Node 24 已输出完整成功 JSON 后、Actions cleanup 前越界，其他 Windows legs 仍在冷安装；workflow 因此保留 4 GiB 有界堆并基于实测把独立 job timeout 调整为 35 分钟，需在新提交上重跑完整矩阵。
+- release commit 的 main CI run `33262322234` attempt 1 仅有既有 macOS bearer health timing 测试瞬时失败；同一 SHA 的 failed-job rerun attempt 2 为 8/8 成功。DSH Runtime Canary run `33262325888` 在 35 分钟预算内完成 macOS/Windows 全矩阵 8/8，Windows Node 22.19 冷安装最长约 30 分 50 秒，验证了 4 GiB 堆与 35 分钟边界。
+- GitHub/Gitee 的 annotated tag object 均为 `aae5e3712a0b32e5a90dd3ded14141e63f7091d0`，解引用到 release commit `751b3920b63aeaca36f4fe4781a4d2c4aa2501f0`。GitHub canonical stable Release 为精确 `v0.2.5`，包含 8 项预期资产。
+- Release workflow run `33263842797` 的 GitHub draft、macOS、Windows 与 updater manifest 均成功；Gitee API 首次因 tag 尚未同步失败、第二次在首个 EXE 上传 15 分钟后超时。按已授权 browser fallback 保持 prerelease，上传 7 个 canonical 二进制/签名后再上传 Gitee manifest，公开回下载逐字节核验，最后提升 stable；attempt 3 只读复核 8 项资产后整条 workflow 成功。
+- Gitee 的 7 个 canonical 二进制/签名 SHA-256 与 GitHub 完全一致：app tar `9ae8aee51e8066a22242e2b41f97d167293bf11a8c0ffcb7b217401e3a335faa`、app sig `1b3dfd3f8a6e3bf2624516a2d21269ae9951c6356a5abf48b29936df6e8c6e15`、DMG `d253a78b39357ada63d521c7f032213664c4ab6fced632308674b05905322e0b`、EXE `9311c50a5eebe7e1497ff839db520d22f5e1fea2acfdb997d565b5881b76ec8f`、EXE sig `7be3302da0a1389b6a34010ab39f8c919a0727f9636ec3b3393e6f97d78b3285`、MSI `6f177e43585adc64216dfed6364505cd5298b29b7c172b7809fe8647f5c47868`、MSI sig `cba0fd8660f3c8cf525dfc9adc2414bebdd41cd82811e2844d4f7bec93a29881`。Gitee 专用 `latest.json` 及 `/releases/download/latest/latest.json` SHA-256 均为 `f89baead26824c03cacddb4c477c7669773886f654dca539f71dad5d6ed3c03b`。
+- Windows 原生 CI、安装包构建与 DSH canary 均通过，但 Windows 11 + Kimi 0.39.1 的真实 OAuth、Relay、二维码、手机熄屏重连、0.2.4→0.2.5 安装升级和退出无残留仍属于 G3，未被自动化证据替代。
 
 # Kimi 官方远程控制一键封装
 
